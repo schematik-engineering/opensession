@@ -89,6 +89,10 @@ export class DiscordGateway {
   private connect(): void {
     if (this.stopped || this.state.status === "fatal") return;
     this.clearConnectionTimers();
+    // Heartbeat ACK state belongs to one WebSocket connection. Carrying an
+    // unacked heartbeat across reconnect would make the new socket close on
+    // its first heartbeat tick before Discord can ACK it.
+    this.heartbeatAcked = true;
     this.state = {
       ...this.state,
       status: this.reconnectAttempt ? "reconnecting" : "connecting",
