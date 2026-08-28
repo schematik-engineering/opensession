@@ -148,6 +148,7 @@ describe("remote repo lifecycle", () => {
 			"main",
 			"opensession",
 			{ sandboxId: "sbx-test", provider: "daytona", repoId: "opensession" },
+			{ seedPrivateFiles: false },
 		);
 
 		expect(d.commands).toHaveLength(3);
@@ -182,6 +183,7 @@ describe("remote repo lifecycle", () => {
 			"main",
 			"opensession",
 			{ sandboxId: "sbx-test", provider: "box", repoId: "opensession" },
+			{ seedPrivateFiles: false },
 		);
 
 		expect(d.commands[0]!.command).toContain("echo cwd");
@@ -254,6 +256,7 @@ describe("remote repo lifecycle", () => {
 			"main",
 			"opensession",
 			{ sandboxId: "sbx-test", provider: "daytona", repoId: "opensession" },
+			{ seedPrivateFiles: false },
 		);
 
 		expect(d.commands[1]!.command).toContain("umount /work/feature");
@@ -273,6 +276,7 @@ describe("remote workspace private seed files", () => {
 				"git", "-C", root,
 				"-c", "user.name=OpenSession Test",
 				"-c", "user.email=test@opensession.local",
+				"-c", "core.hooksPath=/dev/null",
 				"commit", "-qm", "default manifest",
 			],
 		});

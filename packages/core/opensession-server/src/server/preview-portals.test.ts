@@ -78,7 +78,11 @@ describe("permission-coupled preview portals", () => {
 		const worktree = join(root, "opensession-portal-status");
 		mkdirSync(worktree);
 		const previousRoot = process.env.OPENSESSION_WORKTREES_DIR;
+		const previousConfig = process.env.OPENSESSION_CONFIG;
 		process.env.OPENSESSION_WORKTREES_DIR = root;
+		// An explicit operator repo registry is authoritative. Point this fixture
+		// at a missing config so it exercises the portable built-in self repo.
+		process.env.OPENSESSION_CONFIG = join(root, "missing-config.json");
 		const record = { name: "api", key: "PORTAL_API_PORT", command: "bun run api", port, state: "stopped" };
 		writeFileSync(
 			join(worktree, ".ports.conf"),
@@ -97,6 +101,8 @@ describe("permission-coupled preview portals", () => {
 			squatter.stop(true);
 			if (previousRoot == null) delete process.env.OPENSESSION_WORKTREES_DIR;
 			else process.env.OPENSESSION_WORKTREES_DIR = previousRoot;
+			if (previousConfig == null) delete process.env.OPENSESSION_CONFIG;
+			else process.env.OPENSESSION_CONFIG = previousConfig;
 			rmSync(root, { recursive: true, force: true });
 		}
 	});

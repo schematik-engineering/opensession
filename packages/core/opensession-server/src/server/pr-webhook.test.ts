@@ -5,6 +5,9 @@ import {
 } from "./pr-webhook";
 
 describe("review request webhook sync", () => {
+	const loginFor = (name: string) =>
+		name === "Kent" ? "kentdebruin" : undefined;
+
 	test("clears a mirrored person request when GitHub removes it", () => {
 		expect(
 			reviewerRemovalClearsSessionRequest(
@@ -14,6 +17,7 @@ describe("review request webhook sync", () => {
 					pull_request: { requested_reviewers: [], requested_teams: [] },
 				},
 				"Kent",
+				loginFor,
 			),
 		).toBe(true);
 	});
@@ -33,6 +37,7 @@ describe("review request webhook sync", () => {
 					},
 				},
 				"Kent",
+				loginFor,
 			),
 		).toBe(false);
 		expect(

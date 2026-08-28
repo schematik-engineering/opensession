@@ -292,6 +292,7 @@ describe("creation branch effect executor", () => {
     }) as typeof createWorktree;
     await expect(executeCreationBranchPrepare(branchItem(), {
       listWorktrees: list,
+      isSharedCheckoutDestination: async () => false,
       createWorktree: create,
       result: () => {
         results += 1;
@@ -303,6 +304,7 @@ describe("creation branch effect executor", () => {
     })).rejects.toThrow("injected crash after branch acceptance");
     await executeCreationBranchPrepare(branchItem(), {
       listWorktrees: list,
+      isSharedCheckoutDestination: async () => false,
       createWorktree: create,
       result: () => {
         results += 1;
@@ -320,6 +322,7 @@ describe("creation branch effect executor", () => {
     let existingCalls = 0;
     await executeCreationBranchPrepare(effect, {
       listWorktrees: (async () => []) as typeof listWorktrees,
+      isSharedCheckoutDestination: async () => false,
       createWorktree: (async () => {
         throw new Error("must not create a new branch");
       }) as typeof createWorktree,
@@ -345,6 +348,7 @@ describe("creation branch effect executor", () => {
     let receivedOptions: Record<string, unknown> | undefined;
     await executeCreationBranchPrepare(effect, {
       listWorktrees: (async () => []) as typeof listWorktrees,
+      isSharedCheckoutDestination: async () => false,
       createWorktree: (async (_branch, _project, options) => {
         receivedOptions = options;
         return "/worktrees/create-one";
@@ -386,6 +390,7 @@ describe("creation branch effect executor", () => {
   test("fails indeterminate on an unregistered destination after a crash", async () => {
     await expect(executeCreationBranchPrepare(branchItem(), {
       listWorktrees: (async () => []) as typeof listWorktrees,
+      isSharedCheckoutDestination: async () => false,
       destinationExists: () => true,
       createWorktree: (async () => {
         throw new Error("must not overwrite an ambiguous destination");

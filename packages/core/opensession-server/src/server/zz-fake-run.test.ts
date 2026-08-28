@@ -38,6 +38,7 @@ let testSessionListStore: import("./session-list-store").SessionListStore | null
 let restoreSessionListStore: (() => void) | null = null;
 let restoreSessionsDir: (() => void) | null = null;
 let restoreJournal: (() => void) | null = null;
+let restoreRunHosts: (() => void) | null = null;
 let redirected = false;
 const previousPiDetach = process.env.OPENSESSION_PI_DETACH;
 const previousMemoryDb = process.env.OPENSESSION_MEMORY_DB;
@@ -78,6 +79,11 @@ beforeAll(async () => {
 		`${tmp}/active-runs.json`,
 	);
 	restoreJournal = () => runJournal.__setActiveRunsPathForTest(prevJournal);
+	const hostClient = await import("./host-client");
+	const previousRunHostsInProcess =
+		hostClient.__setRunHostsInProcessForTest(true);
+	restoreRunHosts = () =>
+		hostClient.__setRunHostsInProcessForTest(previousRunHostsInProcess);
 
 	runSession = await import("./run-session");
 	agentRunner = await import("./agent-runner");
@@ -111,6 +117,7 @@ afterAll(() => {
 	if (previousMemoryDb === undefined) delete process.env.OPENSESSION_MEMORY_DB;
 	else process.env.OPENSESSION_MEMORY_DB = previousMemoryDb;
 	agentRunner?.__setEngineForTest(null);
+	restoreRunHosts?.();
 	restoreJournal?.();
 	restoreSessionsDir?.();
 	restoreSessionListStore?.();

@@ -686,7 +686,7 @@ export function connectedGithubAccounts(): GithubConnectedAccount[] {
  *  mtime rather than by a TTL, so it is never stale by a window: a `stat` is
  *  what a request pays, and `writeStore` clears it outright, which is what
  *  makes a reconnect take effect in the same breath rather than a beat later. */
-let reconnectCache: { path: string; stamp: number; logins: Set<string> } | null =
+let reconnectCache: { path: string; stamp: string; logins: Set<string> } | null =
   null;
 
 function invalidateReconnectCache(): void {
@@ -695,9 +695,14 @@ function invalidateReconnectCache(): void {
 
 function refreshDeadLogins(): Set<string> {
   const path = storePath();
-  let stamp = 0;
+  let stamp = "missing";
   try {
-    stamp = statSync(path).mtimeMs;
+    const stat = statSync(path);
+    // Some filesystems expose millisecond mtimes, so two external writes in
+    // one tick can otherwise leave the request-path cache stale. Size and
+    // ctime preserve the cheap stat-only fast path while detecting those
+    // replacements and truncations.
+    stamp = `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`;
   } catch {} // no store yet: nobody has connected, so nobody is dead
   if (reconnectCache?.path === path && reconnectCache.stamp === stamp) {
     return reconnectCache.logins;

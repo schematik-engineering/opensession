@@ -108,6 +108,7 @@ function scheduleSessionsInvalidation(): void {
 export function reviewerRemovalClearsSessionRequest(
 	payload: any,
 	requestTo: string,
+	loginFor: (name: string) => string | null | undefined = githubLoginFor,
 ): boolean {
 	if (payload?.action !== "review_request_removed") return false;
 	const owner = String(payload?.repository?.owner?.login || "").toLowerCase();
@@ -121,7 +122,7 @@ export function reviewerRemovalClearsSessionRequest(
 		if (owner) remaining.add(`${owner}/${slug}`);
 	}
 	const target = requestTo.toLowerCase();
-	const login = githubLoginFor(requestTo)?.toLowerCase();
+	const login = loginFor(requestTo)?.toLowerCase();
 	return !remaining.has(target) && (!login || !remaining.has(login));
 }
 

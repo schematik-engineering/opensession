@@ -393,6 +393,7 @@ describe("session kernel actor service", () => {
         responseTimeoutMs: 700,
         databasePath: join(stateDir, "sessions", "session-kernel.sqlite"),
       });
+      serviceEpoch = undefined;
       await expect(client.callAsync(
         { t: "store", method: "creationState", args: ["after-restart"] },
         "creationState",
@@ -712,7 +713,7 @@ describe("session kernel actor service", () => {
       result: {
         result: {
           kind: "deliver",
-          promptEntryId: "large-entry",
+          promptEntryId: "large",
           items: [{ id: "large", content }],
         },
       },
