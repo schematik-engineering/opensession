@@ -76,13 +76,24 @@ describe("public PR review policy", () => {
   });
 
   test("rejects oversized public changes before provisioning", () => {
-    expect(publicReviewSizeError({ changedFiles: 11, additions: 1, deletions: 1 }, limits)).toContain(
-      "11 files",
-    );
-    expect(publicReviewSizeError({ changedFiles: 2, additions: 60, deletions: 41 }, limits)).toContain(
-      "101 lines",
-    );
-    expect(publicReviewSizeError({ changedFiles: 2, additions: 60, deletions: 40 }, limits)).toBeNull();
+    expect(
+      publicReviewSizeError(
+        { changedFiles: 11, additions: 1, deletions: 1 },
+        limits,
+      ),
+    ).toContain("11 files");
+    expect(
+      publicReviewSizeError(
+        { changedFiles: 2, additions: 60, deletions: 41 },
+        limits,
+      ),
+    ).toContain("101 lines");
+    expect(
+      publicReviewSizeError(
+        { changedFiles: 2, additions: 60, deletions: 40 },
+        limits,
+      ),
+    ).toBeNull();
   });
 
   test("bounds attempts for one immutable head", () => {
@@ -97,7 +108,10 @@ describe("public PR review policy", () => {
   test("bounds one author and the repository per UTC day", () => {
     const first = admit(null, { prNumber: 1, headSha: "a".repeat(40) });
     const second = admit(first.state, { prNumber: 2, headSha: "b".repeat(40) });
-    const authorLimited = admit(second.state, { prNumber: 3, headSha: "c".repeat(40) });
+    const authorLimited = admit(second.state, {
+      prNumber: 3,
+      headSha: "c".repeat(40),
+    });
     expect(authorLimited).toMatchObject({ ok: false, reason: "author_limit" });
 
     const third = admit(second.state, {
@@ -124,26 +138,52 @@ describe("public PR review policy", () => {
   });
 
   test("strictly disposes the Executor before tool-less model inference", () => {
-    const source = readFileSync(new URL("./public-review.ts", import.meta.url), "utf8");
-    const verify = source.indexOf("export async function verifyPublicPrInDisposableExecutor");
+    const source = readFileSync(
+      new URL("./public-review.ts", import.meta.url),
+      "utf8",
+    );
+    const verify = source.indexOf(
+      "export async function verifyPublicPrInDisposableExecutor",
+    );
     const destroy = source.indexOf("await provider.destroy", verify);
-    const toolLess = source.indexOf("export async function runToollessPublicReview");
+    const toolLess = source.indexOf(
+      "export async function runToollessPublicReview",
+    );
     const inference = source.indexOf("await oneShotDetailed", toolLess);
-    const review = readFileSync(new URL("./review.ts", import.meta.url), "utf8");
+    const review = readFileSync(
+      new URL("./review.ts", import.meta.url),
+      "utf8",
+    );
     const daytona = readFileSync(
       new URL("../../server/sandbox/adapters/daytona.ts", import.meta.url),
       "utf8",
     );
     const publicBranch = review.indexOf("if (publicReview) {");
-    const verifyCall = review.indexOf("await verifyPublicPrInDisposableExecutor", publicBranch);
-    const toolLessCall = review.indexOf("await runToollessPublicReview", publicBranch);
-    expect(source.slice(verify, toolLess)).toContain("refs/pull/${input.prNumber}/head");
-    expect(source.slice(verify, toolLess)).toContain("+${input.baseSha}:${baseRef}");
-    expect(source.slice(verify, toolLess)).not.toContain("+refs/heads/${input.baseRef}:${baseRef}");
+    const verifyCall = review.indexOf(
+      "await verifyPublicPrInDisposableExecutor",
+      publicBranch,
+    );
+    const toolLessCall = review.indexOf(
+      "await runToollessPublicReview",
+      publicBranch,
+    );
+    expect(source.slice(verify, toolLess)).toContain(
+      "refs/pull/${input.prNumber}/head",
+    );
+    expect(source.slice(verify, toolLess)).toContain(
+      "+${input.baseSha}:${baseRef}",
+    );
+    expect(source.slice(verify, toolLess)).not.toContain(
+      "+refs/heads/${input.baseRef}:${baseRef}",
+    );
     expect(source).toContain('sandboxProviderConfigured("daytona")');
     expect(source.slice(verify, toolLess)).toContain('cloneCredential: "none"');
-    expect(source.slice(verify, toolLess)).toContain("sourceVerification: true");
-    expect(source.slice(verify, toolLess)).not.toContain('getSandboxProvider("microvm")');
+    expect(source.slice(verify, toolLess)).toContain(
+      "sourceVerification: true",
+    );
+    expect(source.slice(verify, toolLess)).not.toContain(
+      'getSandboxProvider("microvm")',
+    );
     expect(daytona).toContain("if (!sbx && !sourceVerification)");
     expect(daytona).toContain("const template = sourceVerification");
     expect(daytona).toContain("sourceVerification\n            ? undefined");

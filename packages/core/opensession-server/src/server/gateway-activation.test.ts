@@ -23,13 +23,15 @@ class FakePort extends EventEmitter {
 describe("gateway activation preload barrier", () => {
   test("keeps the compatibility path active by default", async () => {
     expect(gatewayRole({})).toBe("active");
-    await expect(waitForGatewayActivationIfStandby({ env: {} })).resolves.toBeUndefined();
+    await expect(
+      waitForGatewayActivationIfStandby({ env: {} }),
+    ).resolves.toBeUndefined();
   });
 
   test("rejects unknown roles and unsupervised standby launches", async () => {
-    expect(() => gatewayRole({ OPENSESSION_GATEWAY_ROLE: "candidate" })).toThrow(
-      "Invalid OPENSESSION_GATEWAY_ROLE",
-    );
+    expect(() =>
+      gatewayRole({ OPENSESSION_GATEWAY_ROLE: "candidate" }),
+    ).toThrow("Invalid OPENSESSION_GATEWAY_ROLE");
     await expect(
       waitForGatewayActivationIfStandby({
         env: { OPENSESSION_GATEWAY_ROLE: "standby" },
@@ -80,9 +82,13 @@ describe("gateway activation preload barrier", () => {
   });
 
   test("entrypoint waits before every production boot effect", async () => {
-    const entry = await Bun.file(resolve(import.meta.dir, "../../opensession.ts")).text();
+    const entry = await Bun.file(
+      resolve(import.meta.dir, "../../opensession.ts"),
+    ).text();
     const prewarm = entry.indexOf("preloadPreparedFrontend()");
-    const precheck = entry.indexOf("waitForRuntimePeerGeneration({ timeoutMs: 5_000 })");
+    const precheck = entry.indexOf(
+      "waitForRuntimePeerGeneration({ timeoutMs: 5_000 })",
+    );
     const barrier = entry.indexOf("await waitForGatewayActivationIfStandby()");
     const peers = entry.indexOf("await waitForRuntimePeerGeneration()");
     const lease = entry.indexOf("await acquireGatewayActivationLease");
@@ -108,35 +114,41 @@ describe("gateway activation preload barrier", () => {
   test("admits effects only when each peer reports its selected generation", async () => {
     const kernel = "a".repeat(40);
     const executor = "b".repeat(40);
-    await expect(waitForRuntimePeerGeneration({
-      env: {
-        OPENSESSION_RELEASE_GENERATION: "c".repeat(40),
-        OPENSESSION_KERNEL_GENERATION: kernel,
-        OPENSESSION_EXECUTOR_GENERATION: executor,
-      },
-      fetchReady: async () => Response.json({ generation: kernel }),
-      readReadyFile: () => JSON.stringify({ pid: 7, generation: executor }),
-    })).resolves.toBeUndefined();
-    await expect(waitForRuntimePeerGeneration({
-      env: { OPENSESSION_RELEASE_GENERATION: "not-a-sha" },
-    })).rejects.toThrow("Invalid runtime peer generation");
+    await expect(
+      waitForRuntimePeerGeneration({
+        env: {
+          OPENSESSION_RELEASE_GENERATION: "c".repeat(40),
+          OPENSESSION_KERNEL_GENERATION: kernel,
+          OPENSESSION_EXECUTOR_GENERATION: executor,
+        },
+        fetchReady: async () => Response.json({ generation: kernel }),
+        readReadyFile: () => JSON.stringify({ pid: 7, generation: executor }),
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      waitForRuntimePeerGeneration({
+        env: { OPENSESSION_RELEASE_GENERATION: "not-a-sha" },
+      }),
+    ).rejects.toThrow("Invalid runtime peer generation");
   });
 
   test("does not require an executor peer when simple mode disables it", async () => {
     const kernel = "a".repeat(40);
     let readExecutor = false;
-    await expect(waitForRuntimePeerGeneration({
-      env: {
-        OPENSESSION_EXECUTOR: "0",
-        OPENSESSION_KERNEL_GENERATION: kernel,
-        OPENSESSION_EXECUTOR_GENERATION: kernel,
-      },
-      fetchReady: async () => Response.json({ generation: kernel }),
-      readReadyFile: () => {
-        readExecutor = true;
-        throw new Error("disabled executor must not be read");
-      },
-    })).resolves.toBeUndefined();
+    await expect(
+      waitForRuntimePeerGeneration({
+        env: {
+          OPENSESSION_EXECUTOR: "0",
+          OPENSESSION_KERNEL_GENERATION: kernel,
+          OPENSESSION_EXECUTOR_GENERATION: kernel,
+        },
+        fetchReady: async () => Response.json({ generation: kernel }),
+        readReadyFile: () => {
+          readExecutor = true;
+          throw new Error("disabled executor must not be read");
+        },
+      }),
+    ).resolves.toBeUndefined();
     expect(readExecutor).toBe(false);
   });
 
@@ -150,12 +162,14 @@ describe("gateway activation preload barrier", () => {
       },
     });
     expect(existsSync(lockPath)).toBe(true);
-    await expect(acquireGatewayActivationLease({
-      env: {
-        OPENSESSION_GATEWAY_LEASE: lockPath,
-        OPENSESSION_GATEWAY_LEASE_WAIT_SECS: "0",
-      },
-    })).rejects.toThrow("already held");
+    await expect(
+      acquireGatewayActivationLease({
+        env: {
+          OPENSESSION_GATEWAY_LEASE: lockPath,
+          OPENSESSION_GATEWAY_LEASE_WAIT_SECS: "0",
+        },
+      }),
+    ).rejects.toThrow("already held");
     await lease.release();
     expect(existsSync(lockPath)).toBe(false);
     rmSync(root, { recursive: true, force: true });

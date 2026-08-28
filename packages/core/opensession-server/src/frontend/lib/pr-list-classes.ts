@@ -25,12 +25,13 @@ export const PR_LIST = "-mx-3";
  *  sit at the same 19px, so a heavier state heading reads as the page's real
  *  title and pushes "Pull requests" into looking like a caption over it. */
 export const PR_SECTION_LABEL =
-	"m-0 mb-3.5 flex items-baseline gap-2 px-3 text-section-title font-title tracking-[-0.01em] text-fg";
+  "m-0 mb-3.5 flex items-baseline gap-2 px-3 text-section-title font-title tracking-[-0.01em] text-fg";
 
 /** A date group: the same quiet label the archived list gives its own. The
  *  `px-3` pays back the list's outdent, so every label on the page and the row
  *  content under it share one x. */
-const GROUP_LABEL = "m-0 flex items-baseline gap-2 px-3 font-semibold text-faint";
+const GROUP_LABEL =
+  "m-0 flex items-baseline gap-2 px-3 font-semibold text-faint";
 
 /** A date belongs to the rows under it rather than to the state above it, so it
  *  stays on the content edge with them and sits tight to them: the air goes
@@ -69,21 +70,21 @@ export const PR_FEED_GROUP_LABEL = `${GROUP_LABEL} pb-2 text-label`;
  * offsets below are `px-3` plus the leading columns plus `gap-2.5`.
  */
 export const PR_FEED_ROW =
-	"group focus-ring relative grid w-full grid-cols-[24px_minmax(0,1fr)_130px_44px] " +
-	"cursor-pointer items-center gap-2.5 rounded-control border-0 bg-transparent px-3 py-3 " +
-	"text-left transition-colors duration-[var(--dur-micro)] ease-[var(--ease)] hover:bg-hover " +
-	"after:pointer-events-none after:absolute after:right-3 after:bottom-0 after:left-[46px] " +
-	"after:h-px after:bg-line after:transition-opacity after:duration-[var(--dur-micro)] " +
-	"last:after:opacity-0 hover:after:opacity-0 " +
-	"[&:has(+button:hover)]:after:opacity-0 " +
-	"phone:grid-cols-[24px_minmax(0,1fr)_44px]";
+  "group focus-ring relative grid w-full grid-cols-[24px_minmax(0,1fr)_130px_44px] " +
+  "cursor-pointer items-center gap-2.5 rounded-control border-0 bg-transparent px-3 py-3 " +
+  "text-left transition-colors duration-[var(--dur-micro)] ease-[var(--ease)] hover:bg-hover " +
+  "after:pointer-events-none after:absolute after:right-3 after:bottom-0 after:left-[46px] " +
+  "after:h-px after:bg-line after:transition-opacity after:duration-[var(--dur-micro)] " +
+  "last:after:opacity-0 hover:after:opacity-0 " +
+  "[&:has(+button:hover)]:after:opacity-0 " +
+  "phone:grid-cols-[24px_minmax(0,1fr)_44px]";
 
 export const PR_ROW =
-	"group focus-ring relative grid w-full grid-cols-[22px_24px_minmax(0,1fr)_130px_44px] " +
-	"cursor-pointer items-center gap-2.5 rounded-control border-0 bg-transparent px-3 py-3 " +
-	"text-left transition-colors duration-[var(--dur-micro)] ease-[var(--ease)] hover:bg-hover " +
-	"after:pointer-events-none after:absolute after:right-3 after:bottom-0 after:left-[78px] " +
-	"after:h-px after:bg-line after:transition-opacity after:duration-[var(--dur-micro)] " +
-	"last:after:opacity-0 hover:after:opacity-0 " +
-	"[&:has(+button:hover)]:after:opacity-0 " +
-	"phone:grid-cols-[22px_24px_minmax(0,1fr)_44px]";
+  "group focus-ring relative grid w-full grid-cols-[22px_24px_minmax(0,1fr)_130px_44px] " +
+  "cursor-pointer items-center gap-2.5 rounded-control border-0 bg-transparent px-3 py-3 " +
+  "text-left transition-colors duration-[var(--dur-micro)] ease-[var(--ease)] hover:bg-hover " +
+  "after:pointer-events-none after:absolute after:right-3 after:bottom-0 after:left-[78px] " +
+  "after:h-px after:bg-line after:transition-opacity after:duration-[var(--dur-micro)] " +
+  "last:after:opacity-0 hover:after:opacity-0 " +
+  "[&:has(+button:hover)]:after:opacity-0 " +
+  "phone:grid-cols-[22px_24px_minmax(0,1fr)_44px]";

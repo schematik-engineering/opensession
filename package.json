@@ -2,26 +2,27 @@
   "name": "opensession",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "bun@1.4.0",
   "description": "Open Session — self-hosted agent session dashboard: run, watch, and steer AI coding sessions from the web UI, Slack, and native clients",
+  "homepage": "https://opensession.com",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tellahq/opensession.git"
   },
-  "homepage": "https://opensession.com",
+  "bin": {
+    "opensession": "scripts/cli.ts"
+  },
   "workspaces": [
     "packages/clients/website",
     "packages/core/opensession-server",
     "packages/core/protocol"
   ],
-  "bin": {
-    "opensession": "scripts/cli.ts"
-  },
   "scripts": {
     "app:dev": "bun scripts/app-dev.ts",
     "bench:memory": "bun scripts/memory-bench.ts",
     "dev": "bun --hot packages/core/opensession-server/opensession.ts",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
     "opensession": "bun scripts/cli.ts",
     "setup": "bun scripts/cli.ts onboard",
     "start": "bun packages/core/opensession-server/opensession.ts",
@@ -32,10 +33,6 @@
     "typecheck": "tsc --noEmit",
     "website:build": "bun --cwd packages/clients/website build",
     "website:dev": "bun --cwd packages/clients/website dev"
-  },
-  "patchedDependencies": {
-    "@base-ui/react@1.6.0": "patches/@base-ui%2Freact@1.6.0.patch",
-    "@pierre/trees@1.0.0-beta.4": "patches/@pierre%2Ftrees@1.0.0-beta.4.patch"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.104",
@@ -86,7 +83,13 @@
     "@types/web-push": "^3.6.4",
     "agentation": "^3.0.2",
     "oxc-transform-react": "^0.147.0",
+    "oxfmt": "^0.65.0",
     "oxlint": "^1.80.0",
     "tailwindcss": "^4.3.2"
+  },
+  "packageManager": "bun@1.4.0",
+  "patchedDependencies": {
+    "@base-ui/react@1.6.0": "patches/@base-ui%2Freact@1.6.0.patch",
+    "@pierre/trees@1.0.0-beta.4": "patches/@pierre%2Ftrees@1.0.0-beta.4.patch"
   }
 }

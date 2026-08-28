@@ -200,7 +200,12 @@ type HostToClientPayload =
   | { t: "steer_failed"; text: string }
   /** Reply to a retract_steer request. False means the message already crossed
    * the engine's step boundary, so the client must not restore it as a draft. */
-  | { t: "steer_retracted"; requestId: string; steerId: string; retracted: boolean }
+  | {
+      t: "steer_retracted";
+      requestId: string;
+      steerId: string;
+      retracted: boolean;
+    }
   /** Run generator finished; meta.done is written. Client should ack with shutdown. */
   | { t: "end"; done?: StreamEvent }
   /**
@@ -229,7 +234,11 @@ type HostToClientPayload =
    * carry stable uuids, so re-delivery (socket-mode reattach resend, WS
    * replay) upserts instead of duplicating.
    */
-  | { t: "transcript"; engineSessionId: string; lines: Record<string, unknown>[] };
+  | {
+      t: "transcript";
+      engineSessionId: string;
+      lines: Record<string, unknown>[];
+    };
 
 export type ClientToHostMsg =
   | { t: "ask_answer"; askId: string; result: AskResult }
@@ -340,7 +349,10 @@ export function ndjsonReader(
         return;
       }
       if (fragments.length) {
-        const line = Buffer.concat([...fragments, tail], fragmentBytes + tail.length);
+        const line = Buffer.concat(
+          [...fragments, tail],
+          fragmentBytes + tail.length,
+        );
         fragments = [];
         fragmentBytes = 0;
         if (!emit(line)) return;

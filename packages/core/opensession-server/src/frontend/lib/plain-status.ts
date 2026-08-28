@@ -23,16 +23,16 @@
  * token now, which does re-resolve per theme.
  */
 import {
-	IconCheck,
-	IconInbox,
-	IconMoon,
-	IconStatusRing,
+  IconCheck,
+  IconInbox,
+  IconMoon,
+  IconStatusRing,
 } from "../components/icons";
 
 export const STATUS_LABEL: Record<string, string> = {
-	TODO: "Todo",
-	SNOOZED: "Snoozed",
-	DONE: "Done",
+  TODO: "Todo",
+  SNOOZED: "Snoozed",
+  DONE: "Done",
 };
 
 /**
@@ -43,12 +43,12 @@ export const STATUS_LABEL: Record<string, string> = {
  * the tint reading as a disc around it.
  */
 const BASE =
-	"inline-flex size-[26px] shrink-0 items-center justify-center rounded-control";
+  "inline-flex size-[26px] shrink-0 items-center justify-center rounded-control";
 
 const TONES: Record<string, string> = {
-	todo: "bg-[color-mix(in_srgb,var(--blue)_18%,transparent)] text-blue",
-	done: "bg-[color-mix(in_srgb,var(--green)_18%,transparent)] text-green",
-	snoozed: "bg-[color-mix(in_srgb,var(--yellow)_20%,transparent)] text-yellow",
+  todo: "bg-[color-mix(in_srgb,var(--blue)_18%,transparent)] text-blue",
+  done: "bg-[color-mix(in_srgb,var(--green)_18%,transparent)] text-green",
+  snoozed: "bg-[color-mix(in_srgb,var(--yellow)_20%,transparent)] text-yellow",
 };
 
 /**
@@ -58,16 +58,16 @@ const TONES: Record<string, string> = {
  * than the clock its own Snooze button wears, and Done is the bare check.
  */
 const ICONS: Record<string, typeof IconCheck> = {
-	todo: IconInbox,
-	done: IconCheck,
-	snoozed: IconMoon,
+  todo: IconInbox,
+  done: IconCheck,
+  snoozed: IconMoon,
 };
 
 export function plainStatusClass(status: string): string {
-	const tone = TONES[status.toLowerCase()] ?? "bg-active text-faint";
-	return `${BASE} ${tone}`;
+  const tone = TONES[status.toLowerCase()] ?? "bg-active text-faint";
+  return `${BASE} ${tone}`;
 }
 
 export function plainStatusIcon(status: string): typeof IconCheck {
-	return ICONS[status.toLowerCase()] ?? IconStatusRing;
+  return ICONS[status.toLowerCase()] ?? IconStatusRing;
 }

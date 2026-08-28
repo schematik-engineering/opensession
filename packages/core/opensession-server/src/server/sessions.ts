@@ -1,5 +1,11 @@
 import { executeSessionProjection } from "./session-projection-executor";
-import { readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
+import {
+  readdirSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "fs";
 import { opendir } from "fs/promises";
 import { OPENSESSION_SESSIONS_DIR } from "./paths";
 import { statePath } from "./paths";
@@ -18,10 +24,7 @@ import { findCodexRollout } from "./codex-accounts";
 import { providerFor } from "./models";
 import { parseTranscript, parseTranscriptAsync } from "./jsonl-parser";
 import type { SeqEntry } from "./transcript-store";
-import {
-  importLegacyTranscript,
-  transcript,
-} from "./actor-transcript";
+import { importLegacyTranscript, transcript } from "./actor-transcript";
 import {
   isTranscriptStoreDegraded,
   clearTranscriptStoreDegraded,
@@ -99,7 +102,10 @@ const SKIP_FILES = new Set([
  * whole-list contract; request paths use the narrower halves. */
 export type SessionArchiveSlice = "include" | "exclude" | "only";
 
-function inArchiveSlice(archived: boolean, slice: SessionArchiveSlice): boolean {
+function inArchiveSlice(
+  archived: boolean,
+  slice: SessionArchiveSlice,
+): boolean {
   if (slice === "include") return true;
   return slice === "only" ? archived : !archived;
 }
@@ -115,7 +121,7 @@ function resolveSlackUser(userId: string): string {
 
 export function getTranscriptPath(
   worktreeDir: string,
-  sessionId: string
+  sessionId: string,
 ): string {
   const hash = worktreeDir.replaceAll("/", "-").replace(/^-/, "");
   return `${CLAUDE_PROJECTS_DIR}/-${hash}/${sessionId}.jsonl`;
@@ -124,7 +130,7 @@ export function getTranscriptPath(
 export function getEngineTranscriptPath(
   worktreeDir: string,
   engineSessionId: string,
-  provider: "claude" | "codex" | "pi"
+  provider: "claude" | "codex" | "pi",
 ): string | null {
   if (provider === "codex") {
     return findCodexRollout(engineSessionId)?.path || null;
@@ -136,8 +142,6 @@ export function getEngineTranscriptPath(
   return getTranscriptPath(worktreeDir, engineSessionId);
 }
 
-
-
 /**
  * A session's engine transcript as entries, whatever the engine: claude jsonl
  * and codex rollouts parse from their transcript file; pi reads straight
@@ -148,7 +152,7 @@ export function getEngineTranscriptPath(
 export function readEngineTranscript(
   worktreeDir: string,
   engineSessionId: string,
-  provider: "claude" | "codex" | "pi"
+  provider: "claude" | "codex" | "pi",
 ): TranscriptEntry[] {
   if (provider === "pi") return engineStoreTranscript(engineSessionId);
   const path = getEngineTranscriptPath(worktreeDir, engineSessionId, provider);
@@ -162,11 +166,12 @@ export function readEngineTranscript(
 export async function readEngineTranscriptAsync(
   worktreeDir: string,
   engineSessionId: string,
-  provider: "claude" | "codex" | "pi"
+  provider: "claude" | "codex" | "pi",
 ): Promise<TranscriptEntry[]> {
   if (provider === "pi") return engineStoreTranscriptAsync(engineSessionId);
   const path = getEngineTranscriptPath(worktreeDir, engineSessionId, provider);
-  if (!path || !existsSync(path)) return engineStoreTranscriptAsync(engineSessionId);
+  if (!path || !existsSync(path))
+    return engineStoreTranscriptAsync(engineSessionId);
   return parseTranscriptAsync(path);
 }
 
@@ -178,9 +183,10 @@ export async function readEngineTranscriptAsync(
 export async function readEngineHandoffTranscriptAsync(
   worktreeDir: string,
   engineSessionId: string,
-  provider: "claude" | "codex" | "pi"
+  provider: "claude" | "codex" | "pi",
 ): Promise<TranscriptEntry[]> {
-  if (provider === "pi") return engineStoreHandoffTranscriptAsync(engineSessionId);
+  if (provider === "pi")
+    return engineStoreHandoffTranscriptAsync(engineSessionId);
   const path = getEngineTranscriptPath(worktreeDir, engineSessionId, provider);
   if (!path || !existsSync(path))
     return engineStoreHandoffTranscriptAsync(engineSessionId);
@@ -223,16 +229,17 @@ function engineStoreOwner(engineSessionId: string): UnifiedSession | undefined {
     // By the time a transcript is read the cache module is long-loaded —
     // this is a module-cache hit (the importLegacyIntoStore pattern in
     // pi-transcript.ts).
-    const cacheMod = require("./session-cache") as typeof import("./session-cache");
+    const cacheMod =
+      require("./session-cache") as typeof import("./session-cache");
     const sessions = cacheMod.getCachedSessions();
     const byUnifiedId = (unifiedId: string | undefined) =>
       unifiedId
         ? sessions.find(
-            (s) => s.id === unifiedId || s.aliasIds?.includes(unifiedId)
+            (s) => s.id === unifiedId || s.aliasIds?.includes(unifiedId),
           )
         : undefined;
     const journaled = activeRunRecords().find(
-      (r) => r.claudeSessionId === engineSessionId && r.osSessionId
+      (r) => r.claudeSessionId === engineSessionId && r.osSessionId,
     );
     return (
       byUnifiedId(journaled?.osSessionId) ??
@@ -241,13 +248,13 @@ function engineStoreOwner(engineSessionId: string): UnifiedSession | undefined {
         (s) =>
           s.piSessionId === engineSessionId ||
           s.codexThreadId === engineSessionId ||
-          s.claudeSessionId === engineSessionId
+          s.claudeSessionId === engineSessionId,
       )
     );
   } catch (e) {
     console.warn(
       `[sessions] engine store owner resolution failed for ${engineSessionId}:`,
-      e instanceof Error ? e.message : e
+      e instanceof Error ? e.message : e,
     );
     return undefined;
   }
@@ -258,7 +265,9 @@ function engineStoreTranscript(engineSessionId: string): TranscriptEntry[] {
   return owner ? mergedSessionTranscript(owner) : [];
 }
 
-async function engineStoreTranscriptAsync(engineSessionId: string): Promise<TranscriptEntry[]> {
+async function engineStoreTranscriptAsync(
+  engineSessionId: string,
+): Promise<TranscriptEntry[]> {
   const owner = engineStoreOwner(engineSessionId);
   return owner ? mergedSessionTranscriptAsync(owner) : [];
 }
@@ -276,7 +285,7 @@ async function engineStoreHandoffTranscriptAsync(
   } catch (e) {
     console.warn(
       `[sessions] engine handoff transcript read failed for ${engineSessionId}:`,
-      e instanceof Error ? e.message : e
+      e instanceof Error ? e.message : e,
     );
     return [];
   }
@@ -319,7 +328,12 @@ export function v2MirrorFiles(
 ): { path: string; size: number }[] {
   if (!session.transcriptPath) return [];
   try {
-    return [{ path: session.transcriptPath, size: statSync(session.transcriptPath).size }];
+    return [
+      {
+        path: session.transcriptPath,
+        size: statSync(session.transcriptPath).size,
+      },
+    ];
   } catch {
     return [];
   }
@@ -343,7 +357,9 @@ async function v2ReadAll(sessionId: string): Promise<TranscriptEntry[]> {
     out.push(...page.entries);
     if (page.complete) break;
     if (page.coveredThroughSeq <= since)
-      throw new Error(`Hydrated transcript page made no progress for ${sessionId}`);
+      throw new Error(
+        `Hydrated transcript page made no progress for ${sessionId}`,
+      );
     since = page.coveredThroughSeq;
   }
   return out;
@@ -367,12 +383,9 @@ async function v2ReadAll(sessionId: string): Promise<TranscriptEntry[]> {
 export async function v2TranscriptHasDrift(
   store: Pick<typeof transcript, "getImportInfo">,
   sessionId: string,
-  session: TranscriptSessionRef
+  session: TranscriptSessionRef,
 ): Promise<boolean> {
-  if (
-    isTranscriptStoreDegraded(sessionId)
-  )
-    return true;
+  if (isTranscriptStoreDegraded(sessionId)) return true;
   const files = v2MirrorFiles(session);
   // No legacy files at all (every post-retirement session) → nothing to
   // drift against; the store is the only source.
@@ -389,33 +402,37 @@ export async function v2TranscriptHasDrift(
  */
 async function v2StoreTranscript(
   sessionId: string,
-  session: TranscriptSessionRef
+  session: TranscriptSessionRef,
 ): Promise<TranscriptEntry[] | null> {
   if (await transcript.needsImport(sessionId)) return null;
-  if (!await v2TranscriptHasDrift(transcript, sessionId, session))
+  if (!(await v2TranscriptHasDrift(transcript, sessionId, session)))
     return v2ReadAll(sessionId);
   // Drift (§8): re-import (upserts keep original seqs, making this safe to
   // repeat) and serve legacy for THIS call. Watermark = candidate-set size
   // measured BEFORE the legacy parse — lines appended during the parse then
   // read as growth next time instead of being silently covered.
   const totalSize = v2MirrorFiles(session).reduce((sum, f) => sum + f.size, 0);
-  const legacy = session.transcriptPath ? parseTranscript(session.transcriptPath) : [];
+  const legacy = session.transcriptPath
+    ? parseTranscript(session.transcriptPath)
+    : [];
   const importInfo = await transcript.getImportInfo(sessionId);
   void importLegacyTranscript(
     sessionId,
     legacy,
     importInfo?.src || "merged",
-    totalSize
-  ).then(() => {
-    // The full re-import restored every entry the store had missed. Release
-    // the failure marker only after actor completion.
-    clearTranscriptStoreDegraded(sessionId);
-  }).catch((error) => {
-    console.warn(
-      `[sessions] transcript v2 drift re-import failed for ${sessionId}:`,
-      error instanceof Error ? error.message : error
-    );
-  });
+    totalSize,
+  )
+    .then(() => {
+      // The full re-import restored every entry the store had missed. Release
+      // the failure marker only after actor completion.
+      clearTranscriptStoreDegraded(sessionId);
+    })
+    .catch((error) => {
+      console.warn(
+        `[sessions] transcript v2 drift re-import failed for ${sessionId}:`,
+        error instanceof Error ? error.message : error,
+      );
+    });
   return legacy;
 }
 
@@ -435,20 +452,22 @@ async function v2StoreTranscript(
  * working unchanged.
  */
 export async function engineUserTexts(session: {
-	id?: string;
-	transcriptPath?: string | null;
-	claudeSessionId?: string | null;
+  id?: string;
+  transcriptPath?: string | null;
+  claudeSessionId?: string | null;
 }): Promise<string[]> {
-	try {
-		return (await mergedSessionTranscriptAsync({
-			id: session.id,
-			transcriptPath: session.transcriptPath ?? null,
-		}))
-			.filter((e) => e.type === "user")
-			.map((e) => e.content.trim());
-	} catch {
-		return [];
-	}
+  try {
+    return (
+      await mergedSessionTranscriptAsync({
+        id: session.id,
+        transcriptPath: session.transcriptPath ?? null,
+      })
+    )
+      .filter((e) => e.type === "user")
+      .map((e) => e.content.trim());
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -461,38 +480,39 @@ export async function engineUserTexts(session: {
  * message and would otherwise mask it.
  */
 export async function trailingUserTexts(session: {
-	id?: string;
-	transcriptPath?: string | null;
-	claudeSessionId?: string | null;
+  id?: string;
+  transcriptPath?: string | null;
+  claudeSessionId?: string | null;
 }): Promise<string[]> {
-	try {
-		const entries = await mergedSessionTranscriptAsync({
-			id: session.id,
-			transcriptPath: session.transcriptPath ?? null,
-		});
-		let lastResponse = -1;
-		for (let i = entries.length - 1; i >= 0; i--) {
-			const t = entries[i].type;
-			if (t === "assistant" || t === "tool_use" || t === "tool_result") {
-				lastResponse = i;
-				break;
-			}
-		}
-		return entries
-			.slice(lastResponse + 1)
-			.filter((e) => e.type === "user")
-			.map((e) => e.content.trim())
-			.filter(Boolean);
-	} catch {
-		return [];
-	}
+  try {
+    const entries = await mergedSessionTranscriptAsync({
+      id: session.id,
+      transcriptPath: session.transcriptPath ?? null,
+    });
+    let lastResponse = -1;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const t = entries[i].type;
+      if (t === "assistant" || t === "tool_use" || t === "tool_result") {
+        lastResponse = i;
+        break;
+      }
+    }
+    return entries
+      .slice(lastResponse + 1)
+      .filter((e) => e.type === "user")
+      .map((e) => e.content.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 export function engineSessionPatch(
   provider: "claude" | "codex" | "pi",
   engineSessionId: string,
 ): Partial<NativeSessionFile> {
-  if (provider === "codex") return { codexThreadId: engineSessionId || undefined };
+  if (provider === "codex")
+    return { codexThreadId: engineSessionId || undefined };
   if (provider === "pi") return { piSessionId: engineSessionId || undefined };
   return { claudeSessionId: engineSessionId || undefined };
 }
@@ -506,7 +526,8 @@ export function engineSessionIdFor(
   provider: "claude" | "codex" | "pi",
 ): string | undefined {
   if (provider === "codex") return session.codexThreadId || undefined;
-  if (provider === "pi") return session.piSessionId || session.claudeSessionId || undefined;
+  if (provider === "pi")
+    return session.piSessionId || session.claudeSessionId || undefined;
   return session.claudeSessionId || undefined;
 }
 
@@ -520,7 +541,7 @@ function sessionEngineKeys(session: UnifiedSession): string[] {
 
 function findTranscriptPath(
   worktreeDir: string | null,
-  sessionId: string | null
+  sessionId: string | null,
 ): string | null {
   if (!sessionId) return null;
   if (worktreeDir) {
@@ -549,7 +570,8 @@ function findTranscriptPath(
 // gateway for seconds. Serve the last completed snapshot immediately and
 // refresh cooperatively in the background instead. Current transcripts still
 // resolve through their direct path without waiting for this index.
-let transcriptIndexCache: { map: Map<string, string>; ts: number } | null = null;
+let transcriptIndexCache: { map: Map<string, string>; ts: number } | null =
+  null;
 let transcriptIndexRefresh: Promise<void> | null = null;
 const EMPTY_TRANSCRIPT_INDEX = new Map<string, string>();
 const TRANSCRIPT_INDEX_TTL = 5 * 60_000;
@@ -585,27 +607,31 @@ async function warmTranscriptIndexAsync(): Promise<void> {
         projects = null;
       }
       try {
-        if (projects) for await (const project of projects) {
-          if (!project.isDirectory()) continue;
-          let entries;
-          try {
-            entries = await opendir(`${CLAUDE_PROJECTS_DIR}/${project.name}`);
-          } catch {
-            continue;
+        if (projects)
+          for await (const project of projects) {
+            if (!project.isDirectory()) continue;
+            let entries;
+            try {
+              entries = await opendir(`${CLAUDE_PROJECTS_DIR}/${project.name}`);
+            } catch {
+              continue;
+            }
+            let indexed = 0;
+            for await (const entry of entries) {
+              if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+              const id = entry.name.slice(0, -".jsonl".length);
+              if (!map.has(id))
+                map.set(
+                  id,
+                  `${CLAUDE_PROJECTS_DIR}/${project.name}/${entry.name}`,
+                );
+              if (++indexed % 256 === 0) await Bun.sleep(0);
+            }
+            // One project directory can hold thousands of transcripts. Yield
+            // after each directory so a cold reverse-index build never delays a
+            // WebSocket handshake behind a batch of large readdir calls.
+            await Bun.sleep(0);
           }
-          let indexed = 0;
-          for await (const entry of entries) {
-            if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
-            const id = entry.name.slice(0, -".jsonl".length);
-            if (!map.has(id))
-              map.set(id, `${CLAUDE_PROJECTS_DIR}/${project.name}/${entry.name}`);
-            if (++indexed % 256 === 0) await Bun.sleep(0);
-          }
-          // One project directory can hold thousands of transcripts. Yield
-          // after each directory so a cold reverse-index build never delays a
-          // WebSocket handshake behind a batch of large readdir calls.
-          await Bun.sleep(0);
-        }
       } catch {
         // The state root can change under tests and dev tooling. A partial
         // reverse index is safe; direct transcript paths still resolve.
@@ -736,9 +762,7 @@ function slackSessionRow(file: string): UnifiedSession | null {
   if (!data) return null;
 
   const branch = data.branch || file.replace(".json", "");
-  const startedBy = data.userId
-    ? resolveSlackUser(data.userId)
-    : null;
+  const startedBy = data.userId ? resolveSlackUser(data.userId) : null;
 
   // Use a stable ID based on filename
   const id = `slack-${file.replace(".json", "")}`;
@@ -756,10 +780,7 @@ function slackSessionRow(file: string): UnifiedSession | null {
     // `branch` is the last resort: for a thread/DM session it is the raw
     // `<channel>-<threadTs>` key, which is not a name anyone can read.
     title: data.title?.trim() || branch,
-    lastActivity:
-      data.lastActivity ||
-      data.createdAt ||
-      getFileMtime(path),
+    lastActivity: data.lastActivity || data.createdAt || getFileMtime(path),
     createdAt: data.createdAt || getFileMtime(path),
     isRunning: false,
     transcriptPath: null,
@@ -813,17 +834,16 @@ function* linearSessionRows(): Generator<UnifiedSession> {
   for (const file of readdirSync(LINEAR_SESSIONS_DIR)) {
     if (!file.endsWith(".json")) continue;
     const data = readJsonSafe<LinearSessionFile>(
-      `${LINEAR_SESSIONS_DIR}/${file}`
+      `${LINEAR_SESSIONS_DIR}/${file}`,
     );
     if (!data) continue;
 
     const rawName =
-      data.participants?.[0]?.name ||
-      data.lastActiveUser?.name ||
-      null;
+      data.participants?.[0]?.name || data.lastActiveUser?.name || null;
     // Clean up email-style names (e.g. "john@example.com" → "John")
     const startedBy = rawName?.includes("@")
-      ? rawName.split("@")[0].charAt(0).toUpperCase() + rawName.split("@")[0].slice(1)
+      ? rawName.split("@")[0].charAt(0).toUpperCase() +
+        rawName.split("@")[0].slice(1)
       : rawName;
 
     const title = data.issueIdentifier
@@ -949,7 +969,9 @@ export function readNativeSessionListRow(
   sessionId: string,
 ): UnifiedSession | undefined {
   if (!/^[A-Za-z0-9_-]{1,160}$/.test(sessionId)) return undefined;
-  const data = readJsonSafe<NativeSessionFile>(`${SESSIONS_DIR}/${sessionId}.json`);
+  const data = readJsonSafe<NativeSessionFile>(
+    `${SESSIONS_DIR}/${sessionId}.json`,
+  );
   if (!data?.id || data.id !== sessionId) return undefined;
   const session = nativeSessionRow(data);
   const generated = getGeneratedTitle(session.id);
@@ -968,7 +990,9 @@ export function readNativeSessionListRow(
 
 /** Read one native session directly. Opening a known session must not wait for
  * the multi-thousand-file list scan that populates the sidebar. */
-export function readNativeSession(sessionId: string): UnifiedSession | undefined {
+export function readNativeSession(
+  sessionId: string,
+): UnifiedSession | undefined {
   const session = readNativeSessionListRow(sessionId);
   if (!session) return undefined;
   session.transcriptPath = resolveTranscriptPath(
@@ -984,9 +1008,7 @@ function* nativeSessionRows(): Generator<UnifiedSession> {
 
   for (const file of readdirSync(SESSIONS_DIR)) {
     if (!file.endsWith(".json") || SKIP_FILES.has(file)) continue;
-    const data = readJsonSafe<NativeSessionFile>(
-      `${SESSIONS_DIR}/${file}`
-    );
+    const data = readJsonSafe<NativeSessionFile>(`${SESSIONS_DIR}/${file}`);
     // Skip non-session bookkeeping files in this dir (active-runs.json,
     // prompt-queues.json, active-at-shutdown.json, …) — a real session always
     // has an id, these don't, so they'd otherwise become bogus id:undefined rows.
@@ -1106,7 +1128,9 @@ function* assembleSessionSteps(
   const selectedSessions =
     slice === "include"
       ? allSessions
-      : allSessions.filter((session) => inArchiveSlice(!!session.archived, slice));
+      : allSessions.filter((session) =>
+          inArchiveSlice(!!session.archived, slice),
+        );
 
   // Enrich with PR URLs and state, matched within the session's own repo so a
   // branch name reused across repos never picks up the wrong PR. Beyond the
@@ -1178,7 +1202,8 @@ function* assembleSessionSteps(
         session.prUpdatedAt = pr.updatedAt;
         session.prChecks = pr.checks;
         session.prOsReview = lastReviewSummary(
-          readPrState(pr.number, configuredRepos()[sessionRepoId]?.ghRepo)?.lastReview,
+          readPrState(pr.number, configuredRepos()[sessionRepoId]?.ghRepo)
+            ?.lastReview,
           pr.headRefOid,
         );
       }
@@ -1199,7 +1224,12 @@ function* assembleSessionSteps(
     for (const att of session.attachedRepos || [])
       targets.push({ repo: att.repo, branch: att.branch, source: "attached" });
     for (const lp of session.linkedPrs || [])
-      targets.push({ repo: lp.repo, branch: lp.branch, source: "linked", stored: lp });
+      targets.push({
+        repo: lp.repo,
+        branch: lp.branch,
+        source: "linked",
+        stored: lp,
+      });
     // PRs that name this session in their attribution footer but sit on a
     // branch it doesn't own — the "one feature, four PRs" shape, where the
     // agent opened PRs in repos it never attached (or on a second branch of
@@ -1252,7 +1282,12 @@ function* assembleSessionSteps(
         // bare ref — the PR routes resolve it live. A covered repo with no
         // cache entry genuinely has no PR, and a primary branch with no PR
         // stays absent, as before.
-        refs.push({ repo: t.repo, branch: t.branch, source: t.source, ...t.stored });
+        refs.push({
+          repo: t.repo,
+          branch: t.branch,
+          source: t.source,
+          ...t.stored,
+        });
       }
     }
     if (refs.length > 0) session.prs = refs;
@@ -1316,7 +1351,7 @@ function* assembleSessionSteps(
   // Sort by lastActivity descending
   selectedSessions.sort(
     (a, b) =>
-      new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
+      new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime(),
   );
 
   return selectedSessions;
@@ -1360,7 +1395,9 @@ async function assembleSessionsAsync(
   }
 }
 
-export function getAllSessions(slice: SessionArchiveSlice = "include"): UnifiedSession[] {
+export function getAllSessions(
+  slice: SessionArchiveSlice = "include",
+): UnifiedSession[] {
   return assembleSessions(
     scanSlackSessions(),
     scanLinearSessions(),
@@ -1436,6 +1473,8 @@ export async function deleteSession(session: UnifiedSession): Promise<void> {
  * the mailbox is both impossible and unnecessary. Callers must verify the
  * tombstone before using this recovery path.
  */
-export function removeTombstonedSessionArtifacts(session: UnifiedSession): void {
+export function removeTombstonedSessionArtifacts(
+  session: UnifiedSession,
+): void {
   removeSessionArtifacts(session);
 }

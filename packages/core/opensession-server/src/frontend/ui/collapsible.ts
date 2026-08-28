@@ -31,4 +31,4 @@ export { Collapsible } from "@base-ui/react/collapsible";
  * outrank it.
  */
 export const collapsiblePanelClasses =
-	"h-[var(--collapsible-panel-height)] overflow-hidden transition-[height] duration-[var(--dur)] ease-[var(--ease)] data-[starting-style]:h-0 data-[ending-style]:h-0 [&[hidden]]:hidden";
+  "h-[var(--collapsible-panel-height)] overflow-hidden transition-[height] duration-[var(--dur)] ease-[var(--ease)] data-[starting-style]:h-0 data-[ending-style]:h-0 [&[hidden]]:hidden";

@@ -12,8 +12,8 @@ export const PIXEL_GRID = "grid grid-cols-3 gap-px [--glow-color:currentColor]";
  * matches base.css's squircle rule — so these keep their corner shape, not just
  * their radius. */
 export const PIXEL =
-	"size-[3px] rounded-xs bg-[color-mix(in_srgb,currentColor_35%,transparent)] " +
-	"transition-[background,box-shadow,opacity] duration-[var(--dur-micro)] ease-[var(--ease)]";
+  "size-[3px] rounded-xs bg-[color-mix(in_srgb,currentColor_35%,transparent)] " +
+  "transition-[background,box-shadow,opacity] duration-[var(--dur-micro)] ease-[var(--ease)]";
 
 /** The wave, as animation LONGHANDS rather than an `animate-[…]` shorthand.
  * The shorthand would reset `animation-delay`, and which of the two won would
@@ -21,7 +21,7 @@ export const PIXEL =
  * — so every pixel would animate in unison if the delay utility happened to be
  * emitted first. Longhands touch different properties and cannot collide. */
 const WAVE_BASE =
-	"[animation-name:pixel-snake-trail] [animation-timing-function:ease-out] [animation-iteration-count:infinite]";
+  "[animation-name:pixel-snake-trail] [animation-timing-function:ease-out] [animation-iteration-count:infinite]";
 export const PIXEL_WAVE = `${WAVE_BASE} [animation-duration:1.4s]`;
 /** Calm, ambient cadence — for indicators where 1.4s reads as jittery rather
  * than lively (the Changes tab's empty state). */
@@ -33,14 +33,14 @@ export const PIXEL_WAVE_SLOW = `${WAVE_BASE} [animation-duration:2.4s]`;
  * the source — a built string like `[animation-delay:${n}ms]` would compile to
  * nothing and every pixel would light at once. */
 export const PIXEL_DELAY = [
-	"[animation-delay:0ms]",
-	"[animation-delay:210ms]",
-	"[animation-delay:420ms]",
-	"[animation-delay:630ms]",
-	"[animation-delay:840ms]",
+  "[animation-delay:0ms]",
+  "[animation-delay:210ms]",
+  "[animation-delay:420ms]",
+  "[animation-delay:630ms]",
+  "[animation-delay:840ms]",
 ];
 
 /** Index into PIXEL_DELAY for the nth cell of the 3×3 grid. */
 export function pixelDelayStep(i: number): number {
-	return Math.floor(i / 3) + (i % 3);
+  return Math.floor(i / 3) + (i % 3);
 }

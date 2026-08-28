@@ -30,7 +30,9 @@ export function nextReviewDebounce(
   maxWaitMs: number,
 ): ReviewDebounceTiming {
   const first =
-    typeof firstPushAt === "number" && Number.isFinite(firstPushAt) ? firstPushAt : now;
+    typeof firstPushAt === "number" && Number.isFinite(firstPushAt)
+      ? firstPushAt
+      : now;
   return {
     firstPushAt: first,
     dueAt: Math.min(now + quietMs, first + maxWaitMs),

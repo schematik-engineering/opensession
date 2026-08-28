@@ -26,8 +26,16 @@ export function isLikelyPromptCacheMiss(
   userTurns: number,
   providerId: string,
 ): boolean {
-  if (providerId !== "anthropic" || userTurns < 2 || usage.contextTokens < 10_000) return false;
-  return usage.cacheReadTokens < 1_024 && usage.cacheReadTokens / usage.contextTokens < 0.05;
+  if (
+    providerId !== "anthropic" ||
+    userTurns < 2 ||
+    usage.contextTokens < 10_000
+  )
+    return false;
+  return (
+    usage.cacheReadTokens < 1_024 &&
+    usage.cacheReadTokens / usage.contextTokens < 0.05
+  );
 }
 
 /** Prompt size + cache reuse of one completed model step, for the rebuild
@@ -181,7 +189,8 @@ export function shouldPersistModelSwitch(
   return (
     event.type === "model_switch" &&
     event.temporaryFallback !== true &&
-    (event.switchReason === undefined || event.switchReason === "out of credits")
+    (event.switchReason === undefined ||
+      event.switchReason === "out of credits")
   );
 }
 

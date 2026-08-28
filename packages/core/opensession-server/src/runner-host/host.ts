@@ -45,7 +45,12 @@ process.once("exit", cleanupProjectedGithubAuth);
 // can now close the startup race without broad process-name matching.
 writeFileSync(
   `${hostDir}/startup.json`,
-  JSON.stringify({ ...processIdentity(), pid: process.pid, specPath: resolve(specPath), startedAt: new Date().toISOString() }),
+  JSON.stringify({
+    ...processIdentity(),
+    pid: process.pid,
+    specPath: resolve(specPath),
+    startedAt: new Date().toISOString(),
+  }),
   { mode: 0o600 },
 );
 if (existsSync(`${hostDir}/cancelled`)) {
@@ -187,7 +192,8 @@ const { TranscriptRelay } = await import("./transcript-relay");
 const { SocketWriteQueue } = await import("./socket-write-queue");
 const transcriptRelay = new TranscriptRelay();
 {
-  const { setTranscriptForwarder } = await import("../server/transcript-forward");
+  const { setTranscriptForwarder } =
+    await import("../server/transcript-forward");
   let warnedOverflow = false;
   setTranscriptForwarder((engineSessionId, lines) => {
     if (!transcriptRelay.record(engineSessionId, lines) && !warnedOverflow) {
@@ -237,7 +243,8 @@ function sendHello(): void {
   // is the terminal fence: an ended hello cannot close the connection before
   // these replay frames have been consumed.
   if (!RUN_WS_URL) {
-    for (const batch of transcriptRelay.replay()) send({ t: "transcript", ...batch });
+    for (const batch of transcriptRelay.replay())
+      send({ t: "transcript", ...batch });
     send({ t: "catchup_complete" });
   }
 }
@@ -263,8 +270,7 @@ function handleClientMsg(msg: ClientToHostMsg): void {
           msg.text,
           msg.images,
 
-          msg.steerId
-
+          msg.steerId,
         )
       ) {
         // Too late (run finishing) or backend can't steer — bounce it back so
@@ -276,7 +282,7 @@ function handleClientMsg(msg: ClientToHostMsg): void {
     case "retract_steer": {
       void retractAgentSteer(
         [spec.osSessionId, meta.engineSessionId],
-        msg.steerId
+        msg.steerId,
       ).then((retracted) => {
         send({
           t: "steer_retracted",
@@ -292,12 +298,12 @@ function handleClientMsg(msg: ClientToHostMsg): void {
         !interruptAndSteerAgentRun(
           [spec.osSessionId, meta.engineSessionId],
           msg.text,
-          msg.images
+          msg.images,
         ) &&
         !steerAgentRun(
           [spec.osSessionId, meta.engineSessionId],
           msg.text,
-          msg.images
+          msg.images,
         )
       ) {
         send({ t: "steer_failed", text: msg.text });
@@ -373,7 +379,9 @@ if (RUN_WS_URL) {
           }
         }
         if (gap) {
-          log(`replay gap: frames ${gap.from}..${gap.to} were dropped (buffer overflow)`);
+          log(
+            `replay gap: frames ${gap.from}..${gap.to} were dropped (buffer overflow)`,
+          );
           sock.send(JSON.stringify({ t: "gap", ...gap }));
         }
         for (const line of lines) sock.send(line);
@@ -385,7 +393,8 @@ if (RUN_WS_URL) {
       }
       buf.ack(after); // the watermark below `after` will never be replayed again
       streaming = true;
-      if (lines.length) log(`replayed ${lines.length} frame(s) after seq ${after}`);
+      if (lines.length)
+        log(`replayed ${lines.length} frame(s) after seq ${after}`);
     };
     sock.onopen = () => {
       backoff = 500;
@@ -408,7 +417,10 @@ if (RUN_WS_URL) {
         return;
       }
       if (msg?.t === "ack") {
-        const ack = { seq: Number(msg.seq) || 0, epoch: typeof msg.epoch === "string" ? msg.epoch : undefined };
+        const ack = {
+          seq: Number(msg.seq) || 0,
+          epoch: typeof msg.epoch === "string" ? msg.epoch : undefined,
+        };
         if (!streaming) {
           if (ackTimer) clearTimeout(ackTimer);
           const freshServer = !ack.epoch || ack.epoch !== lastEpoch;
@@ -529,7 +541,10 @@ function proxyMcpConfigs(): Record<string, unknown> | undefined {
   // that is `bun run <mcp-proxy.ts>` (process.execPath is bun — resolves both
   // on the host and inside a sandbox container where protocol.ts's BUN_BIN host
   // path doesn't exist); as a compiled binary it is `<exe> mcp-proxy`.
-  const [proxyCommand, ...proxyArgs] = mcpProxyArgv(process.execPath, MCP_PROXY_ENTRY);
+  const [proxyCommand, ...proxyArgs] = mcpProxyArgv(
+    process.execPath,
+    MCP_PROXY_ENTRY,
+  );
   for (const name of names) {
     out[name] = {
       command: proxyCommand,
@@ -587,7 +602,9 @@ try {
     usageCredits: spec.usageCredits,
     prReviewer: spec.prReviewer,
     journal: {
-      ...(spec.lifecycle === "auxiliary" ? {} : { osSessionId: spec.osSessionId }),
+      ...(spec.lifecycle === "auxiliary"
+        ? {}
+        : { osSessionId: spec.osSessionId }),
       kind: spec.journalKind || "prompt",
       firstJournaledAt: spec.firstJournaledAt,
       resumeAttempts: spec.resumeAttempts,
@@ -617,7 +634,10 @@ try {
 }
 
 ended = true;
-meta.done = terminal ?? { type: "error", content: "Run ended without a result" };
+meta.done = terminal ?? {
+  type: "error",
+  content: "Run ended without a result",
+};
 meta.endedAt = new Date().toISOString();
 saveMeta();
 send({ t: "end", done: terminal });

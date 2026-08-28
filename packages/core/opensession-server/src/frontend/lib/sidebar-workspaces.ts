@@ -1,9 +1,12 @@
 import type { UnifiedSession, Workspace } from "./types";
 
 export function isScratchWorkspace(
-	sessions: readonly Pick<UnifiedSession, "mode">[],
+  sessions: readonly Pick<UnifiedSession, "mode">[],
 ): boolean {
-	return sessions.length > 0 && sessions.every((session) => session.mode === "scratch");
+  return (
+    sessions.length > 0 &&
+    sessions.every((session) => session.mode === "scratch")
+  );
 }
 
 /**
@@ -30,20 +33,20 @@ export const ASK_BAND = "__ask__";
  * into this one.
  */
 export function isAskWorkspace(
-	sessions: readonly Pick<UnifiedSession, "mode" | "repoLess">[],
+  sessions: readonly Pick<UnifiedSession, "mode" | "repoLess">[],
 ): boolean {
-	return (
-		sessions.length > 0 &&
-		sessions.every((session) => session.mode === "ask" && !!session.repoLess)
-	);
+  return (
+    sessions.length > 0 &&
+    sessions.every((session) => session.mode === "ask" && !!session.repoLess)
+  );
 }
 
 export function spawnedSessionBelongsInSidebar(
-	session: Pick<UnifiedSession, "spawnedBy">,
-	needsAttention: boolean,
-	claimed: boolean,
+  session: Pick<UnifiedSession, "spawnedBy">,
+  needsAttention: boolean,
+  claimed: boolean,
 ): boolean {
-	return !session.spawnedBy || needsAttention || claimed;
+  return !session.spawnedBy || needsAttention || claimed;
 }
 
 /**
@@ -55,34 +58,36 @@ export function spawnedSessionBelongsInSidebar(
  * sidebar” appear to do nothing until the lens is cleared.
  */
 export function sessionSharesSelectedSidebarGroup(
-	session: Pick<UnifiedSession, "id" | "aliasIds" | "workspaceId" | "worktreeDir">,
-	selected: Pick<UnifiedSession, "id" | "aliasIds" | "workspaceId" | "worktreeDir"> | null,
-	selectedWorkspaceId?: string | null,
+  session: Pick<
+    UnifiedSession,
+    "id" | "aliasIds" | "workspaceId" | "worktreeDir"
+  >,
+  selected: Pick<
+    UnifiedSession,
+    "id" | "aliasIds" | "workspaceId" | "worktreeDir"
+  > | null,
+  selectedWorkspaceId?: string | null,
 ): boolean {
-	if (
-		selectedWorkspaceId &&
-		session.workspaceId === selectedWorkspaceId
-	)
-		return true;
-	if (!selected) return false;
-	if (
-		session.id === selected.id ||
-		session.aliasIds?.includes(selected.id) ||
-		selected.aliasIds?.includes(session.id)
-	)
-		return true;
-	if (selected.workspaceId)
-		return session.workspaceId === selected.workspaceId;
-	return (
-		!!selected.worktreeDir?.includes("/worktrees/") &&
-		session.worktreeDir === selected.worktreeDir
-	);
+  if (selectedWorkspaceId && session.workspaceId === selectedWorkspaceId)
+    return true;
+  if (!selected) return false;
+  if (
+    session.id === selected.id ||
+    session.aliasIds?.includes(selected.id) ||
+    selected.aliasIds?.includes(session.id)
+  )
+    return true;
+  if (selected.workspaceId) return session.workspaceId === selected.workspaceId;
+  return (
+    !!selected.worktreeDir?.includes("/worktrees/") &&
+    session.worktreeDir === selected.worktreeDir
+  );
 }
 
 export interface ActiveWorkspaceSubagent {
-	session: UnifiedSession;
-	/** One for a direct child of workspace work, increasing for nested workers. */
-	depth: number;
+  session: UnifiedSession;
+  /** One for a direct child of workspace work, increasing for nested workers. */
+  depth: number;
 }
 
 /**
@@ -95,80 +100,80 @@ export interface ActiveWorkspaceSubagent {
  * worker is running, blocked on a question, or has queued work to deliver.
  */
 export function activeSubagentsForWorkspace(
-	sessions: readonly UnifiedSession[],
-	workspaceId: string | null | undefined,
+  sessions: readonly UnifiedSession[],
+  workspaceId: string | null | undefined,
 ): ActiveWorkspaceSubagent[] {
-	if (!workspaceId) return [];
+  if (!workspaceId) return [];
 
-	// The live session list should already be unique. Keeping the last copy of
-	// a duplicate makes this helper defensive against an optimistic list merge
-	// without ever rendering the same child twice.
-	const byId = new Map<string, UnifiedSession>();
-	for (const session of sessions) byId.set(session.id, session);
+  // The live session list should already be unique. Keeping the last copy of
+  // a duplicate makes this helper defensive against an optimistic list merge
+  // without ever rendering the same child twice.
+  const byId = new Map<string, UnifiedSession>();
+  for (const session of sessions) byId.set(session.id, session);
 
-	const family = new Set<string>();
-	const childrenByParent = new Map<string, string[]>();
-	for (const session of byId.values()) {
-		if (session.workspaceId === workspaceId) family.add(session.id);
-		if (session.parentSessionId) {
-			const children = childrenByParent.get(session.parentSessionId) ?? [];
-			children.push(session.id);
-			childrenByParent.set(session.parentSessionId, children);
-		}
-	}
-	const queue = Array.from(family);
-	for (let i = 0; i < queue.length; i++) {
-		for (const childId of childrenByParent.get(queue[i]) ?? []) {
-			if (family.has(childId)) continue;
-			family.add(childId);
-			queue.push(childId);
-		}
-	}
+  const family = new Set<string>();
+  const childrenByParent = new Map<string, string[]>();
+  for (const session of byId.values()) {
+    if (session.workspaceId === workspaceId) family.add(session.id);
+    if (session.parentSessionId) {
+      const children = childrenByParent.get(session.parentSessionId) ?? [];
+      children.push(session.id);
+      childrenByParent.set(session.parentSessionId, children);
+    }
+  }
+  const queue = Array.from(family);
+  for (let i = 0; i < queue.length; i++) {
+    for (const childId of childrenByParent.get(queue[i]) ?? []) {
+      if (family.has(childId)) continue;
+      family.add(childId);
+      queue.push(childId);
+    }
+  }
 
-	const depthOf = (session: UnifiedSession): number => {
-		let depth = 1;
-		let parentId = session.parentSessionId;
-		const seen = new Set([session.id]);
-		while (parentId && family.has(parentId) && !seen.has(parentId)) {
-			seen.add(parentId);
-			const parent = byId.get(parentId);
-			if (!parent?.parentSessionId) break;
-			depth++;
-			parentId = parent.parentSessionId;
-		}
-		return depth;
-	};
+  const depthOf = (session: UnifiedSession): number => {
+    let depth = 1;
+    let parentId = session.parentSessionId;
+    const seen = new Set([session.id]);
+    while (parentId && family.has(parentId) && !seen.has(parentId)) {
+      seen.add(parentId);
+      const parent = byId.get(parentId);
+      if (!parent?.parentSessionId) break;
+      depth++;
+      parentId = parent.parentSessionId;
+    }
+    return depth;
+  };
 
-	return Array.from(byId.values())
-		.filter(
-			(session) =>
-				family.has(session.id) &&
-				!!session.parentSessionId &&
-				!session.archived &&
-				(session.isRunning ||
-					!!session.waitingForInput ||
-					(session.queuedCount ?? 0) > 0),
-		)
-		.map((session) => ({ session, depth: depthOf(session) }))
-		.sort(
-			(a, b) =>
-				(a.session.createdAt || "").localeCompare(b.session.createdAt || "") ||
-				a.session.id.localeCompare(b.session.id),
-		);
+  return Array.from(byId.values())
+    .filter(
+      (session) =>
+        family.has(session.id) &&
+        !!session.parentSessionId &&
+        !session.archived &&
+        (session.isRunning ||
+          !!session.waitingForInput ||
+          (session.queuedCount ?? 0) > 0),
+    )
+    .map((session) => ({ session, depth: depthOf(session) }))
+    .sort(
+      (a, b) =>
+        (a.session.createdAt || "").localeCompare(b.session.createdAt || "") ||
+        a.session.id.localeCompare(b.session.id),
+    );
 }
 
 /** The root session a workspace row should open, never one of its subagents. */
 export function workspaceMainSession(row: {
-	sessions: readonly UnifiedSession[];
+  sessions: readonly UnifiedSession[];
 }): UnifiedSession | null {
-	if (row.sessions.length === 0) return null;
-	const rowSessionIds = new Set(row.sessions.map((session) => session.id));
-	return (
-		row.sessions.find(
-			(session) =>
-				!session.parentSessionId || !rowSessionIds.has(session.parentSessionId),
-		) ?? row.sessions[0]
-	);
+  if (row.sessions.length === 0) return null;
+  const rowSessionIds = new Set(row.sessions.map((session) => session.id));
+  return (
+    row.sessions.find(
+      (session) =>
+        !session.parentSessionId || !rowSessionIds.has(session.parentSessionId),
+    ) ?? row.sessions[0]
+  );
 }
 
 /**
@@ -180,27 +185,27 @@ export function workspaceMainSession(row: {
  * runs that carry no workspace.
  */
 export function workspaceRowOwnsSession(
-	row: {
-		key: string;
-		workspace: Pick<Workspace, "id"> | null;
-		sessions: readonly Pick<UnifiedSession, "id">[];
-	},
-	selected: Pick<UnifiedSession, "id" | "workspaceId" | "worktreeDir"> | null,
+  row: {
+    key: string;
+    workspace: Pick<Workspace, "id"> | null;
+    sessions: readonly Pick<UnifiedSession, "id">[];
+  },
+  selected: Pick<UnifiedSession, "id" | "workspaceId" | "worktreeDir"> | null,
 ): boolean {
-	if (!selected) return false;
-	if (row.sessions.some((session) => session.id === selected.id)) return true;
-	if (selected.workspaceId) return row.workspace?.id === selected.workspaceId;
-	return !!selected.worktreeDir && row.key === `wt:${selected.worktreeDir}`;
+  if (!selected) return false;
+  if (row.sessions.some((session) => session.id === selected.id)) return true;
+  if (selected.workspaceId) return row.workspace?.id === selected.workspaceId;
+  return !!selected.worktreeDir && row.key === `wt:${selected.worktreeDir}`;
 }
 
 /** A workspace route can be selected before its first session exists. */
 export function workspaceRowOwnsSelection(
-	row: Parameters<typeof workspaceRowOwnsSession>[0],
-	selectedSession: Parameters<typeof workspaceRowOwnsSession>[1],
-	selectedWorkspaceId: string | null,
+  row: Parameters<typeof workspaceRowOwnsSession>[0],
+  selectedSession: Parameters<typeof workspaceRowOwnsSession>[1],
+  selectedWorkspaceId: string | null,
 ): boolean {
-	return (
-		(!!selectedWorkspaceId && row.workspace?.id === selectedWorkspaceId) ||
-		workspaceRowOwnsSession(row, selectedSession)
-	);
+  return (
+    (!!selectedWorkspaceId && row.workspace?.id === selectedWorkspaceId) ||
+    workspaceRowOwnsSession(row, selectedSession)
+  );
 }

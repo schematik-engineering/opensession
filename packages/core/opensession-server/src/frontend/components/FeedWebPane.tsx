@@ -15,21 +15,21 @@ import { feedForRefKind } from "../lib/feeds-meta";
  */
 
 export interface RefWebPanel {
-	/** Tab label ("Video", "Conversation"). */
-	label: string;
-	/** Custom component key (e.g. "slack-channel") — rendered by the panel
-	 *  registry in SessionViewer/WorkspacePane instead of an iframe. */
-	component?: string;
-	/** The item id the panel is about (channel id, video id). */
-	refId: string;
-	/** The iframe-able URL (web panels). */
-	embedUrl?: string;
-	/** External links rendered in the pane header. */
-	links: { label: string; href: string }[];
+  /** Tab label ("Video", "Conversation"). */
+  label: string;
+  /** Custom component key (e.g. "slack-channel") — rendered by the panel
+   *  registry in SessionViewer/WorkspacePane instead of an iframe. */
+  component?: string;
+  /** The item id the panel is about (channel id, video id). */
+  refId: string;
+  /** The iframe-able URL (web panels). */
+  embedUrl?: string;
+  /** External links rendered in the pane header. */
+  links: { label: string; href: string }[];
 }
 
 function fillTemplate(template: string, id: string): string {
-	return template.replaceAll("{id}", encodeURIComponent(id));
+  return template.replaceAll("{id}", encodeURIComponent(id));
 }
 
 /**
@@ -39,57 +39,57 @@ function fillTemplate(template: string, id: string): string {
  * (cold meta cache on first paint) has no panel until the meta fetch lands.
  */
 export function refWebPanel(ref: ExternalRef): RefWebPanel | null {
-	const feed = feedForRefKind(ref.kind);
-	if (feed?.panel && (feed.panel.embedUrlTemplate || feed.panel.component)) {
-		return {
-			label: feed.panel.label,
-			refId: ref.id,
-			...(feed.panel.component ? { component: feed.panel.component } : {}),
-			...(feed.panel.embedUrlTemplate
-				? { embedUrl: fillTemplate(feed.panel.embedUrlTemplate, ref.id) }
-				: {}),
-			links: (feed.panel.links || []).map((l) => ({
-				label: l.label,
-				href: fillTemplate(l.hrefTemplate, ref.id),
-			})),
-		};
-	}
-	return null;
+  const feed = feedForRefKind(ref.kind);
+  if (feed?.panel && (feed.panel.embedUrlTemplate || feed.panel.component)) {
+    return {
+      label: feed.panel.label,
+      refId: ref.id,
+      ...(feed.panel.component ? { component: feed.panel.component } : {}),
+      ...(feed.panel.embedUrlTemplate
+        ? { embedUrl: fillTemplate(feed.panel.embedUrlTemplate, ref.id) }
+        : {}),
+      links: (feed.panel.links || []).map((l) => ({
+        label: l.label,
+        href: fillTemplate(l.hrefTemplate, ref.id),
+      })),
+    };
+  }
+  return null;
 }
 
 export function FeedWebPane({
-	panel,
-	title,
-	className,
+  panel,
+  title,
+  className,
 }: {
-	panel: RefWebPanel;
-	title?: string;
-	className?: string;
+  panel: RefWebPanel;
+  title?: string;
+  className?: string;
 }) {
-	return (
-		<div className={`flex h-full min-h-0 flex-col ${className || ""}`}>
-			<div className="flex items-center gap-3 border-b border-divider px-3 py-2">
-				<span className="min-w-0 flex-1 truncate text-label font-medium text-fg">
-					{title || panel.label}
-				</span>
-				{panel.links.map((l) => (
-					<a
-						key={l.href}
-						href={l.href}
-						target="_blank"
-						rel="noreferrer"
-						className="whitespace-nowrap text-xs font-medium text-dim hover:text-fg"
-					>
-						{l.label} ↗
-					</a>
-				))}
-			</div>
-			<iframe
-				src={panel.embedUrl || "about:blank"}
-				title={title || panel.label}
-				className="min-h-0 w-full flex-1 border-0 bg-black"
-				allow="fullscreen; autoplay; clipboard-write"
-			/>
-		</div>
-	);
+  return (
+    <div className={`flex h-full min-h-0 flex-col ${className || ""}`}>
+      <div className="flex items-center gap-3 border-b border-divider px-3 py-2">
+        <span className="min-w-0 flex-1 truncate text-label font-medium text-fg">
+          {title || panel.label}
+        </span>
+        {panel.links.map((l) => (
+          <a
+            key={l.href}
+            href={l.href}
+            target="_blank"
+            rel="noreferrer"
+            className="whitespace-nowrap text-xs font-medium text-dim hover:text-fg"
+          >
+            {l.label} ↗
+          </a>
+        ))}
+      </div>
+      <iframe
+        src={panel.embedUrl || "about:blank"}
+        title={title || panel.label}
+        className="min-h-0 w-full flex-1 border-0 bg-black"
+        allow="fullscreen; autoplay; clipboard-write"
+      />
+    </div>
+  );
 }

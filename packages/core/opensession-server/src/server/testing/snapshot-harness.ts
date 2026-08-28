@@ -175,8 +175,9 @@ export async function loadSnapshotHarness(): Promise<SnapshotHarness> {
   if (!dirs) throw new Error("call prepareSnapshotEnv() at module top level");
   const d = dirs;
   // Module-scope tickers must never arm in a test process.
-  (globalThis as unknown as { __opensessionBooted?: boolean })
-    .__opensessionBooted = true;
+  (
+    globalThis as unknown as { __opensessionBooted?: boolean }
+  ).__opensessionBooted = true;
 
   const paths = await import("../paths");
   const prevSessionsDir = paths.__setSessionsDirForTest(d.sessions);
@@ -268,20 +269,29 @@ export async function loadSnapshotHarness(): Promise<SnapshotHarness> {
       const files = require("fs").readdirSync(d.sessions) as string[];
       const owner = files
         .filter((file) => file.endsWith(".json"))
-        .map((file) => JSON.parse(require("fs").readFileSync(join(d.sessions, file), "utf8")))
-        .find((session) =>
-          session.piSessionId === engineSessionId ||
-          session.claudeSessionId === engineSessionId ||
-          session.codexThreadId === engineSessionId,
+        .map((file) =>
+          JSON.parse(
+            require("fs").readFileSync(join(d.sessions, file), "utf8"),
+          ),
+        )
+        .find(
+          (session) =>
+            session.piSessionId === engineSessionId ||
+            session.claudeSessionId === engineSessionId ||
+            session.codexThreadId === engineSessionId,
         );
-      if (!owner?.id) throw new Error(`No session owns engine id ${engineSessionId}`);
-      const { parseJsonlLines } = require("../jsonl-parser") as typeof import("../jsonl-parser");
-      await transcriptStore.transcriptStore().importLegacyTranscript(
-        owner.id,
-        parseJsonlLines(lines.map((line) => JSON.stringify(line))),
-        "merged",
-        null,
-      );
+      if (!owner?.id)
+        throw new Error(`No session owns engine id ${engineSessionId}`);
+      const { parseJsonlLines } =
+        require("../jsonl-parser") as typeof import("../jsonl-parser");
+      await transcriptStore
+        .transcriptStore()
+        .importLegacyTranscript(
+          owner.id,
+          parseJsonlLines(lines.map((line) => JSON.stringify(line))),
+          "merged",
+          null,
+        );
       transcriptPersistence.recordEngineSessionOwner(engineSessionId, owner.id);
       return transcriptStore.transcriptStore().dbPath;
     },
@@ -291,7 +301,10 @@ export async function loadSnapshotHarness(): Promise<SnapshotHarness> {
         writeFileSync(
           join(dir, `${scope}.json`),
           JSON.stringify({
-            entries: entries.map((e) => ({ ...e, at: "2026-01-01T00:00:00.000Z" })),
+            entries: entries.map((e) => ({
+              ...e,
+              at: "2026-01-01T00:00:00.000Z",
+            })),
           }),
         );
       const prev = memory.__setMemoryDirForTest(dir);
@@ -308,7 +321,14 @@ export async function loadSnapshotHarness(): Promise<SnapshotHarness> {
         memory.__setMemoryDirForTest(prev);
       }
     },
-    async prompt({ sessionId, content, user, turns, collect, contextSessions }) {
+    async prompt({
+      sessionId,
+      content,
+      user,
+      turns,
+      collect,
+      contextSessions,
+    }) {
       const fake = fakeEngine.makeFakeEngine(turns, {
         // A real adapter persists the turn it produced; without this the store
         // would only ever hold user lines (run-session broadcasts, it does not

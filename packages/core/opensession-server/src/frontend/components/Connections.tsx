@@ -1,5 +1,11 @@
 import { GITHUB_APP_GRANT_PERMISSIONS } from "../../shared/github-app-permissions";
-import React, { useCallback, useEffect, useEffectEvent, useState, useRef } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useState,
+  useRef,
+} from "react";
 import { Menu } from "../ui/menu";
 import { OptionSelect } from "../ui/select";
 import { cn } from "../ui/cn";
@@ -54,7 +60,13 @@ interface McpConnection {
   transport: "http" | "stdio";
   target: string;
   envKeys: string[];
-  status: "connected" | "ready" | "needs-env" | "needs-auth" | "unreachable" | "missing";
+  status:
+    | "connected"
+    | "ready"
+    | "needs-env"
+    | "needs-auth"
+    | "unreachable"
+    | "missing";
   detail?: string;
   /** Per-user allowlist, if this server is restricted (absent = everyone). */
   allowedUsers?: string[];
@@ -64,7 +76,10 @@ interface ConnectionsData {
   mcpServers: McpConnection[];
 }
 
-const STATUS_META: Record<McpConnection["status"], { label: string; dot: string; bad?: boolean }> = {
+const STATUS_META: Record<
+  McpConnection["status"],
+  { label: string; dot: string; bad?: boolean }
+> = {
   connected: { label: "Connected", dot: "var(--green)" },
   ready: { label: "Ready", dot: "var(--green)" },
   "needs-env": { label: "Needs setup", dot: "var(--yellow)", bad: true },
@@ -93,9 +108,28 @@ const MCP_BLURBS: Record<string, string> = {
 
 function LockIcon({ size = 12 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect x="5" y="10.5" width="14" height="9" rx="2" fill="currentColor" opacity="0.9" />
-      <path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" stroke="currentColor" strokeWidth="1.8" fill="none" />
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
+      <rect
+        x="5"
+        y="10.5"
+        width="14"
+        height="9"
+        rx="2"
+        fill="currentColor"
+        opacity="0.9"
+      />
+      <path
+        d="M8 10.5V8a4 4 0 0 1 8 0v2.5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        fill="none"
+      />
     </svg>
   );
 }
@@ -155,9 +189,9 @@ export function Connections() {
     };
   }, [load]);
 
-  const [oauthByName, setOauthByName] = useState<Record<string, McpOauthStatus>>(
-    {},
-  );
+  const [oauthByName, setOauthByName] = useState<
+    Record<string, McpOauthStatus>
+  >({});
   const loadOauth = useCallback(async (servers: McpConnection[]) => {
     const entries = await Promise.all(
       servers.map(async (server) => {
@@ -225,7 +259,9 @@ export function Connections() {
       );
       if (data?.mcpServers) void loadOauth(data.mcpServers);
     } catch (cause) {
-      setRemoveError(errorMessage(cause, `Could not disconnect ${server.name}`));
+      setRemoveError(
+        errorMessage(cause, `Could not disconnect ${server.name}`),
+      );
     }
   }
 
@@ -280,7 +316,12 @@ export function Connections() {
           <>
             <Button
               variant="soft"
-              icon={<IconHistory size={16} className={refreshing ? "animate-spin" : ""} />}
+              icon={
+                <IconHistory
+                  size={16}
+                  className={refreshing ? "animate-spin" : ""}
+                />
+              }
               onClick={() => load(true)}
               disabled={refreshing}
             >
@@ -298,7 +339,9 @@ export function Connections() {
       />
 
       {removeError && (
-        <InlineAlert onDismiss={() => setRemoveError(null)}>{removeError}</InlineAlert>
+        <InlineAlert onDismiss={() => setRemoveError(null)}>
+          {removeError}
+        </InlineAlert>
       )}
 
       {showAdd && (
@@ -315,7 +358,9 @@ export function Connections() {
         <ConnectionsSkeleton />
       ) : (
         <>
-          <SectionHeading>MCP servers: tools inside every session</SectionHeading>
+          <SectionHeading>
+            MCP servers: tools inside every session
+          </SectionHeading>
           <SettingCard>
             {data.mcpServers.map((s) => {
               const meta = STATUS_META[s.status];
@@ -339,7 +384,8 @@ export function Connections() {
                           <LockIcon /> {s.allowedUsers!.join(", ")}
                         </span>
                       )}
-                      {(oauthByName[s.name]?.shared || oauthByName[s.name]?.users.length) ? (
+                      {oauthByName[s.name]?.shared ||
+                      oauthByName[s.name]?.users.length ? (
                         <span
                           className="flex flex-shrink-0 items-center gap-1 rounded-full bg-active px-1.5 py-0.5 text-meta font-medium text-green"
                           title={[
@@ -365,11 +411,18 @@ export function Connections() {
                       {MCP_BLURBS[s.name] || "MCP server"}
                     </div>
                     <div className="mt-0.5 flex items-center gap-1.5 text-meta text-faint">
-                      <span className="rounded bg-active px-1.5 py-px">{s.transport}</span>
-                      <span className="truncate" title={s.target}>{s.target}</span>
+                      <span className="rounded bg-active px-1.5 py-px">
+                        {s.transport}
+                      </span>
+                      <span className="truncate" title={s.target}>
+                        {s.target}
+                      </span>
                     </div>
                     {meta.bad && s.detail && (
-                      <div className="mt-1 truncate text-meta text-red" title={s.detail}>
+                      <div
+                        className="mt-1 truncate text-meta text-red"
+                        title={s.detail}
+                      >
                         {s.detail}
                       </div>
                     )}
@@ -386,15 +439,20 @@ export function Connections() {
                       <IconDotsHorizontal size={18} />
                     </Menu.Trigger>
                     <Menu.Popup align="end" sideOffset={4}>
-                      {(s.transport === "http" || oauthByName[s.name]?.capable) && (
+                      {(s.transport === "http" ||
+                        oauthByName[s.name]?.capable) && (
                         <>
-                          <Menu.Item onClick={() => handleOauthConnect(s, "shared")}>
+                          <Menu.Item
+                            onClick={() => handleOauthConnect(s, "shared")}
+                          >
                             <IconPlus size={16} className="text-faint" />
                             {oauthByName[s.name]?.shared
                               ? "Reconnect (workspace)"
                               : "Connect (workspace)"}
                           </Menu.Item>
-                          <Menu.Item onClick={() => handleOauthConnect(s, "me")}>
+                          <Menu.Item
+                            onClick={() => handleOauthConnect(s, "me")}
+                          >
                             <IconPlus size={16} className="text-faint" />
                             Connect my account
                           </Menu.Item>
@@ -405,8 +463,8 @@ export function Connections() {
                               Connect with API token
                             </Menu.Item>
                           ) : null}
-                          {(oauthByName[s.name]?.shared ||
-                            oauthByName[s.name]?.users.length) ? (
+                          {oauthByName[s.name]?.shared ||
+                          oauthByName[s.name]?.users.length ? (
                             <Menu.Item
                               onClick={() =>
                                 handleOauthDisconnect(
@@ -479,7 +537,12 @@ interface GithubAuthData {
   authOnConnect?: boolean;
   /** Simple mode: the single connected login, if exactly one. */
   soleLogin?: string | null;
-  accounts: { login: string; name?: string; connectedAt: string; scopes?: string }[];
+  accounts: {
+    login: string;
+    name?: string;
+    connectedAt: string;
+    scopes?: string;
+  }[];
   team: {
     name: string;
     github: string;
@@ -521,7 +584,11 @@ export function queuePersonalGithubConnect() {
 // Blank org creates the app under the signed-in personal account; an org login
 // creates it under that organization (so the org owns it and it can reach org
 // repos). Same query params either way.
-function buildGithubAppCreateUrl(name: string, org: string, webhookBaseUrl: string): string {
+function buildGithubAppCreateUrl(
+  name: string,
+  org: string,
+  webhookBaseUrl: string,
+): string {
   const params = new URLSearchParams({
     name,
     url: "http://localhost:3850",
@@ -696,10 +763,18 @@ function GithubAppWizard({
   const createReady = appOwner === "you" || !!appOrg.trim();
   const previewSlug = deriveGithubAppSlug(appName);
   const canSave = !!clientId.trim() && !!slug.trim() && !!secret.trim();
-  const titles = ["Create the app", "Add the details", "Install on your repos", "Connect"];
+  const titles = [
+    "Create the app",
+    "Add the details",
+    "Install on your repos",
+    "Connect",
+  ];
 
   return (
-    <Modal.Root open={open} onOpenChange={(next) => !saving && onOpenChange(next)}>
+    <Modal.Root
+      open={open}
+      onOpenChange={(next) => !saving && onOpenChange(next)}
+    >
       <Modal.Content widthClassName="max-w-[34rem]" initialFocus={stepFocusRef}>
         <Modal.Header
           title="Set up a GitHub App"
@@ -718,7 +793,10 @@ function GithubAppWizard({
                   // Switching to a personal App drops the captured org owner,
                   // but sign-in is still enabled only after GitHub connects.
                   if (next === "you" && intentOrg) {
-                    if (!confirm("Switch the App owner to your personal account?")) return;
+                    if (
+                      !confirm("Switch the App owner to your personal account?")
+                    )
+                      return;
                     onClearIntent();
                   }
                   setAppOwner(next as "you" | "org");
@@ -788,9 +866,9 @@ function GithubAppWizard({
             <div className="text-meta leading-snug text-faint">
               Pre-filled: name{" "}
               <span className="font-mono text-dim">{appName}</span>, permissions
-              (Actions, Checks, statuses, and Deployments read; Contents, Issues,
-              and Pull requests write; Members read), and private.
-              Names are unique on GitHub, so tweak it if it's taken.
+              (Actions, Checks, statuses, and Deployments read; Contents,
+              Issues, and Pull requests write; Members read), and private. Names
+              are unique on GitHub, so tweak it if it's taken.
             </div>
             <Modal.Footer>
               <button
@@ -838,8 +916,8 @@ function GithubAppWizard({
                 />
                 <span className="text-meta leading-snug text-faint">
                   In <span className="text-dim">About</span> at the top: the{" "}
-                  <span className="text-dim">Client ID</span>, not the App ID above
-                  it.
+                  <span className="text-dim">Client ID</span>, not the App ID
+                  above it.
                 </span>
               </div>
               <div className="flex flex-col gap-1">
@@ -878,8 +956,8 @@ function GithubAppWizard({
                 />
                 <span className="text-meta leading-snug text-faint">
                   In <span className="text-dim">Client secrets</span>, click{" "}
-                  <span className="text-dim">Generate a new client secret</span>, then
-                  copy it (shown once). Required.
+                  <span className="text-dim">Generate a new client secret</span>
+                  , then copy it (shown once). Required.
                 </span>
               </div>
               <GithubPrivateKeyField
@@ -891,9 +969,9 @@ function GithubAppWizard({
                 description={
                   <>
                     In <span className="text-dim">Private keys</span>, click{" "}
-                    <span className="text-dim">Generate a private key</span>, then choose
-                    the downloaded .pem file. Lets the bot and PR checks run on the App;
-                    leave blank for sign-in only.
+                    <span className="text-dim">Generate a private key</span>,
+                    then choose the downloaded .pem file. Lets the bot and PR
+                    checks run on the App; leave blank for sign-in only.
                   </>
                 }
               />
@@ -908,7 +986,9 @@ function GithubAppWizard({
               </Button>
               <Button
                 variant="primary"
-                onClick={() => onSaveApp(appOwner === "org" ? appOrg.trim() : "")}
+                onClick={() =>
+                  onSaveApp(appOwner === "org" ? appOrg.trim() : "")
+                }
                 disabled={!canSave || saving}
               >
                 {saving ? "Saving…" : "Save and continue"}
@@ -928,7 +1008,9 @@ function GithubAppWizard({
                 ref={setStepFocus}
                 variant="primary"
                 icon={<IconArrowUpRight size={20} />}
-                render={<a href={installUrl} target="_blank" rel="noreferrer" />}
+                render={
+                  <a href={installUrl} target="_blank" rel="noreferrer" />
+                }
               >
                 Install on your repositories
               </Button>
@@ -952,8 +1034,8 @@ function GithubAppWizard({
           <div className="flex flex-col gap-4">
             {appOwner === "org" && (
               <div className="text-supporting leading-snug text-dim">
-                This turns on GitHub sign-in for this workspace. You'll be signed
-                in as the first admin.
+                This turns on GitHub sign-in for this workspace. You'll be
+                signed in as the first admin.
               </div>
             )}
             {flow ? (
@@ -971,7 +1053,11 @@ function GithubAppWizard({
                     variant="primary"
                     icon={<IconArrowUpRight size={20} />}
                     render={
-                      <a href={flow.verificationUri} target="_blank" rel="noreferrer" />
+                      <a
+                        href={flow.verificationUri}
+                        target="_blank"
+                        rel="noreferrer"
+                      />
                     }
                   >
                     Open GitHub
@@ -979,7 +1065,9 @@ function GithubAppWizard({
                 </div>
                 <div className="flex items-center gap-2 text-supporting text-dim">
                   <PulseDot size={7} />
-                  <span>Waiting for GitHub. Authorize there, then close that tab.</span>
+                  <span>
+                    Waiting for GitHub. Authorize there, then close that tab.
+                  </span>
                 </div>
               </div>
             ) : error ? (
@@ -1038,7 +1126,9 @@ export function GithubAccounts({
 } = {}) {
   const [data, setData] = useState<GithubAuthData | null>(null);
   const [flow, setFlow] = useState<DeviceFlow | null>(null);
-  const [flowState, setFlowState] = useState<"idle" | "starting" | "waiting">("idle");
+  const [flowState, setFlowState] = useState<"idle" | "starting" | "waiting">(
+    "idle",
+  );
   const [error, setError] = useState<string | null>(null);
   // Simple-mode "bring your own GitHub App" form: client id + slug (+ secret)
   // written to config.json, so the device flow lights up with no env var and no
@@ -1225,7 +1315,9 @@ export function GithubAccounts({
       });
       void load();
     } catch (cause) {
-      setError(errorMessage(cause, "Could not clear GitHub organization setup"));
+      setError(
+        errorMessage(cause, "Could not clear GitHub organization setup"),
+      );
     }
   }
 
@@ -1272,7 +1364,9 @@ export function GithubAccounts({
           variant="primary"
           className="h-9 bg-fg text-bg hover:bg-fg/85"
           icon={<IconArrowUpRight size={20} />}
-          render={<a href={flow.verificationUri} target="_blank" rel="noreferrer" />}
+          render={
+            <a href={flow.verificationUri} target="_blank" rel="noreferrer" />
+          }
         >
           Open GitHub
         </Button>
@@ -1284,7 +1378,8 @@ export function GithubAccounts({
         <span className="flex min-w-0 flex-1 items-center gap-2">
           <PulseDot size={7} />
           <span className="min-w-0">
-            Waiting for GitHub. Authorize there, then close that tab and return here.
+            Waiting for GitHub. Authorize there, then close that tab and return
+            here.
           </span>
         </span>
         {!cancelOutside && (
@@ -1300,13 +1395,14 @@ export function GithubAccounts({
       </div>
     </div>
   ) : null;
-  const outsideCancel = cancelOutside && flow ? (
-    <div className="mt-3 flex justify-center">
-      <Button size="sm" variant="ghost" onClick={cancelConnect}>
-        Cancel
-      </Button>
-    </div>
-  ) : null;
+  const outsideCancel =
+    cancelOutside && flow ? (
+      <div className="mt-3 flex justify-center">
+        <Button size="sm" variant="ghost" onClick={cancelConnect}>
+          Cancel
+        </Button>
+      </div>
+    ) : null;
 
   // ── Simple mode ──
   // No web sign-in, so no roster and no authUser: the card is one shared account
@@ -1320,7 +1416,9 @@ export function GithubAccounts({
     return (
       <>
         {showHeading && <SectionHeading>GitHub</SectionHeading>}
-        {error && <InlineAlert onDismiss={() => setError(null)}>{error}</InlineAlert>}
+        {error && (
+          <InlineAlert onDismiss={() => setError(null)}>{error}</InlineAlert>
+        )}
         <SettingCard className={cardClassName}>
           <SettingRow className="items-start gap-x-3">
             {connected ? (
@@ -1372,7 +1470,10 @@ export function GithubAccounts({
                     {/* Reconnect re-runs the device flow, which exists only with
                         a configured App. */}
                     {data.connectAvailable && (
-                      <Menu.Item onClick={startConnect} disabled={flowState !== "idle"}>
+                      <Menu.Item
+                        onClick={startConnect}
+                        disabled={flowState !== "idle"}
+                      >
                         <IconPlug size={16} className="text-faint" />
                         Reconnect
                       </Menu.Item>
@@ -1395,80 +1496,89 @@ export function GithubAccounts({
               set by the wizard or an env var); before that the setup wizard is
               the entry point. */}
           {!connected &&
-            (data.connectAvailable
-              ? flowState !== "waiting" && (
-                  <div className="flex flex-col gap-2.5 px-5 py-3.5">
-                    <div className="flex flex-wrap items-center gap-2.5">
+            (data.connectAvailable ? (
+              flowState !== "waiting" && (
+                <div className="flex flex-col gap-2.5 px-5 py-3.5">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <Button
+                      variant="primary"
+                      onClick={onConnectRequest ?? startConnect}
+                      disabled={flowState !== "idle"}
+                    >
+                      {flowState === "starting"
+                        ? "Starting…"
+                        : "Sign in with GitHub"}
+                    </Button>
+                    {data.appInstallUrl && (
                       <Button
-                        variant="primary"
-                        onClick={onConnectRequest ?? startConnect}
-                        disabled={flowState !== "idle"}
+                        size="sm"
+                        variant="ghost"
+                        icon={<IconArrowUpRight size={20} />}
+                        render={
+                          <a
+                            href={data.appInstallUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          />
+                        }
                       >
-                        {flowState === "starting" ? "Starting…" : "Sign in with GitHub"}
+                        Manage repositories
                       </Button>
-                      {data.appInstallUrl && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          icon={<IconArrowUpRight size={20} />}
-                          render={
-                            <a
-                              href={data.appInstallUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                            />
-                          }
-                        >
-                          Manage repositories
-                        </Button>
-                      )}
-                    </div>
-                    <div className="text-meta leading-snug text-faint">
-                      GitHub opens in a new tab. Authorize with the one-time code,
-                      then close that tab and return here. Every session shares the
-                      connected account.
-                    </div>
-                    {/* A config-set app can be cleared live; an env-set one only
-                        gets named, since it needs a restart to change. */}
-                    {data.appConfigSource === "config" ? (
-                      <button
-                        type="button"
-                        className="self-start text-meta text-dim underline hover:text-fg"
-                        onClick={removeApp}
-                      >
-                        Remove app
-                      </button>
-                    ) : (
-                      <div className="text-meta leading-snug text-faint">
-                        Set via{" "}
-                        <code className="rounded-sm bg-surface px-1 py-0.5 font-mono text-[0.92em] text-dim">
-                          OPENSESSION_GITHUB_CLIENT_ID
-                        </code>
-                        . Unset and restart to change.
-                      </div>
                     )}
                   </div>
-                )
-              : (
-                  <div className="flex flex-col gap-4 px-5 py-3.5">
-                    <div className="text-meta leading-snug text-faint">
-                      No sign-in here, so every session shares one GitHub account.
-                      Turn on GitHub sign-in for per-person accounts.
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <div className="text-label font-medium text-fg">GitHub App</div>
-                      <div className="text-meta leading-snug text-faint">
-                        Install your own app on the repos you choose, then authorize
-                        with a one-time code.
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2.5">
-                        <Button variant="primary" onClick={() => void load().then(() => setWizardOpen(true))}>
-                          Set up GitHub App
-                        </Button>
-                      </div>
-                    </div>
+                  <div className="text-meta leading-snug text-faint">
+                    GitHub opens in a new tab. Authorize with the one-time code,
+                    then close that tab and return here. Every session shares
+                    the connected account.
                   </div>
-                ))}
+                  {/* A config-set app can be cleared live; an env-set one only
+                        gets named, since it needs a restart to change. */}
+                  {data.appConfigSource === "config" ? (
+                    <button
+                      type="button"
+                      className="self-start text-meta text-dim underline hover:text-fg"
+                      onClick={removeApp}
+                    >
+                      Remove app
+                    </button>
+                  ) : (
+                    <div className="text-meta leading-snug text-faint">
+                      Set via{" "}
+                      <code className="rounded-sm bg-surface px-1 py-0.5 font-mono text-[0.92em] text-dim">
+                        OPENSESSION_GITHUB_CLIENT_ID
+                      </code>
+                      . Unset and restart to change.
+                    </div>
+                  )}
+                </div>
+              )
+            ) : (
+              <div className="flex flex-col gap-4 px-5 py-3.5">
+                <div className="text-meta leading-snug text-faint">
+                  No sign-in here, so every session shares one GitHub account.
+                  Turn on GitHub sign-in for per-person accounts.
+                </div>
+                <div className="flex flex-col gap-2">
+                  <div className="text-label font-medium text-fg">
+                    GitHub App
+                  </div>
+                  <div className="text-meta leading-snug text-faint">
+                    Install your own app on the repos you choose, then authorize
+                    with a one-time code.
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <Button
+                      variant="primary"
+                      onClick={() =>
+                        void load().then(() => setWizardOpen(true))
+                      }
+                    >
+                      Set up GitHub App
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ))}
 
           {deviceFlowWell}
 
@@ -1532,7 +1642,9 @@ export function GithubAccounts({
   const needsReconnect = !!own?.needsReconnect;
   const showConnect = !own?.connected || needsReconnect;
   const ownAccount = own
-    ? data.accounts.find((a) => a.login.toLowerCase() === own.github.toLowerCase())
+    ? data.accounts.find(
+        (a) => a.login.toLowerCase() === own.github.toLowerCase(),
+      )
     : undefined;
   // Personal view is one row, not a brand row plus a roster of one: with a
   // single possible account the second row only ever repeated the first.
@@ -1543,7 +1655,9 @@ export function GithubAccounts({
   return (
     <>
       {showHeading && (
-        <SectionHeading>{personal ? "GitHub" : "GitHub accounts"}</SectionHeading>
+        <SectionHeading>
+          {personal ? "GitHub" : "GitHub accounts"}
+        </SectionHeading>
       )}
       {error && (
         <InlineAlert onDismiss={() => setError(null)}>{error}</InlineAlert>
@@ -1567,9 +1681,15 @@ export function GithubAccounts({
           )}
           <SettingRowText>
             <SettingRowTitle className={cn(personal && "truncate")}>
-              {signedIn ? own!.name : personal ? "GitHub" : "Per-user GitHub auth"}
+              {signedIn
+                ? own!.name
+                : personal
+                  ? "GitHub"
+                  : "Per-user GitHub auth"}
               {signedIn && (
-                <span className="ml-2 text-label font-normal text-faint">@{own!.github}</span>
+                <span className="ml-2 text-label font-normal text-faint">
+                  @{own!.github}
+                </span>
               )}
             </SettingRowTitle>
             {!personal && (
@@ -1616,7 +1736,13 @@ export function GithubAccounts({
               )
             ) : (
               <StatusChip
-                label={active ? "Enabled" : data.enabled ? "Missing client id" : "Disabled"}
+                label={
+                  active
+                    ? "Enabled"
+                    : data.enabled
+                      ? "Missing client id"
+                      : "Disabled"
+                }
                 dot={active ? "var(--green)" : "var(--yellow)"}
               />
             )}
@@ -1648,7 +1774,10 @@ export function GithubAccounts({
                   <IconDotsHorizontal size={18} />
                 </Menu.Trigger>
                 <Menu.Popup align="end" sideOffset={4}>
-                  <Menu.Item onClick={startConnect} disabled={flowState !== "idle"}>
+                  <Menu.Item
+                    onClick={startConnect}
+                    disabled={flowState !== "idle"}
+                  >
                     <IconPlug size={16} className="text-faint" />
                     Reconnect
                   </Menu.Item>
@@ -1683,7 +1812,9 @@ export function GithubAccounts({
                 <SettingRowText>
                   <SettingRowTitle className="truncate">
                     {m.name}
-                    <span className="ml-2 text-label font-normal text-faint">@{m.github}</span>
+                    <span className="ml-2 text-label font-normal text-faint">
+                      @{m.github}
+                    </span>
                   </SettingRowTitle>
                   {/* Under the name rather than beside it: as a third column it
                       had nothing to shrink into on a phone and overlapped the
@@ -1711,29 +1842,30 @@ export function GithubAccounts({
                           : "var(--line-strong, var(--text-faint))"
                     }
                   />
-                  {m.connected && m.canManage && (
-                    // Behind the ⋯ rather than beside the chip: a connected row
-                    // needs no button of its own, and a neutral "Disconnect"
-                    // sitting where an unconnected row shows "Connect" made the
-                    // two states look identical.
-                    <Menu.Root>
-                      <Menu.Trigger
-                        className={rowMenuTriggerClasses}
-                        aria-label={`Manage @${m.github}`}
-                      >
-                        <IconDotsHorizontal size={18} />
-                      </Menu.Trigger>
-                      <Menu.Popup align="end" sideOffset={4}>
-                        <Menu.Item
-                          onClick={() => disconnect(m.github)}
-                          className="text-red data-[highlighted]:bg-red-soft"
+                  {m.connected &&
+                    m.canManage && (
+                      // Behind the ⋯ rather than beside the chip: a connected row
+                      // needs no button of its own, and a neutral "Disconnect"
+                      // sitting where an unconnected row shows "Connect" made the
+                      // two states look identical.
+                      <Menu.Root>
+                        <Menu.Trigger
+                          className={rowMenuTriggerClasses}
+                          aria-label={`Manage @${m.github}`}
                         >
-                          <IconTrash size={16} />
-                          Disconnect
-                        </Menu.Item>
-                      </Menu.Popup>
-                    </Menu.Root>
-                  )}
+                          <IconDotsHorizontal size={18} />
+                        </Menu.Trigger>
+                        <Menu.Popup align="end" sideOffset={4}>
+                          <Menu.Item
+                            onClick={() => disconnect(m.github)}
+                            className="text-red data-[highlighted]:bg-red-soft"
+                          >
+                            <IconTrash size={16} />
+                            Disconnect
+                          </Menu.Item>
+                        </Menu.Popup>
+                      </Menu.Root>
+                    )}
                 </SettingRowControl>
               </SettingRow>
             );
@@ -1880,7 +2012,13 @@ function ConnectTokenDialog({
   );
 }
 
-function AddMcpForm({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
+function AddMcpForm({
+  onClose,
+  onAdded,
+}: {
+  onClose: () => void;
+  onAdded: () => void;
+}) {
   const [name, setName] = useState("");
   const [transport, setTransport] = useState<"http" | "stdio">("http");
   const [url, setUrl] = useState("");
@@ -1933,7 +2071,12 @@ function AddMcpForm({ onClose, onAdded }: { onClose: () => void; onAdded: () => 
       <SettingsFormRow>
         <SettingsField>
           Name
-          <input className={settingsInputClass} value={name} onChange={(e) => setName(e.target.value)} placeholder="github" />
+          <input
+            className={settingsInputClass}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="github"
+          />
         </SettingsField>
         <SettingsField>
           Transport

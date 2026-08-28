@@ -602,9 +602,10 @@ function grantHeader(name: string, slot: GrantSlot): string | undefined {
 }
 
 /** Connection status for the UI: who's connected on each grant. */
-export function mcpOauthStatus(
-  name: string,
-): { shared?: { connectedBy?: string; updatedAt: string }; users: string[] } {
+export function mcpOauthStatus(name: string): {
+  shared?: { connectedBy?: string; updatedAt: string };
+  users: string[];
+} {
   const auth = readStore()[name];
   return {
     ...(auth?.shared
@@ -781,9 +782,16 @@ const TOKEN_VALIDATORS: Record<
       signal: AbortSignal.timeout(10_000),
     });
     if (res.status === 401 || res.status === 403)
-      return { ok: false, error: "Vercel rejected that token. Create a new one at vercel.com/account/settings/tokens and paste it again." };
+      return {
+        ok: false,
+        error:
+          "Vercel rejected that token. Create a new one at vercel.com/account/settings/tokens and paste it again.",
+      };
     if (!res.ok)
-      return { ok: false, error: `Could not check the token with Vercel (HTTP ${res.status})` };
+      return {
+        ok: false,
+        error: `Could not check the token with Vercel (HTTP ${res.status})`,
+      };
     return { ok: true };
   },
   vero: async (token) => {
@@ -849,7 +857,9 @@ export async function saveManualMcpGrant(
     ? resolveTeammate(opts.forUser)?.name
     : undefined;
   if (opts.forUser && !teamName)
-    throw new Error(`"${opts.forUser}" doesn't resolve to a configured teammate`);
+    throw new Error(
+      `"${opts.forUser}" doesn't resolve to a configured teammate`,
+    );
   const store = readStore();
   const entry = store[name] ?? {
     serverUrl,

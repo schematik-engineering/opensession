@@ -3,11 +3,7 @@ import { useSetupStatus } from "../hooks/useSetupStatus";
 import { DEFAULT_DOC_TITLE, docTitle } from "../lib/brand";
 import { Button } from "../ui/button";
 import { cn } from "../ui/cn";
-import {
-  SettingCard,
-  SettingsHeader,
-  SettingsPanel,
-} from "../ui/settings";
+import { SettingCard, SettingsHeader, SettingsPanel } from "../ui/settings";
 import { LoadingState } from "../ui/state";
 import { SetupChecklist } from "./SetupChecklist";
 import { IntegrationsList } from "./SetupIntegrations";
@@ -43,7 +39,9 @@ function sectionAnchor(id: SectionId) {
 function scrollToSection(id: SectionId) {
   const target = document.getElementById(sectionAnchor(id));
   if (!target) return;
-  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const reduced = window.matchMedia?.(
+    "(prefers-reduced-motion: reduce)",
+  ).matches;
   target.scrollIntoView({
     behavior: reduced ? "auto" : "smooth",
     block: "start",
@@ -104,7 +102,9 @@ function SetupSummary({
             <span
               className={cn(
                 "flex size-5 shrink-0 items-center justify-center rounded-full",
-                step.complete ? "bg-green-soft text-green" : "bg-hover text-faint",
+                step.complete
+                  ? "bg-green-soft text-green"
+                  : "bg-hover text-faint",
               )}
               aria-hidden="true"
             >

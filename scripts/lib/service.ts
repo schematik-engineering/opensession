@@ -345,9 +345,12 @@ async function resolveUsername(): Promise<string> {
  *  - `EnvironmentFile=-…` so a box that has not written secrets yet still
  *    starts, instead of failing with a unit that looks fine.
  */
-export async function renderSocketUnit(scope: SystemdScope = "user"): Promise<string> {
+export async function renderSocketUnit(
+  scope: SystemdScope = "user",
+): Promise<string> {
   const template = join(REPO_ROOT, "opensession.socket");
-  if (!existsSync(template)) throw new Error(`missing socket unit template at ${template}`);
+  if (!existsSync(template))
+    throw new Error(`missing socket unit template at ${template}`);
   const port = process.env.PORT || envFileValue("PORT") || "3850";
   if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65_535)
     throw new Error("PORT must be a valid TCP port");
@@ -355,11 +358,15 @@ export async function renderSocketUnit(scope: SystemdScope = "user"): Promise<st
     .replace(/^ListenStream=.*$/m, `ListenStream=127.0.0.1:${port}`)
     .replace(
       /^Service=.*$/m,
-      isCompiledBinary() ? "Service=opensession.service" : "Service=opensession-ingress.service",
+      isCompiledBinary()
+        ? "Service=opensession.service"
+        : "Service=opensession-ingress.service",
     )
     .replace(
       /^WantedBy=.*$/m,
-      scope === "system" ? "WantedBy=sockets.target" : "WantedBy=default.target",
+      scope === "system"
+        ? "WantedBy=sockets.target"
+        : "WantedBy=default.target",
     );
   return unit;
 }
@@ -368,14 +375,21 @@ export async function renderIngressUnit(
   scope: SystemdScope = "user",
 ): Promise<string> {
   const template = join(REPO_ROOT, "opensession-ingress.service");
-  if (!existsSync(template)) throw new Error(`missing ingress unit template at ${template}`);
+  if (!existsSync(template))
+    throw new Error(`missing ingress unit template at ${template}`);
   let unit = (await Bun.file(template).text())
     .replace(/^WorkingDirectory=.*$/m, `WorkingDirectory=${serviceWorkdir()}`)
-    .replace(/^ExecStart=.*$/m,
-      `ExecStart=${bunPath()} run packages/core/opensession-server/src/server/gateway-ingress.ts`)
+    .replace(
+      /^ExecStart=.*$/m,
+      `ExecStart=${bunPath()} run packages/core/opensession-server/src/server/gateway-ingress.ts`,
+    )
     .replace(/^Environment="HOME=.*"$/m, `Environment="HOME=${HOME}"`)
-    .replace(/^Environment="PATH=.*"$/m, `Environment="PATH=${servicePath(dirname(bunPath()))}"`);
-  if (scope === "system") return unit.replace(/^User=.*$/m, `User=${await resolveUsername()}`);
+    .replace(
+      /^Environment="PATH=.*"$/m,
+      `Environment="PATH=${servicePath(dirname(bunPath()))}"`,
+    );
+  if (scope === "system")
+    return unit.replace(/^User=.*$/m, `User=${await resolveUsername()}`);
   return unit
     .replace(/^Slice=opensession-control\.slice\n/m, "")
     .replace(/^User=.*\n/m, "")
@@ -406,8 +420,14 @@ export async function renderUnit(
     );
   if (compiled) {
     unit = unit
-      .replace(/^Wants=opensession\.socket opensession-ingress\.service$/m, "Requires=opensession.socket")
-      .replace(/^After=network\.target opensession-ingress\.service/m, "After=network.target opensession.socket")
+      .replace(
+        /^Wants=opensession\.socket opensession-ingress\.service$/m,
+        "Requires=opensession.socket",
+      )
+      .replace(
+        /^After=network\.target opensession-ingress\.service/m,
+        "After=network.target opensession.socket",
+      )
       .replace(/^Type=simple$/m, "Type=simple\nSockets=opensession.socket")
       .replace(/^Environment="OPENSESSION_EXTERNAL_INGRESS=1"\n/m, "");
   }
@@ -659,21 +679,29 @@ export function renderSessionKernelLauncher(): string {
     ? `${SHIM_PATH} session-kernel-service`
     : `${bunPath()} run packages/core/opensession-server/src/session-kernel-service.ts`;
   return (
-    `#!/bin/bash\n` +
-    `cd ${serviceWorkdir()} || exit 1\n` +
-    `exec ${exec}\n`
+    `#!/bin/bash\n` + `cd ${serviceWorkdir()} || exit 1\n` + `exec ${exec}\n`
   );
 }
 
 export function renderSessionKernelPlist(): string {
-  const binDir = isCompiledBinary() ? dirname(SHIM_PATH) : bunPath().replace(/\/bun$/, "");
-  const state = process.env.OPENSESSION_STATE_DIR || envFileValue("OPENSESSION_STATE_DIR");
+  const binDir = isCompiledBinary()
+    ? dirname(SHIM_PATH)
+    : bunPath().replace(/\/bun$/, "");
+  const state =
+    process.env.OPENSESSION_STATE_DIR || envFileValue("OPENSESSION_STATE_DIR");
   const sessions =
-    process.env.OPENSESSION_SESSIONS_DIR || envFileValue("OPENSESSION_SESSIONS_DIR");
+    process.env.OPENSESSION_SESSIONS_DIR ||
+    envFileValue("OPENSESSION_SESSIONS_DIR");
   const optional = [
-    state ? `    <key>OPENSESSION_STATE_DIR</key><string>${xml(state)}</string>` : "",
-    sessions ? `    <key>OPENSESSION_SESSIONS_DIR</key><string>${xml(sessions)}</string>` : "",
-  ].filter(Boolean).join("\n");
+    state
+      ? `    <key>OPENSESSION_STATE_DIR</key><string>${xml(state)}</string>`
+      : "",
+    sessions
+      ? `    <key>OPENSESSION_SESSIONS_DIR</key><string>${xml(sessions)}</string>`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -752,9 +780,7 @@ export async function install(
           (await metadataEndpointReachable())
         ) {
           const uid = process.getuid?.() ?? 0;
-          fail(
-            "service installation blocked: EC2/cloud metadata is reachable",
-          );
+          fail("service installation blocked: EC2/cloud metadata is reachable");
           for (const line of metadataInstallBlockGuidance(uid)) info(line);
           return false;
         }
@@ -794,7 +820,8 @@ export async function install(
       } else {
         const executorUnit = await renderExecutorUnit();
         await Bun.write(STAGED_UNIT_PATH, unit);
-        if (sourceIngress) await Bun.write(STAGED_INGRESS_UNIT_PATH, ingressUnit);
+        if (sourceIngress)
+          await Bun.write(STAGED_INGRESS_UNIT_PATH, ingressUnit);
         await Bun.write(STAGED_SOCKET_PATH, socketUnit);
         await Bun.write(STAGED_EXECUTOR_UNIT_PATH, executorUnit);
         await Bun.write(STAGED_SESSION_KERNEL_UNIT_PATH, kernelUnit);
@@ -882,7 +909,9 @@ export async function install(
           );
           migratedUserUnit = await Bun.file(USER_UNIT_PATH).text();
           if (existsSync(USER_INGRESS_UNIT_PATH))
-            migratedUserIngressUnit = await Bun.file(USER_INGRESS_UNIT_PATH).text();
+            migratedUserIngressUnit = await Bun.file(
+              USER_INGRESS_UNIT_PATH,
+            ).text();
           if (existsSync(USER_SESSION_KERNEL_UNIT_PATH))
             migratedUserKernelUnit = await Bun.file(
               USER_SESSION_KERNEL_UNIT_PATH,
@@ -905,7 +934,11 @@ export async function install(
           );
           if (existsSync(USER_INGRESS_UNIT_PATH))
             await runInherit(
-              systemctl("user", ["disable", "--now", "opensession-ingress.service"]),
+              systemctl("user", [
+                "disable",
+                "--now",
+                "opensession-ingress.service",
+              ]),
               undefined,
               env,
             );
@@ -930,13 +963,19 @@ export async function install(
           );
         }
         const start = [
-          ...(wasActive
-            ? [["sudo", "systemctl", "stop", SERVICE_NAME]]
-            : []),
+          ...(wasActive ? [["sudo", "systemctl", "stop", SERVICE_NAME]] : []),
           ["sudo", "systemctl", "daemon-reload"],
           ["sudo", "systemctl", "enable", "--now", SOCKET_NAME],
           ...(sourceIngress
-            ? [["sudo", "systemctl", "enable", "--now", "opensession-ingress.service"]]
+            ? [
+                [
+                  "sudo",
+                  "systemctl",
+                  "enable",
+                  "--now",
+                  "opensession-ingress.service",
+                ],
+              ]
             : []),
           ["sudo", "systemctl", "enable", EXECUTOR_SERVICE_NAME],
           [
@@ -957,7 +996,10 @@ export async function install(
               mkdirSync(dirname(USER_UNIT_PATH), { recursive: true });
               await Bun.write(USER_UNIT_PATH, migratedUserUnit);
               if (migratedUserIngressUnit)
-                await Bun.write(USER_INGRESS_UNIT_PATH, migratedUserIngressUnit);
+                await Bun.write(
+                  USER_INGRESS_UNIT_PATH,
+                  migratedUserIngressUnit,
+                );
               if (migratedUserKernelUnit)
                 await Bun.write(
                   USER_SESSION_KERNEL_UNIT_PATH,
@@ -982,7 +1024,11 @@ export async function install(
                 );
               if (migratedUserIngressUnit)
                 await runInherit(
-                  systemctl("user", ["enable", "--now", "opensession-ingress.service"]),
+                  systemctl("user", [
+                    "enable",
+                    "--now",
+                    "opensession-ingress.service",
+                  ]),
                   undefined,
                   env,
                 );
@@ -1013,7 +1059,13 @@ export async function install(
         systemctl(scope, ["daemon-reload"]),
         systemctl(scope, ["enable", "--now", SOCKET_NAME]),
         ...(sourceIngress
-          ? [systemctl(scope, ["enable", "--now", "opensession-ingress.service"])]
+          ? [
+              systemctl(scope, [
+                "enable",
+                "--now",
+                "opensession-ingress.service",
+              ]),
+            ]
           : []),
         systemctl(scope, ["enable", SESSION_KERNEL_SERVICE_NAME]),
         systemctl(scope, ["restart", SESSION_KERNEL_SERVICE_NAME]),
@@ -1051,10 +1103,7 @@ export async function install(
       chmodSync(LAUNCHD_LAUNCHER, 0o755);
       chmodSync(LAUNCHD_SESSION_KERNEL_LAUNCHER, 0o755);
       await Bun.write(LAUNCHD_PLIST, renderPlist());
-      await Bun.write(
-        LAUNCHD_SESSION_KERNEL_PLIST,
-        renderSessionKernelPlist(),
-      );
+      await Bun.write(LAUNCHD_SESSION_KERNEL_PLIST, renderSessionKernelPlist());
       await run(["launchctl", "bootout", `${domain()}/${LAUNCHD_LABEL}`]);
       await run([
         "launchctl",
@@ -1119,14 +1168,23 @@ export async function control(
     const kernel = `${domain()}/${LAUNCHD_SESSION_KERNEL_LABEL}`;
     switch (action) {
       case "start": {
-        const actorLoaded = (await run(["launchctl", "print", kernel], { quiet: true })).code === 0;
+        const actorLoaded =
+          (await run(["launchctl", "print", kernel], { quiet: true })).code ===
+          0;
         const actor = await runInherit(
           actorLoaded
             ? ["launchctl", "kickstart", kernel]
-            : ["launchctl", "bootstrap", domain(), LAUNCHD_SESSION_KERNEL_PLIST],
+            : [
+                "launchctl",
+                "bootstrap",
+                domain(),
+                LAUNCHD_SESSION_KERNEL_PLIST,
+              ],
         );
         if (actor !== 0) return actor;
-        const gatewayLoaded = (await run(["launchctl", "print", label], { quiet: true })).code === 0;
+        const gatewayLoaded =
+          (await run(["launchctl", "print", label], { quiet: true })).code ===
+          0;
         return await runInherit(
           gatewayLoaded
             ? ["launchctl", "kickstart", label]
@@ -1140,7 +1198,12 @@ export async function control(
       }
       case "restart": {
         await runInherit(["launchctl", "bootout", label]);
-        const actor = await runInherit(["launchctl", "kickstart", "-k", kernel]);
+        const actor = await runInherit([
+          "launchctl",
+          "kickstart",
+          "-k",
+          kernel,
+        ]);
         if (actor !== 0) return actor;
         return await runInherit([
           "launchctl",
@@ -1167,7 +1230,11 @@ export async function control(
       env,
     );
     return actor === 0
-      ? await runInherit(systemctl(scope, ["start", SERVICE_NAME]), undefined, env)
+      ? await runInherit(
+          systemctl(scope, ["start", SERVICE_NAME]),
+          undefined,
+          env,
+        )
       : actor;
   }
   const gateway = await runInherit(
@@ -1176,7 +1243,10 @@ export async function control(
     env,
   );
   const actor = await runInherit(
-    systemctl(scope, [action === "restart" ? "restart" : "stop", SESSION_KERNEL_SERVICE_NAME]),
+    systemctl(scope, [
+      action === "restart" ? "restart" : "stop",
+      SESSION_KERNEL_SERVICE_NAME,
+    ]),
     undefined,
     env,
   );
@@ -1189,7 +1259,11 @@ export async function control(
     return gateway || actor || socket;
   }
   return actor === 0
-    ? await runInherit(systemctl(scope, ["start", SERVICE_NAME]), undefined, env)
+    ? await runInherit(
+        systemctl(scope, ["start", SERVICE_NAME]),
+        undefined,
+        env,
+      )
     : actor;
 }
 

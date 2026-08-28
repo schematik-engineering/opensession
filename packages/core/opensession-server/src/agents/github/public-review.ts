@@ -65,8 +65,9 @@ type PublicReviewPool = {
   waiters: Array<() => void>;
 };
 
-const publicReviewPool: PublicReviewPool = ((globalThis as any)
-  .__publicReviewPool ??= { active: 0, waiters: [] });
+const publicReviewPool: PublicReviewPool = ((
+  globalThis as any
+).__publicReviewPool ??= { active: 0, waiters: [] });
 
 async function acquirePublicReviewSlot(): Promise<() => void> {
   const concurrency = numberSetting(
@@ -75,7 +76,9 @@ async function acquirePublicReviewSlot(): Promise<() => void> {
     8,
   );
   if (publicReviewPool.active >= concurrency) {
-    await new Promise<void>((resolve) => publicReviewPool.waiters.push(resolve));
+    await new Promise<void>((resolve) =>
+      publicReviewPool.waiters.push(resolve),
+    );
   } else {
     publicReviewPool.active += 1;
   }
@@ -91,7 +94,9 @@ async function acquirePublicReviewSlot(): Promise<() => void> {
 
 const numberSetting = (name: string, fallback: number, max: number): number => {
   const value = Number.parseInt(process.env[name] || "", 10);
-  return Number.isSafeInteger(value) && value > 0 && value <= max ? value : fallback;
+  return Number.isSafeInteger(value) && value > 0 && value <= max
+    ? value
+    : fallback;
 };
 
 export function publicReviewIsolationAvailable(): boolean {
@@ -100,7 +105,11 @@ export function publicReviewIsolationAvailable(): boolean {
 
 export function publicReviewLimits(): PublicReviewLimits {
   return {
-    maxFiles: numberSetting("OPENSESSION_PUBLIC_REVIEW_MAX_FILES", DEFAULT_MAX_FILES, 2_000),
+    maxFiles: numberSetting(
+      "OPENSESSION_PUBLIC_REVIEW_MAX_FILES",
+      DEFAULT_MAX_FILES,
+      2_000,
+    ),
     maxChangedLines: numberSetting(
       "OPENSESSION_PUBLIC_REVIEW_MAX_CHANGED_LINES",
       DEFAULT_MAX_CHANGED_LINES,
@@ -133,7 +142,10 @@ export function isExternalPullRequest(
   details: Pick<PrAutomationDetails, "headRepo">,
   baseRepo: string,
 ): boolean {
-  return !!details.headRepo && details.headRepo.toLowerCase() !== baseRepo.toLowerCase();
+  return (
+    !!details.headRepo &&
+    details.headRepo.toLowerCase() !== baseRepo.toLowerCase()
+  );
 }
 
 export function automaticReviewEventAllowed(input: {
@@ -145,7 +157,10 @@ export function automaticReviewEventAllowed(input: {
 }
 
 export function publicReviewSizeError(
-  details: Pick<PrAutomationDetails, "changedFiles" | "additions" | "deletions">,
+  details: Pick<
+    PrAutomationDetails,
+    "changedFiles" | "additions" | "deletions"
+  >,
   limits = publicReviewLimits(),
 ): string | null {
   if (details.changedFiles > limits.maxFiles) {
@@ -160,7 +175,13 @@ export function publicReviewSizeError(
 
 export function evaluatePublicReviewAdmission(
   previous: PublicReviewBudgetState | null,
-  input: { day: string; repo: string; prNumber: number; headSha: string; author: string },
+  input: {
+    day: string;
+    repo: string;
+    prNumber: number;
+    headSha: string;
+    author: string;
+  },
   limits = publicReviewLimits(),
 ): PublicReviewAdmission {
   const state: PublicReviewBudgetState =
@@ -204,43 +225,56 @@ export function admitPublicReview(input: {
   const path = budgetPath();
   if (existsSync(path)) {
     try {
-      previous = JSON.parse(readFileSync(path, "utf8")) as PublicReviewBudgetState;
+      previous = JSON.parse(
+        readFileSync(path, "utf8"),
+      ) as PublicReviewBudgetState;
     } catch {
       throw new Error("public review budget state is unreadable");
     }
   }
-  const result = evaluatePublicReviewAdmission(
-    previous,
-    {
-      day: (input.now || new Date()).toISOString().slice(0, 10),
-      repo: input.repo,
-      prNumber: input.prNumber,
-      headSha: input.headSha,
-      author: input.author,
-    },
-  );
+  const result = evaluatePublicReviewAdmission(previous, {
+    day: (input.now || new Date()).toISOString().slice(0, 10),
+    repo: input.repo,
+    prNumber: input.prNumber,
+    headSha: input.headSha,
+    author: input.author,
+  });
   if (result.ok) writeJsonAtomic(path, result.state, true, 0o600);
   return result;
 }
 
 function assertGitIdentity(
-  input: Pick<IsolatedPublicReviewInput, "prNumber" | "baseRef" | "baseSha" | "headSha">,
+  input: Pick<
+    IsolatedPublicReviewInput,
+    "prNumber" | "baseRef" | "baseSha" | "headSha"
+  >,
 ): void {
   if (!Number.isSafeInteger(input.prNumber) || input.prNumber < 1) {
     throw new Error("invalid public PR number");
   }
   if (!SHA_RE.test(input.headSha) || !SHA_RE.test(input.baseSha)) {
-    throw new Error("public PR review requires immutable 40-character Git SHAs");
+    throw new Error(
+      "public PR review requires immutable 40-character Git SHAs",
+    );
   }
-  if (!REF_RE.test(input.baseRef) || input.baseRef.startsWith("-") || input.baseRef.includes("..")) {
+  if (
+    !REF_RE.test(input.baseRef) ||
+    input.baseRef.startsWith("-") ||
+    input.baseRef.includes("..")
+  ) {
     throw new Error("invalid public PR base ref");
   }
 }
 
 function assertPinnedInput(input: IsolatedPublicReviewInput): void {
   assertGitIdentity(input);
-  if (input.diff.headRefOid !== input.headSha || input.diff.baseRefOid !== input.baseSha) {
-    throw new Error("GitHub diff identity does not match the requested public PR commits");
+  if (
+    input.diff.headRefOid !== input.headSha ||
+    input.diff.baseRefOid !== input.baseSha
+  ) {
+    throw new Error(
+      "GitHub diff identity does not match the requested public PR commits",
+    );
   }
 }
 
@@ -276,7 +310,9 @@ export async function verifyPublicPrInDisposableExecutor(
   const release = await acquirePublicReviewSlot();
   try {
     if (!publicReviewIsolationAvailable()) {
-      throw new Error("isolated public review requires the qualified Daytona Executor provider");
+      throw new Error(
+        "isolated public review requires the qualified Daytona Executor provider",
+      );
     }
     const repo = getRepo(input.repoId);
     const provider = getSandboxProvider("daytona");

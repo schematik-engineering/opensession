@@ -36,10 +36,14 @@ function parseSnapshot(deployState: string): StableFrontendSnapshot | null {
       typeof value.version !== "string" ||
       typeof value.indexHtml !== "string" ||
       typeof value.publishedAt !== "string"
-    ) return null;
+    )
+      return null;
     const releases = resolve(deployState, "releases");
     const root = resolve(value.releaseRoot);
-    if (!root.startsWith(`${releases}${sep}`) || !existsSync(join(root, ".opensession-release"))) {
+    if (
+      !root.startsWith(`${releases}${sep}`) ||
+      !existsSync(join(root, ".opensession-release"))
+    ) {
       return null;
     }
     return { ...value, releaseRoot: root } as StableFrontendSnapshot;
@@ -95,13 +99,24 @@ function parsedRequest(request: Buffer): {
   } catch {
     return null;
   }
-  const accept = lines.find((line) => /^accept:/i.test(line))?.slice(7).trim() || "";
-  const userAgent = lines.find((line) => /^user-agent:/i.test(line))?.slice(11).trim() || "";
+  const accept =
+    lines
+      .find((line) => /^accept:/i.test(line))
+      ?.slice(7)
+      .trim() || "";
+  const userAgent =
+    lines
+      .find((line) => /^user-agent:/i.test(line))
+      ?.slice(11)
+      .trim() || "";
   return {
     method: match[1] as "GET" | "HEAD",
     pathname,
     acceptsHtml: accept.includes("text/html") || accept.includes("*/*"),
-    socialCrawler: /bot|crawler|spider|slackbot|facebookexternalhit|twitterbot|linkedinbot/i.test(userAgent),
+    socialCrawler:
+      /bot|crawler|spider|slackbot|facebookexternalhit|twitterbot|linkedinbot/i.test(
+        userAgent,
+      ),
   };
 }
 
@@ -169,7 +184,9 @@ export function createStableFrontendResponder(
     const body = readFileSync(path);
     if (length <= maxCachedAssetBytes && length <= maxAssetCacheBytes) {
       while (assetBytes + length > maxAssetCacheBytes && assets.size > 0) {
-        const oldest = assets.entries().next().value as [string, Buffer] | undefined;
+        const oldest = assets.entries().next().value as
+          | [string, Buffer]
+          | undefined;
         if (!oldest) break;
         assets.delete(oldest[0]);
         assetBytes -= oldest[1].byteLength;
@@ -189,16 +206,21 @@ export function createStableFrontendResponder(
       try {
         status = options.liveStatus?.() ?? {};
       } catch (error) {
-        console.error("[stable-frontend] could not collect ingress status", error);
+        console.error(
+          "[stable-frontend] could not collect ingress status",
+          error,
+        );
       }
       return response(
         "200 OK",
-        Buffer.from(`${JSON.stringify({
-          ok: true,
-          phase: "handoff",
-          backendReady: false,
-          ...status,
-        })}\n`),
+        Buffer.from(
+          `${JSON.stringify({
+            ok: true,
+            phase: "handoff",
+            backendReady: false,
+            ...status,
+          })}\n`,
+        ),
         {
           "Content-Type": "application/json; charset=utf-8",
           "Cache-Control": "no-store",
@@ -207,9 +229,11 @@ export function createStableFrontendResponder(
       );
     }
     if (
-      parsed.pathname === "/ready" || parsed.pathname === "/api" ||
+      parsed.pathname === "/ready" ||
+      parsed.pathname === "/api" ||
       BACKEND_PATH_PREFIXES.some((prefix) => parsed.pathname.startsWith(prefix))
-    ) return null;
+    )
+      return null;
 
     const selected = currentSnapshot();
     if (!selected) return null;
@@ -219,12 +243,15 @@ export function createStableFrontendResponder(
       try {
         const stat = statSync(asset);
         if (stat.isFile()) {
-          const extension = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : "";
+          const extension = name.includes(".")
+            ? name.slice(name.lastIndexOf(".") + 1)
+            : "";
           return response(
             "200 OK",
             head ? Buffer.alloc(0) : cachedAsset(asset, stat.size),
             {
-              "Content-Type": MIME_TYPES[extension] || "application/octet-stream",
+              "Content-Type":
+                MIME_TYPES[extension] || "application/octet-stream",
               "Cache-Control": "public, max-age=31536000, immutable",
               "X-Content-Type-Options": "nosniff",
             },
@@ -235,9 +262,11 @@ export function createStableFrontendResponder(
       } catch {}
     }
     if (
-      !parsed.acceptsHtml || parsed.socialCrawler ||
+      !parsed.acceptsHtml ||
+      parsed.socialCrawler ||
       /\.[a-z0-9]{1,8}$/i.test(parsed.pathname)
-    ) return null;
+    )
+      return null;
     return response(
       "200 OK",
       indexBody,

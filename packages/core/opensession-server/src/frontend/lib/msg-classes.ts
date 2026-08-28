@@ -25,7 +25,8 @@
  * WebKit paints selection as full-width bands across block gaps; a flex column
  * makes the highlight hug the words (same reason as .viewer-messages).
  */
-const msgRowBase = "msg mx-auto flex w-full max-w-[var(--session-col)] flex-col";
+const msgRowBase =
+  "msg mx-auto flex w-full max-w-[var(--session-col)] flex-col";
 
 /** A normal turn: assistant answer, user bubble, teammate reply. */
 export const msgRow = `${msgRowBase} mb-4.5`;
@@ -52,7 +53,7 @@ export const msgOwnTurn = "mt-1";
  * to be `.msg-label::before`; that rule is gone from legacy.css.
  */
 export const msgLabel =
-	"msg-label mb-1.25 flex flex-row-reverse items-center gap-1.75 text-meta font-semibold tracking-[-0.01em] text-faint selection:bg-[rgba(0,0,0,0.01)] [&_*::selection]:bg-[rgba(0,0,0,0.01)]";
+  "msg-label mb-1.25 flex flex-row-reverse items-center gap-1.75 text-meta font-semibold tracking-[-0.01em] text-faint selection:bg-[rgba(0,0,0,0.01)] [&_*::selection]:bg-[rgba(0,0,0,0.01)]";
 
 /** A teammate's reply routed back into the session — a warm teal, so it reads
  *  as someone else stepping in rather than the driver's own words. */
@@ -64,12 +65,12 @@ export const msgLabelHuman = "text-[#1f9e8a]";
  * they have a surface of their own, so there is no gap to band-paint.
  */
 export const msgBody =
-	"msg-body flex flex-col items-stretch text-body leading-6 break-words";
+  "msg-body flex flex-col items-stretch text-body leading-6 break-words";
 
 /** Bubble bodies: shrink-wrapped to their words and hugging the right edge,
  *  capped short of the column so a long message still reads right-aligned. */
 const msgBubble =
-	"msg-body block max-w-[min(600px,90%)] self-end text-body leading-6 break-words text-fg";
+  "msg-body block max-w-[min(600px,90%)] self-end text-body leading-6 break-words text-fg";
 export const msgBubbleUser = `${msgBubble} rounded-lg bg-panel px-3.5 py-2.5`;
 export const msgBubbleHuman = `${msgBubble} rounded-row bg-[rgba(31,158,138,0.12)] px-3.5 py-2.25`;
 
@@ -84,13 +85,13 @@ export const msgStreamingRow = "msg-streaming [overflow-anchor:none]";
  *  the reduced-motion exception that keeps it blinking) stays on the text's
  *  line — as a flex child it would wrap onto its own row. */
 export const msgBodyStreaming =
-	"msg-body msg-body-assistant block text-body leading-6 break-words text-fg";
+  "msg-body msg-body-assistant block text-body leading-6 break-words text-fg";
 
 /** Provider reasoning summaries are activity, not answer hierarchy. Codex
  * Desktop treats the generated `**title**` as chrome and keeps the body quiet;
  * these do the same while leaving every summary visible in the timeline. */
 export const msgReasoningTitle =
-	"whitespace-pre-line text-body font-normal leading-6 break-words text-dim";
+  "whitespace-pre-line text-body font-normal leading-6 break-words text-dim";
 // Reasoning is never answer emphasis. Keep provider-authored strong markers
 // structurally intact for markdown while preventing them from becoming bold.
 export const msgReasoningBody = `${msgBody} text-dim [&_strong]:font-normal`;
@@ -102,11 +103,11 @@ export const msgReasoningBody = `${msgBody} text-dim [&_strong]:font-normal`;
  * reduced motion. Shared by streamed reasoning and the turn-level fallback, so
  * a silent provider still leaves one legible liveness signal. */
 export const msgActivityShimmer =
-	"inline-block bg-clip-text text-transparent [-webkit-background-clip:text] [-webkit-text-fill-color:transparent] " +
-	"[background-color:var(--text-dim)] " +
-	"[background-image:linear-gradient(to_right,var(--text-dim)_0,var(--reasoning-shimmer-contrast)_40%,var(--reasoning-shimmer-contrast)_60%,var(--text-dim)_100%)] " +
-	"[background-position:-100%_0] [background-size:50%_200%] [background-repeat:no-repeat] " +
-	"animate-[reasoning-shimmer_3s_ease_0.5s_infinite]";
+  "inline-block bg-clip-text text-transparent [-webkit-background-clip:text] [-webkit-text-fill-color:transparent] " +
+  "[background-color:var(--text-dim)] " +
+  "[background-image:linear-gradient(to_right,var(--text-dim)_0,var(--reasoning-shimmer-contrast)_40%,var(--reasoning-shimmer-contrast)_60%,var(--text-dim)_100%)] " +
+  "[background-position:-100%_0] [background-size:50%_200%] [background-repeat:no-repeat] " +
+  "animate-[reasoning-shimmer_3s_ease_0.5s_infinite]";
 
 export const msgReasoningShimmer = msgActivityShimmer;
 
@@ -116,7 +117,7 @@ export const msgReasoningShimmer = msgActivityShimmer;
  * names it.
  */
 const msgSystemBase =
-	"msg-system-text inline-block max-w-[min(560px,100%)] self-center py-1.5 text-center text-meta leading-[1.45] text-faint";
+  "msg-system-text inline-block max-w-[min(560px,100%)] self-center py-1.5 text-center text-meta leading-[1.45] text-faint";
 
 /** The centered notice pill itself. */
 export const msgSystemText = `${msgSystemBase} rounded-row bg-panel px-3.5`;
@@ -126,7 +127,7 @@ export const msgSystemText = `${msgSystemBase} rounded-row bg-panel px-3.5`;
  *  the full reading column rather than the pill's narrower cap, so a recap
  *  wraps on the same measure as the turns around it, inside the same row. */
 export const msgSystemInline =
-	"msg-system-text block w-full py-1.5 text-meta leading-[1.45] text-faint";
+  "msg-system-text block w-full py-1.5 text-meta leading-[1.45] text-faint";
 
 /**
  * A toned notice reads as a sentence, not a banner: everything the server and
@@ -144,7 +145,7 @@ export const msgSystemInline =
  * depending on where the compiler happened to emit them.
  */
 export const msgSystemToned =
-	"data-[tone]:inline-flex data-[tone]:items-start data-[tone]:gap-1.5 data-[tone]:text-left";
+  "data-[tone]:inline-flex data-[tone]:items-start data-[tone]:gap-1.5 data-[tone]:text-left";
 
 /**
  * The colour a toned notice wears — a LOOKUP of literal strings, never a built
@@ -153,15 +154,15 @@ export const msgSystemToned =
  * `sourceChipTone` in lib/source-chip-classes.
  */
 const SYSTEM_TONE: Record<string, string> = {
-	error: "data-[tone=error]:bg-red-soft data-[tone=error]:text-red",
-	warn:
-		"data-[tone=warn]:bg-[color-mix(in_srgb,var(--yellow)_12%,transparent)] " +
-		"data-[tone=warn]:text-yellow",
+  error: "data-[tone=error]:bg-red-soft data-[tone=error]:text-red",
+  warn:
+    "data-[tone=warn]:bg-[color-mix(in_srgb,var(--yellow)_12%,transparent)] " +
+    "data-[tone=warn]:text-yellow",
 };
 
 /** `info` deliberately resolves to nothing: it is the pill's resting look. */
 export function msgSystemTone(tone: string): string {
-	return SYSTEM_TONE[tone] ?? "";
+  return SYSTEM_TONE[tone] ?? "";
 }
 
 /** Inline attachments under a turn. Right-aligned inside a bubble's column. */
@@ -169,4 +170,4 @@ export const msgMedia = "mt-1.5 flex flex-wrap gap-2";
 
 /** Short relative time in a label row (hover for the real one). */
 export const msgTime =
-	"ml-1.5 cursor-default text-meta font-medium tracking-normal text-faint";
+  "ml-1.5 cursor-default text-meta font-medium tracking-normal text-faint";

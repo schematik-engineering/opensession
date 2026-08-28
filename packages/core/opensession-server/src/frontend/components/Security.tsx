@@ -70,10 +70,14 @@ interface RecurringScan {
 type Tab = "scans" | "profiles";
 
 /** A scan's state as the settings row reads it: a dot and a word. */
-function scanStatus(status: SecurityScan["status"]): { label: string; dot: string } {
+function scanStatus(status: SecurityScan["status"]): {
+  label: string;
+  dot: string;
+} {
   if (status === "running") return { label: "Running", dot: "var(--yellow)" };
   if (status === "done") return { label: "Done", dot: "var(--green)" };
-  if (status === "interactive") return { label: "Interactive", dot: "var(--accent)" };
+  if (status === "interactive")
+    return { label: "Interactive", dot: "var(--accent)" };
   return { label: "Error", dot: "var(--red)" };
 }
 
@@ -100,31 +104,29 @@ export function Security({ onOpenSession }: Props) {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("scans");
   const [showNewScan, setShowNewScan] = useState(false);
-  const [editProfile, setEditProfile] = useState<ScanProfile | "new" | null>(null);
+  const [editProfile, setEditProfile] = useState<ScanProfile | "new" | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
 
   // Stable identity: only setters and module functions are captured, so the
   // polling effect can list `load` without ever refiring from re-renders.
   const load = useCallback(async () => {
     await (async () => {
-const data = await fetchSecurity();
+      const data = await fetchSecurity();
       setScans(data.scans);
       setProfiles(data.profiles);
       setRepos(data.repos);
       setLoading(false);
-})().catch(async () => {
-
-});
+    })().catch(async () => {});
     await (async () => {
-const autos = await fetchAutomations();
+      const autos = await fetchAutomations();
       setRecurring(
         (autos as RecurringScan[]).filter((a) =>
           /deepsec|security scan/i.test(a.name),
         ),
       );
-})().catch(async () => {
-
-});
+    })().catch(async () => {});
   }, []);
 
   useEffect(() => {
@@ -138,23 +140,24 @@ const autos = await fetchAutomations();
   }, [load]);
 
   async function handleDeleteScan(s: SecurityScan) {
-    if (!confirm("Remove this scan record? Its sessions are left as-is.")) return;
+    if (!confirm("Remove this scan record? Its sessions are left as-is."))
+      return;
     await (async () => {
-await deleteScanApi(s.id);
+      await deleteScanApi(s.id);
       load();
-})().catch(async (e: any) => {
-setError(e.message);
-});
+    })().catch(async (e: any) => {
+      setError(e.message);
+    });
   }
 
   async function handleDeleteProfile(p: ScanProfile) {
     if (!confirm(`Delete profile "${p.name}"?`)) return;
     await (async () => {
-await deleteScanProfileApi(p.id);
+      await deleteScanProfileApi(p.id);
       load();
-})().catch(async (e: any) => {
-setError(e.message);
-});
+    })().catch(async (e: any) => {
+      setError(e.message);
+    });
   }
 
   return (
@@ -193,8 +196,12 @@ setError(e.message);
             value={tab}
             onValueChange={(next) => setTab(next as Tab)}
           >
-            <SegmentedOption value="scans">Scans {scans.length}</SegmentedOption>
-            <SegmentedOption value="profiles">Profiles {profiles.length}</SegmentedOption>
+            <SegmentedOption value="scans">
+              Scans {scans.length}
+            </SegmentedOption>
+            <SegmentedOption value="profiles">
+              Profiles {profiles.length}
+            </SegmentedOption>
           </Segmented>
         </div>
 
@@ -210,8 +217,9 @@ setError(e.message);
           <SettingCard>
             {profiles.length === 0 ? (
               <EmptyState placement="row" title="No scan profiles yet">
-                A profile tells a scan how to read your code: what to prioritize,
-                what is intentionally public, and where the severity bar sits.
+                A profile tells a scan how to read your code: what to
+                prioritize, what is intentionally public, and where the severity
+                bar sits.
               </EmptyState>
             ) : (
               profiles.map((p) => (
@@ -221,7 +229,9 @@ setError(e.message);
                     <SettingRowDescription className="line-clamp-2">
                       {p.prompt}
                     </SettingRowDescription>
-                    <div className="mt-1 text-meta text-faint">by {p.createdBy}</div>
+                    <div className="mt-1 text-meta text-faint">
+                      by {p.createdBy}
+                    </div>
                   </SettingRowText>
                   <SettingRowControl>
                     <Menu.Root>
@@ -254,7 +264,9 @@ setError(e.message);
           <>
             {recurring.length > 0 && (
               <>
-                <SettingsGroupLabel className="mt-0">Recurring</SettingsGroupLabel>
+                <SettingsGroupLabel className="mt-0">
+                  Recurring
+                </SettingsGroupLabel>
                 <SettingCard>
                   {recurring.map((r) => (
                     <SettingRow key={r.id}>
@@ -262,15 +274,20 @@ setError(e.message);
                         <SettingRowTitle>{r.name}</SettingRowTitle>
                         <SettingRowDescription>
                           {r.schedule}
-                          {r.lastRunAt ? ` · last run ${relativeTime(r.lastRunAt)}` : ""}
+                          {r.lastRunAt
+                            ? ` · last run ${relativeTime(r.lastRunAt)}`
+                            : ""}
                         </SettingRowDescription>
                       </SettingRowText>
                       <SettingRowControl className="flex items-center gap-3">
-                        {r.lastRunStatus === "ok" || r.lastRunStatus === "error" ? (
+                        {r.lastRunStatus === "ok" ||
+                        r.lastRunStatus === "error" ? (
                           <RunGlyph
                             ok={r.lastRunStatus === "ok"}
                             title={
-                              r.lastRunStatus === "ok" ? "Last run ok" : "Last run failed"
+                              r.lastRunStatus === "ok"
+                                ? "Last run ok"
+                                : "Last run failed"
                             }
                           />
                         ) : null}
@@ -329,11 +346,19 @@ setError(e.message);
                                 title="Running"
                               />
                             ) : (
-                              <RunGlyph ok={ref.status === "ok"} title={ref.error} />
+                              <RunGlyph
+                                ok={ref.status === "ok"}
+                                title={ref.error}
+                              />
                             )}
-                            <span className="shrink-0 text-fg">{repoLabel(ref.repo)}</span>
+                            <span className="shrink-0 text-fg">
+                              {repoLabel(ref.repo)}
+                            </span>
                             {ref.error && (
-                              <span className="truncate text-red" title={ref.error}>
+                              <span
+                                className="truncate text-red"
+                                title={ref.error}
+                              >
                                 {ref.error}
                               </span>
                             )}
@@ -355,14 +380,18 @@ setError(e.message);
 
                       <div className="mt-2 text-meta text-faint">
                         started {relativeTime(s.createdAt)}
-                        {s.finishedAt && ` · finished ${relativeTime(s.finishedAt)}`}
+                        {s.finishedAt &&
+                          ` · finished ${relativeTime(s.finishedAt)}`}
                         {` · by ${s.createdBy}`}
                       </div>
                     </SettingRowText>
                     <SettingRowControl className="flex items-center gap-2">
                       <StatusChip {...scanStatus(s.status)} />
                       <Menu.Root>
-                        <Menu.Trigger className={rowMenuTriggerClasses} aria-label="Manage scan">
+                        <Menu.Trigger
+                          className={rowMenuTriggerClasses}
+                          aria-label="Manage scan"
+                        >
                           <IconDotsHorizontal size={18} />
                         </Menu.Trigger>
                         <Menu.Popup align="end" sideOffset={4}>
@@ -430,7 +459,9 @@ function NewScanModal({
   const [repo, setRepo] = useState("");
   const [profileId, setProfileId] = useState("");
   const [instructions, setInstructions] = useState("");
-  const [recurrence, setRecurrence] = useState<"none" | "daily" | "weekly">("none");
+  const [recurrence, setRecurrence] = useState<"none" | "daily" | "weekly">(
+    "none",
+  );
   const [interactive, setInteractive] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -460,7 +491,7 @@ function NewScanModal({
     setStarting(true);
     setError(null);
     await (async () => {
-const res = await startScanApi({
+      const res = await startScanApi({
         repos: scope === "all" ? "all" : [repo],
         profileId: profileId || undefined,
         instructions: instructions.trim() || undefined,
@@ -469,10 +500,10 @@ const res = await startScanApi({
         createdBy: getCurrentUser(),
       });
       onStarted(res.sessionId);
-})().catch(async (e: any) => {
-setError(e.message);
+    })().catch(async (e: any) => {
+      setError(e.message);
       setStarting(false);
-});
+    });
   }
 
   return (
@@ -561,7 +592,9 @@ setError(e.message);
                 { value: "daily", label: "Daily" },
                 { value: "weekly", label: "Weekly" },
               ]}
-              onChange={(next) => setRecurrence(next as "none" | "daily" | "weekly")}
+              onChange={(next) =>
+                setRecurrence(next as "none" | "daily" | "weekly")
+              }
               disabled={!canRecur}
             />
             {!singleRepo && (
@@ -586,8 +619,8 @@ setError(e.message);
             <span>
               Interactive mode
               <span className="mt-0.5 block text-label font-normal text-faint">
-                Instead of scanning end to end, {AGENT_NAME} shapes the threat model
-                with you in a session first.
+                Instead of scanning end to end, {AGENT_NAME} shapes the threat
+                model with you in a session first.
               </span>
             </span>
           </label>
@@ -596,7 +629,11 @@ setError(e.message);
         </div>
 
         <Modal.Footer>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={starting}>
+          <Button
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            disabled={starting}
+          >
             Cancel
           </Button>
           <Button
@@ -649,13 +686,18 @@ function ProfileModal({
     setSaving(true);
     setError(null);
     await (async () => {
-if (initial) await updateScanProfileApi(initial.id, { name, prompt });
-      else await createScanProfileApi({ name, prompt, createdBy: getCurrentUser() });
+      if (initial) await updateScanProfileApi(initial.id, { name, prompt });
+      else
+        await createScanProfileApi({
+          name,
+          prompt,
+          createdBy: getCurrentUser(),
+        });
       onSaved();
-})().catch(async (e: any) => {
-setError(e.message);
+    })().catch(async (e: any) => {
+      setError(e.message);
       setSaving(false);
-});
+    });
   }
 
   return (
@@ -700,7 +742,11 @@ setError(e.message);
         </div>
 
         <Modal.Footer>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={saving}>
+          <Button
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            disabled={saving}
+          >
             Cancel
           </Button>
           <Button

@@ -3,7 +3,13 @@ import { $ } from "bun";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getGitStatus, gitFailureMessage, gitPull, gitPush, porcelainPaths } from "./git-status";
+import {
+  getGitStatus,
+  gitFailureMessage,
+  gitPull,
+  gitPush,
+  porcelainPaths,
+} from "./git-status";
 import type { WorkspaceExec } from "./sandbox/workspace-exec";
 
 const roots: string[] = [];
@@ -32,7 +38,8 @@ async function makeRepo(): Promise<{ repo: string; origin: string }> {
 }
 
 afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  for (const root of roots.splice(0))
+    rmSync(root, { recursive: true, force: true });
 });
 
 describe("getGitStatus", () => {
@@ -43,7 +50,11 @@ describe("getGitStatus", () => {
     await git(repo, "commit", "-m", "Feature change");
     await git(repo, "push", "origin", "feature");
 
-    expect(await git(repo, "config", "--get", "branch.feature.remote").catch(() => "")).toBe("");
+    expect(
+      await git(repo, "config", "--get", "branch.feature.remote").catch(
+        () => "",
+      ),
+    ).toBe("");
     expect(await getGitStatus(repo, "main")).toMatchObject({
       branch: "feature",
       hasUpstream: true,
@@ -78,7 +89,9 @@ describe("gitPull from base", () => {
     await git(repo, "checkout", "feature");
 
     expect(await gitPull(repo, "main")).toEqual({ ok: true });
-    expect(await git(repo, "rev-list", "--count", "HEAD..origin/main")).toBe("0");
+    expect(await git(repo, "rev-list", "--count", "HEAD..origin/main")).toBe(
+      "0",
+    );
     expect(await git(repo, "status", "--porcelain")).toBe("");
 
     await git(repo, "push", "origin", "feature");
@@ -104,7 +117,9 @@ describe("gitPull from base", () => {
 
     const result = await gitPull(repo, "main");
     expect(result).toHaveProperty("error");
-    expect("error" in result ? result.error : "").toContain("conflicts with main");
+    expect("error" in result ? result.error : "").toContain(
+      "conflicts with main",
+    );
     expect(await git(repo, "rev-parse", "HEAD")).toBe(before);
     expect(await git(repo, "status", "--porcelain")).toBe("");
     expect(existsSync(join(repo, ".git", "MERGE_HEAD"))).toBe(false);
@@ -134,9 +149,9 @@ describe("gitFailureMessage", () => {
   });
 
   test("keeps a useful final line and falls back for empty output", () => {
-    expect(gitFailureMessage("remote: Permission denied\n", "Git push failed")).toBe(
-      "remote: Permission denied",
-    );
+    expect(
+      gitFailureMessage("remote: Permission denied\n", "Git push failed"),
+    ).toBe("remote: Permission denied");
     expect(gitFailureMessage("", "Git push failed")).toBe("Git push failed");
   });
 });
@@ -151,7 +166,9 @@ describe("porcelainPaths", () => {
   });
 
   test("takes a rename's new path — the old one is gone from disk", () => {
-    expect(porcelainPaths("R  src/old.ts -> src/new.ts")).toEqual(["src/new.ts"]);
+    expect(porcelainPaths("R  src/old.ts -> src/new.ts")).toEqual([
+      "src/new.ts",
+    ]);
   });
 
   test("unquotes a path git had to escape", () => {
@@ -162,7 +179,6 @@ describe("porcelainPaths", () => {
     expect(porcelainPaths("\n\nM  src/a.ts\nM\n")).toEqual(["src/a.ts"]);
   });
 });
-
 
 describe("scoped Git credentials", () => {
   test("passes a credential only to the explicit server-owned operation", async () => {
@@ -175,7 +191,9 @@ describe("scoped Git credentials", () => {
       { sandboxed: false, remote: false },
     ) as WorkspaceExec;
 
-    expect(await gitPush("/repo", "feature", exec, { GH_TOKEN: "scoped" })).toEqual({ ok: true });
+    expect(
+      await gitPush("/repo", "feature", exec, { GH_TOKEN: "scoped" }),
+    ).toEqual({ ok: true });
     expect(envs).toEqual([{ GH_TOKEN: "scoped" }]);
   });
 
@@ -189,7 +207,9 @@ describe("scoped Git credentials", () => {
       { sandboxed: false, remote: true },
     ) as WorkspaceExec;
 
-    expect(await gitPush("/runner/repo", "feature", exec, { GH_TOKEN: "host-only" })).toEqual({ ok: true });
+    expect(
+      await gitPush("/runner/repo", "feature", exec, { GH_TOKEN: "host-only" }),
+    ).toEqual({ ok: true });
     expect(envs).toEqual([undefined]);
   });
 
@@ -205,11 +225,16 @@ describe("scoped Git credentials", () => {
     const hostEnv = {
       GH_TOKEN: "scoped",
       GITHUB_TOKEN: "scoped",
-      GIT_CONFIG_VALUE_1: "!/home/user/.opensession/bin/opensession github-credential",
+      GIT_CONFIG_VALUE_1:
+        "!/home/user/.opensession/bin/opensession github-credential",
     };
 
-    expect(await gitPull("/repo", undefined, exec, hostEnv)).toEqual({ ok: true });
-    expect(await gitPush("/repo", "feature", exec, hostEnv)).toEqual({ ok: true });
+    expect(await gitPull("/repo", undefined, exec, hostEnv)).toEqual({
+      ok: true,
+    });
+    expect(await gitPush("/repo", "feature", exec, hostEnv)).toEqual({
+      ok: true,
+    });
     expect(envs).toHaveLength(2);
     for (const env of envs) {
       expect(env).toMatchObject({

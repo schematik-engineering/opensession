@@ -96,7 +96,7 @@ export const TurnFooter = function TurnFooter({
     <div
       className={cn(
         "mx-auto mb-[18px] flex w-full max-w-[var(--session-col)] flex-wrap items-center gap-x-0.5 gap-y-1.5",
-        className
+        className,
       )}
     >
       {duration && (
@@ -124,7 +124,9 @@ export const TurnFooter = function TurnFooter({
         </Tooltip>
         <Menu.Root>
           <Menu.Trigger
-            className={BTN + " data-[popup-open]:bg-hover data-[popup-open]:text-dim"}
+            className={
+              BTN + " data-[popup-open]:bg-hover data-[popup-open]:text-dim"
+            }
             aria-label="More message actions"
           >
             <IconDotsHorizontal size={20} />
@@ -306,12 +308,7 @@ function AssetChip({ path }: { path: string }) {
       <IconArrowUpRight size={20} className="size-4 flex-shrink-0 text-faint" />
     </>
   );
-  if (!asset.available)
-    return (
-      <span className={cn(CHIP, "pr-1")}>
-        {body}
-      </span>
-    );
+  if (!asset.available) return <span className={cn(CHIP, "pr-1")}>{body}</span>;
   return (
     <Tooltip label="Open this file">
       <button
@@ -379,13 +376,18 @@ function FileChip({
         closeDelay={120}
         className={cn(
           CHIP,
-          "cursor-pointer pr-1.5 hover:bg-hover data-[popup-open]:bg-hover"
+          "cursor-pointer pr-1.5 hover:bg-hover data-[popup-open]:bg-hover",
         )}
         aria-label={`Show what this turn wrote to ${name}`}
       >
         {body}
       </Popover.Trigger>
-      <Popover.Popup side="top" align="start" elevation="lg" className={DIFF_CARD}>
+      <Popover.Popup
+        side="top"
+        align="start"
+        elevation="lg"
+        className={DIFF_CARD}
+      >
         <FileDiffCard file={file} roots={roots} />
       </Popover.Popup>
     </Popover.Root>
@@ -464,8 +466,10 @@ export function TurnLineStatsCard({
   additions?: number;
   deletions?: number;
 }) {
-  const additions = additionsProp ?? files.reduce((n, file) => n + file.additions, 0);
-  const deletions = deletionsProp ?? files.reduce((n, file) => n + file.deletions, 0);
+  const additions =
+    additionsProp ?? files.reduce((n, file) => n + file.additions, 0);
+  const deletions =
+    deletionsProp ?? files.reduce((n, file) => n + file.deletions, 0);
   const roots = useToolPathRoots();
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLSpanElement | null>(null);
@@ -551,8 +555,10 @@ function MoreChip({ files }: { files: TouchedFile[] }) {
   return (
     <Tooltip
       label={
-        files.slice(0, 12).map((f) => fileName(f.path)).join(", ") +
-        (files.length > 12 ? ", …" : "")
+        files
+          .slice(0, 12)
+          .map((f) => fileName(f.path))
+          .join(", ") + (files.length > 12 ? ", …" : "")
       }
     >
       <span className="ml-1 flex h-6 flex-shrink-0 items-center gap-1.5 rounded-md px-1.5">
@@ -578,7 +584,7 @@ export function LineStats({
     <span
       className={cn(
         "flex flex-shrink-0 items-center gap-1 text-label font-medium leading-4",
-        className
+        className,
       )}
     >
       <span className="text-green">+{additions}</span>
@@ -617,13 +623,15 @@ function readTouchedFiles(entry: TranscriptEntry): TouchedFile[] {
   const lines = (v: unknown) => {
     if (typeof v !== "string" || v.length === 0) return 0;
     let count = 1;
-    for (let at = v.indexOf("\n"); at >= 0; at = v.indexOf("\n", at + 1)) count++;
+    for (let at = v.indexOf("\n"); at >= 0; at = v.indexOf("\n", at + 1))
+      count++;
     return count;
   };
   // Engines disagree on casing: pi writes `filePath`/`oldString`, the
   // Claude SDK `file_path`/`old_string`.
   const key = (...names: string[]) => {
-    for (const n of names) if (typeof inp[n] === "string" && inp[n]) return inp[n] as string;
+    for (const n of names)
+      if (typeof inp[n] === "string" && inp[n]) return inp[n] as string;
     return "";
   };
   const filePath = key("file_path", "filePath");
@@ -648,32 +656,38 @@ function readTouchedFiles(entry: TranscriptEntry): TouchedFile[] {
       if (filePath) {
         const oldStr = key("old_string", "oldString");
         const newStr = key("new_string", "newString");
-        return [{
-          path: filePath,
-          additions: lines(newStr),
-          deletions: lines(oldStr),
-          hunks: [replaceHunk(oldStr, newStr)],
-        }];
+        return [
+          {
+            path: filePath,
+            additions: lines(newStr),
+            deletions: lines(oldStr),
+            hunks: [replaceHunk(oldStr, newStr)],
+          },
+        ];
       }
       // codex's apply_patch names its files inside the patch body.
       return mergeTouchedFiles(patchTouchedFiles(key("patchText", "patch")));
     }
     case "Write":
       if (!filePath) return [];
-      return [{
-        path: filePath,
-        additions: lines(inp.content),
-        deletions: 0,
-        hunks: [addedHunk(str(inp.content))],
-      }];
+      return [
+        {
+          path: filePath,
+          additions: lines(inp.content),
+          deletions: 0,
+          hunks: [addedHunk(str(inp.content))],
+        },
+      ];
     case "NotebookEdit":
       if (typeof inp.notebook_path !== "string") return [];
-      return [{
-        path: inp.notebook_path,
-        additions: lines(inp.new_source),
-        deletions: 0,
-        hunks: [addedHunk(str(inp.new_source))],
-      }];
+      return [
+        {
+          path: inp.notebook_path,
+          additions: lines(inp.new_source),
+          deletions: 0,
+          hunks: [addedHunk(str(inp.new_source))],
+        },
+      ];
     case "FileChange": {
       if (!Array.isArray(inp.changes)) return [];
       const files: TouchedFile[] = [];
@@ -695,7 +709,7 @@ export function collectTouchedFiles(items: TranscriptEntry[]): TouchedFile[] {
     items.flatMap((it) => {
       if (it.type !== "tool_use") return [];
       return touchedFilesFromTool(it);
-    })
+    }),
   );
 }
 
@@ -826,7 +840,9 @@ function fileChangePath(change: unknown): string | null {
 // http on the tailnet, so fall back to a hidden-textarea copy.
 function copyText(text: string, onDone: () => void) {
   if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(text).then(onDone, () => fallbackCopy(text, onDone));
+    navigator.clipboard
+      .writeText(text)
+      .then(onDone, () => fallbackCopy(text, onDone));
   } else {
     fallbackCopy(text, onDone);
   }

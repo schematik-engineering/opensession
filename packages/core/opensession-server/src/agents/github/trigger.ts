@@ -18,9 +18,11 @@ export type PrActionKind = "review" | "autofix" | "simplify" | "adversarial";
 
 /** Extract a PR number from "4296", "#4296", "pr 4296", or a GitHub PR URL. */
 export function parsePrNumber(input: number | string): number | null {
-  if (typeof input === "number") return Number.isFinite(input) ? Math.trunc(input) : null;
+  if (typeof input === "number")
+    return Number.isFinite(input) ? Math.trunc(input) : null;
   const s = String(input);
-  const m = s.match(/\/pull\/(\d+)/) || s.match(/#?(\d+)\s*$/) || s.match(/(\d+)/);
+  const m =
+    s.match(/\/pull\/(\d+)/) || s.match(/#?(\d+)\s*$/) || s.match(/(\d+)/);
   return m ? parseInt(m[1], 10) : null;
 }
 
@@ -56,9 +58,15 @@ export async function triggerPrAction(
   steer?: string,
   ghRepo?: string,
 ): Promise<TriggerResult> {
-  const details = await getPrAutomationDetails(String(prNumber), ghRepo || undefined);
+  const details = await getPrAutomationDetails(
+    String(prNumber),
+    ghRepo || undefined,
+  );
   if (!details) {
-    return { ok: false, message: `I couldn't find PR #${prNumber} on ${ghRepo || defaultRepo().ghRepo}.` };
+    return {
+      ok: false,
+      message: `I couldn't find PR #${prNumber} on ${ghRepo || defaultRepo().ghRepo}.`,
+    };
   }
   const baseGhRepo = ghRepo || defaultRepo().ghRepo;
   const external = isExternalPullRequest(details, baseGhRepo);
@@ -83,7 +91,8 @@ export async function triggerPrAction(
     resolveSessionCreated = resolve;
   });
 
-  const fail = (e: unknown) => console.error(`[github] ${kind} trigger failed for PR #${prNumber}:`, e);
+  const fail = (e: unknown) =>
+    console.error(`[github] ${kind} trigger failed for PR #${prNumber}:`, e);
   let done: Promise<unknown>;
   switch (kind) {
     case "review":
@@ -92,18 +101,39 @@ export async function triggerPrAction(
       // SHA/comment dedup enabled there. This branch also serves that recovery,
       // and needs the same handoff tail as webhook.ts's fireReview: without it an
       // unsatisfied recovered review reached nobody (PR #5055, 2026-07-19).
-      done = runReview(ref, resolveReviewConfig().config, resolveSessionCreated, true, steer)
-        .then((result) => result?.publicReview ? undefined : maybeHandoffFindings(ref, result))
+      done = runReview(
+        ref,
+        resolveReviewConfig().config,
+        resolveSessionCreated,
+        true,
+        steer,
+      )
+        .then((result) =>
+          result?.publicReview ? undefined : maybeHandoffFindings(ref, result),
+        )
         .catch(fail);
       break;
     case "autofix":
-      done = runAutoFix(ref, requestedBy, resolveSessionCreated, false, steer).catch(fail);
+      done = runAutoFix(
+        ref,
+        requestedBy,
+        resolveSessionCreated,
+        false,
+        steer,
+      ).catch(fail);
       break;
     case "simplify":
-      done = runSimplify(ref, requestedBy, resolveSessionCreated, steer).catch(fail);
+      done = runSimplify(ref, requestedBy, resolveSessionCreated, steer).catch(
+        fail,
+      );
       break;
     case "adversarial":
-      done = runAdversarial(ref, requestedBy, resolveSessionCreated, steer).catch(fail);
+      done = runAdversarial(
+        ref,
+        requestedBy,
+        resolveSessionCreated,
+        steer,
+      ).catch(fail);
       break;
   }
 
@@ -121,10 +151,7 @@ export async function triggerPrAction(
   // Each internal behavior announces only after it owns the relevant lock. If
   // it exits first, another action won the lock or setup failed, do not hand
   // the UI an id for a worker that never started.
-  const bksId = await Promise.race([
-    sessionCreated,
-    done.then(() => ""),
-  ]);
+  const bksId = await Promise.race([sessionCreated, done.then(() => "")]);
   if (!bksId) {
     return {
       ok: false,

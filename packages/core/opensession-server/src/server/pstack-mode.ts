@@ -2,21 +2,21 @@ const PSTACK_COMMAND_RE = /^\/(?:skill:)?(?:pstack|poteto-mode)(?:\s|$)/i;
 
 /** An opening prompt that enables sticky pstack mode for the new session. */
 export function enablesPstackMode(text: string): boolean {
-	if (!PSTACK_COMMAND_RE.test(text.trim())) return false;
-	const input = pstackCommandInput(text);
-	return !["off", "disable", "stop"].includes(input.toLowerCase());
+  if (!PSTACK_COMMAND_RE.test(text.trim())) return false;
+  const input = pstackCommandInput(text);
+  return !["off", "disable", "stop"].includes(input.toLowerCase());
 }
 
 /** Text after either mode command. Empty means a status request. */
 export function pstackCommandInput(text: string): string {
-	return text
-		.trim()
-		.replace(/^\/(?:skill:)?(?:pstack|poteto-mode)\b\s*/i, "")
-		.trim();
+  return text
+    .trim()
+    .replace(/^\/(?:skill:)?(?:pstack|poteto-mode)\b\s*/i, "")
+    .trim();
 }
 
 export function isPstackCommand(text: string): boolean {
-	return PSTACK_COMMAND_RE.test(text.trim());
+  return PSTACK_COMMAND_RE.test(text.trim());
 }
 
 /**

@@ -8,7 +8,9 @@ describe("resumableAccountUrl", () => {
         "https://one.example/",
         "https://one.example/workspace/ws-1/session/os-1?tab=changes#latest",
       ),
-    ).toBe("https://one.example/workspace/ws-1/session/os-1?tab=changes#latest");
+    ).toBe(
+      "https://one.example/workspace/ws-1/session/os-1?tab=changes#latest",
+    );
   });
 
   test("rejects another account and shell pages", () => {
@@ -21,8 +23,6 @@ describe("resumableAccountUrl", () => {
     expect(
       resumableAccountUrl("https://one.example/", "file:///offline.html"),
     ).toBeNull();
-    expect(
-      resumableAccountUrl("https://one.example/", "not a URL"),
-    ).toBeNull();
+    expect(resumableAccountUrl("https://one.example/", "not a URL")).toBeNull();
   });
 });

@@ -51,7 +51,8 @@ function harness() {
   let resolveCalls = 0;
   let runReview: (ref: PrRef) => Promise<ReviewResult | null> = async (ref) => {
     reviewCalls += 1;
-    if (!state.reviewedShas.includes(ref.headSha)) state.reviewedShas.push(ref.headSha);
+    if (!state.reviewedShas.includes(ref.headSha))
+      state.reviewedShas.push(ref.headSha);
     return { findings: 0, blocking: 0 };
   };
 
@@ -63,7 +64,12 @@ function harness() {
   };
   const timers: FakeTimer[] = [];
   const setTimer = ((callback: () => void) => {
-    const timer: FakeTimer = { callback, cleared: false, ran: false, unref() {} };
+    const timer: FakeTimer = {
+      callback,
+      cleared: false,
+      ran: false,
+      unref() {},
+    };
     timers.push(timer);
     return timer;
   }) as unknown as typeof setTimeout;
@@ -107,7 +113,9 @@ function harness() {
   );
 
   async function runNextTimer(): Promise<void> {
-    const timer = timers.find((candidate) => !candidate.cleared && !candidate.ran);
+    const timer = timers.find(
+      (candidate) => !candidate.cleared && !candidate.ran,
+    );
     if (!timer) throw new Error("No pending timer");
     timer.ran = true;
     timer.callback();
@@ -179,7 +187,11 @@ describe("DesiredReviewScheduler", () => {
 
   test("keeps transient review errors queued", async () => {
     const h = harness();
-    h.setRunReview(async () => ({ findings: 0, blocking: 0, error: "temporary" }));
+    h.setRunReview(async () => ({
+      findings: 0,
+      blocking: 0,
+      error: "temporary",
+    }));
     h.scheduler.admit(HEAD_A);
 
     await h.runNextTimer();
@@ -202,12 +214,19 @@ describe("DesiredReviewScheduler", () => {
     );
     h.scheduler.admit(HEAD_A);
     await h.runNextTimer();
-    expect(h.state.pendingReview).toMatchObject({ phase: "running", attempts: 1 });
+    expect(h.state.pendingReview).toMatchObject({
+      phase: "running",
+      attempts: 1,
+    });
 
     h.setNow(9_000);
     h.scheduler.admit(HEAD_B);
     const newer = h.state.pendingReview;
-    expect(newer).toMatchObject({ phase: "queued", headSha: "head-b", attempts: 0 });
+    expect(newer).toMatchObject({
+      phase: "queued",
+      headSha: "head-b",
+      attempts: 0,
+    });
     expect(Date.parse(newer!.firstPushAt)).toBe(9_000);
 
     finishReview({ findings: 0, blocking: 0, error: "superseded" });
@@ -222,7 +241,10 @@ describe("DesiredReviewScheduler", () => {
 
     await h.runNextTimer();
     expect(h.resolveCalls).toBe(0);
-    expect(h.state.pendingReview).toMatchObject({ phase: "queued", attempts: 0 });
+    expect(h.state.pendingReview).toMatchObject({
+      phase: "queued",
+      attempts: 0,
+    });
     expect(Date.parse(h.state.pendingReview!.dueAt)).toBe(20_000);
   });
 });

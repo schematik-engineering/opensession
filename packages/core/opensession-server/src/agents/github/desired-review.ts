@@ -30,8 +30,14 @@ export interface DesiredReviewDependencies {
     patch: (state: GithubPrState) => boolean,
     ghRepo?: string,
   ) => GithubPrState;
-  resolvePr: (prNumber: number, ghRepo?: string) => Promise<PrAutomationDetails | null>;
-  runReview: (ref: PrRef, details: PrAutomationDetails) => Promise<ReviewResult | null>;
+  resolvePr: (
+    prNumber: number,
+    ghRepo?: string,
+  ) => Promise<PrAutomationDetails | null>;
+  runReview: (
+    ref: PrRef,
+    details: PrAutomationDetails,
+  ) => Promise<ReviewResult | null>;
   isReviewLocked: (prNumber: number, ghRepo?: string) => boolean;
   restBackoffUntil: () => number;
   setTimer?: typeof setTimeout;
@@ -60,8 +66,12 @@ interface RequiredOptions {
   restoreStaggerMs: number;
 }
 
-export function desiredReviewOutstanding(state: GithubPrState | null | undefined): boolean {
-  return Boolean(state?.pendingReview && state.pendingReview.phase !== "exhausted");
+export function desiredReviewOutstanding(
+  state: GithubPrState | null | undefined,
+): boolean {
+  return Boolean(
+    state?.pendingReview && state.pendingReview.phase !== "exhausted",
+  );
 }
 
 function markerAttempts(marker: PendingReviewState): number {
@@ -129,13 +139,16 @@ export class DesiredReviewScheduler {
     this.now = deps.now ?? Date.now;
     this.newGeneration = deps.newGeneration ?? (() => crypto.randomUUID());
     this.log = deps.log ?? ((message) => console.log(message));
-    this.logError = deps.logError ?? ((message, error) => console.error(message, error));
+    this.logError =
+      deps.logError ?? ((message, error) => console.error(message, error));
   }
 
   admit(ref: PrRef): void {
     const key = prKey(ref.number, ref.ghRepo);
     const timer = this.timers.get(key);
-    const persisted = timer ? undefined : this.deps.readState(ref.number, ref.ghRepo)?.pendingReview;
+    const persisted = timer
+      ? undefined
+      : this.deps.readState(ref.number, ref.ghRepo)?.pendingReview;
     const parsedFirstPushAt = Date.parse(persisted?.firstPushAt || "");
     const now = this.now();
     const firstPushAt = reviewBurstStart(
@@ -143,7 +156,9 @@ export class DesiredReviewScheduler {
         ? { firstPushAt: timer.firstPushAt, attempts: timer.attempts }
         : persisted
           ? {
-              firstPushAt: Number.isFinite(parsedFirstPushAt) ? parsedFirstPushAt : undefined,
+              firstPushAt: Number.isFinite(parsedFirstPushAt)
+                ? parsedFirstPushAt
+                : undefined,
               attempts: markerAttempts(persisted),
             }
           : undefined,
@@ -156,7 +171,12 @@ export class DesiredReviewScheduler {
       this.options.maxWaitMs,
     );
     const generation = this.newGeneration();
-    const marker = queuedMarker(ref, generation, timing.firstPushAt, timing.dueAt);
+    const marker = queuedMarker(
+      ref,
+      generation,
+      timing.firstPushAt,
+      timing.dueAt,
+    );
     this.deps.updateState(
       ref.number,
       ref.headRef,
@@ -202,7 +222,10 @@ export class DesiredReviewScheduler {
           : Number.isFinite(parsedDueAt)
             ? parsedDueAt
             : now;
-      const dueAt = Math.max(requestedDueAt, now + restored * this.options.restoreStaggerMs);
+      const dueAt = Math.max(
+        requestedDueAt,
+        now + restored * this.options.restoreStaggerMs,
+      );
       restored += 1;
       this.arm(ref, marker, dueAt);
       this.log(`[github] restored desired review for PR #${state.prNumber}`);
@@ -213,7 +236,10 @@ export class DesiredReviewScheduler {
     state: GithubPrState,
     raw: PendingReviewState,
   ): PendingReviewState | undefined {
-    const legacy = raw as PendingReviewState & { claimedAt?: string; exhaustedAt?: string };
+    const legacy = raw as PendingReviewState & {
+      claimedAt?: string;
+      exhaustedAt?: string;
+    };
     const generation = raw.generation || this.newGeneration();
     const attempts = markerAttempts(raw);
     const firstPushAt = Date.parse(raw.firstPushAt);
@@ -233,7 +259,9 @@ export class DesiredReviewScheduler {
             phase,
             generation,
             attempts,
-            firstPushAt: new Date(Number.isFinite(firstPushAt) ? firstPushAt : now).toISOString(),
+            firstPushAt: new Date(
+              Number.isFinite(firstPushAt) ? firstPushAt : now,
+            ).toISOString(),
             dueAt: new Date(Number.isFinite(dueAt) ? dueAt : now).toISOString(),
             claimedAt: legacy.claimedAt || new Date(now).toISOString(),
           }
@@ -243,8 +271,12 @@ export class DesiredReviewScheduler {
               phase,
               generation,
               attempts,
-              firstPushAt: new Date(Number.isFinite(firstPushAt) ? firstPushAt : now).toISOString(),
-              dueAt: new Date(Number.isFinite(dueAt) ? dueAt : now).toISOString(),
+              firstPushAt: new Date(
+                Number.isFinite(firstPushAt) ? firstPushAt : now,
+              ).toISOString(),
+              dueAt: new Date(
+                Number.isFinite(dueAt) ? dueAt : now,
+              ).toISOString(),
               exhaustedAt: legacy.exhaustedAt || new Date(now).toISOString(),
             }
           : {
@@ -252,8 +284,12 @@ export class DesiredReviewScheduler {
               phase,
               generation,
               attempts,
-              firstPushAt: new Date(Number.isFinite(firstPushAt) ? firstPushAt : now).toISOString(),
-              dueAt: new Date(Number.isFinite(dueAt) ? dueAt : now).toISOString(),
+              firstPushAt: new Date(
+                Number.isFinite(firstPushAt) ? firstPushAt : now,
+              ).toISOString(),
+              dueAt: new Date(
+                Number.isFinite(dueAt) ? dueAt : now,
+              ).toISOString(),
             };
 
     const needsWrite =
@@ -262,8 +298,10 @@ export class DesiredReviewScheduler {
       raw.attempts !== attempts ||
       raw.firstPushAt !== normalized.firstPushAt ||
       raw.dueAt !== normalized.dueAt ||
-      (normalized.phase === "running" && legacy.claimedAt !== normalized.claimedAt) ||
-      (normalized.phase === "exhausted" && legacy.exhaustedAt !== normalized.exhaustedAt);
+      (normalized.phase === "running" &&
+        legacy.claimedAt !== normalized.claimedAt) ||
+      (normalized.phase === "exhausted" &&
+        legacy.exhaustedAt !== normalized.exhaustedAt);
     if (!needsWrite) return normalized;
     let stored = false;
     this.deps.updateStateIf(
@@ -292,13 +330,19 @@ export class DesiredReviewScheduler {
     const key = prKey(ref.number, ref.ghRepo);
     this.removeTimer(key);
     let pending: DesiredReviewTimer;
-    const timer = this.setTimer(() => {
-      if (this.timers.get(key) !== pending) return;
-      void this.run(ref, generation).catch((error) => {
-        this.logError(`[github] desired review crashed for PR #${ref.number}`, error);
-        this.defer(ref, generation, error);
-      });
-    }, reviewDebounceDelay(dueAt, this.now()));
+    const timer = this.setTimer(
+      () => {
+        if (this.timers.get(key) !== pending) return;
+        void this.run(ref, generation).catch((error) => {
+          this.logError(
+            `[github] desired review crashed for PR #${ref.number}`,
+            error,
+          );
+          this.defer(ref, generation, error);
+        });
+      },
+      reviewDebounceDelay(dueAt, this.now()),
+    );
     timer.unref?.();
     pending = {
       timer,
@@ -337,7 +381,12 @@ export class DesiredReviewScheduler {
       this.defer(ref, generation, error, this.deps.restBackoffUntil());
       return;
     }
-    if (!details || details.state !== "OPEN" || details.isDraft || !details.headRefOid) {
+    if (
+      !details ||
+      details.state !== "OPEN" ||
+      details.isDraft ||
+      !details.headRefOid
+    ) {
       this.clear(ref, generation);
       return;
     }
@@ -380,14 +429,21 @@ export class DesiredReviewScheduler {
     );
   }
 
-  private claim(ref: PrRef, generation: string): PendingReviewState | undefined {
+  private claim(
+    ref: PrRef,
+    generation: string,
+  ): PendingReviewState | undefined {
     let running: PendingReviewState | undefined;
     this.deps.updateStateIf(
       ref.number,
       ref.headRef,
       (state) => {
         const pending = state.pendingReview;
-        if (!pending || pending.generation !== generation || pending.phase === "exhausted")
+        if (
+          !pending ||
+          pending.generation !== generation ||
+          pending.phase === "exhausted"
+        )
           return false;
         running = {
           ...markerBase(pending),
@@ -404,10 +460,17 @@ export class DesiredReviewScheduler {
     return running;
   }
 
-  private defer(ref: PrRef, generation: string, error: unknown, notBefore = 0): void {
+  private defer(
+    ref: PrRef,
+    generation: string,
+    error: unknown,
+    notBefore = 0,
+  ): void {
     const now = this.now();
     const message =
-      error instanceof Error ? error.message : String(error || "Review did not complete");
+      error instanceof Error
+        ? error.message
+        : String(error || "Review did not complete");
     let next: PendingReviewState | undefined;
     this.deps.updateStateIf(
       ref.number,
@@ -427,7 +490,12 @@ export class DesiredReviewScheduler {
           };
         } else {
           const retryAt = Math.max(
-            now + reviewRetryDelay(attempts, this.options.retryBaseMs, this.options.retryMaxMs),
+            now +
+              reviewRetryDelay(
+                attempts,
+                this.options.retryBaseMs,
+                this.options.retryMaxMs,
+              ),
             notBefore,
           );
           next = {

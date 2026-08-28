@@ -57,7 +57,9 @@ describe("concurrent writers on one PR's state", () => {
   test("a review-lane commit keeps a mention marker that landed mid-flight", () => {
     // The review's early read, taken before its (slow) model run.
     const snapshot = getOrInitPrState(PR, HEAD);
-    updatePrState(PR, HEAD, (s) => { s.summaryCommentId = 11; });
+    updatePrState(PR, HEAD, (s) => {
+      s.summaryCommentId = 11;
+    });
 
     // A mention webhook arrives while the review is still awaiting.
     setPendingMention(PR, pendingMention(7));
@@ -86,7 +88,11 @@ describe("concurrent writers on one PR's state", () => {
   test("a code-lane commit keeps the review verdict written during its run", () => {
     const pr = PR + 1;
     updatePrState(pr, HEAD, (s) => {
-      s.autoFix = { active: true, iterations: 1, startedAt: new Date().toISOString() };
+      s.autoFix = {
+        active: true,
+        iterations: 1,
+        startedAt: new Date().toISOString(),
+      };
     });
 
     // The review lane records its verdict while the auto-fix loop is running.
@@ -99,11 +105,19 @@ describe("concurrent writers on one PR's state", () => {
 
     // The loop's own locals win for its own fields, and nothing else is touched.
     updatePrState(pr, HEAD, (s) => {
-      if (s.autoFix) { s.autoFix.active = false; s.autoFix.iterations = 3; s.autoFix.lastPushedSha = "ddddddd"; }
+      if (s.autoFix) {
+        s.autoFix.active = false;
+        s.autoFix.iterations = 3;
+        s.autoFix.lastPushedSha = "ddddddd";
+      }
     });
 
     const after = readPrState(pr)!;
-    expect(after.autoFix).toMatchObject({ active: false, iterations: 3, lastPushedSha: "ddddddd" });
+    expect(after.autoFix).toMatchObject({
+      active: false,
+      iterations: 3,
+      lastPushedSha: "ddddddd",
+    });
     expect(after.lastReview?.sha).toBe("ccccccc");
     expect(after.lastReviewedSha).toBe("ccccccc");
   });
@@ -161,8 +175,12 @@ describe("review debounce timing", () => {
   });
 
   test("starts a fresh burst after work was attempted", () => {
-    expect(reviewBurstStart({ firstPushAt: 1_000, attempts: 0 }, 8_000)).toBe(1_000);
-    expect(reviewBurstStart({ firstPushAt: 1_000, attempts: 1 }, 8_000)).toBe(8_000);
+    expect(reviewBurstStart({ firstPushAt: 1_000, attempts: 0 }, 8_000)).toBe(
+      1_000,
+    );
+    expect(reviewBurstStart({ firstPushAt: 1_000, attempts: 1 }, 8_000)).toBe(
+      8_000,
+    );
   });
 
   test("backs retries off exponentially with a cap", () => {

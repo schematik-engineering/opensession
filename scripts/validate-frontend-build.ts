@@ -36,7 +36,9 @@ export function validateFrontendBuild(
   const assets = meta.assets as unknown[];
   for (const asset of assets) {
     if (typeof asset !== "string" || !asset || !existsSync(join(dist, asset))) {
-      throw new Error(`frontend bundle is incomplete: missing ${String(asset)}`);
+      throw new Error(
+        `frontend bundle is incomplete: missing ${String(asset)}`,
+      );
     }
   }
   return { assets: assets as string[], inputsHash: expectedHash };

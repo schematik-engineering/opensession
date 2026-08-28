@@ -49,7 +49,7 @@ Pure SwiftUI with SwiftStreamingMarkdown for CommonMark/GFM rendering. See
   opened from the bottom toolbar beside the Desk; an unread queue uses the
   filled accent icon. Filter and New Session remain top-right controls. One
   card per unread
-  *workspace* (the same grouping the list shows,
+  _workspace_ (the same grouping the list shows,
   built by `CatchUpQueue` from the shared `/api/reads` marks with the web
   deck's rules: yours, not archived, not an automation, not the Desk). The card
   renders the workspace's main chat with a compact title, state and repo header,
@@ -85,8 +85,8 @@ Pure SwiftUI with SwiftStreamingMarkdown for CommonMark/GFM rendering. See
   and renders as a normal message. On phones, one changed-files summary
   replaces the footer chip cloud while opening the same Changes panel. Team
   notes sit in that timeline without entering the agent context. The
-   yellow composer mode posts them directly to the team and offers only the
-   author edit and delete actions.
+  yellow composer mode posts them directly to the team and offers only the
+  author edit and delete actions.
   Tool rows use the server's presentation metadata for canonical names,
   humanized MCP server/tool labels, glyph families, summaries and ±lines; the
   native derivation remains as an older-server fallback. Expanding one renders
@@ -106,37 +106,39 @@ Pure SwiftUI with SwiftStreamingMarkdown for CommonMark/GFM rendering. See
   links labelled with the referenced session's title, and tapping one opens
   that session in the app (falling back to the web app for a session this
   client hasn't polled).
-   Long answers clamp with `Show full message · 12 KB` (wire-clamped entries
-   refetch on demand), system events are toned by severity, and a floating pill
-   offers the way back down — reading `New messages` when output arrived while
-   you were scrolled up. On wide pointer layouts, a native rail indexes the
-   current person's sent messages; hover previews one and activation jumps the
-   transcript to it. It stays hidden on iPhone and compact widths. A selected
-   Markdown passage stays highlighted as
-   composer context, then rides with the next prompt, team note, or scheduled
-   message as a block quote. When the server offers `reply_suggestions`, the
-   idle composer shows optional quick-reply chips; choosing one adds its full
-   text to the draft for editing rather than sending it. The Personal setting
-   shares the web client's `reply-suggestions` account preference. `stream_text`
-   provides token-level streaming when Settings → Personal → Preferences → Live
-   typing is on; it defaults off. A horizontally scrollable session tab strip
-   appears when a workspace/worktree contains multiple sessions. Its history menu
-   queries only that workspace's closed siblings and restores one directly into
-   the strip. A workspace down to one session draws no strip, so that history
-   moves to the Closed sessions submenu of the session's overflow menu, which
-   reopens a row the same way. On macOS, where the sidebar is the live-session
-   switcher, the same scoped history lives in the selected session's toolbar
-   instead. On iOS, the PWA-style Liquid Glass action bar floats above the
-   composer with Archive, session actions, New session, and Next chat. It stays
-   directly above the composer when the keyboard opens. The actions menu carries
-   worktree details, the pull request panel, rename, share, hide or restore, and
-   archive, matching the sidebar row's long-press menu. A bounded cache keeps
-   recently visited conversations loaded while their
+  Long answers clamp with `Show full message · 12 KB` (wire-clamped entries
+  refetch on demand), system events are toned by severity, and a floating pill
+  offers the way back down — reading `New messages` when output arrived while
+  you were scrolled up. On wide pointer layouts, a native rail indexes the
+  current person's sent messages; hover previews one and activation jumps the
+  transcript to it. It stays hidden on iPhone and compact widths. A selected
+  Markdown passage stays highlighted as
+  composer context, then rides with the next prompt, team note, or scheduled
+  message as a block quote. When the server offers `reply_suggestions`, the
+  idle composer shows optional quick-reply chips; choosing one adds its full
+  text to the draft for editing rather than sending it. The Personal setting
+  shares the web client's `reply-suggestions` account preference. `stream_text`
+  provides token-level streaming when Settings → Personal → Preferences → Live
+  typing is on; it defaults off. A horizontally scrollable session tab strip
+  appears when a workspace/worktree contains multiple sessions. Its history menu
+  queries only that workspace's closed siblings and restores one directly into
+  the strip. A workspace down to one session draws no strip, so that history
+  moves to the Closed sessions submenu of the session's overflow menu, which
+  reopens a row the same way. On macOS, where the sidebar is the live-session
+  switcher, the same scoped history lives in the selected session's toolbar
+  instead. On iOS, the PWA-style Liquid Glass action bar floats above the
+  composer with Archive, session actions, New session, and Next chat. It stays
+  directly above the composer when the keyboard opens. The actions menu carries
+  worktree details, the pull request panel, rename, share, hide or restore, and
+  archive, matching the sidebar row's long-press menu. A bounded cache keeps
+  recently visited conversations loaded while their
   off-screen sockets remain disconnected, so returning to a page does not show
   a loading screen. Fenced Markdown, expanded tool inputs and code assets use
   the PWA's GitHub light/dark syntax palette. Native-owned code surfaces show
   plain text immediately while highlighting finishes and keep large files plain.
   ```mermaid fences render as diagrams (see "Mermaid diagrams" below).
+
+  ```
 - **Workspace details** — tapping the session title opens a native worktree sheet
   with repository and branch metadata, local git status, changed files, a
   color-coded pull request card for checks, review state and conflicts,
@@ -428,7 +430,7 @@ against both schemes.
 
 ## Architecture
 
-```
+````
 OS1/
   OS1App.swift               App entry; forces Settings on first run
   NativePreferences.swift    Cross-device preference hydration/cache
@@ -505,7 +507,7 @@ OS1/
     MermaidHostPage.swift    Locates the bundled renderer page
     MermaidRenderer.swift    Offscreen WebKit render + snapshot + cache
     MermaidDiagramView.swift The diagram row: code fence, then the picture
-```
+````
 
 ## Protocol notes (from the server source)
 

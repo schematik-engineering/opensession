@@ -101,7 +101,7 @@ export function UpdatePill({ addHandler, variant = "card" }: Props) {
           setForceAt((prev) => prev ?? Date.now() + FORCE_GRACE_MS);
         }
       }),
-    [addHandler]
+    [addHandler],
   );
 
   // Backstop for a window that missed the broadcast (an Electron renderer
@@ -200,11 +200,7 @@ export function UpdatePill({ addHandler, variant = "card" }: Props) {
   }
 
   return (
-    <div
-      className={PERSISTENT_NOTICE_CARD}
-      role="status"
-      aria-live="polite"
-    >
+    <div className={PERSISTENT_NOTICE_CARD} role="status" aria-live="polite">
       <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
         <span className="max-w-full truncate text-supporting font-medium leading-[1.3] text-fg">
           {forced
@@ -215,13 +211,17 @@ export function UpdatePill({ addHandler, variant = "card" }: Props) {
         </span>
         {detail && (
           <Tooltip label={detail} side="top" multiline>
-            <span className="max-w-full truncate text-meta font-medium leading-[1.3] text-dim">{detail}</span>
+            <span className="max-w-full truncate text-meta font-medium leading-[1.3] text-dim">
+              {detail}
+            </span>
           </Tooltip>
         )}
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <button
-          className={"inline-flex h-7 items-center rounded-control px-3 cursor-pointer border-none bg-accent text-supporting font-semibold leading-none text-on-accent transition-[background] duration-[var(--dur-micro)] ease-[var(--ease)] hover:bg-accent-hover disabled:cursor-wait disabled:opacity-75"}
+          className={
+            "inline-flex h-7 items-center rounded-control px-3 cursor-pointer border-none bg-accent text-supporting font-semibold leading-none text-on-accent transition-[background] duration-[var(--dur-micro)] ease-[var(--ease)] hover:bg-accent-hover disabled:cursor-wait disabled:opacity-75"
+          }
           onClick={refresh}
           disabled={refreshing}
         >

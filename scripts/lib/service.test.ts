@@ -42,7 +42,9 @@ describe("cloud metadata install refusal", () => {
     expect(guidance).toContain(
       "sudo iptables -I OUTPUT -d 169.254.169.254 -m owner --uid-owner 1234 -j REJECT",
     );
-    expect(guidance).toContain("rerun the same Open Session installation command");
+    expect(guidance).toContain(
+      "rerun the same Open Session installation command",
+    );
     expect(guidance).toContain("OPENSESSION_ALLOW_IMDS=1");
     expect(guidance).toContain("explicitly skip this safety check");
   });
@@ -105,7 +107,9 @@ describe.skipIf(!onServiceHost)("systemd unit", () => {
     expect(unit).toContain("[Install]");
     expect(unit).not.toContain("Wants=opensession-session-kernel.service");
     expect(unit).not.toContain("Wants=opensession-executor.service");
-    expect(unit).toContain("Wants=opensession.socket opensession-ingress.service");
+    expect(unit).toContain(
+      "Wants=opensession.socket opensession-ingress.service",
+    );
     expect(unit).not.toContain("Sockets=opensession.socket");
     expect(unit).toContain('Environment="OPENSESSION_EXTERNAL_INGRESS=1"');
     expect(unit).not.toContain("Requires=opensession-executor.service");

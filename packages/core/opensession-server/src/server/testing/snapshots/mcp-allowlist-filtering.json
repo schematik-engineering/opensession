@@ -50,10 +50,7 @@
         "opensession-turn"
       ],
       "journalKind": "prompt",
-      "mcpScope": [
-        "snapshot-alpha",
-        "snapshot-restricted"
-      ],
+      "mcpScope": ["snapshot-alpha", "snapshot-restricted"],
       "mode": "scratch",
       "model": "pi/anthropic/claude-sonnet-5",
       "prompt": {
@@ -70,15 +67,11 @@
       "gateReason": null,
       "mcpConfig": {
         "snapshot-alpha": {
-          "args": [
-            "--alpha"
-          ],
+          "args": ["--alpha"],
           "command": "/bin/true"
         }
       },
-      "mountedMcpServers": [
-        "snapshot-alpha"
-      ],
+      "mountedMcpServers": ["snapshot-alpha"],
       "sharedServerEligible": false,
       "strippedTools": [
         "*_cancel_subscription",
@@ -178,33 +171,23 @@
         },
         {
           "message": "\"Create a refund\" requires per-call human approval, and this run is unattended. This tool is not available; post the exact action you want taken, including the tool name and full parameters, in your internal note for human review.",
-          "tools": [
-            "mcp__stripe__create_refund"
-          ]
+          "tools": ["mcp__stripe__create_refund"]
         },
         {
           "message": "\"Cancel a subscription\" requires per-call human approval, and this run is unattended. This tool is not available; post the exact action you want taken, including the tool name and full parameters, in your internal note for human review.",
-          "tools": [
-            "mcp__stripe__cancel_subscription"
-          ]
+          "tools": ["mcp__stripe__cancel_subscription"]
         },
         {
           "message": "\"Update a subscription\" requires per-call human approval, and this run is unattended. This tool is not available; post the exact action you want taken, including the tool name and full parameters, in your internal note for human review.",
-          "tools": [
-            "mcp__stripe__update_subscription"
-          ]
+          "tools": ["mcp__stripe__update_subscription"]
         },
         {
           "message": "\"Execute a raw Stripe API call\" requires per-call human approval, and this run is unattended. This tool is not available; post the exact action you want taken, including the tool name and full parameters, in your internal note for human review.",
-          "tools": [
-            "mcp__stripe__stripe_api_execute"
-          ]
+          "tools": ["mcp__stripe__stripe_api_execute"]
         },
         {
           "message": "\"Execute a mutating Stripe API call\" requires per-call human approval, and this run is unattended. This tool is not available; post the exact action you want taken, including the tool name and full parameters, in your internal note for human review.",
-          "tools": [
-            "mcp__stripe__stripe_api_write"
-          ]
+          "tools": ["mcp__stripe__stripe_api_write"]
         }
       ],
       "unattended": true

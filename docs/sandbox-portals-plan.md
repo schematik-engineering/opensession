@@ -27,13 +27,13 @@ targets where the difference matters.
 
 Use these user-facing concepts consistently:
 
-| Concept | Meaning |
-| --- | --- |
-| **This machine** | The default execution target: a local worktree and its existing setup. |
-| **Sandbox** | Isolated compute selected for a session. |
-| **Project preparation** | Optional, credential-free reusable setup state that speeds new Sandboxes. |
-| **Awake / Sleeping / Waking** | The lifecycle of a session's Sandbox. |
-| **Portal** | An authenticated live HTTP/WebSocket service belonging to one session. |
+| Concept                       | Meaning                                                                   |
+| ----------------------------- | ------------------------------------------------------------------------- |
+| **This machine**              | The default execution target: a local worktree and its existing setup.    |
+| **Sandbox**                   | Isolated compute selected for a session.                                  |
+| **Project preparation**       | Optional, credential-free reusable setup state that speeds new Sandboxes. |
+| **Awake / Sleeping / Waking** | The lifecycle of a session's Sandbox.                                     |
+| **Portal**                    | An authenticated live HTTP/WebSocket service belonging to one session.    |
 
 Do not expose `None`, `bind`, `volume`, provider names, prewarm machinery, or
 snapshot implementation details in the normal session flow. Provider and
@@ -52,13 +52,13 @@ sticky ports and authenticated Portals.
 Open Session already has more execution mechanisms, but they currently leak
 into the product:
 
-| Layer | Current Open Session behavior | Target presentation |
-| --- | --- | --- |
-| New session | Provider-specific Sandbox, optionally adopted from a prewarm | A fresh **Sandbox**. |
-| Project setup | Warm-on-typing automatically prepares and may publish credential-free templates for template-capable providers | Explicitly opted-in **Project preparation ready**. |
-| Session durability | Provider-specific checkpoints, snapshots, pause, or archival; durable sleep/wake exists only where the provider implements it | **Sandbox sleeping**. |
-| Wake | Provider resume/restore; `.agents/resume` remains reserved until a selectable provider wires it | **Waking Sandbox**, with the hook run before work resumes. |
-| Services | Supervised Portals through `opensession-portals` and generated `.ports.conf`, alongside the legacy repository Preview start path | Multiple supervised **Portals**, without a competing Preview concept. |
+| Layer              | Current Open Session behavior                                                                                                    | Target presentation                                                   |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| New session        | Provider-specific Sandbox, optionally adopted from a prewarm                                                                     | A fresh **Sandbox**.                                                  |
+| Project setup      | Warm-on-typing automatically prepares and may publish credential-free templates for template-capable providers                   | Explicitly opted-in **Project preparation ready**.                    |
+| Session durability | Provider-specific checkpoints, snapshots, pause, or archival; durable sleep/wake exists only where the provider implements it    | **Sandbox sleeping**.                                                 |
+| Wake               | Provider resume/restore; `.agents/resume` remains reserved until a selectable provider wires it                                  | **Waking Sandbox**, with the hook run before work resumes.            |
+| Services           | Supervised Portals through `opensession-portals` and generated `.ports.conf`, alongside the legacy repository Preview start path | Multiple supervised **Portals**, without a competing Preview concept. |
 
 Keep the stronger implementation layers. Simplify the visible model to fresh
 Sandbox, optional Project preparation, and session-specific sleep/wake.

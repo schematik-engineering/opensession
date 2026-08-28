@@ -19,32 +19,32 @@ import { extendTailwindMerge } from "tailwind-merge";
  * mode where the inherited color is close to the intended one.
  */
 const semanticFontSizes = [
-	"meta",
-	"supporting",
-	"control-label",
-	"label",
-	"body",
-	"item-title",
-	"dialog-title",
-	"section-title",
-	"page-title",
-	"stat",
+  "meta",
+  "supporting",
+  "control-label",
+  "label",
+  "body",
+  "item-title",
+  "dialog-title",
+  "section-title",
+  "page-title",
+  "stat",
 ] as const;
 
 const twMerge = extendTailwindMerge({
-	extend: {
-		classGroups: {
-			"font-size": [{ text: [...semanticFontSizes] }],
-			// `rounded-control` (the chrome corner, styles/tailwind.css) has the
-			// same problem in the radius group: unregistered, tailwind-merge
-			// cannot tell it conflicts with `rounded-full`, so a caller's
-			// override lands *alongside* the primitive's corner instead of
-			// replacing it and the winner is decided by stylesheet order. That
-			// currently favours the override by luck — reordering the theme
-			// tokens would silently square off AskCard's pill.
-			rounded: [{ rounded: ["control"] }],
-		},
-	},
+  extend: {
+    classGroups: {
+      "font-size": [{ text: [...semanticFontSizes] }],
+      // `rounded-control` (the chrome corner, styles/tailwind.css) has the
+      // same problem in the radius group: unregistered, tailwind-merge
+      // cannot tell it conflicts with `rounded-full`, so a caller's
+      // override lands *alongside* the primitive's corner instead of
+      // replacing it and the winner is decided by stylesheet order. That
+      // currently favours the override by luck — reordering the theme
+      // tokens would silently square off AskCard's pill.
+      rounded: [{ rounded: ["control"] }],
+    },
+  },
 });
 
 /**
@@ -55,5 +55,5 @@ const twMerge = extendTailwindMerge({
  * call sites to fork it.
  */
 export function cn(...inputs: ClassValue[]): string {
-	return twMerge(clsx(inputs));
+  return twMerge(clsx(inputs));
 }

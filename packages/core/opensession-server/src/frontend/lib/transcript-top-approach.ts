@@ -7,27 +7,27 @@ const TOP_APPROACH_COOLDOWN_MS = 900;
  * soon as the cooldown allows.
  */
 export class TranscriptTopApproachGate {
-	private pendingIntent = false;
-	private lastFire = Number.NEGATIVE_INFINITY;
+  private pendingIntent = false;
+  private lastFire = Number.NEGATIVE_INFINITY;
 
-	request() {
-		this.pendingIntent = true;
-	}
+  request() {
+    this.pendingIntent = true;
+  }
 
-	reset() {
-		this.pendingIntent = false;
-		this.lastFire = Number.NEGATIVE_INFINITY;
-	}
+  reset() {
+    this.pendingIntent = false;
+    this.lastFire = Number.NEGATIVE_INFINITY;
+  }
 
-	shouldFire(nearTop: boolean, now: number): boolean {
-		if (
-			!this.pendingIntent ||
-			!nearTop ||
-			now - this.lastFire < TOP_APPROACH_COOLDOWN_MS
-		)
-			return false;
-		this.pendingIntent = false;
-		this.lastFire = now;
-		return true;
-	}
+  shouldFire(nearTop: boolean, now: number): boolean {
+    if (
+      !this.pendingIntent ||
+      !nearTop ||
+      now - this.lastFire < TOP_APPROACH_COOLDOWN_MS
+    )
+      return false;
+    this.pendingIntent = false;
+    this.lastFire = now;
+    return true;
+  }
 }

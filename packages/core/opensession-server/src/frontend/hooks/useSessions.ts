@@ -1,10 +1,16 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import type { UnifiedSession } from "../lib/types";
 import { fetchSessionsSnapshot } from "../lib/api";
 import {
-	mergeSessionSlices,
-	settledOverrides,
-	type LocalArchiveOverride,
+  mergeSessionSlices,
+  settledOverrides,
+  type LocalArchiveOverride,
 } from "../lib/session-slices";
 
 /** The unscoped live list, kept as a compatibility fallback. */
@@ -270,100 +276,97 @@ export function useSessions({
     snapshotRuntimeRevision: number,
     requestQuery: string,
   ) => {
-      const reconciled = reconcilePendingSessionPatches(
-        parsed,
-        pendingPatchRef.current,
-        snapshotRuntimeRevision,
-      );
-      const selectedSessionId = new URLSearchParams(
+    const reconciled = reconcilePendingSessionPatches(
+      parsed,
+      pendingPatchRef.current,
+      snapshotRuntimeRevision,
+    );
+    const selectedSessionId =
+      new URLSearchParams(
         requestQuery.startsWith("?") ? requestQuery.slice(1) : requestQuery,
       ).get("session") ?? undefined;
-      // Reconcile refs before scheduling state. React may replay state updaters
-      // in development, so mutating stickyRef from inside one can acknowledge a
-      // single server snapshot twice and retire the fallback too early.
-      setLive(
-        reconcileStickySessions(
-          reconciled,
-          stickyRef.current,
-          selectedSessionId,
-        ),
-      );
-    };
+    // Reconcile refs before scheduling state. React may replay state updaters
+    // in development, so mutating stickyRef from inside one can acknowledge a
+    // single server snapshot twice and retire the fallback too early.
+    setLive(
+      reconcileStickySessions(reconciled, stickyRef.current, selectedSessionId),
+    );
+  };
 
   // Stable per query: refs, setters and module fns otherwise. The polling
   // effect below can list it without re-arming on unrelated re-renders.
   // Named function expression so the invalidation re-poll can recurse
   // without the compiler seeing a read of `poll` mid-initialization.
-  const poll = useCallback(async function pollSelf(): Promise<void> {
-    const requestQuery = liveQuery;
-    if (pollPromiseRef.current?.query === requestQuery)
-      return pollPromiseRef.current.promise;
-    if (pollPromiseRef.current) pollAbortRef.current?.abort();
-    if (appliedLiveQueryRef.current !== requestQuery) {
-      appliedLiveQueryRef.current = requestQuery;
-      etagRef.current = null;
-      lastTextRef.current = null;
-    }
-    const controller = new AbortController();
-    pollAbortRef.current = controller;
-    const startedAt = Date.now();
-    const snapshotRuntimeRevision = runtimeRevisionRef.current;
-    const invalidationRevision = invalidationRevisionRef.current;
-    const promise = (async () => {
-      await (async () => {
-const snapshot = await fetchSessionsSnapshot({
-          etag: etagRef.current,
-          signal: controller.signal,
-          query: requestQuery,
-        });
-        if (
-          !mountedRef.current ||
-          !liveSnapshotMatchesQuery(
-            requestQuery,
-            appliedLiveQueryRef.current,
+  const poll = useCallback(
+    async function pollSelf(): Promise<void> {
+      const requestQuery = liveQuery;
+      if (pollPromiseRef.current?.query === requestQuery)
+        return pollPromiseRef.current.promise;
+      if (pollPromiseRef.current) pollAbortRef.current?.abort();
+      if (appliedLiveQueryRef.current !== requestQuery) {
+        appliedLiveQueryRef.current = requestQuery;
+        etagRef.current = null;
+        lastTextRef.current = null;
+      }
+      const controller = new AbortController();
+      pollAbortRef.current = controller;
+      const startedAt = Date.now();
+      const snapshotRuntimeRevision = runtimeRevisionRef.current;
+      const invalidationRevision = invalidationRevisionRef.current;
+      const promise = (async () => {
+        await (async () => {
+          const snapshot = await fetchSessionsSnapshot({
+            etag: etagRef.current,
+            signal: controller.signal,
+            query: requestQuery,
+          });
+          if (
+            !mountedRef.current ||
+            !liveSnapshotMatchesQuery(requestQuery, appliedLiveQueryRef.current)
           )
-        )
-          return;
-        if (!snapshot.notModified && snapshot.text !== null) {
-          etagRef.current = snapshot.etag;
-          if (snapshot.text !== lastTextRef.current) {
-            lastTextRef.current = snapshot.text;
-            applyServer(
-              JSON.parse(snapshot.text),
-              snapshotRuntimeRevision,
-              requestQuery,
-            );
+            return;
+          if (!snapshot.notModified && snapshot.text !== null) {
+            etagRef.current = snapshot.etag;
+            if (snapshot.text !== lastTextRef.current) {
+              lastTextRef.current = snapshot.text;
+              applyServer(
+                JSON.parse(snapshot.text),
+                snapshotRuntimeRevision,
+                requestQuery,
+              );
+            }
           }
-        }
-        liveAtRef.current = startedAt;
-        if (
-          locallyArchivedRef.current.size > 0 ||
-          locallyUnarchivedRef.current.size > 0
-        )
-          setLiveAt(startedAt);
-        setLoading(false);
-        setError(null);
-})().catch(async (e: any) => {
-if (e?.name === "AbortError") return;
-        if (mountedRef.current) {
-          setError(e.message);
+          liveAtRef.current = startedAt;
+          if (
+            locallyArchivedRef.current.size > 0 ||
+            locallyUnarchivedRef.current.size > 0
+          )
+            setLiveAt(startedAt);
           setLoading(false);
-        }
-});
-    })().finally(() => {
-      if (pollPromiseRef.current?.promise === promise)
-        pollPromiseRef.current = null;
-      if (pollAbortRef.current === controller) pollAbortRef.current = null;
-      if (
-        mountedRef.current &&
-        document.visibilityState !== "hidden" &&
-        invalidationRevisionRef.current !== invalidationRevision
-      )
-        void pollSelf();
-    });
-    pollPromiseRef.current = { query: requestQuery, promise };
-    return promise;
-  }, [liveQuery]);
+          setError(null);
+        })().catch(async (e: any) => {
+          if (e?.name === "AbortError") return;
+          if (mountedRef.current) {
+            setError(e.message);
+            setLoading(false);
+          }
+        });
+      })().finally(() => {
+        if (pollPromiseRef.current?.promise === promise)
+          pollPromiseRef.current = null;
+        if (pollAbortRef.current === controller) pollAbortRef.current = null;
+        if (
+          mountedRef.current &&
+          document.visibilityState !== "hidden" &&
+          invalidationRevisionRef.current !== invalidationRevision
+        )
+          void pollSelf();
+      });
+      pollPromiseRef.current = { query: requestQuery, promise };
+      return promise;
+    },
+    [liveQuery],
+  );
 
   useEffect(() => {
     mountedRef.current = true;
@@ -403,46 +406,50 @@ if (e?.name === "AbortError") return;
   const archivedEtagRef = useRef<string | null>(null);
   const archivedPromiseRef = useRef<Promise<void> | null>(null);
 
-  const pollArchived = useCallback(async function pollArchivedSelf(): Promise<void> {
-    if (archivedPromiseRef.current) return archivedPromiseRef.current;
-    const startedAt = Date.now();
-    const invalidationRevision = invalidationRevisionRef.current;
-    const promise = (async () => {
-      await (async () => {
-const snapshot = await fetchSessionsSnapshot({
-          etag: archivedEtagRef.current,
-          query: ARCHIVED_QUERY,
-        });
-        if (!mountedRef.current) return;
-        if (!snapshot.notModified && snapshot.text !== null) {
-          archivedEtagRef.current = snapshot.etag;
-          if (snapshot.text !== archivedTextRef.current) {
-            archivedTextRef.current = snapshot.text;
-            setArchivedIndex(JSON.parse(snapshot.text));
+  const pollArchived = useCallback(
+    async function pollArchivedSelf(): Promise<void> {
+      if (archivedPromiseRef.current) return archivedPromiseRef.current;
+      const startedAt = Date.now();
+      const invalidationRevision = invalidationRevisionRef.current;
+      const promise = (async () => {
+        await (async () => {
+          const snapshot = await fetchSessionsSnapshot({
+            etag: archivedEtagRef.current,
+            query: ARCHIVED_QUERY,
+          });
+          if (!mountedRef.current) return;
+          if (!snapshot.notModified && snapshot.text !== null) {
+            archivedEtagRef.current = snapshot.etag;
+            if (snapshot.text !== archivedTextRef.current) {
+              archivedTextRef.current = snapshot.text;
+              setArchivedIndex(JSON.parse(snapshot.text));
+            }
           }
-        }
-        archivedIndexAtRef.current = startedAt;
+          archivedIndexAtRef.current = startedAt;
+          if (
+            locallyArchivedRef.current.size > 0 ||
+            locallyUnarchivedRef.current.size > 0
+          )
+            setArchivedIndexAt(startedAt);
+        })().catch(async () => {
+          // Never surfaced as the app's error: the live list is what the app is
+          // for, and a failed index just leaves Archived showing what it had.
+        });
+      })().finally(() => {
+        if (archivedPromiseRef.current === promise)
+          archivedPromiseRef.current = null;
         if (
-          locallyArchivedRef.current.size > 0 ||
-          locallyUnarchivedRef.current.size > 0
+          mountedRef.current &&
+          document.visibilityState !== "hidden" &&
+          invalidationRevisionRef.current !== invalidationRevision
         )
-          setArchivedIndexAt(startedAt);
-})().catch(async () => {
-// Never surfaced as the app's error: the live list is what the app is
-        // for, and a failed index just leaves Archived showing what it had.
-});
-    })().finally(() => {
-      if (archivedPromiseRef.current === promise) archivedPromiseRef.current = null;
-      if (
-        mountedRef.current &&
-        document.visibilityState !== "hidden" &&
-        invalidationRevisionRef.current !== invalidationRevision
-      )
-        void pollArchivedSelf();
-    });
-    archivedPromiseRef.current = promise;
-    return promise;
-  }, []);
+          void pollArchivedSelf();
+      });
+      archivedPromiseRef.current = promise;
+      return promise;
+    },
+    [],
+  );
 
   // The sidebar only links to Archived now; it does not render archived rows or
   // their count. Keep this larger index out of the app entirely until that
@@ -475,12 +482,12 @@ const snapshot = await fetchSessionsSnapshot({
 
   // One list out of the slices, so every consumer keeps reading `archived`
   // off a single array (see lib/session-slices for why that's the shape).
-  const sessions = (mergeSessionSlices({
-        live,
-        archivedIndex,
-        locallyArchived,
-        locallyUnarchived,
-      }));
+  const sessions = mergeSessionSlices({
+    live,
+    archivedIndex,
+    locallyArchived,
+    locallyUnarchived,
+  });
   useLayoutEffect(() => {
     mergedRef.current = sessions;
   });
@@ -550,23 +557,23 @@ const snapshot = await fetchSessionsSnapshot({
   // until the server's own copy lands, so the new tab renders instead of a
   // "Starting…" placeholder. Call `unstick` if the create fails.
   const inject = (session: UnifiedSession, opts?: { sticky?: boolean }) => {
-      // The list no longer matches the last server response — force the next
-      // poll to apply (it reconciles the injected copy, same as before).
-      lastTextRef.current = null;
-      etagRef.current = null;
-      const pending = stickyRef.current.get(session.id);
-      if (opts?.sticky)
-        stickyRef.current.set(session.id, {
-          session,
-          serverSeen: pending?.serverSeen ?? false,
-        });
-      else if (pending) pending.session = session;
-      setLive((prev) =>
-        prev.some((s) => s.id === session.id)
-          ? prev.map((s) => (s.id === session.id ? session : s))
-          : [...prev, session],
-      );
-    };
+    // The list no longer matches the last server response — force the next
+    // poll to apply (it reconciles the injected copy, same as before).
+    lastTextRef.current = null;
+    etagRef.current = null;
+    const pending = stickyRef.current.get(session.id);
+    if (opts?.sticky)
+      stickyRef.current.set(session.id, {
+        session,
+        serverSeen: pending?.serverSeen ?? false,
+      });
+    else if (pending) pending.session = session;
+    setLive((prev) =>
+      prev.some((s) => s.id === session.id)
+        ? prev.map((s) => (s.id === session.id ? session : s))
+        : [...prev, session],
+    );
+  };
 
   // Drop a session's sticky status (e.g. its create failed / was abandoned).
   // The session itself stays until the next poll reconciles it away.
@@ -578,58 +585,60 @@ const snapshot = await fetchSessionsSnapshot({
   };
 
   const patch = (id: string, patch: Partial<UnifiedSession>) => {
-      lastTextRef.current = null;
-      etagRef.current = null;
-      const sticky = stickyRef.current.get(id);
-      if (sticky) sticky.session = { ...sticky.session, ...patch };
-      if (sessionPatchNeedsAcknowledgement(patch)) {
-        const previous = pendingPatchRef.current.get(id);
-        const runtimeRevision =
-          "isRunning" in patch
-            ? ++runtimeRevisionRef.current
-            : previous?.runtimeRevision;
-        pendingPatchRef.current.set(id, {
-          values: { ...previous?.values, ...patch },
-          runtimeRevision,
-        });
+    lastTextRef.current = null;
+    etagRef.current = null;
+    const sticky = stickyRef.current.get(id);
+    if (sticky) sticky.session = { ...sticky.session, ...patch };
+    if (sessionPatchNeedsAcknowledgement(patch)) {
+      const previous = pendingPatchRef.current.get(id);
+      const runtimeRevision =
+        "isRunning" in patch
+          ? ++runtimeRevisionRef.current
+          : previous?.runtimeRevision;
+      pendingPatchRef.current.set(id, {
+        values: { ...previous?.values, ...patch },
+        runtimeRevision,
+      });
+    }
+    if ("archived" in patch) {
+      const at = Date.now();
+      const drop = <V>(prev: Map<string, V>) => {
+        if (!prev.has(id)) return prev;
+        const next = new Map(prev);
+        next.delete(id);
+        return next;
+      };
+      if (patch.archived) {
+        // The next live poll drops this row and the index doesn't have it
+        // yet: hold the copy we already have so the session doesn't blink
+        // out of the sidebar and out of ⌘Z's reach in between.
+        const current = liveRef.current.find((s) => s.id === id);
+        if (current)
+          setLocallyArchived((prev) =>
+            new Map(prev).set(id, { session: { ...current, ...patch }, at }),
+          );
+        setLocallyUnarchived(drop);
+      } else {
+        setLocallyUnarchived((prev) => new Map(prev).set(id, at));
+        setLocallyArchived(drop);
+        // Mirror image of the above: the row lives in the archived index,
+        // so there is nothing in the live slice for the patch below to flip
+        // and it would vanish until the next poll. Move it across now. It
+        // may be an index summary; one poll replaces it with the full row.
+        const known = mergedRef.current.find((s) => s.id === id);
+        if (known)
+          setLive((prev) =>
+            prev.some((s) => s.id === id)
+              ? prev
+              : [...prev, { ...known, ...patch }],
+          );
       }
-      if ("archived" in patch) {
-        const at = Date.now();
-        const drop = <V,>(prev: Map<string, V>) => {
-          if (!prev.has(id)) return prev;
-          const next = new Map(prev);
-          next.delete(id);
-          return next;
-        };
-        if (patch.archived) {
-          // The next live poll drops this row and the index doesn't have it
-          // yet: hold the copy we already have so the session doesn't blink
-          // out of the sidebar and out of ⌘Z's reach in between.
-          const current = liveRef.current.find((s) => s.id === id);
-          if (current)
-            setLocallyArchived((prev) =>
-              new Map(prev).set(id, { session: { ...current, ...patch }, at }),
-            );
-          setLocallyUnarchived(drop);
-        } else {
-          setLocallyUnarchived((prev) => new Map(prev).set(id, at));
-          setLocallyArchived(drop);
-          // Mirror image of the above: the row lives in the archived index,
-          // so there is nothing in the live slice for the patch below to flip
-          // and it would vanish until the next poll. Move it across now. It
-          // may be an index summary; one poll replaces it with the full row.
-          const known = mergedRef.current.find((s) => s.id === id);
-          if (known)
-            setLive((prev) =>
-              prev.some((s) => s.id === id) ? prev : [...prev, { ...known, ...patch }],
-            );
-        }
-        // Settle the override immediately when the index is already in use.
-        // Otherwise the local copy is enough for undo until Archived opens.
-        if (loadArchived || archivedIndex !== null) void pollArchived();
-      }
-      setLive((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
-    };
+      // Settle the override immediately when the index is already in use.
+      // Otherwise the local copy is enough for undo until Archived opens.
+      if (loadArchived || archivedIndex !== null) void pollArchived();
+    }
+    setLive((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  };
 
   const remove = (id: string) => {
     lastTextRef.current = null;
@@ -638,7 +647,7 @@ const snapshot = await fetchSessionsSnapshot({
     archivedEtagRef.current = null;
     stickyRef.current.delete(id);
     pendingPatchRef.current.delete(id);
-    const drop = <V,>(prev: Map<string, V>) => {
+    const drop = <V>(prev: Map<string, V>) => {
       if (!prev.has(id)) return prev;
       const next = new Map(prev);
       next.delete(id);

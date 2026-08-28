@@ -44,7 +44,9 @@ interface Props {
  *    answers again — that page state is suspect anyway.
  */
 export function RestartOverlay({ connected, addHandler }: Props) {
-  const [phase, setPhase] = useState<"ok" | "reconnecting" | "restarting" | "crashed">("ok");
+  const [phase, setPhase] = useState<
+    "ok" | "reconnecting" | "restarting" | "crashed"
+  >("ok");
   const [backOnline, setBackOnline] = useState(false);
   // Who likely caused the restart: `by` on server_restarting, or `restartBy`
   // on the new server's hello.
@@ -59,9 +61,9 @@ export function RestartOverlay({ connected, addHandler }: Props) {
   const explicitAt = useRef(0);
   const disconnectedAt = useRef<number | null>(null);
   const phaseRef = useRef(phase);
-	useLayoutEffect(() => {
-		phaseRef.current = phase;
-	});
+  useLayoutEffect(() => {
+    phaseRef.current = phase;
+  });
 
   const resolveRestart = () => {
     explicit.current = false;
@@ -89,7 +91,8 @@ export function RestartOverlay({ connected, addHandler }: Props) {
     }
   };
 
-  const handleHealth = (data: { bootId?: unknown }) => handleBootId(data.bootId);
+  const handleHealth = (data: { bootId?: unknown }) =>
+    handleBootId(data.bootId);
 
   // Learn the current instance's bootId up front (also the fallback for
   // servers that don't send the hello frame yet).
@@ -111,7 +114,10 @@ export function RestartOverlay({ connected, addHandler }: Props) {
           explicit.current = true;
           explicitAt.current = Date.now();
           if (msg.by) setRestartBy(msg.by);
-          if (phaseRef.current === "ok" || phaseRef.current === "reconnecting") {
+          if (
+            phaseRef.current === "ok" ||
+            phaseRef.current === "reconnecting"
+          ) {
             setPhase("restarting");
           }
         } else if (msg.type === "hello") {
@@ -119,7 +125,7 @@ export function RestartOverlay({ connected, addHandler }: Props) {
           handleBootId(msg.bootId);
         }
       }),
-    [addHandler]
+    [addHandler],
   );
 
   // Disconnect tracking: after a foreground grace, show the calm reconnecting
@@ -147,10 +153,12 @@ export function RestartOverlay({ connected, addHandler }: Props) {
       if (timer !== undefined) clearTimeout(timer);
       timer = undefined;
       if (document.visibilityState === "hidden") {
-        if (phaseRef.current === "reconnecting" && !explicit.current) setPhase("ok");
+        if (phaseRef.current === "reconnecting" && !explicit.current)
+          setPhase("ok");
         return;
       }
-      if (phaseRef.current !== "ok" && phaseRef.current !== "restarting") return;
+      if (phaseRef.current !== "ok" && phaseRef.current !== "restarting")
+        return;
       const delay = phaseRef.current === "restarting" ? 0 : PILL_DELAY_MS;
       timer = setTimeout(() => {
         if (document.visibilityState !== "hidden") setPhase("reconnecting");
@@ -175,13 +183,13 @@ export function RestartOverlay({ connected, addHandler }: Props) {
       const started = disconnectedAt.current ?? Date.now();
       if (Date.now() - started < ESCALATE_AFTER_MS) return;
       await (async () => {
-await fetchHealthStatus();
-})().catch(async () => {
-if (!cancelled) {
+        await fetchHealthStatus();
+      })().catch(async () => {
+        if (!cancelled) {
           sawDown.current = true;
           setPhase("crashed");
         }
-});
+      });
     }, 3000);
     return () => {
       cancelled = true;
@@ -201,11 +209,9 @@ if (!cancelled) {
         return;
       }
       await (async () => {
-const d = await fetchHealthStatus();
+        const d = await fetchHealthStatus();
         if (!cancelled) handleHealth(d);
-})().catch(async () => {
-
-});
+      })().catch(async () => {});
     }, 1500);
     return () => {
       cancelled = true;
@@ -219,14 +225,12 @@ const d = await fetchHealthStatus();
     let cancelled = false;
     const iv = setInterval(async () => {
       await (async () => {
-await fetchHealthStatus();
+        await fetchHealthStatus();
         if (!cancelled) {
           setBackOnline(true);
           setTimeout(() => location.reload(), 700);
         }
-})().catch(async () => {
-
-});
+      })().catch(async () => {});
     }, 1500);
     return () => {
       cancelled = true;
@@ -255,7 +259,11 @@ await fetchHealthStatus();
   if (phase !== "crashed") return null;
 
   return (
-    <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/82 p-6 backdrop-blur-[4px]" role="alertdialog" aria-live="assertive">
+    <div
+      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/82 p-6 backdrop-blur-[4px]"
+      role="alertdialog"
+      aria-live="assertive"
+    >
       <div className="flex max-w-[340px] flex-col items-center gap-3.5 rounded-lg border border-line bg-panel px-[26px] py-7 text-center">
         <div
           className={`size-[30px] rounded-full border-2 ${
@@ -275,7 +283,9 @@ await fetchHealthStatus();
             : "The page will refresh automatically once the server is back."}
         </div>
         {!backOnline && restartBy && (
-          <div className="mt-1.5 max-w-full truncate text-label font-medium leading-[1.4] text-dim opacity-80">Triggered by {restartBy}</div>
+          <div className="mt-1.5 max-w-full truncate text-label font-medium leading-[1.4] text-dim opacity-80">
+            Triggered by {restartBy}
+          </div>
         )}
       </div>
     </div>

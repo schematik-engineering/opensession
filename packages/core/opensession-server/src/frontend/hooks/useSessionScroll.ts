@@ -35,7 +35,8 @@ const TOP_THRESHOLD = 600;
 // scrolls during keyboard/visual-viewport animation, leaving the pin stranded
 // at an intermediate position.
 const COARSE_POINTER =
-  typeof window !== "undefined" && !!window.matchMedia?.("(pointer: coarse)").matches;
+  typeof window !== "undefined" &&
+  !!window.matchMedia?.("(pointer: coarse)").matches;
 export interface SessionScroll {
   /** Attach to the scrollable transcript container. */
   containerRef: React.RefObject<HTMLDivElement | null>;
@@ -104,7 +105,10 @@ function latestMessageVisible(container: HTMLElement): boolean {
   if (!latest) return true;
   const containerRect = container.getBoundingClientRect();
   const latestRect = latest.getBoundingClientRect();
-  return latestRect.bottom > containerRect.top && latestRect.top < containerRect.bottom;
+  return (
+    latestRect.bottom > containerRect.top &&
+    latestRect.top < containerRect.bottom
+  );
 }
 
 export function useSessionScroll(initialFollowing = true): SessionScroll {
@@ -193,17 +197,20 @@ export function useSessionScroll(initialFollowing = true): SessionScroll {
     // "none" while following, back to the browser once the reader isn't.
   }, []);
 
-  const setFollowing = useCallback((v: boolean) => {
-    followingRef.current = v;
-    setFollowingState(v);
-    if (v) {
-      towardHistoryGestureRef.current = false;
-      // Returning to the live edge ends any pinned turn and clears the unread flag.
-      setNewBelow(false);
-      setShowScrollToBottom(false);
-      clearSpacer();
-    }
-  }, [clearSpacer]);
+  const setFollowing = useCallback(
+    (v: boolean) => {
+      followingRef.current = v;
+      setFollowingState(v);
+      if (v) {
+        towardHistoryGestureRef.current = false;
+        // Returning to the live edge ends any pinned turn and clears the unread flag.
+        setNewBelow(false);
+        setShowScrollToBottom(false);
+        clearSpacer();
+      }
+    },
+    [clearSpacer],
+  );
 
   // Both floating controls read the same scroll position, so they are recomputed
   // together: the "Load all" pill at the head of the transcript and the return
@@ -212,9 +219,11 @@ export function useSessionScroll(initialFollowing = true): SessionScroll {
   const updateEdges = useCallback((isFollowing?: boolean) => {
     const resolvedFollowing = isFollowing ?? followingRef.current;
     const el = containerRef.current;
-    setShowScrollToBottom(Boolean(el && !resolvedFollowing && !latestMessageVisible(el)));
+    setShowScrollToBottom(
+      Boolean(el && !resolvedFollowing && !latestMessageVisible(el)),
+    );
     setAtTop(
-      Boolean(el && el.scrollTop <= Math.min(el.clientHeight, TOP_THRESHOLD))
+      Boolean(el && el.scrollTop <= Math.min(el.clientHeight, TOP_THRESHOLD)),
     );
   }, []);
 
@@ -233,47 +242,53 @@ export function useSessionScroll(initialFollowing = true): SessionScroll {
       const el = containerRef.current;
       if (!el) return;
       clearSpacer();
-      if (behavior === "smooth") autoFlightRef.current = performance.now() + 1200;
+      if (behavior === "smooth")
+        autoFlightRef.current = performance.now() + 1200;
       el.scrollTo({ top: el.scrollHeight, behavior });
       setFollowing(true);
     },
-    [clearSpacer, setFollowing]
+    [clearSpacer, setFollowing],
   );
 
-  const anchorToTop = useCallback((target: HTMLElement | null, behavior?: ScrollBehavior) => {
-    const el = containerRef.current;
-    if (!el || !target) return;
-    // Callers may force "auto" when an instant reopen-anchor jump is preferable
-    // to an animation that can be disturbed by transcript layout changes.
-    const resolved: ScrollBehavior =
-      behavior ?? (COARSE_POINTER ? "auto" : "smooth");
-    const instant = resolved !== "smooth";
-    const delta = target.getBoundingClientRect().top - visibleTop(el) - TOP_GAP;
-    if (delta <= 0) {
-      // Already at or above the target — don't scroll up. For a pinned turn
-      // this IS the pin position; remember it so relayout holds it.
-      if (pinnedRef.current) pinTopRef.current = el.scrollTop;
-      return;
-    }
-    const finalFromBottom = el.scrollHeight - (el.scrollTop + delta) - el.clientHeight;
-    if (pinnedRef.current) pinTopRef.current = el.scrollTop + delta;
-    el.scrollTo({ top: el.scrollTop + delta, behavior: resolved });
-    // An instant scroll can land clamped (sub-pixel or scroll-max rounding);
-    // record where it actually parked so relayout's hold engages.
-    if (instant && pinnedRef.current) pinTopRef.current = el.scrollTop;
-    // A reopen-anchor that lands at the live edge anyway keeps following (with
-    // a flight so the animation's mid positions don't disengage it). A pinned
-    // turn must stop following instead: its padded "edge" is fake, and the
-    // reply streams into the reserved space below.
-    if (!pinnedRef.current && finalFromBottom < STICK_THRESHOLD) {
-      if (!instant) autoFlightRef.current = performance.now() + 1200;
-      return;
-    }
-    // Leaving the live edge to read from the top is intent: stop following so the
-    // streaming reply fills the space below instead of yanking us back down.
-    setFollowing(false);
-    updateEdges(false);
-  }, [setFollowing, updateEdges]);
+  const anchorToTop = useCallback(
+    (target: HTMLElement | null, behavior?: ScrollBehavior) => {
+      const el = containerRef.current;
+      if (!el || !target) return;
+      // Callers may force "auto" when an instant reopen-anchor jump is preferable
+      // to an animation that can be disturbed by transcript layout changes.
+      const resolved: ScrollBehavior =
+        behavior ?? (COARSE_POINTER ? "auto" : "smooth");
+      const instant = resolved !== "smooth";
+      const delta =
+        target.getBoundingClientRect().top - visibleTop(el) - TOP_GAP;
+      if (delta <= 0) {
+        // Already at or above the target — don't scroll up. For a pinned turn
+        // this IS the pin position; remember it so relayout holds it.
+        if (pinnedRef.current) pinTopRef.current = el.scrollTop;
+        return;
+      }
+      const finalFromBottom =
+        el.scrollHeight - (el.scrollTop + delta) - el.clientHeight;
+      if (pinnedRef.current) pinTopRef.current = el.scrollTop + delta;
+      el.scrollTo({ top: el.scrollTop + delta, behavior: resolved });
+      // An instant scroll can land clamped (sub-pixel or scroll-max rounding);
+      // record where it actually parked so relayout's hold engages.
+      if (instant && pinnedRef.current) pinTopRef.current = el.scrollTop;
+      // A reopen-anchor that lands at the live edge anyway keeps following (with
+      // a flight so the animation's mid positions don't disengage it). A pinned
+      // turn must stop following instead: its padded "edge" is fake, and the
+      // reply streams into the reserved space below.
+      if (!pinnedRef.current && finalFromBottom < STICK_THRESHOLD) {
+        if (!instant) autoFlightRef.current = performance.now() + 1200;
+        return;
+      }
+      // Leaving the live edge to read from the top is intent: stop following so the
+      // streaming reply fills the space below instead of yanking us back down.
+      setFollowing(false);
+      updateEdges(false);
+    },
+    [setFollowing, updateEdges],
+  );
 
   // Size the bottom spacer to exactly the room the pinned turn needs to sit near the
   // top. Resizing a spacer that's below the fold doesn't move what the reader sees.
@@ -281,13 +296,21 @@ export function useSessionScroll(initialFollowing = true): SessionScroll {
     const el = containerRef.current;
     const sp = spacerRef.current;
     if (!el || !sp) return;
-    if (!pinnedRef.current) { sp.style.height = "0px"; return; }
+    if (!pinnedRef.current) {
+      sp.style.height = "0px";
+      return;
+    }
     const target = lastUserEl(el);
-    if (!target) { sp.style.height = "0px"; return; }
+    if (!target) {
+      sp.style.height = "0px";
+      return;
+    }
     const current = sp.offsetHeight;
     const contentHeight = el.scrollHeight - current; // exclude the spacer itself
     const targetTop =
-      target.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop;
+      target.getBoundingClientRect().top -
+      el.getBoundingClientRect().top +
+      el.scrollTop;
     const below = contentHeight - targetTop; // content height beneath the pinned turn
     // Shrink by the visual-viewport pan (iOS keyboard) so scroll-max sits
     // exactly at the pan-aware pin position — no more, or the anchor clamps
@@ -301,10 +324,13 @@ export function useSessionScroll(initialFollowing = true): SessionScroll {
     needAnchorRef.current = true;
   }, []);
 
-  const endTurn = useCallback(() => { clearSpacer(); }, [clearSpacer]);
+  const endTurn = useCallback(() => {
+    clearSpacer();
+  }, [clearSpacer]);
 
   const suspendEndMaintenance = useCallback(() => {
-    for (const frame of disclosureSettleFramesRef.current) cancelAnimationFrame(frame);
+    for (const frame of disclosureSettleFramesRef.current)
+      cancelAnimationFrame(frame);
     disclosureSettleFramesRef.current = [];
     disclosureSettleRef.current = true;
     // Two frames: one for the fold's own layout pass, one for the follow-up
@@ -406,7 +432,10 @@ export function useSessionScroll(initialFollowing = true): SessionScroll {
         scrollPerf.frames++;
         const elapsed = performance.now() - scrollPerf.startedAt;
         if (elapsed >= 500) {
-          recordSessionPerf("scroll_fps", (scrollPerf.frames * 1_000) / elapsed);
+          recordSessionPerf(
+            "scroll_fps",
+            (scrollPerf.frames * 1_000) / elapsed,
+          );
           scrollPerf.startedAt = performance.now();
           scrollPerf.frames = 0;
         }
@@ -496,7 +525,12 @@ export function useSessionScroll(initialFollowing = true): SessionScroll {
       lastTouchRef.current = performance.now();
       const nextY = event.touches[0]?.clientY ?? null;
       // Dragging the finger down moves the transcript toward earlier messages.
-      if (touchY !== null && nextY !== null && nextY > touchY && el.scrollTop > 0)
+      if (
+        touchY !== null &&
+        nextY !== null &&
+        nextY > touchY &&
+        el.scrollTop > 0
+      )
         leaveForGesture();
       else if (touchY !== null && nextY !== null && nextY < touchY)
         towardHistoryGestureRef.current = false;

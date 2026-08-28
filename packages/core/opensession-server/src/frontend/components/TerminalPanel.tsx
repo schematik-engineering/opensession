@@ -113,7 +113,9 @@ export function ShellPanel({
   /** False while another side-panel tab covers the (still-mounted) panel. */
   visible: boolean;
 }) {
-  const [tabs, setTabs] = useState<ShellTabSpec[]>(() => [{ id: newTermId(), n: 1 }]);
+  const [tabs, setTabs] = useState<ShellTabSpec[]>(() => [
+    { id: newTermId(), n: 1 },
+  ]);
   const [activeId, setActiveId] = useState<string>(() => tabs[0]!.id);
   const nextN = useRef(2);
 
@@ -262,7 +264,13 @@ function ShellView({
       // actual available canvas instead of drawing beneath visual padding.
       fit.fit();
 
-      send({ type: "term_start", sessionId, termId, cols: term.cols, rows: term.rows });
+      send({
+        type: "term_start",
+        sessionId,
+        termId,
+        cols: term.cols,
+        rows: term.rows,
+      });
 
       const offData = term.onData((d: string) =>
         send({ type: "term_input", termId, data: b64encode(d) }),
@@ -294,7 +302,12 @@ function ShellView({
         if (!el || el.clientWidth === 0 || el.clientHeight === 0) return;
         try {
           fit.fit();
-          send({ type: "term_resize", termId, cols: term.cols, rows: term.rows });
+          send({
+            type: "term_resize",
+            termId,
+            cols: term.cols,
+            rows: term.rows,
+          });
         } catch {}
       };
       showRef.current = () => {

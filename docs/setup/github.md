@@ -27,9 +27,9 @@ Configure it from Settings → Integrations, or under
       "oauthClientSecret": "…",
       "appSlug": "open-session-example",
       "installationOwner": "your-org",
-      "userPrAuth": true
-    }
-  }
+      "userPrAuth": true,
+    },
+  },
 }
 ```
 
@@ -50,17 +50,17 @@ pin its known numeric installation.
 The create-App link in Settings → Integrations is generated from the same
 canonical permission set used when tokens are minted:
 
-| Scope | Access | Why |
-| --- | --- | --- |
-| Actions | Read | failing workflow logs for trusted fixes |
-| Checks | Read | check runs |
-| Commit statuses | Read | status rollups |
-| Contents | Read and write | clone and push |
-| Deployments | Read | preview deployment state |
-| Issues | Read and write | issue and PR comments |
-| Metadata | Read | GitHub baseline |
-| Pull requests | Read and write | reviews, PRs, merges |
-| Members (organization) | Read | roster and attribution |
+| Scope                  | Access         | Why                                     |
+| ---------------------- | -------------- | --------------------------------------- |
+| Actions                | Read           | failing workflow logs for trusted fixes |
+| Checks                 | Read           | check runs                              |
+| Commit statuses        | Read           | status rollups                          |
+| Contents               | Read and write | clone and push                          |
+| Deployments            | Read           | preview deployment state                |
+| Issues                 | Read and write | issue and PR comments                   |
+| Metadata               | Read           | GitHub baseline                         |
+| Pull requests          | Read and write | reviews, PRs, merges                    |
+| Members (organization) | Read           | roster and attribution                  |
 
 Enable **Device Flow**, generate a client secret and private key, then install
 the App only on the organization and repositories Open Session should reach.
@@ -117,14 +117,14 @@ GitHub-side subscription checkboxes take effect without an Open Session restart.
 These are the subscribed events the code consumes
 (`packages/core/opensession-server/src/agents/github/webhook.ts`):
 
-| Event | What happens |
-| --- | --- |
-| `issue_comment`, `pull_request_review_comment` (action `created`) | if the body matches a configured mention handle: intent-classified → whole-PR action (review / autofix / simplify / adversarial) or a conversational reply run in a PR-branch worktree |
-| `pull_request` action `labeled` | labels `os-review` / `os-auto-fix` / `os-simplify` / `os-adversarial` trigger the corresponding behavior; create the labels on your repo first. Auto-fix also merges the current base into conflicting PR branches and resolves the conflicts without force-pushing. |
-| `pull_request` `opened`/`reopened`/`synchronize`/`ready_for_review` | auto-review, if the PR is non-draft and either carries `os-review` or the review automation is enabled |
-| `pull_request` action `closed` + merged | notifies linked sessions; fires the docs-sync automation on `github:pr_merged` |
-| `pull_request_review` | refreshes PR state; when the Slack agent is enabled, review → Slack notification |
-| `workflow_run` | notifies sessions waiting on a merged PR's deploy |
+| Event                                                               | What happens                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `issue_comment`, `pull_request_review_comment` (action `created`)   | if the body matches a configured mention handle: intent-classified → whole-PR action (review / autofix / simplify / adversarial) or a conversational reply run in a PR-branch worktree                                                                               |
+| `pull_request` action `labeled`                                     | labels `os-review` / `os-auto-fix` / `os-simplify` / `os-adversarial` trigger the corresponding behavior; create the labels on your repo first. Auto-fix also merges the current base into conflicting PR branches and resolves the conflicts without force-pushing. |
+| `pull_request` `opened`/`reopened`/`synchronize`/`ready_for_review` | auto-review, if the PR is non-draft and either carries `os-review` or the review automation is enabled                                                                                                                                                               |
+| `pull_request` action `closed` + merged                             | notifies linked sessions; fires the docs-sync automation on `github:pr_merged`                                                                                                                                                                                       |
+| `pull_request_review`                                               | refreshes PR state; when the Slack agent is enabled, review → Slack notification                                                                                                                                                                                     |
+| `workflow_run`                                                      | notifies sessions waiting on a merged PR's deploy                                                                                                                                                                                                                    |
 
 ### Public-repository actor gate
 
@@ -265,6 +265,7 @@ below without enabling the sign-in gate.
    app without it refuses every attempt (`device_flow_disabled`) and nobody
    can get in. The callback URL, by contrast, is unused, because sign-in never
    redirects; put your instance's URL in if GitHub insists on the field.
+
 2. Configure `~/.opensession/config.json`:
 
    ```json
@@ -288,6 +289,7 @@ below without enabling the sign-in gate.
    separately as described above. Environment `OPENSESSION_GITHUB_*` values
    win over config. Signing in needs the client id; the secret renews user
    tokens; the key mints bot installation tokens.
+
 3. App and authentication config is read live; no restart is required. Restart
    only after load-time agent settings change, or once if you want the boot-only
    `createdByLogin` migration to backfill existing sessions immediately.
@@ -352,7 +354,7 @@ updates the App webhook URL and shared secret with App JWT authentication. This
 keeps networking out of first-run onboarding while allowing comments, labels,
 and other webhook events to be enabled later.
 
-The single connected account is *the* account for this install (there is no
+The single connected account is _the_ account for this install (there is no
 roster in simple mode; the one connected account is the acting identity).
 **Disconnect** removes it. For a UI-managed App, **Remove app** then clears the
 configured client id, slug, secret, private key, and installation intent; the
@@ -365,7 +367,7 @@ connect.
 
 Connecting the app does **not** by itself turn on the sign-in gate (governed
 solely by `integrations.github.userPrAuth`). Because the App's client id is the
-*same* key sign-in reads, graduating a team to
+_same_ key sign-in reads, graduating a team to
 [per-user GitHub auth](#per-user-github-auth-prs-as-the-session-owner) is a
 one-flag change, or automatic for an org-owned app: `install.sh --org <name>`
 (or choosing the Organization owner in the wizard) records the org, and at the

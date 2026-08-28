@@ -1,19 +1,46 @@
 /** Explain the configuration that will apply to a session's next Pi turn. */
 import type { UnifiedSession } from "./types";
-import { resolveSessionRunInputs, type SessionRunInputs } from "./session-run-inputs";
+import {
+  resolveSessionRunInputs,
+  type SessionRunInputs,
+} from "./session-run-inputs";
 import { filterMcpServers, STRIPE_CONFIRM_TOOLS } from "./runner-shared";
 import { readMcpConfig } from "./connections";
 import { mcpSharedGrantHeader, mcpUserGrantHeader } from "./mcp-oauth";
 import { userMatchesAny, commitAuthorFor } from "./shared/user-mappings";
 import { configuredPaths } from "./config";
-import { baseJournalKind, isUnattendedKind, deniedToolIds, runGateReason, runToolPolicy, readLocalInstructions, type RunToolPolicy } from "./run-policy";
-import { DIAL_ORACLE_AGENTS, ORCHESTRATOR_WORKER_AGENTS, accountProviderForModel, dialPreset, interactiveDefaultModel, interactiveFallbackModel, modelSupportsSteer, orchestratorPreset, orchestratorWorkerForBridge, routeModel, sameBridgeDialOracle } from "./models";
+import {
+  baseJournalKind,
+  isUnattendedKind,
+  deniedToolIds,
+  runGateReason,
+  runToolPolicy,
+  readLocalInstructions,
+  type RunToolPolicy,
+} from "./run-policy";
+import {
+  DIAL_ORACLE_AGENTS,
+  ORCHESTRATOR_WORKER_AGENTS,
+  accountProviderForModel,
+  dialPreset,
+  interactiveDefaultModel,
+  interactiveFallbackModel,
+  modelSupportsSteer,
+  orchestratorPreset,
+  orchestratorWorkerForBridge,
+  routeModel,
+  sameBridgeDialOracle,
+} from "./models";
 import { resolveWorkspaceModelPreset } from "./workspace-model-presets";
 import { getAccountById } from "./claude-accounts";
 import { githubUserLoginForRun } from "./github-auth";
 import { sessionMemoryScopes } from "./session-memory";
 import { sessionRepoIds } from "./session-repos";
-import { isRunnableSandboxProvider, sandboxProviderConfigured, sandboxesEnabled } from "./sandbox/config";
+import {
+  isRunnableSandboxProvider,
+  sandboxProviderConfigured,
+  sandboxesEnabled,
+} from "./sandbox/config";
 import { selfImproveMcpForSession } from "./automations";
 import { createGoalSelfMcpServer } from "../agents/slack/goal-tools";
 
@@ -159,10 +186,13 @@ export function describeMcpServers(
     scope,
     // The gate clears on any of these; de-duplicated so the reason reads as
     // the set of identities tried, not as one name repeated.
-    gateUsers: [...new Set([user, ...grantUsers].filter((u): u is string => !!u))],
+    gateUsers: [
+      ...new Set([user, ...grantUsers].filter((u): u is string => !!u)),
+    ],
     configPath: configuredPaths().mcpConfig,
     hasOauthGrant: (name) =>
-      grantHolders.some((u) => mcpUserGrantHeader(name, u)) || !!mcpSharedGrantHeader(name),
+      grantHolders.some((u) => mcpUserGrantHeader(name, u)) ||
+      !!mcpSharedGrantHeader(name),
   });
 }
 
@@ -180,7 +210,8 @@ export function describeStrippedTools(
     rows.push({
       tool,
       ids: deniedToolIds(tool, { broad: tool in confirmTools }),
-      source: "automations.ts AUTOMATION_DENIED_TOOLS (automation-owned session)",
+      source:
+        "automations.ts AUTOMATION_DENIED_TOOLS (automation-owned session)",
       reason: message,
     });
   }
@@ -238,7 +269,6 @@ export async function inProcessServerNames(
   return Object.keys(servers);
 }
 
-
 /** Compose the next-turn configuration from the same resolvers dispatch uses. */
 export async function buildSessionEffectiveConfig(
   session: UnifiedSession,
@@ -274,29 +304,60 @@ export async function buildSessionEffectiveConfig(
   const gateReason = runGateReason({ journal: { kind: journalKind } });
   const gate: Record<string, ConfigRow> = {
     journalKind: row(journalKind, "run-session.ts journal.kind"),
-    unattendedKind: row(isUnattendedKind(baseJournalKind(journalKind)), "run-policy.ts isUnattendedKind"),
+    unattendedKind: row(
+      isUnattendedKind(baseJournalKind(journalKind)),
+      "run-policy.ts isUnattendedKind",
+    ),
     allowed: row(gateReason === null, "run-policy.ts runGateReason"),
     reason: row(gateReason, "run-policy.ts runGateReason"),
   };
 
-  const preset = dialPreset(requestedModel) ?? orchestratorPreset(requestedModel) ??
+  const preset =
+    dialPreset(requestedModel) ??
+    orchestratorPreset(requestedModel) ??
     resolveWorkspaceModelPreset(requestedModel, session.workspaceId);
   const model: Record<string, ConfigRow> = {
-    requested: row(requestedModel, session.model ? "session file model" : "instance interactive default"),
+    requested: row(
+      requestedModel,
+      session.model ? "session file model" : "instance interactive default",
+    ),
     engine: row("pi", "models.ts routeModel"),
     dispatchModel: row(routed.model, "models.ts routeModel"),
     provider: row(providerID ?? null, "Pi model id provider segment"),
-    preset: row(preset ? { id: requestedModel, label: (preset as { label?: string }).label, mainModel: preset.model } : null, "model preset registry"),
+    preset: row(
+      preset
+        ? {
+            id: requestedModel,
+            label: (preset as { label?: string }).label,
+            mainModel: preset.model,
+          }
+        : null,
+      "model preset registry",
+    ),
     effort: row(session.effort ?? null, "session file effort"),
     fastMode: row(session.fastMode ?? false, "session file fastMode"),
-    fallbackModel: row(interactiveFallbackModel(session.model) ?? null, "models.ts interactiveFallbackModel"),
-    supportsSteer: row(modelSupportsSteer(requestedModel), "models.ts modelSupportsSteer"),
-    accountPool: row(accountProviderForModel(requestedModel) ?? null, "models.ts accountProviderForModel"),
+    fallbackModel: row(
+      interactiveFallbackModel(session.model) ?? null,
+      "models.ts interactiveFallbackModel",
+    ),
+    supportsSteer: row(
+      modelSupportsSteer(requestedModel),
+      "models.ts modelSupportsSteer",
+    ),
+    accountPool: row(
+      accountProviderForModel(requestedModel) ?? null,
+      "models.ts accountProviderForModel",
+    ),
   };
 
   const account: Record<string, ConfigRow> = {
     pinned: row(
-      session.accountId ? { id: session.accountId, name: getAccountById(session.accountId)?.name ?? null } : null,
+      session.accountId
+        ? {
+            id: session.accountId,
+            name: getAccountById(session.accountId)?.name ?? null,
+          }
+        : null,
       "session file accountId",
       { stability: "load-dependent" },
     ),
@@ -305,10 +366,16 @@ export async function buildSessionEffectiveConfig(
   const grantUsers = [inputs.mcpGrantUser, inputs.user];
   const inProcess = await inProcessServerNames(session, inputs);
   const mcp = {
-    scope: row<string[] | "all">(inputs.mcpServers ?? "all", "session-run-inputs.ts MCP scope"),
+    scope: row<string[] | "all">(
+      inputs.mcpServers ?? "all",
+      "session-run-inputs.ts MCP scope",
+    ),
     servers: describeMcpServers(inputs.mcpServers, inputs.user, grantUsers),
     inProcess: {
-      branch: row(inputs.inProcessMcpBranch, "session-run-inputs.ts in-process branch"),
+      branch: row(
+        inputs.inProcessMcpBranch,
+        "session-run-inputs.ts in-process branch",
+      ),
       servers: row(inProcess, "interactive-mcp.ts / automations.ts"),
     },
   };
@@ -320,48 +387,103 @@ export async function buildSessionEffectiveConfig(
   });
   const tools: Record<string, ConfigRow> = {
     unattended: row(policy.unattended, "run-policy.ts runToolPolicy"),
-    stripped: row(describeStrippedTools(policy, inputs.deniedTools, STRIPE_CONFIRM_TOOLS), "run-policy.ts runToolPolicy"),
-    disabledIds: row(Object.keys(policy.disables).sort(), "run-policy.ts runToolPolicy"),
-    bashPolicy: row(session.mode === "ask" ? "read-only allowlist" : policy.unattended ? "org command policy" : "unrestricted", "runner-shared.ts / command-policy.ts"),
+    stripped: row(
+      describeStrippedTools(policy, inputs.deniedTools, STRIPE_CONFIRM_TOOLS),
+      "run-policy.ts runToolPolicy",
+    ),
+    disabledIds: row(
+      Object.keys(policy.disables).sort(),
+      "run-policy.ts runToolPolicy",
+    ),
+    bashPolicy: row(
+      session.mode === "ask"
+        ? "read-only allowlist"
+        : policy.unattended
+          ? "org command policy"
+          : "unrestricted",
+      "runner-shared.ts / command-policy.ts",
+    ),
   };
 
   const bridgeProvider = providerID || "anthropic";
   const agents: Record<string, ConfigRow> = {
-    oracles: row(Object.keys(DIAL_ORACLE_AGENTS).map((name) => {
-      const effective = sameBridgeDialOracle(name, bridgeProvider);
-      return { agent: name, resolvesTo: effective, model: DIAL_ORACLE_AGENTS[effective]?.model };
-    }), "models.ts dial oracle registry"),
-    orchestratorWorkers: row(Object.keys(ORCHESTRATOR_WORKER_AGENTS)
-      .map((name) => ({ agent: name, model: orchestratorWorkerForBridge(name, bridgeProvider)?.model }))
-      .filter((worker) => !!worker.model), "models.ts worker registry"),
-    activePreset: row(preset ? { id: requestedModel } : null, "model preset registry"),
+    oracles: row(
+      Object.keys(DIAL_ORACLE_AGENTS).map((name) => {
+        const effective = sameBridgeDialOracle(name, bridgeProvider);
+        return {
+          agent: name,
+          resolvesTo: effective,
+          model: DIAL_ORACLE_AGENTS[effective]?.model,
+        };
+      }),
+      "models.ts dial oracle registry",
+    ),
+    orchestratorWorkers: row(
+      Object.keys(ORCHESTRATOR_WORKER_AGENTS)
+        .map((name) => ({
+          agent: name,
+          model: orchestratorWorkerForBridge(name, bridgeProvider)?.model,
+        }))
+        .filter((worker) => !!worker.model),
+      "models.ts worker registry",
+    ),
+    activePreset: row(
+      preset ? { id: requestedModel } : null,
+      "model preset registry",
+    ),
   };
 
-  const scopes = sessionMemoryScopes({ user: inputs.user, repos: sessionRepoIds(session) });
+  const scopes = sessionMemoryScopes({
+    user: inputs.user,
+    repos: sessionRepoIds(session),
+  });
   const memory: Record<string, ConfigRow> = {
     injected: row(inputs.sessionNote, "run-session.ts session note"),
-    scopes: row(inputs.sessionNote ? scopes.map((scope) => ({ key: scope.key, kind: scope.kind, label: scope.label })) : [], "session-memory.ts"),
+    scopes: row(
+      inputs.sessionNote
+        ? scopes.map((scope) => ({
+            key: scope.key,
+            kind: scope.kind,
+            label: scope.label,
+          }))
+        : [],
+      "session-memory.ts",
+    ),
   };
   const placement: Record<string, ConfigRow> = {
-    mode: row(target === "host" ? "detached run host" : target, "run-session.ts"),
-    restartSafe: row(target !== "runner" || true, "host-client.ts / sandbox provider"),
+    mode: row(
+      target === "host" ? "detached run host" : target,
+      "run-session.ts",
+    ),
+    restartSafe: row(
+      target !== "runner" || true,
+      "host-client.ts / sandbox provider",
+    ),
   };
   const git = commitAuthorFor(inputs.user, session.startedBy);
   const identity: Record<string, ConfigRow> = {
     user: row(inputs.user ?? null, "request identity"),
     git: row(git ?? null, "shared/user-mappings.ts"),
-    github: row(githubUserLoginForRun(inputs.user || git?.name) ?? null, "github-auth.ts"),
+    github: row(
+      githubUserLoginForRun(inputs.user || git?.name) ?? null,
+      "github-auth.ts",
+    ),
     paths: row(configuredPaths(), "config.ts configuredPaths"),
   };
-  const localInstructions = readLocalInstructions(session.worktreeDir || undefined);
+  const localInstructions = readLocalInstructions(
+    session.worktreeDir || undefined,
+  );
   const instructions: Record<string, ConfigRow> = {
     channel: row("Pi system prompt", "pi-runner.ts"),
-    sources: row([
-      "run-instructions.ts buildRunInstructions",
-      ...(inputs.sessionNote ? ["session note"] : []),
-      ...(session.presetNote ? ["workspace model preset"] : []),
-      ...(localInstructions ? ["workspace-local instructions"] : []),
-    ], "pi-runner.ts instruction composition"),
+    sources: row(
+      [
+        "run-instructions.ts buildRunInstructions",
+        ...(inputs.sessionNote ? ["session note"] : []),
+        ...(session.presetNote ? ["workspace model preset"] : []),
+        ...(localInstructions ? ["workspace-local instructions"] : []),
+      ],
+      "pi-runner.ts instruction composition",
+    ),
   };
 
   const doc: EffectiveConfig = {
@@ -376,7 +498,8 @@ export async function buildSessionEffectiveConfig(
       archived: !!session.archived,
     },
     resolvedAt: new Date().toISOString(),
-    caveat: "A forecast of the next turn. Account selection and fallback routing are resolved again at dispatch.",
+    caveat:
+      "A forecast of the next turn. Account selection and fallback routing are resolved again at dispatch.",
     execution,
     gate,
     model,
@@ -391,7 +514,10 @@ export async function buildSessionEffectiveConfig(
   };
   if (opts.verbose) {
     const { ASK_BASH_PERMISSIONS } = await import("./runner-shared");
-    doc.tools.bashPolicyRules = row(ASK_BASH_PERMISSIONS, "runner-shared.ts ASK_BASH_PERMISSIONS");
+    doc.tools.bashPolicyRules = row(
+      ASK_BASH_PERMISSIONS,
+      "runner-shared.ts ASK_BASH_PERMISSIONS",
+    );
   }
   return doc;
 }

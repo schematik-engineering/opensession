@@ -2,7 +2,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { expandSkillCommand, skillSearchPaths, SHIPPED_SKILLS_DIR } from "./skill-paths";
+import {
+  expandSkillCommand,
+  skillSearchPaths,
+  SHIPPED_SKILLS_DIR,
+} from "./skill-paths";
 import { searchSkills } from "./skills";
 
 const dirs: string[] = [];
@@ -13,15 +17,24 @@ function workspace(): string {
   return dir;
 }
 
-function writeSkill(root: string, name: string, description: string, body = "Body.") {
+function writeSkill(
+  root: string,
+  name: string,
+  description: string,
+  body = "Body.",
+) {
   const dir = join(root, name);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "SKILL.md"), `---\nname: ${name}\ndescription: ${description}\n---\n\n${body}\n`);
+  writeFileSync(
+    join(dir, "SKILL.md"),
+    `---\nname: ${name}\ndescription: ${description}\n---\n\n${body}\n`,
+  );
   return join(dir, "SKILL.md");
 }
 
 afterEach(() => {
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const dir of dirs.splice(0))
+    rmSync(dir, { recursive: true, force: true });
 });
 
 describe("skillSearchPaths", () => {
@@ -50,7 +63,12 @@ describe("skillSearchPaths", () => {
 describe("expandSkillCommand", () => {
   const ws = () => {
     const root = workspace();
-    const filePath = writeSkill(root, "bro", "Restate plainly", "Say it again, plainly.");
+    const filePath = writeSkill(
+      root,
+      "bro",
+      "Restate plainly",
+      "Say it again, plainly.",
+    );
     return { filePath, baseDir: join(root, "bro") };
   };
 
@@ -59,7 +77,10 @@ describe("expandSkillCommand", () => {
     const skills = [{ name: "bro", filePath, baseDir }];
     const expected =
       `<skill name="bro" location="${filePath}">\n` +
-      `References are relative to ${baseDir}.\n\n# nothing`.replace("# nothing", "Say it again, plainly.\n</skill>");
+      `References are relative to ${baseDir}.\n\n# nothing`.replace(
+        "# nothing",
+        "Say it again, plainly.\n</skill>",
+      );
 
     expect(expandSkillCommand("/bro", skills)).toBe(expected);
     expect(expandSkillCommand("/skill:bro", skills)).toBe(expected);
@@ -67,9 +88,11 @@ describe("expandSkillCommand", () => {
 
   test("arguments ride along after the block", () => {
     const { filePath, baseDir } = ws();
-    expect(expandSkillCommand("/bro the deploy bit", [{ name: "bro", filePath, baseDir }])).toEndWith(
-      "</skill>\n\nthe deploy bit",
-    );
+    expect(
+      expandSkillCommand("/bro the deploy bit", [
+        { name: "bro", filePath, baseDir },
+      ]),
+    ).toEndWith("</skill>\n\nthe deploy bit");
   });
 
   test("anything that is not a loaded skill is left alone", () => {
@@ -77,7 +100,9 @@ describe("expandSkillCommand", () => {
     const skills = [{ name: "bro", filePath, baseDir }];
     expect(expandSkillCommand("/model opus", skills)).toBe("/model opus");
     expect(expandSkillCommand("/brother", skills)).toBe("/brother");
-    expect(expandSkillCommand("look at /bro in the docs", skills)).toBe("look at /bro in the docs");
+    expect(expandSkillCommand("look at /bro in the docs", skills)).toBe(
+      "look at /bro in the docs",
+    );
   });
 });
 
@@ -93,28 +118,44 @@ describe("searchSkills", () => {
       "vercel-react-best-practices",
       "vercel-composition-patterns",
     ]) {
-      const shipped = searchSkills(undefined, name).filter((s) => s.name === name);
+      const shipped = searchSkills(undefined, name).filter(
+        (s) => s.name === name,
+      );
       expect(shipped.map((s) => s.source)).toEqual(["user"]);
     }
   });
 
   test("a checkout's own skill shadows the shipped one of the same name", () => {
     const ws = workspace();
-    writeSkill(join(ws, ".agents", "skills"), "simplify", "The checkout's own take");
+    writeSkill(
+      join(ws, ".agents", "skills"),
+      "simplify",
+      "The checkout's own take",
+    );
 
-    expect(searchSkills(ws, "simplify").filter((s) => s.name === "simplify")).toEqual([
-      { name: "simplify", description: "The checkout's own take", source: "project" },
+    expect(
+      searchSkills(ws, "simplify").filter((s) => s.name === "simplify"),
+    ).toEqual([
+      {
+        name: "simplify",
+        description: "The checkout's own take",
+        source: "project",
+      },
     ]);
   });
 
   test("builtin commands only join the menu for an existing session", () => {
     const ws = workspace();
     const named = (name: string, includeBuiltins: boolean) =>
-      searchSkills(ws, name, 24, includeBuiltins).filter((s) => s.name === name);
+      searchSkills(ws, name, 24, includeBuiltins).filter(
+        (s) => s.name === name,
+      );
 
     expect(named("model", false)).toEqual([]);
     expect(named("model", true).map((s) => s.source)).toEqual(["builtin"]);
     expect(named("poteto-mode", false).map((s) => s.source)).toEqual(["user"]);
-    expect(named("poteto-mode", true).map((s) => s.source)).toEqual(["builtin"]);
+    expect(named("poteto-mode", true).map((s) => s.source)).toEqual([
+      "builtin",
+    ]);
   });
 });

@@ -35,9 +35,11 @@ afterEach(() => {
       originalModelProvidersConfig;
   if (originalHaikuFallbackModel === undefined)
     delete process.env.OPENSESSION_HAIKU_FALLBACK_MODEL;
-  else process.env.OPENSESSION_HAIKU_FALLBACK_MODEL = originalHaikuFallbackModel;
+  else
+    process.env.OPENSESSION_HAIKU_FALLBACK_MODEL = originalHaikuFallbackModel;
   refreshPickerModels();
-  if (pickerConfigDir) rmSync(pickerConfigDir, { recursive: true, force: true });
+  if (pickerConfigDir)
+    rmSync(pickerConfigDir, { recursive: true, force: true });
   pickerConfigDir = "";
 });
 
@@ -57,9 +59,7 @@ describe("Pi-only model routing", () => {
     expect(toPiModel("openai/gpt-5.5")).toBe("pi/openai/gpt-5.6-sol");
     expect(toPiModel("pi/openai/gpt-5.4-mini")).toBe("pi/openai/gpt-5.6-luna");
     expect(resolveModel("gpt5.5")?.id).toBe("gpt-5.6-sol");
-    expect(resolveModel("pi/openai/gpt-5.5")?.id).toBe(
-      "pi/openai/gpt-5.6-sol",
-    );
+    expect(resolveModel("pi/openai/gpt-5.5")?.id).toBe("pi/openai/gpt-5.6-sol");
   });
 
   test("routes every accepted id to Pi", () => {
@@ -101,12 +101,8 @@ describe("Pi-only model routing", () => {
     );
     refreshPickerModels();
 
-    expect(resolveModel("glm-5.3")?.id).toBe(
-      "pi/openrouter/z-ai/glm-5.3",
-    );
-    expect(resolveModel("GLM 5.3")?.id).toBe(
-      "pi/openrouter/z-ai/glm-5.3",
-    );
+    expect(resolveModel("glm-5.3")?.id).toBe("pi/openrouter/z-ai/glm-5.3");
+    expect(resolveModel("GLM 5.3")?.id).toBe("pi/openrouter/z-ai/glm-5.3");
   });
 
   test("routes GLM-5.3's pre-release id to the official model", () => {
@@ -122,7 +118,9 @@ describe("Pi-only model routing", () => {
   });
 
   test("selects the account pool from Pi's upstream provider", () => {
-    expect(accountProviderForModel("pi/anthropic/claude-opus-5")).toBe("claude");
+    expect(accountProviderForModel("pi/anthropic/claude-opus-5")).toBe(
+      "claude",
+    );
     expect(accountProviderForModel("pi/openai/gpt-5.6-sol")).toBe("codex");
     expect(accountProviderForModel("pi/wafer/glm-5.2")).toBeUndefined();
   });
@@ -139,8 +137,9 @@ describe("Pi-only model routing", () => {
       "pi/openai/gpt-5.6-sol",
     );
     expect(first?.id.startsWith("pi/")).toBe(true);
-    expect(fallbackPlan("pi/anthropic/claude-fable-5", "pi/openai/gpt-5.6-sol"))
-      .toSatisfy((hops) => hops.every((hop) => hop.id.startsWith("pi/")));
+    expect(
+      fallbackPlan("pi/anthropic/claude-fable-5", "pi/openai/gpt-5.6-sol"),
+    ).toSatisfy((hops) => hops.every((hop) => hop.id.startsWith("pi/")));
   });
 
   test("crosses exhausted Haiku sessions to OpenAI", () => {
@@ -172,9 +171,9 @@ describe("Pi-only model routing", () => {
 
     refreshPickerModels();
 
-    const pickerIds = KNOWN_MODELS
-      .filter((model) => model.provider === "pi")
-      .map((model) => model.id);
+    const pickerIds = KNOWN_MODELS.filter(
+      (model) => model.provider === "pi",
+    ).map((model) => model.id);
     expect(pickerIds).toContain("pi/openai/gpt-5.6-sol");
     expect(pickerIds).toContain("pi/anthropic/claude-fable-5");
   });
@@ -182,10 +181,13 @@ describe("Pi-only model routing", () => {
   test("deduplicates retired pickerModels after routing", () => {
     pickerConfigDir = mkdtempSync(join(tmpdir(), "pi-picker-models-"));
     const path = join(pickerConfigDir, "pi.json");
-    writeFileSync(path, JSON.stringify({
-      enabled: true,
-      pickerModels: ["pi/openai/gpt-5.6-sol"],
-    }));
+    writeFileSync(
+      path,
+      JSON.stringify({
+        enabled: true,
+        pickerModels: ["pi/openai/gpt-5.6-sol"],
+      }),
+    );
     process.env.OPENSESSION_PI_CONFIG = path;
 
     refreshPickerModels();

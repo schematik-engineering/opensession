@@ -71,7 +71,8 @@ afterEach(() => {
     if (saved[k] === undefined) delete process.env[k];
     else process.env[k] = saved[k];
   }
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const dir of dirs.splice(0))
+    rmSync(dir, { recursive: true, force: true });
 });
 
 describe("configuredSelfDev parsing", () => {
@@ -173,19 +174,31 @@ describe("Ask checkout default branch invalidation", () => {
     writeFileSync(join(repo, "README.md"), "main\n");
     git("-C", repo, "add", "README.md");
     git(
-      "-C", repo,
-      "-c", "user.name=Test",
-      "-c", "user.email=test@example.com",
-      "commit", "-q", "-m", "main",
+      "-C",
+      repo,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.com",
+      "commit",
+      "-q",
+      "-m",
+      "main",
     );
     git("-C", repo, "checkout", "-q", "-b", "release");
     writeFileSync(join(repo, "README.md"), "release\n");
     git("-C", repo, "add", "README.md");
     git(
-      "-C", repo,
-      "-c", "user.name=Test",
-      "-c", "user.email=test@example.com",
-      "commit", "-q", "-m", "release",
+      "-C",
+      repo,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.com",
+      "commit",
+      "-q",
+      "-m",
+      "release",
     );
     git("-C", repo, "checkout", "-q", "main");
     git("init", "-q", "--bare", remote);
@@ -205,7 +218,9 @@ describe("Ask checkout default branch invalidation", () => {
       process.env.OPENSESSION_CONFIG = config;
     };
     const branchHead = (dir: string, branch: string) =>
-      Bun.spawnSync(["git", "-C", dir, "rev-parse", branch]).stdout.toString().trim();
+      Bun.spawnSync(["git", "-C", dir, "rev-parse", branch])
+        .stdout.toString()
+        .trim();
 
     return { branchHead, repo, repoId, writeConfig };
   }

@@ -82,7 +82,9 @@ export function getSandboxProvider(
     case "modal":
       return modalProvider;
     case "microvm":
-      throw new Error("Local MicroVM has been retired; choose a managed remote provider");
+      throw new Error(
+        "Local MicroVM has been retired; choose a managed remote provider",
+      );
     case "lambda-microvm":
       return lambdaMicrovmProvider;
     default:

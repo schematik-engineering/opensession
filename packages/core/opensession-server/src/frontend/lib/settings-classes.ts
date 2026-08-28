@@ -33,11 +33,11 @@
 import { cn } from "../ui/cn";
 import { SCROLL_EDGE_DIVIDER } from "./app-shell-classes";
 import {
-	SIDEBAR_DENSITY_VARS,
-	SIDEBAR_GROUP,
-	SIDEBAR_HOVER_LAYER,
-	SIDEBAR_RAIL,
-	SIDEBAR_RAIL_GAP,
+  SIDEBAR_DENSITY_VARS,
+  SIDEBAR_GROUP,
+  SIDEBAR_HOVER_LAYER,
+  SIDEBAR_RAIL,
+  SIDEBAR_RAIL_GAP,
 } from "./sidebar-classes";
 
 /**
@@ -57,7 +57,7 @@ export const SETTINGS_PAGE = "relative flex min-h-0 flex-1 bg-sidebar";
  * platform chrome out of browser and phone layouts.
  */
 export const SETTINGS_DRAG_HANDLE =
-	"settings-drag-handle wco-chrome absolute inset-x-0 top-0 z-10 h-[var(--desktop-header-h)]";
+  "settings-drag-handle wco-chrome absolute inset-x-0 top-0 z-10 h-[var(--desktop-header-h)]";
 
 /**
  * The nav column. No fill, no edge: the page under it is already the sidebar
@@ -69,8 +69,7 @@ export const SETTINGS_DRAG_HANDLE =
  * attribute this element deliberately does not carry: the preference is named
  * "Compact sidebar" and retunes the rail you work in, not a nav you visit.
  */
-export const SETTINGS_NAV =
-	`settings-nav flex w-58 shrink-0 flex-col px-3 py-4 ${SIDEBAR_DENSITY_VARS}`;
+export const SETTINGS_NAV = `settings-nav flex w-58 shrink-0 flex-col px-3 py-4 ${SIDEBAR_DENSITY_VARS}`;
 
 /**
  * The nav's search field, and the seam it grows once the section list travels
@@ -89,7 +88,10 @@ export const SETTINGS_NAV =
  * half-scrolled row off the field's edge, and the list's own `pt-2` matches it
  * at rest, so the line lands centred in the gap it appears in.
  */
-export const SETTINGS_NAV_SEARCH = cn(SCROLL_EDGE_DIVIDER, "pb-2 after:-inset-x-3");
+export const SETTINGS_NAV_SEARCH = cn(
+  SCROLL_EDGE_DIVIDER,
+  "pb-2 after:-inset-x-3",
+);
 
 /**
  * The scrolling section list, and one group inside it.
@@ -102,7 +104,7 @@ export const SETTINGS_NAV_SEARCH = cn(SCROLL_EDGE_DIVIDER, "pb-2 after:-inset-x-
  * track down the middle of the window cuts the nav off from the content.
  */
 export const SETTINGS_NAV_LIST =
-	"-mx-1.5 flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden";
+  "-mx-1.5 flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto pt-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden";
 
 export const SETTINGS_NAV_GROUP = `flex flex-col ${SIDEBAR_GROUP}`;
 
@@ -113,7 +115,7 @@ export const SETTINGS_NAV_GROUP = `flex flex-col ${SIDEBAR_GROUP}`;
  * typographic idea (a small-caps label) from the one the sidebar uses.
  */
 export const SETTINGS_NAV_CAPTION =
-	"flex h-[var(--sidebar-cap-h)] shrink-0 items-center px-2.5 text-label font-semibold text-dim";
+  "flex h-[var(--sidebar-cap-h)] shrink-0 items-center px-2.5 text-label font-semibold text-dim";
 
 /**
  * "Back to app" is the first row of the nav, and now a member of the row family
@@ -124,8 +126,7 @@ export const SETTINGS_NAV_CAPTION =
  * already measures its container plus those two negative margins; `w-full`
  * would size it to the container alone and pull the pill back in on the right.
  */
-export const SETTINGS_BACK =
-	`group -mx-1.5 mb-2 flex cursor-pointer items-center ${SIDEBAR_RAIL_GAP} rounded-row border-none bg-transparent py-[var(--sidebar-row-pad)] pr-2 pl-2.5 text-left text-item-title font-medium text-dim hover:text-fg ${SIDEBAR_HOVER_LAYER}`;
+export const SETTINGS_BACK = `group -mx-1.5 mb-2 flex cursor-pointer items-center ${SIDEBAR_RAIL_GAP} rounded-row border-none bg-transparent py-[var(--sidebar-row-pad)] pr-2 pl-2.5 text-left text-item-title font-medium text-dim hover:text-fg ${SIDEBAR_HOVER_LAYER}`;
 
 /**
  * The scrolling content column beside the nav. `tool` sections fill it
@@ -144,12 +145,12 @@ export const SETTINGS_BACK =
  * cuts.
  */
 export const SETTINGS_CONTENT =
-	"settings-content flex min-w-0 flex-1 justify-center overflow-y-auto border-l border-divider bg-surface px-8 pt-11 desktop:[box-shadow:var(--content-edge-shadow)]";
+  "settings-content flex min-w-0 flex-1 justify-center overflow-y-auto border-l border-divider bg-surface px-8 pt-11 desktop:[box-shadow:var(--content-edge-shadow)]";
 export const SETTINGS_CONTENT_TOOL = "settings-content-tool min-h-0 p-0";
 
 /** Same column inside the phone sheet — a phone gutter instead of the desktop one. */
 export const SETTINGS_CONTENT_SHEET =
-	"flex min-h-0 min-w-0 flex-1 justify-center overflow-y-auto px-2 pt-4";
+  "flex min-h-0 min-w-0 flex-1 justify-center overflow-y-auto px-2 pt-4";
 
 /** The reading column a settings panel sits in, and its bottom air. */
 export const SETTINGS_PANEL_FRAME = "w-full max-w-[720px] self-start pb-22";
@@ -160,8 +161,10 @@ export const SETTINGS_PANEL_FRAME = "w-full max-w-[720px] self-start pb-22";
  * a card is narrow enough that the sentence saying what it does gets cut off
  * mid-word. The measure that matters here is the card's, not the paragraph's.
  */
-export const SETTINGS_PANEL_FRAME_GALLERY = "w-full max-w-[980px] self-start pb-22";
-export const SETTINGS_PANEL_FRAME_SHEET = "w-full max-w-[720px] self-start pb-12";
+export const SETTINGS_PANEL_FRAME_GALLERY =
+  "w-full max-w-[980px] self-start pb-22";
+export const SETTINGS_PANEL_FRAME_SHEET =
+  "w-full max-w-[720px] self-start pb-12";
 
 /**
  * The phone sheet's section list and the search bar floating over its bottom
@@ -181,16 +184,16 @@ export const SETTINGS_PANEL_FRAME_SHEET = "w-full max-w-[720px] self-start pb-12
 export const SETTINGS_SHEET_LIST = "h-full overflow-y-auto px-4 pb-[72px]";
 
 export const SETTINGS_SHEET_SEARCH_BAR =
-	"absolute inset-x-0 bottom-0 z-1 px-4 pb-2.5 pt-2 " +
-	"before:pointer-events-none before:absolute before:inset-x-0 before:bottom-0 " +
-	"before:top-auto before:z-[-1] before:h-[calc(100%+30px)] before:content-[''] " +
-	// Translucent all the way down, not opaque at the base: glass that admits
-	// nothing is just a panel. It only firms up (88%) at the very bottom edge,
-	// where a row would otherwise read THROUGH the field rather than behind it.
-	"before:[background:linear-gradient(to_top,color-mix(in_srgb,var(--bg)_88%,transparent)_0%,color-mix(in_srgb,var(--bg)_76%,transparent)_55%,color-mix(in_srgb,var(--bg)_45%,transparent)_78%,transparent_100%)] " +
-	"before:backdrop-blur-[16px] before:backdrop-saturate-[1.35] " +
-	"before:[-webkit-mask-image:linear-gradient(to_top,#000_0%,#000_62%,transparent_100%)] " +
-	"before:[mask-image:linear-gradient(to_top,#000_0%,#000_62%,transparent_100%)]";
+  "absolute inset-x-0 bottom-0 z-1 px-4 pb-2.5 pt-2 " +
+  "before:pointer-events-none before:absolute before:inset-x-0 before:bottom-0 " +
+  "before:top-auto before:z-[-1] before:h-[calc(100%+30px)] before:content-[''] " +
+  // Translucent all the way down, not opaque at the base: glass that admits
+  // nothing is just a panel. It only firms up (88%) at the very bottom edge,
+  // where a row would otherwise read THROUGH the field rather than behind it.
+  "before:[background:linear-gradient(to_top,color-mix(in_srgb,var(--bg)_88%,transparent)_0%,color-mix(in_srgb,var(--bg)_76%,transparent)_55%,color-mix(in_srgb,var(--bg)_45%,transparent)_78%,transparent_100%)] " +
+  "before:backdrop-blur-[16px] before:backdrop-saturate-[1.35] " +
+  "before:[-webkit-mask-image:linear-gradient(to_top,#000_0%,#000_62%,transparent_100%)] " +
+  "before:[mask-image:linear-gradient(to_top,#000_0%,#000_62%,transparent_100%)]";
 
 /**
  * A row in the settings navigation: the section list and the account block
@@ -208,8 +211,7 @@ export const SETTINGS_SHEET_SEARCH_BAR =
  * selected row lifts it instead of swapping one wash for a lighter one. See
  * SIDEBAR_HOVER_LAYER, which explains why that has to be a layer.
  */
-export const SETTINGS_NAV_ROW =
-	`group mt-0.5 flex w-full cursor-pointer items-center ${SIDEBAR_RAIL_GAP} rounded-row border-none bg-transparent py-[var(--sidebar-row-pad)] pr-2 pl-2.5 text-left text-item-title font-medium text-dim hover:text-fg data-active:bg-selected data-active:text-fg ${SIDEBAR_HOVER_LAYER}`;
+export const SETTINGS_NAV_ROW = `group mt-0.5 flex w-full cursor-pointer items-center ${SIDEBAR_RAIL_GAP} rounded-row border-none bg-transparent py-[var(--sidebar-row-pad)] pr-2 pl-2.5 text-left text-item-title font-medium text-dim hover:text-fg data-active:bg-selected data-active:text-fg ${SIDEBAR_HOVER_LAYER}`;
 
 /**
  * The row's glyph well: the sidebar's 22px rail, not an 18px box. The glyphs
@@ -217,5 +219,4 @@ export const SETTINGS_NAV_ROW =
  * every settings label on the same left edge as every sidebar title, and it
  * centres each mark on that column.
  */
-export const SETTINGS_NAV_ICON =
-	`${SIDEBAR_RAIL} text-faint group-hover:text-fg group-data-active:text-fg`;
+export const SETTINGS_NAV_ICON = `${SIDEBAR_RAIL} text-faint group-hover:text-fg group-data-active:text-fg`;

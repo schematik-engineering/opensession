@@ -6,7 +6,10 @@ import {
 
 const servers: Array<{ stop(closeActiveConnections?: boolean): void }> = [];
 
-async function until(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
+async function until(
+  predicate: () => boolean,
+  timeoutMs = 1_000,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {
     if (Date.now() >= deadline) throw new Error("condition was not reached");
@@ -34,7 +37,9 @@ describe("gateway TCP proxy", () => {
       hostname: "127.0.0.1",
       port: 0,
       fetch(request, server) {
-        return server.upgrade(request) ? undefined : new Response("upgrade required", { status: 426 });
+        return server.upgrade(request)
+          ? undefined
+          : new Response("upgrade required", { status: 426 });
       },
       websocket: {
         message(socket, message) {
@@ -85,8 +90,9 @@ describe("gateway TCP proxy", () => {
       },
     });
     servers.push(proxy);
-    expect(await fetch(`http://127.0.0.1:${proxy.port}/`).then((r) => r.text()))
-      .toBe("stable");
+    expect(
+      await fetch(`http://127.0.0.1:${proxy.port}/`).then((r) => r.text()),
+    ).toBe("stable");
     expect(backendRequests).toBe(0);
   });
 
@@ -109,8 +115,9 @@ describe("gateway TCP proxy", () => {
     });
     servers.push(proxy);
 
-    expect(await fetch(`http://127.0.0.1:${proxy.port}/`).then((r) => r.text()))
-      .toBe(body);
+    expect(
+      await fetch(`http://127.0.0.1:${proxy.port}/`).then((r) => r.text()),
+    ).toBe(body);
     expect(metrics.fallbackServed).toBe(1);
     expect(metrics.connected).toBe(0);
     expect(metrics.pending).toBe(0);
@@ -130,11 +137,14 @@ describe("gateway TCP proxy", () => {
     });
     servers.push(proxy);
 
-    expect(await fetch(`http://127.0.0.1:${proxy.port}/`).then((r) => r.text()))
-      .toBe("first");
+    expect(
+      await fetch(`http://127.0.0.1:${proxy.port}/`).then((r) => r.text()),
+    ).toBe("first");
 
     first.stop(true);
-    const waiting = fetch(`http://127.0.0.1:${proxy.port}/`).then((r) => r.text());
+    const waiting = fetch(`http://127.0.0.1:${proxy.port}/`).then((r) =>
+      r.text(),
+    );
     await Bun.sleep(25);
     const second = backend("second");
     backendPort = second.port!;
@@ -161,7 +171,9 @@ describe("gateway TCP proxy", () => {
     });
     servers.push(proxy);
 
-    const waiting = fetch(`http://127.0.0.1:${proxy.port}/`).then((response) => response.text());
+    const waiting = fetch(`http://127.0.0.1:${proxy.port}/`).then((response) =>
+      response.text(),
+    );
     await until(() => metrics.unavailableRetries >= 4);
     const available = backend("ready");
     backendPort = available.port!;
@@ -196,8 +208,11 @@ describe("gateway TCP proxy", () => {
     }).catch(() => null);
     await until(() => metrics.pending === 1);
 
-    expect(await fetch(`http://127.0.0.1:${proxy.port}/`).then((response) => response.text()))
-      .toBe("stable");
+    expect(
+      await fetch(`http://127.0.0.1:${proxy.port}/`).then((response) =>
+        response.text(),
+      ),
+    ).toBe("stable");
     void fetch(`http://127.0.0.1:${proxy.port}/api/rejected`, {
       signal: AbortSignal.timeout(500),
     }).catch(() => null);

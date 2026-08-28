@@ -16,17 +16,18 @@ import { sessionSourceName } from "../../lib/brand";
  * 1.5-stroke icon set.
  */
 export function OriginMark({ source }: { source?: string | null }) {
-	if (!source || source === "opensession" || source === "backstage") return null;
-	if (!brandLogo(source)) return null;
-	const label = `From ${sessionSourceName(source)}`;
-	return (
-		<span
-			className="ml-1 flex shrink-0 items-center text-faint"
-			role="img"
-			aria-label={label}
-			title={label}
-		>
-			<BrandMark name={source} size={13} />
-		</span>
-	);
+  if (!source || source === "opensession" || source === "backstage")
+    return null;
+  if (!brandLogo(source)) return null;
+  const label = `From ${sessionSourceName(source)}`;
+  return (
+    <span
+      className="ml-1 flex shrink-0 items-center text-faint"
+      role="img"
+      aria-label={label}
+      title={label}
+    >
+      <BrandMark name={source} size={13} />
+    </span>
+  );
 }

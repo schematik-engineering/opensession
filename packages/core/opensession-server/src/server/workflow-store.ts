@@ -16,14 +16,20 @@
  * take down a store write.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from "fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+} from "fs";
 import { stateDir } from "./paths";
 import { writeFileAtomic, writeJsonAtomic } from "./shared/atomic-write";
 import { broadcastToSession } from "./ws-hub";
 import {
-	WORKFLOW_LIMITS,
-	type WorkflowJournalRecord,
-	type WorkflowRunSnapshot,
+  WORKFLOW_LIMITS,
+  type WorkflowJournalRecord,
+  type WorkflowRunSnapshot,
 } from "./workflow-types";
 
 const g = globalThis as any;
@@ -32,14 +38,14 @@ type LiveWorkflow = { snapshot: WorkflowRunSnapshot; cancel: () => void };
 
 /** runId → live snapshot + cancel hook (hot-reload survivable). */
 const liveWorkflows: Map<string, LiveWorkflow> = (g.__opensessionWorkflows ??=
-	new Map());
+  new Map());
 
 function workflowsDir(): string {
-	return process.env.OPENSESSION_WORKFLOWS_DIR || stateDir("workflows");
+  return process.env.OPENSESSION_WORKFLOWS_DIR || stateDir("workflows");
 }
 
 function runDir(runId: string): string {
-	return `${workflowsDir()}/${runId}`;
+  return `${workflowsDir()}/${runId}`;
 }
 
 // readdir results for the list scan, invalidated on create and after a short
@@ -49,51 +55,51 @@ let direntCache: { dir: string; at: number; names: string[] } | null = null;
 const DIRENT_CACHE_MS = 2_000;
 
 function runIdsOnDisk(): string[] {
-	const dir = workflowsDir();
-	const now = Date.now();
-	if (
-		direntCache &&
-		direntCache.dir === dir &&
-		now - direntCache.at < DIRENT_CACHE_MS
-	) {
-		return direntCache.names;
-	}
-	let names: string[] = [];
-	try {
-		names = readdirSync(dir).filter((name) => name.startsWith("wf-"));
-	} catch {}
-	direntCache = { dir, at: now, names };
-	return names;
+  const dir = workflowsDir();
+  const now = Date.now();
+  if (
+    direntCache &&
+    direntCache.dir === dir &&
+    now - direntCache.at < DIRENT_CACHE_MS
+  ) {
+    return direntCache.names;
+  }
+  let names: string[] = [];
+  try {
+    names = readdirSync(dir).filter((name) => name.startsWith("wf-"));
+  } catch {}
+  direntCache = { dir, at: now, names };
+  return names;
 }
 
 function readRunJson(runId: string): WorkflowRunSnapshot | undefined {
-	try {
-		return JSON.parse(
-			readFileSync(`${runDir(runId)}/run.json`, "utf-8"),
-		) as WorkflowRunSnapshot;
-	} catch {
-		return undefined;
-	}
+  try {
+    return JSON.parse(
+      readFileSync(`${runDir(runId)}/run.json`, "utf-8"),
+    ) as WorkflowRunSnapshot;
+  } catch {
+    return undefined;
+  }
 }
 
 function persistSnapshot(snapshot: WorkflowRunSnapshot): void {
-	mkdirSync(runDir(snapshot.runId), { recursive: true });
-	writeJsonAtomic(`${runDir(snapshot.runId)}/run.json`, snapshot);
+  mkdirSync(runDir(snapshot.runId), { recursive: true });
+  writeJsonAtomic(`${runDir(snapshot.runId)}/run.json`, snapshot);
 }
 
 function broadcastSnapshot(snapshot: WorkflowRunSnapshot): void {
-	// ws-hub must never crash a store write.
-	try {
-		broadcastToSession(snapshot.sessionId, {
-			type: "workflow_update",
-			sessionId: snapshot.sessionId,
-			run: snapshot,
-		});
-	} catch {}
+  // ws-hub must never crash a store write.
+  try {
+    broadcastToSession(snapshot.sessionId, {
+      type: "workflow_update",
+      sessionId: snapshot.sessionId,
+      run: snapshot,
+    });
+  } catch {}
 }
 
 function truncate(text: string, max: number): string {
-	return text.length > max ? text.slice(0, max) + "…" : text;
+  return text.length > max ? text.slice(0, max) + "…" : text;
 }
 
 /** Keep snapshot payloads bounded no matter what a mutator wrote — the
@@ -101,158 +107,161 @@ function truncate(text: string, max: number): string {
  *  mutation, so every string a script can influence (labels, log lines,
  *  errors, phase titles) gets capped here, not just the previews. */
 function enforceSnapshotLimits(snapshot: WorkflowRunSnapshot): void {
-	for (const agent of snapshot.agents) {
-		agent.label = truncate(agent.label || "", 200);
-		agent.promptPreview = truncate(
-			agent.promptPreview || "",
-			WORKFLOW_LIMITS.previewChars,
-		);
-		if (agent.resultPreview !== undefined) {
-			agent.resultPreview = truncate(
-				agent.resultPreview,
-				WORKFLOW_LIMITS.previewChars,
-			);
-		}
-		if (agent.error !== undefined) agent.error = truncate(agent.error, 1000);
-	}
-	if (snapshot.error !== undefined)
-		snapshot.error = truncate(snapshot.error, 2000);
-	if (snapshot.phases.length > 100) snapshot.phases = snapshot.phases.slice(0, 100);
-	if (snapshot.logs.length > WORKFLOW_LIMITS.maxLogLines) {
-		snapshot.logs = snapshot.logs.slice(-WORKFLOW_LIMITS.maxLogLines);
-	}
-	for (const l of snapshot.logs) l.message = truncate(l.message, 500);
+  for (const agent of snapshot.agents) {
+    agent.label = truncate(agent.label || "", 200);
+    agent.promptPreview = truncate(
+      agent.promptPreview || "",
+      WORKFLOW_LIMITS.previewChars,
+    );
+    if (agent.resultPreview !== undefined) {
+      agent.resultPreview = truncate(
+        agent.resultPreview,
+        WORKFLOW_LIMITS.previewChars,
+      );
+    }
+    if (agent.error !== undefined) agent.error = truncate(agent.error, 1000);
+  }
+  if (snapshot.error !== undefined)
+    snapshot.error = truncate(snapshot.error, 2000);
+  if (snapshot.phases.length > 100)
+    snapshot.phases = snapshot.phases.slice(0, 100);
+  if (snapshot.logs.length > WORKFLOW_LIMITS.maxLogLines) {
+    snapshot.logs = snapshot.logs.slice(-WORKFLOW_LIMITS.maxLogLines);
+  }
+  for (const l of snapshot.logs) l.message = truncate(l.message, 500);
 }
 
 export function createWorkflowRun(init: {
-	runId: string;
-	sessionId: string;
-	name: string;
-	description?: string;
-	phases: string[];
-	user?: string;
-	cwd: string;
-	script: string;
+  runId: string;
+  sessionId: string;
+  name: string;
+  description?: string;
+  phases: string[];
+  user?: string;
+  cwd: string;
+  script: string;
 }): WorkflowRunSnapshot {
-	const snapshot: WorkflowRunSnapshot = {
-		runId: init.runId,
-		sessionId: init.sessionId,
-		name: init.name,
-		...(init.description !== undefined ? { description: init.description } : {}),
-		status: "running",
-		phases: [...init.phases],
-		agents: [],
-		logs: [],
-		startedAt: new Date().toISOString(),
-		totals: { agents: 0, tokensIn: 0, tokensOut: 0 },
-		...(init.user !== undefined ? { user: init.user } : {}),
-		cwd: init.cwd,
-	};
-	persistSnapshot(snapshot);
-	writeFileAtomic(`${runDir(init.runId)}/script.mjs`, init.script);
-	direntCache = null;
-	// Park the snapshot in the live map now; registerLiveWorkflow fills in the
-	// real cancel hook once the runner has one.
-	const existing = liveWorkflows.get(init.runId);
-	liveWorkflows.set(init.runId, {
-		snapshot,
-		cancel: existing?.cancel ?? (() => {}),
-	});
-	broadcastSnapshot(snapshot);
-	return snapshot;
+  const snapshot: WorkflowRunSnapshot = {
+    runId: init.runId,
+    sessionId: init.sessionId,
+    name: init.name,
+    ...(init.description !== undefined
+      ? { description: init.description }
+      : {}),
+    status: "running",
+    phases: [...init.phases],
+    agents: [],
+    logs: [],
+    startedAt: new Date().toISOString(),
+    totals: { agents: 0, tokensIn: 0, tokensOut: 0 },
+    ...(init.user !== undefined ? { user: init.user } : {}),
+    cwd: init.cwd,
+  };
+  persistSnapshot(snapshot);
+  writeFileAtomic(`${runDir(init.runId)}/script.mjs`, init.script);
+  direntCache = null;
+  // Park the snapshot in the live map now; registerLiveWorkflow fills in the
+  // real cancel hook once the runner has one.
+  const existing = liveWorkflows.get(init.runId);
+  liveWorkflows.set(init.runId, {
+    snapshot,
+    cancel: existing?.cancel ?? (() => {}),
+  });
+  broadcastSnapshot(snapshot);
+  return snapshot;
 }
 
 /** Apply a mutation, persist run.json, broadcast. Returns the snapshot, or
  *  undefined when the run doesn't exist (live or on disk). */
 export function updateWorkflowRun(
-	runId: string,
-	mutate: (s: WorkflowRunSnapshot) => void,
+  runId: string,
+  mutate: (s: WorkflowRunSnapshot) => void,
 ): WorkflowRunSnapshot | undefined {
-	const snapshot = liveWorkflows.get(runId)?.snapshot ?? readRunJson(runId);
-	if (!snapshot) return undefined;
-	mutate(snapshot);
-	enforceSnapshotLimits(snapshot);
-	persistSnapshot(snapshot);
-	broadcastSnapshot(snapshot);
-	return snapshot;
+  const snapshot = liveWorkflows.get(runId)?.snapshot ?? readRunJson(runId);
+  if (!snapshot) return undefined;
+  mutate(snapshot);
+  enforceSnapshotLimits(snapshot);
+  persistSnapshot(snapshot);
+  broadcastSnapshot(snapshot);
+  return snapshot;
 }
 
 export function getWorkflowRun(runId: string): WorkflowRunSnapshot | undefined {
-	return liveWorkflows.get(runId)?.snapshot ?? readRunJson(runId);
+  return liveWorkflows.get(runId)?.snapshot ?? readRunJson(runId);
 }
 
 /** The run's script source (script.mjs), for resume without a new script. */
 export function readWorkflowScript(runId: string): string | undefined {
-	try {
-		return readFileSync(`${runDir(runId)}/script.mjs`, "utf8");
-	} catch {
-		return undefined;
-	}
+  try {
+    return readFileSync(`${runDir(runId)}/script.mjs`, "utf8");
+  } catch {
+    return undefined;
+  }
 }
 
 /** All of a session's runs, newest first. */
 export function listWorkflowRunsForSession(
-	sessionId: string,
+  sessionId: string,
 ): WorkflowRunSnapshot[] {
-	const runs: WorkflowRunSnapshot[] = [];
-	for (const runId of runIdsOnDisk()) {
-		const snapshot = liveWorkflows.get(runId)?.snapshot ?? readRunJson(runId);
-		if (snapshot?.sessionId === sessionId) runs.push(snapshot);
-	}
-	runs.sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1));
-	return runs;
+  const runs: WorkflowRunSnapshot[] = [];
+  for (const runId of runIdsOnDisk()) {
+    const snapshot = liveWorkflows.get(runId)?.snapshot ?? readRunJson(runId);
+    if (snapshot?.sessionId === sessionId) runs.push(snapshot);
+  }
+  runs.sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1));
+  return runs;
 }
 
 export function appendWorkflowJournal(
-	runId: string,
-	entry: WorkflowJournalRecord,
+  runId: string,
+  entry: WorkflowJournalRecord,
 ): void {
-	mkdirSync(runDir(runId), { recursive: true });
-	appendFileSync(
-		`${runDir(runId)}/journal.jsonl`,
-		JSON.stringify(entry) + "\n",
-	);
+  mkdirSync(runDir(runId), { recursive: true });
+  appendFileSync(
+    `${runDir(runId)}/journal.jsonl`,
+    JSON.stringify(entry) + "\n",
+  );
 }
 
 /** Journal entries in append order; a partial/corrupt trailing line (crash
  *  mid-append) is skipped, not fatal. */
 export function readWorkflowJournal(runId: string): WorkflowJournalRecord[] {
-	const path = `${runDir(runId)}/journal.jsonl`;
-	if (!existsSync(path)) return [];
-	const entries: WorkflowJournalRecord[] = [];
-	for (const line of readFileSync(path, "utf-8").split("\n")) {
-		if (!line.trim()) continue;
-		try {
-			entries.push(JSON.parse(line) as WorkflowJournalRecord);
-		} catch {}
-	}
-	return entries;
+  const path = `${runDir(runId)}/journal.jsonl`;
+  if (!existsSync(path)) return [];
+  const entries: WorkflowJournalRecord[] = [];
+  for (const line of readFileSync(path, "utf-8").split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      entries.push(JSON.parse(line) as WorkflowJournalRecord);
+    } catch {}
+  }
+  return entries;
 }
 
 export function registerLiveWorkflow(runId: string, cancel: () => void): void {
-	const existing = liveWorkflows.get(runId);
-	if (existing) {
-		existing.cancel = cancel;
-		return;
-	}
-	const snapshot = readRunJson(runId);
-	if (snapshot) liveWorkflows.set(runId, { snapshot, cancel });
+  const existing = liveWorkflows.get(runId);
+  if (existing) {
+    existing.cancel = cancel;
+    return;
+  }
+  const snapshot = readRunJson(runId);
+  if (snapshot) liveWorkflows.set(runId, { snapshot, cancel });
 }
 
 export function unregisterLiveWorkflow(runId: string): void {
-	liveWorkflows.delete(runId);
+  liveWorkflows.delete(runId);
 }
 
 /** Invoke a live run's cancel hook. False when the run isn't live here. */
 export function cancelLiveWorkflow(runId: string): boolean {
-	const live = liveWorkflows.get(runId);
-	if (!live) return false;
-	try {
-		live.cancel();
-	} catch (e) {
-		console.warn(`[workflow] cancel hook for ${runId} threw:`, e);
-	}
-	return true;
+  const live = liveWorkflows.get(runId);
+  if (!live) return false;
+  try {
+    live.cancel();
+  } catch (e) {
+    console.warn(`[workflow] cancel hook for ${runId} threw:`, e);
+  }
+  return true;
 }
 
 /** Boot pass: a run.json still "running" with no live entry died with the
@@ -260,25 +269,25 @@ export function cancelLiveWorkflow(runId: string): boolean {
  *  (Callers guard this behind the boot flag; the function itself is safe to
  *  re-run.) */
 export function markInterruptedWorkflows(): void {
-	direntCache = null;
-	for (const runId of runIdsOnDisk()) {
-		if (liveWorkflows.has(runId)) continue;
-		const snapshot = readRunJson(runId);
-		if (!snapshot || snapshot.status !== "running") continue;
-		snapshot.status = "interrupted";
-		snapshot.endedAt = new Date().toISOString();
-		for (const agent of snapshot.agents) {
-			if (agent.status === "pending" || agent.status === "running") {
-				agent.status = "cancelled";
-				agent.endedAt = snapshot.endedAt;
-			}
-		}
-		try {
-			persistSnapshot(snapshot);
-		} catch (e) {
-			console.warn(`[workflow] failed to mark ${runId} interrupted:`, e);
-			continue;
-		}
-		broadcastSnapshot(snapshot);
-	}
+  direntCache = null;
+  for (const runId of runIdsOnDisk()) {
+    if (liveWorkflows.has(runId)) continue;
+    const snapshot = readRunJson(runId);
+    if (!snapshot || snapshot.status !== "running") continue;
+    snapshot.status = "interrupted";
+    snapshot.endedAt = new Date().toISOString();
+    for (const agent of snapshot.agents) {
+      if (agent.status === "pending" || agent.status === "running") {
+        agent.status = "cancelled";
+        agent.endedAt = snapshot.endedAt;
+      }
+    }
+    try {
+      persistSnapshot(snapshot);
+    } catch (e) {
+      console.warn(`[workflow] failed to mark ${runId} interrupted:`, e);
+      continue;
+    }
+    broadcastSnapshot(snapshot);
+  }
 }

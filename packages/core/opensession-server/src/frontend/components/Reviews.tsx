@@ -36,30 +36,30 @@ const STATE_RANK: Record<string, number> = { OPEN: 0, CLOSED: 1, MERGED: 2 };
    `desktop:max-[1180px]` keeps it independent of how Tailwind happens to
    order two max-* variants against each other. */
 const ROW =
-	"grid w-full grid-cols-[92px_minmax(0,1fr)_156px_132px_116px_132px_78px] items-center gap-3.5 border-b border-line px-[22px] text-left max-[1180px]:grid-cols-[88px_minmax(0,1fr)_150px_118px_78px]";
+  "grid w-full grid-cols-[92px_minmax(0,1fr)_156px_132px_116px_132px_78px] items-center gap-3.5 border-b border-line px-[22px] text-left max-[1180px]:grid-cols-[88px_minmax(0,1fr)_150px_118px_78px]";
 
-const C_STATE = "flex items-center gap-[7px] text-meta font-medium phone:order-1";
+const C_STATE =
+  "flex items-center gap-[7px] text-meta font-medium phone:order-1";
 const C_TITLE =
-	"flex min-w-0 flex-col gap-[3px] phone:order-2 phone:flex-[1_1_calc(100%-90px)]";
+  "flex min-w-0 flex-col gap-[3px] phone:order-2 phone:flex-[1_1_calc(100%-90px)]";
 const C_CHECKS = "phone:order-3 phone:inline-flex";
 const C_CHANGES =
-	"phone:order-4 phone:inline-flex phone:flex-row phone:items-center phone:gap-2";
-const C_REVIEW =
-	"desktop:max-[1180px]:hidden phone:order-5 phone:inline-flex";
+  "phone:order-4 phone:inline-flex phone:flex-row phone:items-center phone:gap-2";
+const C_REVIEW = "desktop:max-[1180px]:hidden phone:order-5 phone:inline-flex";
 const C_AUTHOR =
-	"flex min-w-0 items-center gap-2 desktop:max-[1180px]:hidden phone:order-6 phone:inline-flex";
+  "flex min-w-0 items-center gap-2 desktop:max-[1180px]:hidden phone:order-6 phone:inline-flex";
 const C_UPDATED =
-	"text-meta whitespace-nowrap text-faint tabular-nums phone:order-7 phone:ml-auto";
+  "text-meta whitespace-nowrap text-faint tabular-nums phone:order-7 phone:ml-auto";
 
 /** "—" and other absent values, wherever a cell has nothing to say. */
 const DIM = "text-meta text-faint";
 
 /** Ink per PR state — replaces the render-time `rv-state-${key}`. */
 const STATE_TONE: Record<string, string> = {
-	open: "text-green",
-	draft: "text-dim",
-	merged: "text-purple",
-	closed: "text-red",
+  open: "text-green",
+  draft: "text-dim",
+  merged: "text-purple",
+  closed: "text-red",
 };
 
 type ChecksTone = "pass" | "fail" | "pending";
@@ -70,12 +70,12 @@ type ChecksTone = "pass" | "fail" | "pending";
  *  in the reduced-motion exceptions, so dropping it would freeze the one dot
  *  that means "still running". */
 const CHECKS_TONE: Record<ChecksTone, { dot: string; label: string }> = {
-	pass: { dot: "bg-green", label: "text-green" },
-	fail: { dot: "bg-red", label: "text-red" },
-	pending: {
-		dot: "bg-yellow rv-check-dot-pending animate-[pulse_1.4s_ease-in-out_infinite]",
-		label: "text-yellow",
-	},
+  pass: { dot: "bg-green", label: "text-green" },
+  fail: { dot: "bg-red", label: "text-red" },
+  pending: {
+    dot: "bg-yellow rv-check-dot-pending animate-[pulse_1.4s_ease-in-out_infinite]",
+    label: "text-yellow",
+  },
 };
 
 function prNum(s: UnifiedSession): string | null {
@@ -111,7 +111,12 @@ function needsReview(s: UnifiedSession): boolean {
 
 /** A GitHub-style icon for a PR's open/merged/closed/draft state. */
 function StateIcon({ kind }: { kind: string }) {
-  const common = { width: 15, height: 15, viewBox: "0 0 16 16", fill: "currentColor" as const };
+  const common = {
+    width: 15,
+    height: 15,
+    viewBox: "0 0 16 16",
+    fill: "currentColor" as const,
+  };
   if (kind === "merged")
     return (
       <svg {...common} aria-hidden>
@@ -136,7 +141,8 @@ function StateIcon({ kind }: { kind: string }) {
 function ChecksCell({ s }: { s: UnifiedSession }) {
   const c = s.prChecks;
   if (!c || c.total === 0) return <span className={DIM}>–</span>;
-  const tone: ChecksTone = c.failed > 0 ? "fail" : c.pending > 0 ? "pending" : "pass";
+  const tone: ChecksTone =
+    c.failed > 0 ? "fail" : c.pending > 0 ? "pending" : "pass";
   const label =
     tone === "fail"
       ? `${c.failed} failing`
@@ -149,8 +155,12 @@ function ChecksCell({ s }: { s: UnifiedSession }) {
       className="inline-flex items-center gap-[7px] text-meta"
       title={`${c.passed} passed · ${c.failed} failed · ${c.pending} pending · ${c.total} total`}
     >
-      <span className={`size-2 shrink-0 rounded-full ${CHECKS_TONE[tone].dot}`} />
-      <span className={`whitespace-nowrap ${CHECKS_TONE[tone].label}`}>{label}</span>
+      <span
+        className={`size-2 shrink-0 rounded-full ${CHECKS_TONE[tone].dot}`}
+      />
+      <span className={`whitespace-nowrap ${CHECKS_TONE[tone].label}`}>
+        {label}
+      </span>
       <span
         className="inline-flex h-1 w-[46px] shrink-0 overflow-hidden rounded-full bg-active phone:hidden"
         aria-hidden
@@ -167,7 +177,8 @@ function ReviewCell({ s }: { s: UnifiedSession }) {
   const d = s.prReviewDecision || "";
   const review = "text-meta font-medium whitespace-nowrap";
   if ((s.prState || "OPEN") !== "OPEN") return <span className={DIM}>–</span>;
-  if (d === "APPROVED") return <span className={`${review} text-green`}>Approved</span>;
+  if (d === "APPROVED")
+    return <span className={`${review} text-green`}>Approved</span>;
   if (d === "CHANGES_REQUESTED")
     return <span className={`${review} text-yellow`}>Changes</span>;
   if (s.prIsDraft) return <span className={`${review} text-faint`}>Draft</span>;
@@ -228,19 +239,31 @@ export function Reviews({
     for (const s of sessions) {
       if (!s.prUrl || s.archived) continue;
       const existing = byPr.get(s.prUrl);
-      if (!existing || new Date(s.lastActivity) > new Date(existing.lastActivity)) {
+      if (
+        !existing ||
+        new Date(s.lastActivity) > new Date(existing.lastActivity)
+      ) {
         byPr.set(s.prUrl, s);
       }
     }
     return [...byPr.values()].sort((a, b) => {
-      const r = (STATE_RANK[a.prState || ""] ?? 1) - (STATE_RANK[b.prState || ""] ?? 1);
+      const r =
+        (STATE_RANK[a.prState || ""] ?? 1) - (STATE_RANK[b.prState || ""] ?? 1);
       if (r !== 0) return r;
-      return new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime();
+      return (
+        new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime()
+      );
     });
   })();
 
   const counts = (() => {
-    const c = { review: 0, open: 0, merged: 0, closed: 0, all: prSessions.length };
+    const c = {
+      review: 0,
+      open: 0,
+      merged: 0,
+      closed: 0,
+      all: prSessions.length,
+    };
     for (const s of prSessions) {
       const state = s.prState || "OPEN";
       if (state === "OPEN") c.open++;
@@ -288,7 +311,13 @@ export function Reviews({
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.isContentEditable)
+      )
+        return;
       onSelect("");
     };
     window.addEventListener("keydown", onKey);
@@ -296,7 +325,8 @@ export function Reviews({
   }, [hasSelection, onSelect]);
 
   // Only label rows with their repo when the list actually spans repos.
-  const multiRepo = (new Set(prSessions.map((s) => s.repo || "repository")).size > 1);
+  const multiRepo =
+    new Set(prSessions.map((s) => s.repo || "repository")).size > 1;
 
   const TABS: Array<{ key: FilterKey; label: string; count: number }> = [
     { key: "review", label: "Needs review", count: counts.review },
@@ -319,7 +349,13 @@ export function Reviews({
             className="inline-flex items-center gap-1.5 rounded-control border-0 bg-transparent px-2 py-1.5 text-sm font-medium text-fg hover:bg-hover"
             onClick={() => onSelect("")}
           >
-            <svg width="17" height="17" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+            <svg
+              width="17"
+              height="17"
+              viewBox="0 0 16 16"
+              fill="currentColor"
+              aria-hidden
+            >
               <path d="M9.78 12.78a.75.75 0 0 1-1.06 0L4.47 8.53a.75.75 0 0 1 0-1.06l4.25-4.25a.749.749 0 1 1 1.06 1.06L6.06 8l3.72 3.72a.75.75 0 0 1 0 1.06Z" />
             </svg>
             Pull requests
@@ -348,9 +384,17 @@ export function Reviews({
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto phone:overflow-x-hidden">
         <div className="sticky top-0 z-[3] bg-surface px-[22px] pt-4">
           <div className="mb-3 flex items-center justify-between gap-4">
-            <h1 className="m-0 text-section-title font-title tracking-[-0.01em]">Reviews</h1>
+            <h1 className="m-0 text-section-title font-title tracking-[-0.01em]">
+              Reviews
+            </h1>
             <div className="flex w-60 items-center gap-[7px] rounded-md border border-line bg-raised px-2.5 py-1.5 text-faint transition-[border-color,background-color] focus-within:border-line-strong focus-within:bg-panel">
-              <svg width="19" height="19" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+              <svg
+                width="19"
+                height="19"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+                aria-hidden
+              >
                 <path d="M10.68 11.74a6 6 0 0 1-7.922-8.982 6 6 0 0 1 8.982 7.922l3.04 3.04a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215ZM11.5 7a4.499 4.499 0 1 0-8.997 0A4.499 4.499 0 0 0 11.5 7Z" />
               </svg>
               <input
@@ -373,7 +417,9 @@ export function Reviews({
                 <button
                   key={t.key}
                   className={`-mb-px flex items-center gap-[7px] border-b-2 px-[13px] pt-2 pb-[11px] text-label font-medium transition-colors phone:shrink-0 phone:px-3.5 phone:pt-[11px] phone:pb-[13px] phone:text-item-title phone:whitespace-nowrap ${
-                    on ? "border-b-accent text-fg" : "border-b-transparent text-dim hover:text-fg"
+                    on
+                      ? "border-b-accent text-fg"
+                      : "border-b-transparent text-dim hover:text-fg"
                   }`}
                   onClick={() => setFilter(t.key)}
                 >
@@ -411,7 +457,11 @@ export function Reviews({
         {filtered.length === 0 ? (
           <div className="flex flex-1 items-center justify-center">
             <EmptyState
-              title={prSessions.length === 0 ? "No pull requests yet" : "Nothing here"}
+              title={
+                prSessions.length === 0
+                  ? "No pull requests yet"
+                  : "Nothing here"
+              }
             >
               {prSessions.length === 0
                 ? `Pull requests opened by ${AGENT_NAME} sessions show up here.`
@@ -431,7 +481,10 @@ export function Reviews({
                   onClick={() => onSelect(s.id)}
                   role="row"
                 >
-                  <span className={`${C_STATE} ${STATE_TONE[meta.key]}`} role="cell">
+                  <span
+                    className={`${C_STATE} ${STATE_TONE[meta.key]}`}
+                    role="cell"
+                  >
                     <StateIcon kind={meta.key} />
                     <span className="whitespace-nowrap">{meta.label}</span>
                   </span>
@@ -454,7 +507,13 @@ export function Reviews({
                             window.open(s.prUrl, "_blank", "noopener");
                           }}
                         >
-                          <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+                          <svg
+                            width="18"
+                            height="18"
+                            viewBox="0 0 16 16"
+                            fill="currentColor"
+                            aria-hidden
+                          >
                             <path d="M3.75 2h3.5a.75.75 0 0 1 0 1.5h-3.5a.25.25 0 0 0-.25.25v8.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25v-3.5a.75.75 0 0 1 1.5 0v3.5A1.75 1.75 0 0 1 12.25 14h-8.5A1.75 1.75 0 0 1 2 12.25v-8.5C2 2.784 2.784 2 3.75 2Zm6.854-1h4.146a.25.25 0 0 1 .25.25v4.146a.25.25 0 0 1-.427.177L13.03 4.03 9.28 7.78a.751.751 0 0 1-1.06-1.06l3.75-3.75-1.543-1.543A.25.25 0 0 1 10.604 1Z" />
                           </svg>
                         </span>
@@ -462,21 +521,33 @@ export function Reviews({
                     </span>
                     <span className="flex min-w-0 items-center gap-3 text-meta text-faint">
                       {multiRepo && (
-                        <Badge>{s.repo ? repoLabel(s.repo) : "repository"}</Badge>
+                        <Badge>
+                          {s.repo ? repoLabel(s.repo) : "repository"}
+                        </Badge>
                       )}
                       {s.branch && (
                         <span className="inline-flex min-w-0 max-w-full items-center gap-1 overflow-hidden text-meta text-dim [&>svg]:shrink-0 [&>svg]:opacity-70">
-                          <svg width="17" height="17" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+                          <svg
+                            width="17"
+                            height="17"
+                            viewBox="0 0 16 16"
+                            fill="currentColor"
+                            aria-hidden
+                          >
                             <path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z" />
                           </svg>
                           <span className="truncate">{s.branch}</span>
                         </span>
                       )}
                       {s.linearIssue && (
-                        <Badge className="tracking-[0.02em]">{s.linearIssue.identifier}</Badge>
+                        <Badge className="tracking-[0.02em]">
+                          {s.linearIssue.identifier}
+                        </Badge>
                       )}
                       {s.isRunning && (
-                        <span className="shrink-0 text-meta text-yellow">● running</span>
+                        <span className="shrink-0 text-meta text-yellow">
+                          ● running
+                        </span>
                       )}
                     </span>
                   </span>
@@ -495,7 +566,11 @@ export function Reviews({
                         {(() => {
                           // Hosts without user avatars (code.storage) fall back
                           // to an initial instead of a broken <img src="">.
-                          const src = avatarUrl(s.prAuthor, providerFromUrl(s.prUrl), 40);
+                          const src = avatarUrl(
+                            s.prAuthor,
+                            providerFromUrl(s.prUrl),
+                            40,
+                          );
                           return src ? (
                             <img
                               className="size-[22px] shrink-0 rounded-avatar bg-active"
@@ -512,7 +587,9 @@ export function Reviews({
                             </span>
                           );
                         })()}
-                        <span className="truncate text-meta text-dim">{s.prAuthor}</span>
+                        <span className="truncate text-meta text-dim">
+                          {s.prAuthor}
+                        </span>
                       </>
                     ) : (
                       <span className={DIM}>–</span>
@@ -527,7 +604,6 @@ export function Reviews({
           </div>
         )}
       </div>
-
     </div>
   );
 }

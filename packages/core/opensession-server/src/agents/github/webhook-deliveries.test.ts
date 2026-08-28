@@ -39,7 +39,9 @@ describe("GitHub delivery replay protection", () => {
   test("persists delivery ids at the legacy Slack-store path and restores them after a reload", () => {
     const deliveryId = "github-delivery-persists";
     markGithubDeliveryProcessed(deliveryId);
-    expect(githubDeliveriesStore()).toBe(`${scratch}/.slack-sessions/github-deliveries.json`);
+    expect(githubDeliveriesStore()).toBe(
+      `${scratch}/.slack-sessions/github-deliveries.json`,
+    );
     expect(isGithubDeliveryProcessed(deliveryId)).toBe(true);
 
     // A forced load clears the in-memory map first, mirroring a restart.

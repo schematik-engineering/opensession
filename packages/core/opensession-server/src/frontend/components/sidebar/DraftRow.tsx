@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { hasDraft, onDraftsChanged } from "../../lib/drafts";
 import {
-	SIDEBAR_HOVER_LAYER,
-	SIDEBAR_RAIL,
-	SIDEBAR_WS_DRAFT,
-	SIDEBAR_WS_ROW,
+  SIDEBAR_HOVER_LAYER,
+  SIDEBAR_RAIL,
+  SIDEBAR_WS_DRAFT,
+  SIDEBAR_WS_ROW,
 } from "../../lib/sidebar-classes";
 import { cn } from "../../ui/cn";
 import { IconPencil, IconPlus } from "../icons";
@@ -32,43 +32,40 @@ import { SIDEBAR_ROW, SIDEBAR_ROW_TITLE } from "./SidebarItem";
  * the first word you typed and then quietly go stale.
  */
 export function DraftRow({
-	active,
-	onClick,
+  active,
+  onClick,
 }: {
-	active: boolean;
-	onClick: () => void;
+  active: boolean;
+  onClick: () => void;
 }) {
-	const [draft, setDraft] = useState(() => hasDraft("new-session"));
-	useEffect(
-		() => onDraftsChanged(() => setDraft(hasDraft("new-session"))),
-		[],
-	);
-	return (
-		<button
-			className={cn(
-				SIDEBAR_ROW,
-				SIDEBAR_WS_ROW,
-				SIDEBAR_HOVER_LAYER,
-				active && "bg-selected",
-			)}
-			data-sidebar-row=""
-			data-selected={active || undefined}
-			onClick={onClick}
-			aria-label="New session, not started yet"
-		>
-			<span className={SIDEBAR_RAIL}>
-				<IconPlus className="shrink-0 text-faint" size={16} />
-			</span>
-			<span className={SIDEBAR_ROW_TITLE}>New session</span>
-			{draft && (
-				<span
-					className={cn(SIDEBAR_WS_DRAFT, "ml-1.5")}
-					data-ws-draft=""
-					aria-label="Unsent draft"
-				>
-					<IconPencil size={20} />
-				</span>
-			)}
-		</button>
-	);
+  const [draft, setDraft] = useState(() => hasDraft("new-session"));
+  useEffect(() => onDraftsChanged(() => setDraft(hasDraft("new-session"))), []);
+  return (
+    <button
+      className={cn(
+        SIDEBAR_ROW,
+        SIDEBAR_WS_ROW,
+        SIDEBAR_HOVER_LAYER,
+        active && "bg-selected",
+      )}
+      data-sidebar-row=""
+      data-selected={active || undefined}
+      onClick={onClick}
+      aria-label="New session, not started yet"
+    >
+      <span className={SIDEBAR_RAIL}>
+        <IconPlus className="shrink-0 text-faint" size={16} />
+      </span>
+      <span className={SIDEBAR_ROW_TITLE}>New session</span>
+      {draft && (
+        <span
+          className={cn(SIDEBAR_WS_DRAFT, "ml-1.5")}
+          data-ws-draft=""
+          aria-label="Unsent draft"
+        >
+          <IconPencil size={20} />
+        </span>
+      )}
+    </button>
+  );
 }

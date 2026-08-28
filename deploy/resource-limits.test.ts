@@ -60,7 +60,9 @@ describe("host resource-limit deployment", () => {
     const deploy = await Bun.file(resolve(repoRoot, "deploy/deploy.sh")).text();
 
     expect(deploy).toContain("deploy/install-resource-control.sh");
-    expect(deploy).toContain("deploy/systemd/opensession.service.d/resources.conf");
+    expect(deploy).toContain(
+      "deploy/systemd/opensession.service.d/resources.conf",
+    );
     expect(deploy).toContain(
       "deploy/systemd/opensession-session-kernel.service.d/capacity.conf",
     );

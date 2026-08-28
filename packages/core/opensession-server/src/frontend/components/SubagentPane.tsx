@@ -70,18 +70,18 @@ export function SubagentPane({
         followRef.current = true;
       }
       await (async () => {
-const next = await fetchSubagent(sessionId, current.agentId);
+        const next = await fetchSubagent(sessionId, current.agentId);
         if (cancelled) return;
         setData(next);
         setLoading(false);
         // Keep polling only while the parent session is live (the sub-agent may
         // still be streaming); once idle the transcript is final.
         if (next.sessionRunning) timer = setTimeout(() => load(false), 1500);
-})().catch(async (e: any) => {
-if (cancelled) return;
+      })().catch(async (e: any) => {
+        if (cancelled) return;
         setError(e?.message || "Failed to load sub-agent");
         setLoading(false);
-});
+      });
     }
 
     load(true);
@@ -119,9 +119,7 @@ if (cancelled) return;
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="border-b border-divider bg-raised px-2.5 pt-2 pb-2.5">
         <div className="flex items-center gap-2">
-          <Badge tone="accent">
-            sub-agent
-          </Badge>
+          <Badge tone="accent">sub-agent</Badge>
           <span
             className="overflow-hidden text-ellipsis whitespace-nowrap text-label font-semibold text-fg"
             title={meta?.description || current.label}
@@ -137,10 +135,9 @@ if (cancelled) return;
             </span>
           )}
           {/* No close button: the tab's × owns that, like Review and Assets. */}
-          {data?.sessionRunning && <span
-              className={LIVE_DOT}
-              title="Session running"
-            />}
+          {data?.sessionRunning && (
+            <span className={LIVE_DOT} title="Session running" />
+          )}
         </div>
         {stack.length > 1 && (
           <button
@@ -150,10 +147,18 @@ if (cancelled) return;
             ← {stack[stack.length - 2].label}
           </button>
         )}
-        {meta?.description && <div className="mt-1.5 text-supporting leading-[1.4] text-dim">{meta.description}</div>}
+        {meta?.description && (
+          <div className="mt-1.5 text-supporting leading-[1.4] text-dim">
+            {meta.description}
+          </div>
+        )}
       </div>
 
-      <div className={`${PANEL_BODY} px-3.5 py-3`} ref={bodyRef} onScroll={onScroll}>
+      <div
+        className={`${PANEL_BODY} px-3.5 py-3`}
+        ref={bodyRef}
+        onScroll={onScroll}
+      >
         {loading ? (
           <LoadingState>Loading sub-agent…</LoadingState>
         ) : error ? (

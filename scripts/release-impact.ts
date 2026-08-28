@@ -1,6 +1,9 @@
 #!/usr/bin/env bun
 
-import { isFrontendOnlyRelease, requiresRootDeploy } from "../packages/core/opensession-server/src/server/self-deploy";
+import {
+  isFrontendOnlyRelease,
+  requiresRootDeploy,
+} from "../packages/core/opensession-server/src/server/self-deploy";
 
 export type ReleaseImpact =
   | "frontend-only"
@@ -12,7 +15,8 @@ export type ReleaseImpact =
 
 const ENTRIES = {
   gateway: "packages/core/opensession-server/opensession.ts",
-  supervisor: "packages/core/opensession-server/src/server/gateway-supervisor.ts",
+  supervisor:
+    "packages/core/opensession-server/src/server/gateway-supervisor.ts",
   kernel: "packages/core/opensession-server/src/session-kernel-service.ts",
   executor: "packages/core/opensession-server/src/executor/main.ts",
 } as const;
@@ -22,10 +26,21 @@ export async function changedPaths(
   fromSha: string,
   toSha: string,
 ): Promise<string[]> {
-  const process = Bun.spawn([
-    "git", "-C", checkout, "diff", "--no-renames", "--name-only", "-z",
-    fromSha, toSha, "--",
-  ], { stdout: "pipe", stderr: "pipe" });
+  const process = Bun.spawn(
+    [
+      "git",
+      "-C",
+      checkout,
+      "diff",
+      "--no-renames",
+      "--name-only",
+      "-z",
+      fromSha,
+      toSha,
+      "--",
+    ],
+    { stdout: "pipe", stderr: "pipe" },
+  );
   const [stdout, stderr, code] = await Promise.all([
     new Response(process.stdout).arrayBuffer(),
     new Response(process.stderr).text(),
@@ -35,7 +50,10 @@ export async function changedPaths(
   return new TextDecoder().decode(stdout).split("\0").filter(Boolean);
 }
 
-async function importClosure(root: string, entry: string): Promise<Set<string>> {
+async function importClosure(
+  root: string,
+  entry: string,
+): Promise<Set<string>> {
   const result = await Bun.build({
     root,
     entrypoints: [entry],
@@ -87,15 +105,19 @@ export function classifyRuntimeComponents(
   };
   for (const path of runtimePaths) {
     if (
-      path === "package.json" || path === "bun.lock" ||
+      path === "package.json" ||
+      path === "bun.lock" ||
       path.startsWith("packages/core/protocol/")
     ) {
       components.kernel = true;
       components.executor = true;
       continue;
     }
-    const known = closures.gateway.has(path) || closures.supervisor.has(path) ||
-      closures.kernel.has(path) || closures.executor.has(path);
+    const known =
+      closures.gateway.has(path) ||
+      closures.supervisor.has(path) ||
+      closures.kernel.has(path) ||
+      closures.executor.has(path);
     components.kernel ||= closures.kernel.has(path);
     components.executor ||= closures.executor.has(path);
     if (!known) {
@@ -115,10 +137,16 @@ export function classifyRuntimeImpact(
     kernel: Set<string>;
     executor: Set<string>;
   },
-): "gateway-handoff" | "supervisor-restart" | "coordinated" | "coordinated-supervisor-restart" {
+):
+  | "gateway-handoff"
+  | "supervisor-restart"
+  | "coordinated"
+  | "coordinated-supervisor-restart" {
   const components = classifyRuntimeComponents(runtimePaths, closures);
   if (components.kernel || components.executor) {
-    return components.supervisor ? "coordinated-supervisor-restart" : "coordinated";
+    return components.supervisor
+      ? "coordinated-supervisor-restart"
+      : "coordinated";
   }
   return components.supervisor ? "supervisor-restart" : "gateway-handoff";
 }
@@ -129,13 +157,15 @@ export function releaseRuntimePaths(paths: string[]): string[] {
     "scripts/release-impact.ts",
     "scripts/validate-frontend-build.ts",
   ]);
-  return paths.filter((path) =>
-    path !== "AGENTS.md" &&
-    !path.startsWith("docs/") &&
-    !path.endsWith(".test.ts") &&
-    !path.endsWith(".spec.ts") &&
-    !deploySupportPaths.has(path) &&
-    !path.startsWith("packages/core/opensession-server/src/frontend/"));
+  return paths.filter(
+    (path) =>
+      path !== "AGENTS.md" &&
+      !path.startsWith("docs/") &&
+      !path.endsWith(".test.ts") &&
+      !path.endsWith(".spec.ts") &&
+      !deploySupportPaths.has(path) &&
+      !path.startsWith("packages/core/opensession-server/src/frontend/"),
+  );
 }
 
 export async function classifyReleaseImpact(options: {
@@ -150,9 +180,14 @@ export async function classifyReleaseImpact(options: {
   closures: Record<string, number>;
   components?: RuntimeComponents;
 }> {
-  const paths = await changedPaths(options.checkout, options.fromSha, options.toSha);
+  const paths = await changedPaths(
+    options.checkout,
+    options.fromSha,
+    options.toSha,
+  );
   if (requiresRootDeploy(paths)) return { impact: "root", paths, closures: {} };
-  if (isFrontendOnlyRelease(paths)) return { impact: "frontend-only", paths, closures: {} };
+  if (isFrontendOnlyRelease(paths))
+    return { impact: "frontend-only", paths, closures: {} };
 
   const runtimePaths = releaseRuntimePaths(paths);
   // Non-runtime support files still need `current` to advance, but no protocol
@@ -163,7 +198,12 @@ export async function classifyReleaseImpact(options: {
       impact: "gateway-handoff",
       paths,
       closures: {},
-      components: { gateway: true, supervisor: false, kernel: false, executor: false },
+      components: {
+        gateway: true,
+        supervisor: false,
+        kernel: false,
+        executor: false,
+      },
     };
   }
 
@@ -186,7 +226,12 @@ export async function classifyReleaseImpact(options: {
     executor,
   });
   return {
-    impact: classifyRuntimeImpact(runtimePaths, { gateway, supervisor, kernel, executor }),
+    impact: classifyRuntimeImpact(runtimePaths, {
+      gateway,
+      supervisor,
+      kernel,
+      executor,
+    }),
     paths,
     closures: closureSizes,
     components,
@@ -196,15 +241,29 @@ export async function classifyReleaseImpact(options: {
 if (import.meta.main) {
   const [fromRoot, toRoot, checkout, fromSha, toSha] = process.argv.slice(2);
   if (
-    !fromRoot || !toRoot || !checkout ||
+    !fromRoot ||
+    !toRoot ||
+    !checkout ||
     !/^[0-9a-f]{40,64}$/.test(fromSha || "") ||
     !/^[0-9a-f]{40,64}$/.test(toSha || "")
   ) {
-    console.error("usage: release-impact.ts <from-release> <to-release> <checkout> <from-sha> <to-sha>");
+    console.error(
+      "usage: release-impact.ts <from-release> <to-release> <checkout> <from-sha> <to-sha>",
+    );
     process.exit(2);
   }
-  const result = await classifyReleaseImpact({ fromRoot, toRoot, checkout, fromSha, toSha });
+  const result = await classifyReleaseImpact({
+    fromRoot,
+    toRoot,
+    checkout,
+    fromSha,
+    toSha,
+  });
   const manifest = process.env.OPENSESSION_RELEASE_IMPACT_MANIFEST;
-  if (manifest) await Bun.write(manifest, `${JSON.stringify({ ...result, generatedAt: new Date().toISOString() }, null, 2)}\n`);
+  if (manifest)
+    await Bun.write(
+      manifest,
+      `${JSON.stringify({ ...result, generatedAt: new Date().toISOString() }, null, 2)}\n`,
+    );
   console.log(result.impact);
 }

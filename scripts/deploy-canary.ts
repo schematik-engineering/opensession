@@ -2,8 +2,10 @@
 
 import { renameSync, writeFileSync } from "node:fs";
 
-const [httpUrl = "http://127.0.0.1:3850/live", output = "/tmp/opensession-deploy-canary.json"] =
-  process.argv.slice(2);
+const [
+  httpUrl = "http://127.0.0.1:3850/live",
+  output = "/tmp/opensession-deploy-canary.json",
+] = process.argv.slice(2);
 const backendReadyUrl = new URL(httpUrl);
 backendReadyUrl.pathname = "/ready";
 const wsUrl = new URL(httpUrl);
@@ -41,13 +43,18 @@ async function probeIngress(): Promise<void> {
   const started = performance.now();
   metrics.httpAttempts++;
   try {
-    const response = await fetch(httpUrl, { signal: AbortSignal.timeout(30_000) });
+    const response = await fetch(httpUrl, {
+      signal: AbortSignal.timeout(30_000),
+    });
     await response.arrayBuffer();
     if (!response.ok) metrics.httpFailures++;
   } catch {
     metrics.httpFailures++;
   }
-  metrics.httpMaxMs = Math.max(metrics.httpMaxMs, Math.round(performance.now() - started));
+  metrics.httpMaxMs = Math.max(
+    metrics.httpMaxMs,
+    Math.round(performance.now() - started),
+  );
 }
 
 async function probeBackend(): Promise<void> {
@@ -58,10 +65,16 @@ async function probeBackend(): Promise<void> {
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(30_000),
     });
-    const body = await response.json() as { ok?: boolean; ready?: boolean; bootId?: string };
-    if (!response.ok || body.ok !== true || body.ready !== true) metrics.backendFailures++;
+    const body = (await response.json()) as {
+      ok?: boolean;
+      ready?: boolean;
+      bootId?: string;
+    };
+    if (!response.ok || body.ok !== true || body.ready !== true)
+      metrics.backendFailures++;
     if (body.bootId) {
-      if (backendBootId && backendBootId !== body.bootId) metrics.backendBootChanges++;
+      if (backendBootId && backendBootId !== body.bootId)
+        metrics.backendBootChanges++;
       backendBootId = body.bootId;
     }
   } catch {

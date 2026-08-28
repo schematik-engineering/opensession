@@ -83,62 +83,66 @@ export function SpinOffMenu({
     const me = getCurrentUser();
 
     try {
-    if (flavor === "analyze") {
-      send({
-        type: "create_session",
-        mode: "ask",
-        branch: "",
-        user: me,
-        createWorkspace: {},
-        prompt:
-          `Analyze this finished ${AGENT_NAME} session ("${session.title}") and report:\n` +
-          `1. What was asked and what was delivered.\n` +
-          `2. What went wrong or was wasted effort (wrong paths, retries, misunderstandings).\n` +
-          `3. A rewritten version of the original prompt that would likely have succeeded in one shot.\n` +
-          `4. Whether any repo docs (docs/kb/**, AGENTS.md, CLAUDE.md) could be updated to prevent ` +
-          `the mistakes you found. Quote the concrete text you would add.\n\n` +
-          `## Conversation\n\n${context}`,
-      });
-      return;
-    }
+      if (flavor === "analyze") {
+        send({
+          type: "create_session",
+          mode: "ask",
+          branch: "",
+          user: me,
+          createWorkspace: {},
+          prompt:
+            `Analyze this finished ${AGENT_NAME} session ("${session.title}") and report:\n` +
+            `1. What was asked and what was delivered.\n` +
+            `2. What went wrong or was wasted effort (wrong paths, retries, misunderstandings).\n` +
+            `3. A rewritten version of the original prompt that would likely have succeeded in one shot.\n` +
+            `4. Whether any repo docs (docs/kb/**, AGENTS.md, CLAUDE.md) could be updated to prevent ` +
+            `the mistakes you found. Quote the concrete text you would add.\n\n` +
+            `## Conversation\n\n${context}`,
+        });
+        return;
+      }
 
-    if (flavor === "learnings") {
+      if (flavor === "learnings") {
+        send({
+          type: "create_session",
+          mode: "code",
+          branch,
+          user: me,
+          createWorkspace: {},
+          prompt:
+            `Feed the durable learnings from a ${AGENT_NAME} session back into this repo's documentation.\n\n` +
+            `## Conversation (session "${session.title}")\n\n${context}\n\n## Task\n\n` +
+            `Extract durable, non-obvious learnings from the conversation above: gotchas, architecture facts, ` +
+            `runbook steps, conventions, anything a teammate or future agent session would benefit from knowing. ` +
+            `Check whether each is already documented; skip session-specific noise. Add the genuinely new ones to ` +
+            `the right place (docs/kb/**, AGENTS.md, CLAUDE.md, or a package README), keeping each addition ` +
+            `short and factual, matching the surrounding style.` +
+            (task.trim()
+              ? `\n\nExtra guidance from ${me}: ${task.trim()}`
+              : "") +
+            `\n\nWhen done, commit on this branch and open a PR titled "docs: learnings from ${AGENT_NAME} session" ` +
+            `with a body summarizing what you added and why. Do NOT merge the PR.`,
+        });
+        return;
+      }
+
+      // build
       send({
         type: "create_session",
         mode: "code",
         branch,
         user: me,
-        createWorkspace: {},
         prompt:
-          `Feed the durable learnings from a ${AGENT_NAME} session back into this repo's documentation.\n\n` +
-          `## Conversation (session "${session.title}")\n\n${context}\n\n## Task\n\n` +
-          `Extract durable, non-obvious learnings from the conversation above: gotchas, architecture facts, ` +
-          `runbook steps, conventions, anything a teammate or future agent session would benefit from knowing. ` +
-          `Check whether each is already documented; skip session-specific noise. Add the genuinely new ones to ` +
-          `the right place (docs/kb/**, AGENTS.md, CLAUDE.md, or a package README), keeping each addition ` +
-          `short and factual, matching the surrounding style.` +
-          (task.trim() ? `\n\nExtra guidance from ${me}: ${task.trim()}` : "") +
-          `\n\nWhen done, commit on this branch and open a PR titled "docs: learnings from ${AGENT_NAME} session" ` +
-          `with a body summarizing what you added and why. Do NOT merge the PR.`,
+          `This coding session was spun off from an Ask session ("${session.title}"). ` +
+          `The conversation below is context. The codebase exploration already happened there, ` +
+          `so trust its conclusions but re-verify file paths before editing.\n\n` +
+          `## Ask conversation\n\n${context}\n\n## Task\n\n${task.trim() || "Implement what was discussed above."}`,
       });
-      return;
-    }
-
-    // build
-    send({
-      type: "create_session",
-      mode: "code",
-      branch,
-      user: me,
-      prompt:
-        `This coding session was spun off from an Ask session ("${session.title}"). ` +
-        `The conversation below is context. The codebase exploration already happened there, ` +
-        `so trust its conclusions but re-verify file paths before editing.\n\n` +
-        `## Ask conversation\n\n${context}\n\n## Task\n\n${task.trim() || "Implement what was discussed above."}`,
-    });
     } catch (error) {
       setStarting(false);
-      toast(error instanceof Error ? error.message : String(error), { variant: "error" });
+      toast(error instanceof Error ? error.message : String(error), {
+        variant: "error",
+      });
     }
   }
 
@@ -167,7 +171,8 @@ export function SpinOffMenu({
     },
     analyze: {
       title: "Analyze session",
-      description: "What went well, what didn't, and a prompt that would have worked in one shot.",
+      description:
+        "What went well, what didn't, and a prompt that would have worked in one shot.",
     },
   };
 
@@ -184,24 +189,54 @@ export function SpinOffMenu({
         </Menu.SubmenuTrigger>
         <Menu.Popup className="w-80 overflow-hidden p-0">
           {isAsk && (
-            <Menu.Item closeOnClick={false} onClick={() => pick("build")} className={itemCls}>
-              <span className="text-label font-semibold text-fg">Build this</span>
-              <span className="text-supporting leading-[1.4] text-faint">Start a coding session with this conversation as context</span>
+            <Menu.Item
+              closeOnClick={false}
+              onClick={() => pick("build")}
+              className={itemCls}
+            >
+              <span className="text-label font-semibold text-fg">
+                Build this
+              </span>
+              <span className="text-supporting leading-[1.4] text-faint">
+                Start a coding session with this conversation as context
+              </span>
             </Menu.Item>
           )}
-          <Menu.Item closeOnClick={false} onClick={() => pick("learnings")} className={itemCls}>
-            <span className="text-label font-semibold text-fg">Capture learnings → docs PR</span>
-            <span className="text-supporting leading-[1.4] text-faint">{AGENT_NAME} adds what was learned here to {session.repo || "the repository"} docs</span>
+          <Menu.Item
+            closeOnClick={false}
+            onClick={() => pick("learnings")}
+            className={itemCls}
+          >
+            <span className="text-label font-semibold text-fg">
+              Capture learnings → docs PR
+            </span>
+            <span className="text-supporting leading-[1.4] text-faint">
+              {AGENT_NAME} adds what was learned here to{" "}
+              {session.repo || "the repository"} docs
+            </span>
           </Menu.Item>
-          <Menu.Item closeOnClick={false} onClick={() => pick("analyze")} className={itemCls}>
-            <span className="text-label font-semibold text-fg">Analyze session</span>
-            <span className="text-supporting leading-[1.4] text-faint">What went well, what didn't, and a better prompt</span>
+          <Menu.Item
+            closeOnClick={false}
+            onClick={() => pick("analyze")}
+            className={itemCls}
+          >
+            <span className="text-label font-semibold text-fg">
+              Analyze session
+            </span>
+            <span className="text-supporting leading-[1.4] text-faint">
+              What went well, what didn't, and a better prompt
+            </span>
           </Menu.Item>
           {/* Closes the whole menu rather than opening the form above: there is
               nothing to fill in here, the composer IS the form. */}
           <Menu.Item onClick={openLinkedSession} className={itemCls}>
-            <span className="text-label font-semibold text-fg">Reference this session</span>
-            <span className="text-supporting leading-[1.4] text-faint">Opens the new-session composer with a link to this one — you write the prompt</span>
+            <span className="text-label font-semibold text-fg">
+              Reference this session
+            </span>
+            <span className="text-supporting leading-[1.4] text-faint">
+              Opens the new-session composer with a link to this one — you write
+              the prompt
+            </span>
           </Menu.Item>
         </Menu.Popup>
       </Menu.SubmenuRoot>
@@ -241,7 +276,9 @@ export function SpinOffMenu({
           )}
 
           {flavor !== "analyze" && (
-            <Field label={flavor === "build" ? "Task" : "Extra guidance (optional)"}>
+            <Field
+              label={flavor === "build" ? "Task" : "Extra guidance (optional)"}
+            >
               <textarea
                 className={`${fieldCls} resize-y py-2 leading-relaxed`}
                 value={task}
@@ -249,7 +286,11 @@ export function SpinOffMenu({
                 rows={3}
                 {...noAutofill}
                 disabled={starting}
-                placeholder={flavor === "learnings" ? "e.g. focus on the deploy gotchas we hit" : ""}
+                placeholder={
+                  flavor === "learnings"
+                    ? "e.g. focus on the deploy gotchas we hit"
+                    : ""
+                }
               />
             </Field>
           )}
@@ -299,7 +340,11 @@ function buildContext(entries: TranscriptEntry[], budget: number): string {
     used += turns[i].length;
   }
   const skipped = turns.length - 1 - rest.length;
-  return [first, skipped > 0 ? `*(… ${skipped} earlier messages omitted …)*` : null, ...rest]
+  return [
+    first,
+    skipped > 0 ? `*(… ${skipped} earlier messages omitted …)*` : null,
+    ...rest,
+  ]
     .filter(Boolean)
     .join("\n\n");
 }
@@ -309,7 +354,11 @@ function truncate(s: string, max: number): string {
 }
 
 function suggestBranch(title: string): string {
-  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32);
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 32);
   return slug ? `${slug}` : `from-ask-${dateStamp()}`;
 }
 

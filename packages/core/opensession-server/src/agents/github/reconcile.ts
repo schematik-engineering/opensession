@@ -30,10 +30,13 @@ import { loadReviewOptions, titleHasSkipKeyword } from "./review-options";
 import type { PrRef } from "./review";
 import { desiredReviewOutstanding } from "./desired-review";
 
-const RECONCILE_MS = parseInt(process.env.OPENSESSION_REVIEW_RECONCILE_MS || String(10 * 60 * 1000));
+const RECONCILE_MS = parseInt(
+  process.env.OPENSESSION_REVIEW_RECONCILE_MS || String(10 * 60 * 1000),
+);
 /** Only PRs updated this recently are eligible — a stall is always recent. */
 const RECONCILE_WINDOW_MS = parseInt(
-  process.env.OPENSESSION_REVIEW_RECONCILE_WINDOW_MS || String(72 * 60 * 60 * 1000),
+  process.env.OPENSESSION_REVIEW_RECONCILE_WINDOW_MS ||
+    String(72 * 60 * 60 * 1000),
 );
 /** Hard cap on fires per cycle so a backlog can never become a review storm. */
 const MAX_FIRES_PER_CYCLE = 2;
@@ -48,14 +51,17 @@ export function reconcileEnabled(): boolean {
 /** One sweep pass over every configured repo. Exported for tests/manual runs. */
 export async function reconcileOpenPrs(): Promise<void> {
   if (!reconcileEnabled() || ghRateLimited("rest")) return;
-  const { resolveReviewConfig, fireReview, fireAutoFix } = await import("./webhook");
+  const { resolveReviewConfig, fireReview, fireAutoFix } =
+    await import("./webhook");
   const { autoEnabled } = resolveReviewConfig();
   let fires = 0;
 
   for (const repo of Object.values(configuredRepos())) {
     if (!repo.ghRepo) continue;
     if (fires >= MAX_FIRES_PER_CYCLE) break;
-    const prs = await listOpenPrs(repo.ghRepo).catch(() => [] as OpenPrSummary[]);
+    const prs = await listOpenPrs(repo.ghRepo).catch(
+      () => [] as OpenPrSummary[],
+    );
     const repoOpts = loadReviewOptions(repo.repo);
     for (const pr of prs) {
       if (fires >= MAX_FIRES_PER_CYCLE) break;
@@ -84,7 +90,9 @@ export async function reconcileOpenPrs(): Promise<void> {
         headRef: pr.headRef,
         headSha: pr.headSha,
         title: pr.title,
-        ...(prKey(pr.number, repo.ghRepo) !== String(pr.number) ? { ghRepo: repo.ghRepo } : {}),
+        ...(prKey(pr.number, repo.ghRepo) !== String(pr.number)
+          ? { ghRepo: repo.ghRepo }
+          : {}),
       };
 
       // ── Auto-fix reconcile: label still on, no loop running ──
@@ -92,14 +100,32 @@ export async function reconcileOpenPrs(): Promise<void> {
       // resolves to this instance's team. A label with no trusted receipt is
       // not enough: on a public repo it may have been applied outside Open
       // Session's trust roster while this process was down.
-      if (!externalFork && pr.labels.some((l) => labelMatches(l, LABEL_AUTOFIX))) {
-        const requestedBy = state?.pendingAutoFix?.requestedBy || state?.autoFix?.requestedBy || "";
+      if (
+        !externalFork &&
+        pr.labels.some((l) => labelMatches(l, LABEL_AUTOFIX))
+      ) {
+        const requestedBy =
+          state?.pendingAutoFix?.requestedBy ||
+          state?.autoFix?.requestedBy ||
+          "";
         if (!isTrustedGithubLogin(requestedBy)) continue;
-        const attempts = state?.reconcile?.autofixSha === pr.headSha ? state.reconcile.autofixAttempts || 0 : 0;
+        const attempts =
+          state?.reconcile?.autofixSha === pr.headSha
+            ? state.reconcile.autofixAttempts || 0
+            : 0;
         if (attempts >= MAX_ATTEMPTS_PER_SHA) continue;
-        updatePrState(pr.number, pr.headRef, (s) => {
-          s.reconcile = { ...s.reconcile, autofixSha: pr.headSha, autofixAttempts: attempts + 1 };
-        }, ref.ghRepo);
+        updatePrState(
+          pr.number,
+          pr.headRef,
+          (s) => {
+            s.reconcile = {
+              ...s.reconcile,
+              autofixSha: pr.headSha,
+              autofixAttempts: attempts + 1,
+            };
+          },
+          ref.ghRepo,
+        );
         fires++;
         audit({
           msg: "review_reconcile",
@@ -123,8 +149,10 @@ export async function reconcileOpenPrs(): Promise<void> {
         !externalFork &&
         !isGithubBotLogin(pr.authorLogin) &&
         !isTrustedGithubLogin(pr.authorLogin)
-      ) continue;
-      const optedIn = autoEnabled || pr.labels.some((l) => labelMatches(l, LABEL_REVIEW));
+      )
+        continue;
+      const optedIn =
+        autoEnabled || pr.labels.some((l) => labelMatches(l, LABEL_REVIEW));
       if (!optedIn || !pr.headSha) continue;
       if (state?.reviewedShas?.includes(pr.headSha)) continue;
       // `updated_at` bumps on comments/labels too, so recency alone would walk
@@ -135,13 +163,26 @@ export async function reconcileOpenPrs(): Promise<void> {
       // missed). Old never-reviewed PRs keep the label-only path.
       const reviewedBefore = (state?.reviewedShas?.length || 0) > 0;
       const createdAt = Date.parse(pr.createdAt || "");
-      const createdRecently = createdAt && Date.now() - createdAt <= RECONCILE_WINDOW_MS;
+      const createdRecently =
+        createdAt && Date.now() - createdAt <= RECONCILE_WINDOW_MS;
       if (!reviewedBefore && !createdRecently) continue;
-      const attempts = state?.reconcile?.reviewSha === pr.headSha ? state.reconcile.reviewAttempts || 0 : 0;
+      const attempts =
+        state?.reconcile?.reviewSha === pr.headSha
+          ? state.reconcile.reviewAttempts || 0
+          : 0;
       if (attempts >= MAX_ATTEMPTS_PER_SHA) continue;
-      updatePrState(pr.number, pr.headRef, (s) => {
-        s.reconcile = { ...s.reconcile, reviewSha: pr.headSha, reviewAttempts: attempts + 1 };
-      }, ref.ghRepo);
+      updatePrState(
+        pr.number,
+        pr.headRef,
+        (s) => {
+          s.reconcile = {
+            ...s.reconcile,
+            reviewSha: pr.headSha,
+            reviewAttempts: attempts + 1,
+          };
+        },
+        ref.ghRepo,
+      );
       fires++;
       audit({
         msg: "review_reconcile",
@@ -163,7 +204,9 @@ export async function reconcileOpenPrs(): Promise<void> {
  *  double-arm; runner-adjacent, so a code change here needs a real restart. */
 export function startReconcileSweep(): void {
   if (!reconcileEnabled()) {
-    console.log("[github] reconcile sweep disabled (OPENSESSION_REVIEW_RECONCILE=0)");
+    console.log(
+      "[github] reconcile sweep disabled (OPENSESSION_REVIEW_RECONCILE=0)",
+    );
     return;
   }
   const g = globalThis as any;

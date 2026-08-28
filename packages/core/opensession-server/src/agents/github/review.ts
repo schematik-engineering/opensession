@@ -51,8 +51,16 @@ import { audit } from "../../server/audit";
 import { modelLabel } from "../../server/models";
 import { createReviewWorktreeForPrHead } from "../../server/worktree";
 import { inverseReviewModel, authorFamilyFor } from "./model-inversion";
-import { runTestOnBaseCheck, testOnBaseSection, type TestOnBaseResult } from "./test-on-base";
-import { runSecretScanCheck, secretScanSection, type SecretScanResult } from "./secret-scan";
+import {
+  runTestOnBaseCheck,
+  testOnBaseSection,
+  type TestOnBaseResult,
+} from "./test-on-base";
+import {
+  runSecretScanCheck,
+  secretScanSection,
+  type SecretScanResult,
+} from "./secret-scan";
 import {
   loadReviewOptions,
   pathIgnored,
@@ -128,7 +136,10 @@ interface ReviewOutput {
  * review in another schema. Codex's `overall_confidence_score` is a 0-1 measure
  * of certainty, not merge safety, so severity + verdict are the honest fallback.
  */
-function deriveMergeSafetyScore(verdict: string | undefined, findings: Finding[]): number | undefined {
+function deriveMergeSafetyScore(
+  verdict: string | undefined,
+  findings: Finding[],
+): number | undefined {
   if (!verdict) return undefined;
 
   let score = verdict === "approve" ? 5 : verdict === "comment" ? 4 : 2;
@@ -182,8 +193,13 @@ function reviewBlockingCount(parsed: ReviewOutput | null): number {
 // P0/P1 are blocking-ish (red), P2 should-fix (orange), P3 minor (white).
 // Legacy high/medium/low kept as aliases in case a prompt variant emits them.
 const SEV_EMOJI: Record<string, string> = {
-  p0: "🔴", p1: "🔴", p2: "🟠", p3: "⚪",
-  high: "🔴", medium: "🟠", low: "⚪",
+  p0: "🔴",
+  p1: "🔴",
+  p2: "🟠",
+  p3: "⚪",
+  high: "🔴",
+  medium: "🟠",
+  low: "⚪",
 };
 
 export async function runReview(
@@ -199,21 +215,30 @@ export async function runReview(
     return null;
   }
   if (!claimLock("review", pr.number, pr.ghRepo)) {
-    console.log(`[github] review already running for PR #${pr.number}, skipping`);
+    console.log(
+      `[github] review already running for PR #${pr.number}, skipping`,
+    );
     return null;
   }
   let preserveRecovery = false;
   try {
     const prRepo = pr.ghRepo ? repoForFullName(pr.ghRepo) : null;
     const state = getOrInitPrState(pr.number, pr.headRef, pr.ghRepo);
-    const priorRun = state.activeRun?.kind === "review" ? state.activeRun : undefined;
+    const priorRun =
+      state.activeRun?.kind === "review" ? state.activeRun : undefined;
     const recovering = Boolean(priorRun);
     // Manual triggers review an already-reviewed SHA. Restart recovery does not:
     // if the prior run completed its durable commit point before the process died,
     // its leftover marker only needs clearing.
     const forceFreshReview = force && !recovering;
-    if (!forceFreshReview && pr.headSha && state.reviewedShas.includes(pr.headSha)) {
-      console.log(`[github] PR #${pr.number} @ ${pr.headSha.slice(0, 7)} already reviewed`);
+    if (
+      !forceFreshReview &&
+      pr.headSha &&
+      state.reviewedShas.includes(pr.headSha)
+    ) {
+      console.log(
+        `[github] PR #${pr.number} @ ${pr.headSha.slice(0, 7)} already reviewed`,
+      );
       return null;
     }
     // Concurrent deliveries are coalesced by the in-process "review" lock above;
@@ -239,7 +264,9 @@ export async function runReview(
           requestedBy: "",
           startedAt,
           headSha: pr.headSha || priorRun?.headSha,
-          progressCommentId: sameHeadRecovery ? priorRun?.progressCommentId : undefined,
+          progressCommentId: sameHeadRecovery
+            ? priorRun?.progressCommentId
+            : undefined,
           reviewResult: recoveredReviewResult,
           steer,
         };
@@ -274,13 +301,17 @@ export async function runReview(
             pr.ghRepo || undefined,
           );
     if (!details) {
-      console.warn(`[github] no PR details for #${pr.number} (${pr.headRef}); review not started`);
+      console.warn(
+        `[github] no PR details for #${pr.number} (${pr.headRef}); review not started`,
+      );
       return null;
     }
     const baseGhRepo = pr.ghRepo || defaultRepo().ghRepo;
     const publicReview = isExternalPullRequest(details, baseGhRepo);
     if (publicReview && (!pr.headSha || details.headRefOid !== pr.headSha)) {
-      console.log(`[github] public PR #${pr.number} moved before isolated review admission`);
+      console.log(
+        `[github] public PR #${pr.number} moved before isolated review admission`,
+      );
       return null;
     }
     if (cancellationRequested()) return finishCancelled();
@@ -302,14 +333,21 @@ export async function runReview(
     let reuseId = sameHeadRecovery ? priorRun?.progressCommentId : undefined;
     if (!reuseId && (sameHeadRecovery || legacyRecovery)) {
       const candidateId = priorRun?.progressCommentId ?? state.summaryCommentId;
-      const candidate = candidateId ? await getComment(candidateId, pr.ghRepo) : null;
+      const candidate = candidateId
+        ? await getComment(candidateId, pr.ghRepo)
+        : null;
       if (candidate && isReviewProgressForHead(candidate.body, pr.headSha)) {
         reuseId = candidateId;
       } else {
-        reuseId = (await findReviewProgressComment(pr.number, pr.headSha, pr.ghRepo)) ?? undefined;
+        reuseId =
+          (await findReviewProgressComment(pr.number, pr.headSha, pr.ghRepo)) ??
+          undefined;
       }
     }
-    const prevId = state.summaryCommentId ?? (await findActiveReviewComment(pr.number, pr.ghRepo)) ?? undefined;
+    const prevId =
+      state.summaryCommentId ??
+      (await findActiveReviewComment(pr.number, pr.ghRepo)) ??
+      undefined;
     const shortSha0 = (pr.headSha || "").slice(0, 7);
     const progressSuffix = publicReview
       ? " · isolated public review"
@@ -326,7 +364,11 @@ export async function runReview(
         pr.number,
         pr.headRef,
         (s) => {
-          if (s.activeRun?.kind !== "review" || s.activeRun.startedAt !== startedAt) return;
+          if (
+            s.activeRun?.kind !== "review" ||
+            s.activeRun.startedAt !== startedAt
+          )
+            return;
           ownsRun = true;
           s.summaryCommentId = placeholderId;
           s.activeRun.progressCommentId = placeholderId;
@@ -337,7 +379,8 @@ export async function runReview(
         await supersedeReviewComment(prevId, pr.ghRepo).catch(() => {});
       }
     }
-    if (cancellationRequested()) return finishCancelled(placeholderId || undefined);
+    if (cancellationRequested())
+      return finishCancelled(placeholderId || undefined);
 
     // Internal PRs keep the rich local agent worktree. A fork is never placed
     // in a host worktree: its exact refs are verified in a disposable MicroVM
@@ -358,14 +401,21 @@ export async function runReview(
             `${REVIEW_MARKER}\n### 🤖 ${personaName()} review\n\n⚠️ Couldn't prepare the PR checkout to review the diff. It will retry on the next push.`,
             pr.ghRepo,
           ).catch(() => {});
-        return { findings: 0, blocking: 0, error: "Could not prepare the PR review worktree" };
+        return {
+          findings: 0,
+          blocking: 0,
+          error: "Could not prepare the PR review worktree",
+        };
       }
     }
-    if (cancellationRequested()) return finishCancelled(placeholderId || undefined);
+    if (cancellationRequested())
+      return finishCancelled(placeholderId || undefined);
 
     // Public contributors cannot change review policy. Their options come from
     // the configured base checkout and deterministic host-side execution stays off.
-    const reviewOpts = loadReviewOptions(publicReview ? prRepo?.repo || DEFAULT_REPO_DIR : cwd);
+    const reviewOpts = loadReviewOptions(
+      publicReview ? prRepo?.repo || DEFAULT_REPO_DIR : cwd,
+    );
     const summaryOnly = details.changedFiles > reviewOpts.summaryOnlyOverFiles;
     const author = publicReview ? null : authorFamilyFor(pr);
     const testOnBase: Promise<TestOnBaseResult | null> =
@@ -378,7 +428,10 @@ export async function runReview(
             prNumber: pr.number,
             ghRepo: pr.ghRepo,
           }).catch((e) => {
-            console.warn(`[github] test-on-base check failed for PR #${pr.number}:`, e);
+            console.warn(
+              `[github] test-on-base check failed for PR #${pr.number}:`,
+              e,
+            );
             return null;
           })
         : Promise.resolve(null);
@@ -390,7 +443,10 @@ export async function runReview(
             prNumber: pr.number,
             ghRepo: pr.ghRepo,
           }).catch((e) => {
-            console.warn(`[github] secret scan failed for PR #${pr.number}:`, e);
+            console.warn(
+              `[github] secret scan failed for PR #${pr.number}:`,
+              e,
+            );
             return null;
           })
         : Promise.resolve(null);
@@ -407,25 +463,43 @@ export async function runReview(
     const priorReview = isUpdate
       ? priorReviewSection({
           lastReview: state.lastReview,
-          priorFindings: classifyPriorFindings(readFeedback(pr.ghRepo), pr.number, preThreads, isGithubBotLogin),
+          priorFindings: classifyPriorFindings(
+            readFeedback(pr.ghRepo),
+            pr.number,
+            preThreads,
+            isGithubBotLogin,
+          ),
           humanThreadLines: openHumanThreadLines(preThreads, isGithubBotLogin),
         })
       : "";
 
     const base = (config.prompt || "").trim() || DEFAULT_REVIEW_PROMPT;
-    const prompt = buildReviewPrompt(base, details, isUpdate, steer, pr.ghRepo, {
-      authorFamily: author?.family,
-      ignoreGlobs: reviewOpts.ignoreGlobs,
-      summaryOnly,
-      intent: prIntentSection(details),
-      discussion: prDiscussionSection(details, isGithubBotLogin, REVIEW_MARKER),
-      priorReview,
-      learnedRules: learnedRulesSection(pr.ghRepo),
-      lastReviewedSha:
-        isUpdate && state.lastReviewedSha && state.lastReviewedSha !== pr.headSha
-          ? state.lastReviewedSha
-          : undefined,
-    });
+    const prompt = buildReviewPrompt(
+      base,
+      details,
+      isUpdate,
+      steer,
+      pr.ghRepo,
+      {
+        authorFamily: author?.family,
+        ignoreGlobs: reviewOpts.ignoreGlobs,
+        summaryOnly,
+        intent: prIntentSection(details),
+        discussion: prDiscussionSection(
+          details,
+          isGithubBotLogin,
+          REVIEW_MARKER,
+        ),
+        priorReview,
+        learnedRules: learnedRulesSection(pr.ghRepo),
+        lastReviewedSha:
+          isUpdate &&
+          state.lastReviewedSha &&
+          state.lastReviewedSha !== pr.headSha
+            ? state.lastReviewedSha
+            : undefined,
+      },
+    );
 
     // Model inversion: never review code with the model family that wrote it
     // (shared blind spots — see model-inversion.ts). Falls back to the
@@ -455,7 +529,8 @@ export async function runReview(
           if (
             s.activeRun?.kind !== "review" ||
             s.activeRun.startedAt !== startedAt
-          ) return;
+          )
+            return;
           s.activeRun.reviewResult = {
             text: result.text,
             error: result.error,
@@ -466,13 +541,16 @@ export async function runReview(
       );
     };
 
-    if (cancellationRequested()) return finishCancelled(placeholderId || undefined);
+    if (cancellationRequested())
+      return finishCancelled(placeholderId || undefined);
     if (isShuttingDown()) {
       preserveRecovery = true;
       console.log(`[github] PR #${pr.number} review parked for restart`);
       return null;
     }
-    console.log(`[github] Reviewing PR #${pr.number} @ ${pr.headSha.slice(0, 7)} (${isUpdate ? "update" : "initial"})`);
+    console.log(
+      `[github] Reviewing PR #${pr.number} @ ${pr.headSha.slice(0, 7)} (${isUpdate ? "update" : "initial"})`,
+    );
     let finalResult: GithubRunResult;
     if (recoveredReviewResult) {
       finalResult = { bksId, ...recoveredReviewResult };
@@ -489,17 +567,27 @@ export async function runReview(
               `${REVIEW_MARKER}\n### 🤖 ${personaName()} review\n\n⚠️ ${sizeError}`,
               pr.ghRepo,
             ).catch(() => {});
-          return { findings: 0, blocking: 0, publicReview: true, error: sizeError };
+          return {
+            findings: 0,
+            blocking: 0,
+            publicReview: true,
+            error: sizeError,
+          };
         }
         const limits = publicReviewLimits();
-        const diff = await getPrDiff(String(pr.number), baseGhRepo, limits.maxPatchBytes);
+        const diff = await getPrDiff(
+          String(pr.number),
+          baseGhRepo,
+          limits.maxPatchBytes,
+        );
         if (
           !diff ||
           diff.skippedFiles ||
           !diff.baseRefOid ||
           diff.headRefOid !== pr.headSha
         ) {
-          const error = "GitHub could not provide one complete immutable patch within the isolated review limit.";
+          const error =
+            "GitHub could not provide one complete immutable patch within the isolated review limit.";
           if (placeholderId)
             await editIssueComment(
               placeholderId,
@@ -521,14 +609,20 @@ export async function runReview(
           diff,
         };
         if (!publicReviewIsolationAvailable()) {
-          const message = "The isolated review environment is unavailable. No contributor code was run.";
+          const message =
+            "The isolated review environment is unavailable. No contributor code was run.";
           if (placeholderId)
             await editIssueComment(
               placeholderId,
               `${REVIEW_MARKER}\n### 🤖 ${personaName()} review\n\n⚠️ ${message}`,
               pr.ghRepo,
             ).catch(() => {});
-          return { findings: 0, blocking: 0, publicReview: true, error: message };
+          return {
+            findings: 0,
+            blocking: 0,
+            publicReview: true,
+            error: message,
+          };
         }
         const admission = admitPublicReview({
           repo: baseGhRepo,
@@ -537,7 +631,8 @@ export async function runReview(
           author: details.author,
         });
         if (!admission.ok) {
-          const error = "The automatic public-review budget is exhausted for this contribution.";
+          const error =
+            "The automatic public-review budget is exhausted for this contribution.";
           if (placeholderId)
             await editIssueComment(
               placeholderId,
@@ -556,15 +651,24 @@ export async function runReview(
         try {
           await verifyPublicPrInDisposableExecutor(isolatedInput);
         } catch (error) {
-          const message = "The isolated review environment is unavailable. No contributor code was run.";
+          const message =
+            "The isolated review environment is unavailable. No contributor code was run.";
           if (placeholderId)
             await editIssueComment(
               placeholderId,
               `${REVIEW_MARKER}\n### 🤖 ${personaName()} review\n\n⚠️ ${message}`,
               pr.ghRepo,
             ).catch(() => {});
-          console.error(`[github] isolated public review failed for PR #${pr.number}:`, error);
-          return { findings: 0, blocking: 0, publicReview: true, error: message };
+          console.error(
+            `[github] isolated public review failed for PR #${pr.number}:`,
+            error,
+          );
+          return {
+            findings: 0,
+            blocking: 0,
+            publicReview: true,
+            error: message,
+          };
         }
         const isolated = await runToollessPublicReview(isolatedInput);
         finalResult = {
@@ -592,24 +696,38 @@ export async function runReview(
         });
         if (finalResult.uncertain) {
           preserveRecovery = true;
-          throw new Error(finalResult.error || "Detached review ownership is uncertain");
+          throw new Error(
+            finalResult.error || "Detached review ownership is uncertain",
+          );
         }
       }
       persistReviewResult(finalResult);
     }
 
-    if (cancellationRequested()) return finishCancelled(placeholderId || undefined);
-    let parsed = parseReviewOutput(finalResult.text, publicReview ? undefined : cwd);
+    if (cancellationRequested())
+      return finishCancelled(placeholderId || undefined);
+    let parsed = parseReviewOutput(
+      finalResult.text,
+      publicReview ? undefined : cwd,
+    );
     // Internal reviews get one bounded continuation. Public reviews are
     // intentionally tool-less and self-contained, so they never reopen a guest
     // or resume a credential-bearing engine to repair malformed output.
-    if (!publicReview && !finalResult.error && !isCompleteReviewOutput(parsed)) {
+    if (
+      !publicReview &&
+      !finalResult.error &&
+      !isCompleteReviewOutput(parsed)
+    ) {
       if (isShuttingDown()) {
         preserveRecovery = true;
-        console.log(`[github] PR #${pr.number} review repair parked for restart`);
+        console.log(
+          `[github] PR #${pr.number} review repair parked for restart`,
+        );
         return null;
       }
-      console.warn(`[github] PR #${pr.number} review ended without structured output; repairing once`);
+      console.warn(
+        `[github] PR #${pr.number} review ended without structured output; repairing once`,
+      );
       finalResult = await runGithubAgent({
         prNumber: pr.number,
         ghRepo: pr.ghRepo,
@@ -628,10 +746,13 @@ export async function runReview(
       });
       if (finalResult.uncertain) {
         preserveRecovery = true;
-        throw new Error(finalResult.error || "Detached review ownership is uncertain");
+        throw new Error(
+          finalResult.error || "Detached review ownership is uncertain",
+        );
       }
       persistReviewResult(finalResult);
-      if (cancellationRequested()) return finishCancelled(placeholderId || undefined);
+      if (cancellationRequested())
+        return finishCancelled(placeholderId || undefined);
       parsed = parseReviewOutput(finalResult.text, cwd);
     }
     const reviewError =
@@ -643,7 +764,8 @@ export async function runReview(
           : "The review did not produce the required structured verdict after one continuation.");
     const tob = await testOnBase;
     const secrets = await secretScan;
-    if (cancellationRequested()) return finishCancelled(placeholderId || undefined);
+    if (cancellationRequested())
+      return finishCancelled(placeholderId || undefined);
 
     // Never publish an assessment against a different commit from the one the
     // worktree and prompt were pinned to. A push while the review was running
@@ -683,7 +805,10 @@ export async function runReview(
     // fixer loop can't do.)
     if (parsed && secrets?.findings.length) {
       parsed.verdict = "request_changes";
-      parsed.confidence = Math.min(typeof parsed.confidence === "number" ? parsed.confidence : 2, 2);
+      parsed.confidence = Math.min(
+        typeof parsed.confidence === "number" ? parsed.confidence : 2,
+        2,
+      );
     }
     await postReview(
       pr,
@@ -720,7 +845,9 @@ export async function runReview(
         blocking: outcome.blocking,
         is_update: isUpdate,
         public_review: publicReview,
-        isolation: publicReview ? "disposable_executor_toolless" : "host_worktree",
+        isolation: publicReview
+          ? "disposable_executor_toolless"
+          : "host_worktree",
         model: finalResult.model,
       });
     }
@@ -776,7 +903,10 @@ export async function runReview(
 function composeInlineBody(f: Finding): string {
   const sev = (f.severity || "").toUpperCase();
   const emoji = SEV_EMOJI[(f.severity || "").toLowerCase()] || "";
-  const head = [emoji, sev && `**${sev}**`, f.title && `— ${f.title}`].filter(Boolean).join(" ").trim();
+  const head = [emoji, sev && `**${sev}**`, f.title && `— ${f.title}`]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
   let out = [head, f.body?.trim()].filter(Boolean).join("\n\n");
   if (f.suggestion?.trim()) {
     out += `\n\n\`\`\`suggestion\n${f.suggestion.replace(/\n+$/, "")}\n\`\`\``;
@@ -797,11 +927,16 @@ async function postReview(
   extraSummary = "",
   publicReview = false,
 ): Promise<void> {
-  const knownCommentId = getOrInitPrState(pr.number, pr.headRef, pr.ghRepo).summaryCommentId;
+  const knownCommentId = getOrInitPrState(
+    pr.number,
+    pr.headRef,
+    pr.ghRepo,
+  ).summaryCommentId;
   const shortSha = (pr.headSha || "").slice(0, 7);
 
   // Summary comment (single, edited in place).
-  let summaryBody = parsed?.summary_markdown?.trim() || fallbackSummary(rawText, runError);
+  let summaryBody =
+    parsed?.summary_markdown?.trim() || fallbackSummary(rawText, runError);
   // Optional change diagram (schema/flow PRs) — GitHub renders mermaid natively.
   const mermaid = parsed?.diagram?.mermaid?.trim();
   if (mermaid && mermaid.length <= 4000) {
@@ -815,15 +950,24 @@ async function postReview(
   const allFindings = parsed?.findings || [];
   let withheld = 0;
   const findings = allFindings.filter((f) => {
-    if (pathIgnored(f.path, opts)) return withheld++, false;
-    if (severityRank(f.severity) > severityRank(opts.minInlineSeverity)) return withheld++, false;
-    if (summaryOnly && severityRank(f.severity) > 1) return withheld++, false;
-    if (shouldSuppressFinding(pr.ghRepo, { severity: f.severity, title: f.title, body: f.body }))
-      return withheld++, false;
+    if (pathIgnored(f.path, opts)) return (withheld++, false);
+    if (severityRank(f.severity) > severityRank(opts.minInlineSeverity))
+      return (withheld++, false);
+    if (summaryOnly && severityRank(f.severity) > 1) return (withheld++, false);
+    if (
+      shouldSuppressFinding(pr.ghRepo, {
+        severity: f.severity,
+        title: f.title,
+        body: f.body,
+      })
+    )
+      return (withheld++, false);
     return true;
   });
   if (withheld > 0) {
-    console.log(`[github] withheld ${withheld} finding(s) on PR #${pr.number} (config/feedback filters)`);
+    console.log(
+      `[github] withheld ${withheld} finding(s) on PR #${pr.number} (config/feedback filters)`,
+    );
     audit({
       msg: "review_findings_withheld",
       pr_number: pr.number,
@@ -833,9 +977,13 @@ async function postReview(
     });
   }
 
-  const verdict = parsed?.verdict ? ` · **${parsed.verdict.replace(/_/g, " ")}**` : "";
+  const verdict = parsed?.verdict
+    ? ` · **${parsed.verdict.replace(/_/g, " ")}**`
+    : "";
   const confidence =
-    typeof parsed?.confidence === "number" ? ` · confidence ${parsed.confidence}/5` : "";
+    typeof parsed?.confidence === "number"
+      ? ` · confidence ${parsed.confidence}/5`
+      : "";
   const findingCount = findings.length;
   // Next-steps footer pointing at the action labels.
   const tip = publicReview
@@ -852,8 +1000,12 @@ async function postReview(
     "",
     summaryBody,
     "",
-    findingCount ? `_${findingCount} inline comment${findingCount === 1 ? "" : "s"} below._` : "",
-    withheld ? `<sub>${withheld} low-signal finding${withheld === 1 ? "" : "s"} withheld by repo config / feedback history.</sub>` : "",
+    findingCount
+      ? `_${findingCount} inline comment${findingCount === 1 ? "" : "s"} below._`
+      : "",
+    withheld
+      ? `<sub>${withheld} low-signal finding${withheld === 1 ? "" : "s"} withheld by repo config / feedback history.</sub>`
+      : "",
     tip,
     footer,
   ]
@@ -886,7 +1038,9 @@ async function postReview(
   // finding we already have an open comment on. GitHub only auto-outdates an inline
   // comment when its anchored line changes, so a finding on an unchanged line
   // (e.g. Dockerfile:96) would otherwise get a fresh duplicate every single push.
-  const existingThreads = await listReviewThreads(pr.number, pr.ghRepo).catch(() => []);
+  const existingThreads = await listReviewThreads(pr.number, pr.ghRepo).catch(
+    () => [],
+  );
 
   // Learning pass over the threads we already fetched: pick up 👍/👎 reactions
   // on our comments and mark outdated/resolved ones "addressed" (the author
@@ -899,7 +1053,10 @@ async function postReview(
   // Classify new human replies in our threads ("intentional" vs "good catch")
   // into replySignal — async model call, fire-and-forget.
   void harvestReplySignals(pr.ghRepo, pr.number, existingThreads).catch((e) =>
-    console.warn(`[github] reply-signal harvest failed for PR #${pr.number}:`, e),
+    console.warn(
+      `[github] reply-signal harvest failed for PR #${pr.number}:`,
+      e,
+    ),
   );
 
   // Anchors (path:line) where we already have an open, still-current bot comment.
@@ -908,7 +1065,13 @@ async function postReview(
   const openBotAnchors = new Set<string>();
   if (!force) {
     for (const t of existingThreads) {
-      if (isGithubBotLogin(t.rootAuthor) && !t.isResolved && !t.isOutdated && t.path && t.line != null) {
+      if (
+        isGithubBotLogin(t.rootAuthor) &&
+        !t.isResolved &&
+        !t.isOutdated &&
+        t.path &&
+        t.line != null
+      ) {
         openBotAnchors.add(`${t.path}:${t.line}`);
       }
     }
@@ -919,7 +1082,9 @@ async function postReview(
     const diff = await getPrDiff(String(pr.number), pr.ghRepo || undefined);
     const commitId = diff?.headRefOid || pr.headSha;
     const onDiff = diff ? filterToDiff(findings, diff.patch) : findings;
-    const fresh = onDiff.filter((f) => !openBotAnchors.has(`${f.path}:${f.line}`));
+    const fresh = onDiff.filter(
+      (f) => !openBotAnchors.has(`${f.path}:${f.line}`),
+    );
     const inline: ReviewInlineComment[] = fresh.map((f) => ({
       path: f.path,
       line: f.line,
@@ -928,22 +1093,36 @@ async function postReview(
     }));
     const deduped = onDiff.length - fresh.length;
     if (deduped > 0) {
-      console.log(`[github] skipped ${deduped} finding(s) already commented on PR #${pr.number}`);
+      console.log(
+        `[github] skipped ${deduped} finding(s) already commented on PR #${pr.number}`,
+      );
     }
     if (inline.length) {
-      const ok = await submitReview(pr.number, commitId, `${personaName()} review · \`${shortSha}\``, inline, pr.ghRepo);
-      if (!ok) console.warn(`[github] submitReview failed for PR #${pr.number}`);
+      const ok = await submitReview(
+        pr.number,
+        commitId,
+        `${personaName()} review · \`${shortSha}\``,
+        inline,
+        pr.ghRepo,
+      );
+      if (!ok)
+        console.warn(`[github] submitReview failed for PR #${pr.number}`);
       // Remember what we posted so future reactions/outcomes can be joined
       // back to it (the feedback filter's training data).
       if (ok) {
         try {
           recordPostedFindings(pr.ghRepo, pr.number, fresh);
         } catch (e) {
-          console.warn(`[github] recording findings failed for PR #${pr.number}:`, e);
+          console.warn(
+            `[github] recording findings failed for PR #${pr.number}:`,
+            e,
+          );
         }
       }
       if (inline.length < onDiff.length - deduped) {
-        console.log(`[github] dropped ${onDiff.length - deduped - inline.length} off-diff finding(s) for PR #${pr.number}`);
+        console.log(
+          `[github] dropped ${onDiff.length - deduped - inline.length} off-diff finding(s) for PR #${pr.number}`,
+        );
       }
     }
   }
@@ -1001,10 +1180,14 @@ export function extractBalancedJson(s: string): string | null {
  * cuts the block at that inner fence — that's exactly what dumped raw narration
  * onto PR #4388.
  */
-export function parseReviewOutput(text: string, cwd?: string): ReviewOutput | null {
+export function parseReviewOutput(
+  text: string,
+  cwd?: string,
+): ReviewOutput | null {
   if (!text) return null;
   const opener = text.lastIndexOf("```json");
-  const candidate = extractBalancedJson(opener === -1 ? text : text.slice(opener)) ?? text;
+  const candidate =
+    extractBalancedJson(opener === -1 ? text : text.slice(opener)) ?? text;
   try {
     const obj = JSON.parse(candidate.trim());
     if (obj && typeof obj === "object") {
@@ -1024,23 +1207,32 @@ export function parseReviewOutput(text: string, cwd?: string): ReviewOutput | nu
                 : undefined;
         if (!raw || !raw.startsWith("/")) return raw;
         const root = cwd?.replace(/\/+$/, "");
-        return root && raw.startsWith(`${root}/`) ? raw.slice(root.length + 1) : undefined;
+        return root && raw.startsWith(`${root}/`)
+          ? raw.slice(root.length + 1)
+          : undefined;
       };
       const findings: Finding[] = Array.isArray(obj.findings)
         ? obj.findings
             .map((f: any) => {
               if (!f || typeof f !== "object") return f;
-              const priority = Number.isInteger(f.priority) && f.priority >= 0 && f.priority <= 3
-                ? `P${f.priority}`
-                : undefined;
-              const title = typeof f.title === "string"
-                ? f.title.replace(/^\[P[0-3]\]\s*/, "")
-                : undefined;
+              const priority =
+                Number.isInteger(f.priority) &&
+                f.priority >= 0 &&
+                f.priority <= 3
+                  ? `P${f.priority}`
+                  : undefined;
+              const title =
+                typeof f.title === "string"
+                  ? f.title.replace(/^\[P[0-3]\]\s*/, "")
+                  : undefined;
               return {
                 ...f,
                 path: findingPath(f),
-                line: Number.isFinite(f.line) ? f.line : f.code_location?.line_range?.start,
-                severity: typeof f.severity === "string" ? f.severity : priority,
+                line: Number.isFinite(f.line)
+                  ? f.line
+                  : f.code_location?.line_range?.start,
+                severity:
+                  typeof f.severity === "string" ? f.severity : priority,
                 title,
                 body:
                   typeof f.body === "string"
@@ -1050,7 +1242,13 @@ export function parseReviewOutput(text: string, cwd?: string): ReviewOutput | nu
                       : f.description,
               };
             })
-            .filter((f: any) => f && typeof f.path === "string" && Number.isFinite(f.line) && typeof f.body === "string")
+            .filter(
+              (f: any) =>
+                f &&
+                typeof f.path === "string" &&
+                Number.isFinite(f.line) &&
+                typeof f.body === "string",
+            )
             .map((f: any) => ({
               path: f.path,
               line: f.line,
@@ -1058,14 +1256,18 @@ export function parseReviewOutput(text: string, cwd?: string): ReviewOutput | nu
               severity: typeof f.severity === "string" ? f.severity : undefined,
               title: typeof f.title === "string" ? f.title : undefined,
               body: f.body,
-              suggestion: typeof f.suggestion === "string" && f.suggestion.trim() ? f.suggestion : undefined,
+              suggestion:
+                typeof f.suggestion === "string" && f.suggestion.trim()
+                  ? f.suggestion
+                  : undefined,
             }))
         : [];
       // Contract confidence is integer merge-safety on a 1-5 scale. An invalid
       // value (typically Codex's 0-1 self-certainty probability) measures a
       // different quantity. Derive merge safety from the normalized verdict and
       // finding severities instead, so every postable review still has a score.
-      const rawConfidence = typeof obj.confidence === "number" ? obj.confidence : undefined;
+      const rawConfidence =
+        typeof obj.confidence === "number" ? obj.confidence : undefined;
       const verdict =
         typeof obj.verdict === "string"
           ? obj.verdict
@@ -1075,7 +1277,10 @@ export function parseReviewOutput(text: string, cwd?: string): ReviewOutput | nu
               ? "request_changes"
               : undefined;
       const confidence =
-        rawConfidence !== undefined && Number.isInteger(rawConfidence) && rawConfidence >= 1 && rawConfidence <= 5
+        rawConfidence !== undefined &&
+        Number.isInteger(rawConfidence) &&
+        rawConfidence >= 1 &&
+        rawConfidence <= 5
           ? rawConfidence
           : deriveMergeSafetyScore(verdict, findings);
       return {
@@ -1090,8 +1295,16 @@ export function parseReviewOutput(text: string, cwd?: string): ReviewOutput | nu
                 ? obj.overall_explanation
                 : undefined,
         diagram:
-          obj.diagram && typeof obj.diagram === "object" && typeof obj.diagram.mermaid === "string"
-            ? { type: typeof obj.diagram.type === "string" ? obj.diagram.type : undefined, mermaid: obj.diagram.mermaid }
+          obj.diagram &&
+          typeof obj.diagram === "object" &&
+          typeof obj.diagram.mermaid === "string"
+            ? {
+                type:
+                  typeof obj.diagram.type === "string"
+                    ? obj.diagram.type
+                    : undefined,
+                mermaid: obj.diagram.mermaid,
+              }
             : undefined,
         findings,
       };
@@ -1101,10 +1314,14 @@ export function parseReviewOutput(text: string, cwd?: string): ReviewOutput | nu
 }
 
 /** A review is postable only when it has a supported verdict and a real summary. */
-export function isCompleteReviewOutput(output: ReviewOutput | null): output is ReviewOutput {
+export function isCompleteReviewOutput(
+  output: ReviewOutput | null,
+): output is ReviewOutput {
   return (
     !!output &&
-    (output.verdict === "approve" || output.verdict === "comment" || output.verdict === "request_changes") &&
+    (output.verdict === "approve" ||
+      output.verdict === "comment" ||
+      output.verdict === "request_changes") &&
     typeof output.summary_markdown === "string" &&
     output.summary_markdown.trim().length > 0
   );
@@ -1128,7 +1345,10 @@ export function parseDiffLineSets(patch: string): Map<string, DiffLineSet> {
   for (const line of patch.split("\n")) {
     if (line.startsWith("+++ ")) {
       let p = line.slice(4).trim();
-      if (p === "/dev/null") { current = null; continue; } // deleted file
+      if (p === "/dev/null") {
+        current = null;
+        continue;
+      } // deleted file
       // git quotes paths with spaces/unicode as "b/foo bar.ts"
       if (p.startsWith('"') && p.endsWith('"')) p = p.slice(1, -1);
       if (p.startsWith("b/")) p = p.slice(2);

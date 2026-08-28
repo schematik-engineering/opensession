@@ -1,7 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { UnifiedSession, WSServerMessage } from "../lib/types";
-import { fetchHomeStats, fetchRecentPrs, type HomeStats, type RecentPr } from "../lib/api";
+import {
+  fetchHomeStats,
+  fetchRecentPrs,
+  type HomeStats,
+  type RecentPr,
+} from "../lib/api";
 import { prStatusMark } from "../lib/pr-status";
 import {
   expandPrRenderWindow,
@@ -84,7 +89,10 @@ function readCachedHomeStats(): HomeStats | null {
     const cached = JSON.parse(
       localStorage.getItem(HOME_STATS_CACHE_KEY) || "null",
     ) as Partial<HomeStats> | null;
-    return cached?.today && cached.week && cached.completeWeek && cached.priorWeek
+    return cached?.today &&
+      cached.week &&
+      cached.completeWeek &&
+      cached.priorWeek
       ? (cached as HomeStats)
       : null;
   } catch {
@@ -173,9 +181,15 @@ function OverviewTile({
       {loading ? (
         <span className="mt-2 block h-6 w-16 rounded-sm bg-line motion-safe:animate-pulse" />
       ) : (
-        <span className="mt-1 block truncate text-stat font-semibold text-fg">{value}</span>
+        <span className="mt-1 block truncate text-stat font-semibold text-fg">
+          {value}
+        </span>
       )}
-      {detail ? <span className="mt-1 block truncate text-meta text-faint">{detail}</span> : null}
+      {detail ? (
+        <span className="mt-1 block truncate text-meta text-faint">
+          {detail}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -303,18 +317,20 @@ export function Prs({
     const target = preview;
     setAddingToSidebar(true);
     await (async () => {
-const workspaceId = await onAddToSidebar(target);
+      const workspaceId = await onAddToSidebar(target);
       setPreview((current) =>
         current?.repo === target.repo && current.branch === target.branch
           ? { ...current, workspaceId }
           : current,
       );
       toast("Added to sidebar");
-})().catch(async () => {
-toast("Couldn't add to sidebar");
-}).finally(async () => {
-setAddingToSidebar(false);
-});
+    })()
+      .catch(async () => {
+        toast("Couldn't add to sidebar");
+      })
+      .finally(async () => {
+        setAddingToSidebar(false);
+      });
   }
 
   useEffect(() => {
@@ -335,7 +351,7 @@ setAddingToSidebar(false);
     };
   }, []);
 
-  const running = (sessions.filter((s) => s.isRunning && !s.archived).length);
+  const running = sessions.filter((s) => s.isRunning && !s.archived).length;
 
   useEffect(() => {
     let active = true;
@@ -369,17 +385,22 @@ setAddingToSidebar(false);
 
   const worktrees = (() => {
     const needle = query.trim().toLowerCase();
-    return allWorktrees
-      .filter((row) => {
-        if (!showArchived && row.archived) return false;
-        if (repo !== "all" && row.repo !== repo) return false;
-        if (person !== "all" && row.person !== person) return false;
-        if (!needle) return true;
-        return [row.title, row.repo, row.branch, row.author, row.number ? `#${row.number}` : ""]
-          .join(" ")
-          .toLowerCase()
-          .includes(needle);
-      });
+    return allWorktrees.filter((row) => {
+      if (!showArchived && row.archived) return false;
+      if (repo !== "all" && row.repo !== repo) return false;
+      if (person !== "all" && row.person !== person) return false;
+      if (!needle) return true;
+      return [
+        row.title,
+        row.repo,
+        row.branch,
+        row.author,
+        row.number ? `#${row.number}` : "",
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle);
+    });
   })();
 
   const visibleWorktrees = worktrees.slice(0, rowLimit);
@@ -392,8 +413,12 @@ setAddingToSidebar(false);
       { state: "CLOSED", label: "Closed" },
     ];
     return definitions.flatMap((definition) => {
-      const total = worktrees.filter((row) => row.state === definition.state).length;
-      const rows = visibleWorktrees.filter((row) => row.state === definition.state);
+      const total = worktrees.filter(
+        (row) => row.state === definition.state,
+      ).length;
+      const rows = visibleWorktrees.filter(
+        (row) => row.state === definition.state,
+      );
       if (!rows.length) return [];
       const groups = new Map<string, WorktreeRow[]>();
       for (const row of rows) {
@@ -404,7 +429,9 @@ setAddingToSidebar(false);
     });
   })();
 
-  const repoOptions = ([...new Set(allWorktrees.map((row) => row.repo).filter(Boolean))].sort());
+  const repoOptions = [
+    ...new Set(allWorktrees.map((row) => row.repo).filter(Boolean)),
+  ].sort();
 
   // The page's controls, in the window's top bar rather than in a strip of
   // their own. That bar spans the pane and was empty until the heading below
@@ -480,121 +507,136 @@ setAddingToSidebar(false);
           group, so widening the pane grows the quiet space between the two
           jobs instead of separating the field from its heading. */}
       <div className="ml-auto flex min-w-0 items-center gap-2">
-      {people.length > 0 && (
-        <Menu.Root>
-          <Menu.Trigger
-            render={
-              <Button variant="ghost" className="min-w-0" icon={<IconPeople size={18} />} caret>
-                <span className="max-w-[150px] truncate">
-                  {person === "all" ? "Anyone" : personLabel(person)}
-                </span>
-              </Button>
-            }
-          />
-          <Menu.Popup align="end" className="min-w-[200px] max-w-[320px]">
-            <Menu.RadioGroup
-              value={person}
-              onValueChange={(value) => setPerson(String(value))}
-            >
-              <Menu.RadioItem value="all" closeOnClick>
-                {/* Sized to the faces below so every label shares one edge. */}
-                <span className="size-[18px] shrink-0" />
-                <span className="min-w-0 flex-1 truncate">Anyone</span>
-                <Menu.Check on={person === "all"} />
-              </Menu.RadioItem>
-              {people.map((who) => {
-                const key = who.name.toLowerCase();
-                return (
-                  <Menu.RadioItem key={key} value={key} closeOnClick>
-                    <UserAvatar name={who.name} size={18} />
-                    <span className="min-w-0 flex-1 truncate">
-                      {key === currentUser.toLowerCase()
-                        ? `${who.fullName} (you)`
-                        : who.fullName}
-                    </span>
-                    <Menu.Check on={person === key} />
-                  </Menu.RadioItem>
-                );
-              })}
-            </Menu.RadioGroup>
-          </Menu.Popup>
-        </Menu.Root>
-      )}
-
-      {repoOptions.length > 1 && (
-        <Menu.Root>
-          <Menu.Trigger
-            render={
-              <Button variant="ghost" className="min-w-0" icon={<IconRepo size={18} />} caret>
-                <span className="max-w-[150px] truncate">
-                  {repo === "all" ? "All repos" : repoLabel(repo)}
-                </span>
-              </Button>
-            }
-          />
-          <Menu.Popup align="end" className="min-w-[200px] max-w-[320px]">
-            <Menu.RadioGroup value={repo} onValueChange={(value) => setRepo(String(value))}>
-              <Menu.RadioItem value="all" closeOnClick>
-                {/* Sized to the tiles below so every label shares one edge. */}
-                <span className="size-[18px] shrink-0" />
-                <span className="min-w-0 flex-1 truncate">All repos</span>
-                <Menu.Check on={repo === "all"} />
-              </Menu.RadioItem>
-              {repoOptions.map((name) => (
-                <Menu.RadioItem key={name} value={name} closeOnClick>
-                  <RepoTile name={name} size={18} />
-                  <span className="min-w-0 flex-1 truncate">{repoLabel(name)}</span>
-                  <Menu.Check on={repo === name} />
+        {people.length > 0 && (
+          <Menu.Root>
+            <Menu.Trigger
+              render={
+                <Button
+                  variant="ghost"
+                  className="min-w-0"
+                  icon={<IconPeople size={18} />}
+                  caret
+                >
+                  <span className="max-w-[150px] truncate">
+                    {person === "all" ? "Anyone" : personLabel(person)}
+                  </span>
+                </Button>
+              }
+            />
+            <Menu.Popup align="end" className="min-w-[200px] max-w-[320px]">
+              <Menu.RadioGroup
+                value={person}
+                onValueChange={(value) => setPerson(String(value))}
+              >
+                <Menu.RadioItem value="all" closeOnClick>
+                  {/* Sized to the faces below so every label shares one edge. */}
+                  <span className="size-[18px] shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">Anyone</span>
+                  <Menu.Check on={person === "all"} />
                 </Menu.RadioItem>
-              ))}
-            </Menu.RadioGroup>
-          </Menu.Popup>
-        </Menu.Root>
-      )}
+                {people.map((who) => {
+                  const key = who.name.toLowerCase();
+                  return (
+                    <Menu.RadioItem key={key} value={key} closeOnClick>
+                      <UserAvatar name={who.name} size={18} />
+                      <span className="min-w-0 flex-1 truncate">
+                        {key === currentUser.toLowerCase()
+                          ? `${who.fullName} (you)`
+                          : who.fullName}
+                      </span>
+                      <Menu.Check on={person === key} />
+                    </Menu.RadioItem>
+                  );
+                })}
+              </Menu.RadioGroup>
+            </Menu.Popup>
+          </Menu.Root>
+        )}
 
-      {/* Archived is a rarely-flipped switch, so it lives behind the overflow
+        {repoOptions.length > 1 && (
+          <Menu.Root>
+            <Menu.Trigger
+              render={
+                <Button
+                  variant="ghost"
+                  className="min-w-0"
+                  icon={<IconRepo size={18} />}
+                  caret
+                >
+                  <span className="max-w-[150px] truncate">
+                    {repo === "all" ? "All repos" : repoLabel(repo)}
+                  </span>
+                </Button>
+              }
+            />
+            <Menu.Popup align="end" className="min-w-[200px] max-w-[320px]">
+              <Menu.RadioGroup
+                value={repo}
+                onValueChange={(value) => setRepo(String(value))}
+              >
+                <Menu.RadioItem value="all" closeOnClick>
+                  {/* Sized to the tiles below so every label shares one edge. */}
+                  <span className="size-[18px] shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">All repos</span>
+                  <Menu.Check on={repo === "all"} />
+                </Menu.RadioItem>
+                {repoOptions.map((name) => (
+                  <Menu.RadioItem key={name} value={name} closeOnClick>
+                    <RepoTile name={name} size={18} />
+                    <span className="min-w-0 flex-1 truncate">
+                      {repoLabel(name)}
+                    </span>
+                    <Menu.Check on={repo === name} />
+                  </Menu.RadioItem>
+                ))}
+              </Menu.RadioGroup>
+            </Menu.Popup>
+          </Menu.Root>
+        )}
+
+        {/* Archived is a rarely-flipped switch, so it lives behind the overflow
           menu rather than spending a slot of its own. It keeps its own colour
           when on, so the row still says the list is narrowed. */}
-      <Menu.Root>
-        <Tooltip label="More filters">
-          <Menu.Trigger
-            render={
-              <Button
-                variant="ghost"
-                className={showArchived ? "shrink-0 text-fg" : "shrink-0"}
-                aria-label="More filters"
-                icon={<IconDotsHorizontal size={18} />}
-              />
-            }
-          />
-        </Tooltip>
-        <Menu.Popup align="end">
-          <Menu.CheckboxItem
-            checked={showArchived}
-            onCheckedChange={(next) => {
-              setShowArchived(next);
-              if (next) onShowArchived();
-            }}
-            closeOnClick
-          >
-            <IconArchive size={18} />
-            <span className="min-w-0 flex-1 truncate">Show archived</span>
-            <Menu.Check on={showArchived} />
-          </Menu.CheckboxItem>
-        </Menu.Popup>
-      </Menu.Root>
+        <Menu.Root>
+          <Tooltip label="More filters">
+            <Menu.Trigger
+              render={
+                <Button
+                  variant="ghost"
+                  className={showArchived ? "shrink-0 text-fg" : "shrink-0"}
+                  aria-label="More filters"
+                  icon={<IconDotsHorizontal size={18} />}
+                />
+              }
+            />
+          </Tooltip>
+          <Menu.Popup align="end">
+            <Menu.CheckboxItem
+              checked={showArchived}
+              onCheckedChange={(next) => {
+                setShowArchived(next);
+                if (next) onShowArchived();
+              }}
+              closeOnClick
+            >
+              <IconArchive size={18} />
+              <span className="min-w-0 flex-1 truncate">Show archived</span>
+              <Menu.Check on={showArchived} />
+            </Menu.CheckboxItem>
+          </Menu.Popup>
+        </Menu.Root>
 
-      {/* The page's one CTA carries its verb as a glyph as well as a word: at
+        {/* The page's one CTA carries its verb as a glyph as well as a word: at
           this size a label alone is a coloured rectangle you read, and the plus
           is what makes it scan as the button that makes something. */}
-      <Button
-        variant="primary"
-        className="shrink-0"
-        icon={<IconPlus size={18} />}
-        onClick={onNewSession}
-      >
-        New session
-      </Button>
+        <Button
+          variant="primary"
+          className="shrink-0"
+          icon={<IconPlus size={18} />}
+          onClick={onNewSession}
+        >
+          New session
+        </Button>
       </div>
     </>
   );
@@ -602,7 +644,10 @@ setAddingToSidebar(false);
   return (
     // The page frame every other list page in the app uses: one centred
     // column at the shared width and padding, a PageHeader on top.
-    <div data-page-scroll className="min-h-0 w-full flex-1 overflow-y-auto bg-surface">
+    <div
+      data-page-scroll
+      className="min-h-0 w-full flex-1 overflow-y-auto bg-surface"
+    >
       {topbarActionsEl ? createPortal(actions, topbarActionsEl) : null}
       <div
         className={cn(
@@ -642,7 +687,9 @@ setAddingToSidebar(false);
               <section key={section.state} className="mb-8">
                 <h2 className={PR_SECTION_LABEL}>
                   {section.label}
-                  <span className="text-label font-medium text-faint">{section.total}</span>
+                  <span className="text-label font-medium text-faint">
+                    {section.total}
+                  </span>
                 </h2>
                 {section.groups.map(([label, rows]) => (
                   <div key={label} className="mb-5">
@@ -671,7 +718,11 @@ setAddingToSidebar(false);
                               <StateIcon state={row.state} />
                             </span>
                             {person === "all" && row.person ? (
-                              <UserAvatar name={personLabel(row.person)} size={20} title={personLabel(row.person)} />
+                              <UserAvatar
+                                name={personLabel(row.person)}
+                                size={20}
+                                title={personLabel(row.person)}
+                              />
                             ) : (
                               <RepoTile name={row.repo} size={20} />
                             )}
@@ -696,10 +747,14 @@ setAddingToSidebar(false);
                                 numbers does not. */}
                             <span className="justify-self-end text-meta tabular-nums phone:hidden">
                               {row.additions !== undefined && (
-                                <span className="text-green">+{compactDiff(row.additions)}</span>
+                                <span className="text-green">
+                                  +{compactDiff(row.additions)}
+                                </span>
                               )}
                               {row.deletions !== undefined && (
-                                <span className="ml-2 text-red">−{compactDiff(row.deletions)}</span>
+                                <span className="ml-2 text-red">
+                                  −{compactDiff(row.deletions)}
+                                </span>
                               )}
                             </span>
                             <span className="justify-self-end text-meta tabular-nums text-faint">

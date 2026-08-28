@@ -154,16 +154,17 @@ export function GitStatusRows({
   return (
     <>
       {rows.map((row) => (
-        <div
-          key={row.key}
-          className={GIT_ROW}
-        >
+        <div key={row.key} className={GIT_ROW}>
           <span className={`${GIT_DOT} ${GIT_DOT_BG[row.tone]}`} aria-hidden />
           <span className={GIT_LABEL}>{row.label}</span>
           {row.action}
         </div>
       ))}
-      {prompted && <div className={`${GIT_NOTE} text-faint`}>Asked {AGENT_NAME} to {prompted} ✓</div>}
+      {prompted && (
+        <div className={`${GIT_NOTE} text-faint`}>
+          Asked {AGENT_NAME} to {prompted} ✓
+        </div>
+      )}
       {error && <div className={`${GIT_NOTE} text-red`}>{error}</div>}
     </>
   );

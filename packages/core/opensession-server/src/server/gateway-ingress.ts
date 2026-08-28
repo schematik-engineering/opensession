@@ -18,7 +18,8 @@ export function inheritedIngressSocketFd(
 }
 
 export async function runGatewayIngress(): Promise<void> {
-  const state = process.env.OPENSESSION_DEPLOY_STATE ||
+  const state =
+    process.env.OPENSESSION_DEPLOY_STATE ||
     join(process.env.HOME || "", ".opensession/deploy");
   const port = Number(process.env.PORT || 3850);
   const metrics = createGatewayTcpProxyMetrics();

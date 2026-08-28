@@ -9,7 +9,8 @@ import {
 
 const roots: string[] = [];
 afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  for (const root of roots.splice(0))
+    rmSync(root, { recursive: true, force: true });
 });
 
 test("gateway backend selection is atomic and fail-closed", () => {

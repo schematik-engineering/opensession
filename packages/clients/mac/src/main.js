@@ -30,7 +30,11 @@ const nativeDictation = new NativeDictation();
 // leave the app in a startup crash loop. Open Session restores its own window bounds, so
 // native persistent UI state is both redundant and unsafe here.
 if (process.platform === "darwin") {
-  systemPreferences.setUserDefault("ApplePersistenceIgnoreState", "boolean", true);
+  systemPreferences.setUserDefault(
+    "ApplePersistenceIgnoreState",
+    "boolean",
+    true,
+  );
 }
 
 // Which Open Session server this shell is a window onto. It is asked for on the
@@ -128,9 +132,12 @@ let pendingDeepLink = null;
 
 function activeWindow() {
   const focused = BrowserWindow.getFocusedWindow();
-  if (focused && appWindows.has(focused) && !focused.isDestroyed()) return focused;
+  if (focused && appWindows.has(focused) && !focused.isDestroyed())
+    return focused;
   if (win && appWindows.has(win) && !win.isDestroyed()) return win;
-  return [...appWindows].findLast((candidate) => !candidate.isDestroyed()) || null;
+  return (
+    [...appWindows].findLast((candidate) => !candidate.isDestroyed()) || null
+  );
 }
 
 function eventWindow(event) {
@@ -187,15 +194,19 @@ function readStoredAccounts() {
       const accounts = stored.accounts.flatMap((account) => {
         const url = normalizeServerUrl(account?.url);
         if (!url) return [];
-        return [{
-          id: String(account.id || crypto.randomUUID()),
-          label: String(account.label || new URL(url).host),
-          url,
-          lastUrl: resumableAccountUrl(url, account.lastUrl),
-        }];
+        return [
+          {
+            id: String(account.id || crypto.randomUUID()),
+            label: String(account.label || new URL(url).host),
+            url,
+            lastUrl: resumableAccountUrl(url, account.lastUrl),
+          },
+        ];
       });
       if (accounts.length) {
-        const activeId = accounts.some((account) => account.id === stored.activeId)
+        const activeId = accounts.some(
+          (account) => account.id === stored.activeId,
+        )
           ? stored.activeId
           : accounts[0].id;
         return { accounts, activeId };
@@ -229,7 +240,9 @@ function writeStoredAccounts(accounts) {
 
 function activeAccountResumeUrl() {
   const stored = readStoredAccounts();
-  const account = stored.accounts.find((candidate) => candidate.id === stored.activeId);
+  const account = stored.accounts.find(
+    (candidate) => candidate.id === stored.activeId,
+  );
   return account?.lastUrl || account?.url || APP_URL;
 }
 
@@ -239,7 +252,9 @@ function activeAccountResumeUrl() {
 function rememberActiveAccountUrl(target) {
   if (!target || target.isDestroyed() || target !== activeWindow()) return;
   const stored = readStoredAccounts();
-  const account = stored.accounts.find((candidate) => candidate.id === stored.activeId);
+  const account = stored.accounts.find(
+    (candidate) => candidate.id === stored.activeId,
+  );
   if (!account) return;
   const next = resumableAccountUrl(account.url, target.webContents.getURL());
   if (!next || next === account.lastUrl) return;
@@ -249,12 +264,17 @@ function rememberActiveAccountUrl(target) {
 
 function readStoredServer() {
   const stored = readStoredAccounts();
-  return stored.accounts.find((account) => account.id === stored.activeId)?.url || null;
+  return (
+    stored.accounts.find((account) => account.id === stored.activeId)?.url ||
+    null
+  );
 }
 
 function writeStoredServer(url, addingAccount = false) {
   const stored = readStoredAccounts();
-  const active = stored.accounts.find((account) => account.id === stored.activeId);
+  const active = stored.accounts.find(
+    (account) => account.id === stored.activeId,
+  );
   if (addingAccount || !active) {
     const account = { id: crypto.randomUUID(), label: new URL(url).host, url };
     stored.accounts.push(account);
@@ -275,7 +295,9 @@ function adoptDefaultForExistingProfile() {
 }
 
 function trustedAccountOrigins() {
-  return readStoredAccounts().accounts.map((account) => new URL(account.url).origin);
+  return readStoredAccounts().accounts.map(
+    (account) => new URL(account.url).origin,
+  );
 }
 
 function setServer(url) {
@@ -295,8 +317,9 @@ function blockServiceWorker() {
   // one of them, so re-registering is how the block follows a server change.
   session.defaultSession.webRequest.onBeforeRequest(
     {
-      urls: [...new Set([APP_ORIGIN, ...trustedAccountOrigins()])]
-        .map((origin) => origin + "/*sw.js*"),
+      urls: [...new Set([APP_ORIGIN, ...trustedAccountOrigins()])].map(
+        (origin) => origin + "/*sw.js*",
+      ),
     },
     (_details, callback) => callback({ cancel: true }),
   );
@@ -313,7 +336,8 @@ async function probeServer(url) {
       signal: controller.signal,
       credentials: "omit",
     });
-    if (!res.ok) return { ok: false, error: `That address answered ${res.status}.` };
+    if (!res.ok)
+      return { ok: false, error: `That address answered ${res.status}.` };
     // The health route is public and answers JSON, so a host that is something
     // else (a parked domain, a proxy's login wall) fails here rather than at
     // the first empty window.
@@ -331,7 +355,8 @@ async function probeServer(url) {
 
 async function resolveServer(raw) {
   const url = normalizeServerUrl(raw);
-  if (!url) return { ok: false, error: "That doesn't look like a server address." };
+  if (!url)
+    return { ok: false, error: "That doesn't look like a server address." };
   const reached = await probeServer(url);
   if (reached.ok) return { ok: true, url };
   // A bare tailnet or LAN host often serves plain HTTP. Match the first-run
@@ -341,7 +366,11 @@ async function resolveServer(raw) {
   return { ...reached, url };
 }
 
-function showSetup(returnDestination = "app", target = activeWindow(), addingAccount = false) {
+function showSetup(
+  returnDestination = "app",
+  target = activeWindow(),
+  addingAccount = false,
+) {
   if (!target || target.isDestroyed()) return;
   const data = windowData.get(target);
   if (data) {
@@ -371,7 +400,8 @@ let updateState = { state: "idle", version: null };
 function setUpdateState(next) {
   updateState = next;
   for (const target of appWindows) {
-    if (!target.isDestroyed()) target.webContents.send("os1:update-state", updateState);
+    if (!target.isDestroyed())
+      target.webContents.send("os1:update-state", updateState);
   }
 }
 
@@ -454,7 +484,8 @@ function initAutoUpdate() {
       dialog.showMessageBox(win, {
         type: "info",
         message: "Update available",
-        detail: "Downloading in the background. You'll be asked to restart when it's ready.",
+        detail:
+          "Downloading in the background. You'll be asked to restart when it's ready.",
       });
     }
   });
@@ -547,9 +578,11 @@ function onScreenBounds(saved) {
   if (Object.values(bounds).some((n) => !Number.isFinite(n))) return null;
   const area = screen.getDisplayMatching(bounds).workArea;
   const shownWidth =
-    Math.min(bounds.x + bounds.width, area.x + area.width) - Math.max(bounds.x, area.x);
+    Math.min(bounds.x + bounds.width, area.x + area.width) -
+    Math.max(bounds.x, area.x);
   const shownHeight =
-    Math.min(bounds.y + bounds.height, area.y + area.height) - Math.max(bounds.y, area.y);
+    Math.min(bounds.y + bounds.height, area.y + area.height) -
+    Math.max(bounds.y, area.y);
   if (shownWidth < 200 || shownHeight < 100) return null;
   bounds.width = clamp(bounds.width, MIN_WIDTH, area.width);
   bounds.height = clamp(bounds.height, MIN_HEIGHT, area.height);
@@ -678,19 +711,22 @@ async function explainMicDenied() {
   if (micDialogOpen) return;
   micDialogOpen = true;
   try {
-    const { response } = await dialog.showMessageBox(win && !win.isDestroyed() ? win : null, {
-      type: "info",
-      message: "macOS is blocking the microphone",
-      // app.getName() rather than the product name: what System Settings lists
-      // is the bundle's label, so this text has to follow the label.
-      detail:
-        `Dictation needs microphone access, and macOS has it turned off for ${app.getName()}.\n\n` +
-        `Open System Settings → Privacy & Security → Microphone, switch ${app.getName()} on, ` +
-        "then quit and reopen it.",
-      buttons: ["Open System Settings", "Not now"],
-      defaultId: 0,
-      cancelId: 1,
-    });
+    const { response } = await dialog.showMessageBox(
+      win && !win.isDestroyed() ? win : null,
+      {
+        type: "info",
+        message: "macOS is blocking the microphone",
+        // app.getName() rather than the product name: what System Settings lists
+        // is the bundle's label, so this text has to follow the label.
+        detail:
+          `Dictation needs microphone access, and macOS has it turned off for ${app.getName()}.\n\n` +
+          `Open System Settings → Privacy & Security → Microphone, switch ${app.getName()} on, ` +
+          "then quit and reopen it.",
+        buttons: ["Open System Settings", "Not now"],
+        defaultId: 0,
+        cancelId: 1,
+      },
+    );
     if (response === 0) openMicSettings();
   } finally {
     micDialogOpen = false;
@@ -903,7 +939,8 @@ function createWindow(initialURL = null) {
     createdWindow.webContents.setZoomLevel(clampZoom(data.zoomLevel));
     if (inActiveWindow(createdWindow.webContents.getURL())) {
       const stored = readStoredAccounts();
-      if (stored.activeId) refreshAccountLabel(stored.activeId, createdWindow.webContents);
+      if (stored.activeId)
+        refreshAccountLabel(stored.activeId, createdWindow.webContents);
     }
   });
   // A commit means the server answered, so the stall guard's job is done —
@@ -987,9 +1024,13 @@ function createWindow(initialURL = null) {
       items.push(
         {
           label: "Copy Image",
-          click: () => createdWindow.webContents.copyImageAt(params.x, params.y),
+          click: () =>
+            createdWindow.webContents.copyImageAt(params.x, params.y),
         },
-        { label: "Copy Image Address", click: () => clipboard.writeText(params.srcURL) },
+        {
+          label: "Copy Image Address",
+          click: () => clipboard.writeText(params.srcURL),
+        },
         { type: "separator" },
       );
     }
@@ -1007,20 +1048,24 @@ function createWindow(initialURL = null) {
     }
 
     // Drop a trailing separator so link-only menus end cleanly.
-    while (items.length && items[items.length - 1].type === "separator") items.pop();
+    while (items.length && items[items.length - 1].type === "separator")
+      items.pop();
     if (!items.length) return;
     Menu.buildFromTemplate(items).popup({ window: createdWindow });
   });
 
   // Show a themed recovery page instead of Chromium's network error.
-  createdWindow.webContents.on("did-fail-load", (_e, code, _desc, _url, isMainFrame) => {
-    if (!isMainFrame) return;
-    // A superseded navigation aborts as a matter of course, so ERR_ABORTED is
-    // not a failure to report. It must not call off the stall guard either: an
-    // abort that commits nothing is the empty window this guards against.
-    if (code === -3 /* ERR_ABORTED */) return;
-    showStatusPage(createdWindow);
-  });
+  createdWindow.webContents.on(
+    "did-fail-load",
+    (_e, code, _desc, _url, isMainFrame) => {
+      if (!isMainFrame) return;
+      // A superseded navigation aborts as a matter of course, so ERR_ABORTED is
+      // not a failure to report. It must not call off the stall guard either: an
+      // abort that commits nothing is the empty window this guards against.
+      if (code === -3 /* ERR_ABORTED */) return;
+      showStatusPage(createdWindow);
+    },
+  );
 
   // Belt-and-braces: if the renderer ever dies, come back instead of showing
   // a dead window.
@@ -1029,7 +1074,8 @@ function createWindow(initialURL = null) {
     openHome(createdWindow);
   });
 
-  if (initialURL && inActiveWindow(initialURL)) loadApp(initialURL, createdWindow);
+  if (initialURL && inActiveWindow(initialURL))
+    loadApp(initialURL, createdWindow);
   else openHome(createdWindow);
   return createdWindow;
 }
@@ -1042,7 +1088,9 @@ async function refreshAccountLabel(accountID, webContents) {
     );
     if (typeof name !== "string" || !name.trim()) return;
     const stored = readStoredAccounts();
-    const account = stored.accounts.find((candidate) => candidate.id === accountID);
+    const account = stored.accounts.find(
+      (candidate) => candidate.id === accountID,
+    );
     if (!account || account.label === name.trim()) return;
     account.label = name.trim();
     if (writeStoredAccounts(stored)) buildAppMenu();
@@ -1052,7 +1100,9 @@ async function refreshAccountLabel(accountID, webContents) {
 function syncBackgroundAccountWindows() {
   if (!appReady) return;
   const stored = readStoredAccounts();
-  const inactive = stored.accounts.filter((account) => account.id !== stored.activeId);
+  const inactive = stored.accounts.filter(
+    (account) => account.id !== stored.activeId,
+  );
   const inactiveIDs = new Set(inactive.map((account) => account.id));
   for (const [id, accountWindow] of backgroundAccountWindows) {
     if (!inactiveIDs.has(id) || accountWindow.isDestroyed()) {
@@ -1083,7 +1133,9 @@ function syncBackgroundAccountWindows() {
       }
     });
     accountWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-    accountWindow.on("closed", () => backgroundAccountWindows.delete(account.id));
+    accountWindow.on("closed", () =>
+      backgroundAccountWindows.delete(account.id),
+    );
     accountWindow.webContents.on("did-finish-load", () => {
       refreshAccountLabel(account.id, accountWindow.webContents);
     });
@@ -1102,13 +1154,20 @@ function switchAccount(id, targetURL = null, target = activeWindow()) {
   // only recover one session id and often selected the workspace's first tab.
   // Capturing before setServer changes the active origin preserves sessions,
   // workspace panes, review tabs, and route refinements independently per org.
-  const current = stored.accounts.find((candidate) => candidate.id === stored.activeId);
+  const current = stored.accounts.find(
+    (candidate) => candidate.id === stored.activeId,
+  );
   if (current && target && !target.isDestroyed()) {
-    const currentUrl = resumableAccountUrl(current.url, target.webContents.getURL());
+    const currentUrl = resumableAccountUrl(
+      current.url,
+      target.webContents.getURL(),
+    );
     if (currentUrl) current.lastUrl = currentUrl;
   }
   const destination =
-    resumableAccountUrl(account.url, targetURL) || account.lastUrl || account.url;
+    resumableAccountUrl(account.url, targetURL) ||
+    account.lastUrl ||
+    account.url;
   account.lastUrl = destination;
   stored.activeId = account.id;
   if (!writeStoredAccounts(stored)) return;
@@ -1118,7 +1177,10 @@ function switchAccount(id, targetURL = null, target = activeWindow()) {
   initAutoUpdate();
   const destinationWindow = showWindow(target);
   for (const appWindow of appWindows) {
-    loadApp(appWindow === destinationWindow ? destination : account.url, appWindow);
+    loadApp(
+      appWindow === destinationWindow ? destination : account.url,
+      appWindow,
+    );
   }
 }
 
@@ -1225,7 +1287,11 @@ app.whenReady().then(async () => {
   // macOS; everything else outside the allowlist is refused.
   session.defaultSession.setPermissionRequestHandler(
     async (wc, permission, callback, details) => {
-      const allowed = ["notifications", "clipboard-sanitized-write", "fullscreen"];
+      const allowed = [
+        "notifications",
+        "clipboard-sanitized-write",
+        "fullscreen",
+      ];
       if (!inWindow(wc.getURL())) return callback(false);
       if (permission === "media") {
         // Audio only. A request that also wants the camera isn't dictation.
@@ -1240,11 +1306,18 @@ app.whenReady().then(async () => {
     const source = e.senderFrame?.url ?? "";
     if (!inWindow(source)) return;
     let origin;
-    try { origin = new URL(source).origin; } catch { return; }
+    try {
+      origin = new URL(source).origin;
+    } catch {
+      return;
+    }
     const next = Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
     if (next) badgeByOrigin.set(origin, next);
     else badgeByOrigin.delete(origin);
-    const total = [...badgeByOrigin.values()].reduce((sum, value) => sum + value, 0);
+    const total = [...badgeByOrigin.values()].reduce(
+      (sum, value) => sum + value,
+      0,
+    );
     app.setBadgeCount(total);
     buildAppMenu();
   });
@@ -1255,11 +1328,18 @@ app.whenReady().then(async () => {
     const source = e.senderFrame?.url ?? "";
     if (!inWindow(source)) return;
     let origin;
-    try { origin = new URL(source).origin; } catch { return; }
+    try {
+      origin = new URL(source).origin;
+    } catch {
+      return;
+    }
     const stored = readStoredAccounts();
-    const account = stored.accounts.find((candidate) => new URL(candidate.url).origin === origin);
+    const account = stored.accounts.find(
+      (candidate) => new URL(candidate.url).origin === origin,
+    );
     const target = eventWindow(e) || activeWindow();
-    if (account && account.id !== stored.activeId) switchAccount(account.id, source, target);
+    if (account && account.id !== stored.activeId)
+      switchAccount(account.id, source, target);
     else showWindow(target);
   });
 
@@ -1382,7 +1462,8 @@ app.whenReady().then(async () => {
     const target = eventWindow(e);
     const data = target && windowData.get(target);
     const url = normalizeServerUrl(raw);
-    if (!url) return { ok: false, error: "That doesn't look like a server address." };
+    if (!url)
+      return { ok: false, error: "That doesn't look like a server address." };
     if (!writeStoredServer(url, data?.addingAccount)) {
       return { ok: false, error: "Couldn't save that address." };
     }

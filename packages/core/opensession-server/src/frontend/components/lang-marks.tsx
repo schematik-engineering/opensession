@@ -180,7 +180,7 @@ export function ExtBadge({
     <span
       className={cn(
         "flex h-4 min-w-4 flex-shrink-0 items-center justify-center px-0.5 text-meta font-bold leading-none",
-        className
+        className,
       )}
       style={{ color: `color-mix(in oklab, ${color} 75%, var(--text))` }}
     >

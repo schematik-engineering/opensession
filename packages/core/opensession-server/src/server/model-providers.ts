@@ -149,7 +149,7 @@ export const WAFER_PICKER_MODELS: readonly string[] = Object.keys(WAFER_MODELS);
  *  to the same entry the picker uses. Undefined when it isn't a Wafer model. */
 function waferModel(model: string) {
   const id = Object.keys(WAFER_MODELS).find(
-    (known) => known.toLowerCase() === model.toLowerCase()
+    (known) => known.toLowerCase() === model.toLowerCase(),
   );
   return id ? WAFER_MODELS[id] : undefined;
 }
@@ -184,7 +184,12 @@ export interface PiProviderCatalog {
     reasoning: boolean;
     thinkingLevelMap: Record<string, string>;
     input: Array<"text" | "image">;
-    cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
+    cost: {
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+    };
     contextWindow: number;
     maxTokens: number;
   }>;
@@ -196,16 +201,18 @@ export function piProviderCatalog(id: string): PiProviderCatalog | undefined {
       name: "OpenRouter",
       api: "openai-completions",
       baseUrl: "https://openrouter.ai/api/v1",
-      models: [{
-        id: GLM_5_3_MODEL_ID,
-        name: "GLM-5.3",
-        reasoning: true,
-        thinkingLevelMap: {},
-        input: ["text"],
-        cost: { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
-        contextWindow: 1_048_576,
-        maxTokens: 131_072,
-      }],
+      models: [
+        {
+          id: GLM_5_3_MODEL_ID,
+          name: "GLM-5.3",
+          reasoning: true,
+          thinkingLevelMap: {},
+          input: ["text"],
+          cost: { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
+          contextWindow: 1_048_576,
+          maxTokens: 131_072,
+        },
+      ],
     };
   }
   if (id !== "wafer") return undefined;
@@ -268,30 +275,46 @@ export interface ModelProviderSettings {
 }
 
 function stringArray(v: unknown): string[] | undefined {
-  return Array.isArray(v) ? v.filter((x: unknown): x is string => typeof x === "string" && !!x) : undefined;
+  return Array.isArray(v)
+    ? v.filter((x: unknown): x is string => typeof x === "string" && !!x)
+    : undefined;
 }
 
 function canonicalPickerModels(v: unknown): string[] | undefined {
   const ids = stringArray(v);
-  return ids ? [...new Set(ids.map(canonicalProviderPickerModelId))] : undefined;
+  return ids
+    ? [...new Set(ids.map(canonicalProviderPickerModelId))]
+    : undefined;
 }
 
-function providerMap(v: unknown): Record<string, ModelProviderConfig> | undefined {
+function providerMap(
+  v: unknown,
+): Record<string, ModelProviderConfig> | undefined {
   if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
   const out: Record<string, ModelProviderConfig> = {};
   for (const [id, raw] of Object.entries(v as Record<string, unknown>)) {
-    if (!PROVIDER_ID_RE.test(id) || !raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    if (
+      !PROVIDER_ID_RE.test(id) ||
+      !raw ||
+      typeof raw !== "object" ||
+      Array.isArray(raw)
+    )
+      continue;
     const r = raw as Record<string, unknown>;
     out[id] = {
       ...(typeof r.apiKey === "string" && r.apiKey ? { apiKey: r.apiKey } : {}),
-      ...(typeof r.baseURL === "string" && r.baseURL ? { baseURL: r.baseURL } : {}),
+      ...(typeof r.baseURL === "string" && r.baseURL
+        ? { baseURL: r.baseURL }
+        : {}),
     };
   }
   return Object.keys(out).length ? out : undefined;
 }
 
 /** Pure normalization (exported for tests): raw JSON → typed config. */
-export function normalizeModelProviderConfig(raw: unknown): ModelProviderSettings | null {
+export function normalizeModelProviderConfig(
+  raw: unknown,
+): ModelProviderSettings | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const r = raw as Record<string, unknown>;
   const enabled = r.enabled === true;
@@ -301,11 +324,13 @@ export function normalizeModelProviderConfig(raw: unknown): ModelProviderSetting
       : undefined;
   return {
     enabled,
-    bridgeAccountIds: stringArray(bridge?.accounts) ?? stringArray(r.bridgeAccountIds),
+    bridgeAccountIds:
+      stringArray(bridge?.accounts) ?? stringArray(r.bridgeAccountIds),
     port: typeof r.port === "number" && r.port > 0 ? r.port : undefined,
     pickerModels: canonicalPickerModels(r.pickerModels),
     bridgeMaxRequestsPerHour:
-      typeof r.bridgeMaxRequestsPerHour === "number" && r.bridgeMaxRequestsPerHour > 0
+      typeof r.bridgeMaxRequestsPerHour === "number" &&
+      r.bridgeMaxRequestsPerHour > 0
         ? r.bridgeMaxRequestsPerHour
         : undefined,
     openaiAccounts: stringArray(bridge?.openaiAccounts),
@@ -318,7 +343,9 @@ export function readModelProviderConfig(): ModelProviderSettings | null {
   const path = configPath();
   if (!existsSync(path)) return null;
   try {
-    return normalizeModelProviderConfig(JSON.parse(readFileSync(path, "utf-8")));
+    return normalizeModelProviderConfig(
+      JSON.parse(readFileSync(path, "utf-8")),
+    );
   } catch (e) {
     console.warn(`[model-providers] Failed to parse ${path}:`, e);
     return null;
@@ -336,7 +363,8 @@ export const DEFAULT_BRIDGE_MAX_REQUESTS_PER_HOUR = 300;
 /** Rolling per-account request ceiling for the native Anthropic bridge. */
 export function bridgeMaxRequestsPerHour(): number {
   return (
-    readModelProviderConfig()?.bridgeMaxRequestsPerHour || DEFAULT_BRIDGE_MAX_REQUESTS_PER_HOUR
+    readModelProviderConfig()?.bridgeMaxRequestsPerHour ||
+    DEFAULT_BRIDGE_MAX_REQUESTS_PER_HOUR
   );
 }
 
@@ -351,7 +379,7 @@ export function orchestratorEnabled(): boolean {
 /** Configured Pi model ids to surface in the picker. */
 export function configuredPickerModels(): string[] {
   return (readModelProviderConfig()?.pickerModels || []).filter((id) =>
-    id.startsWith("pi/")
+    id.startsWith("pi/"),
   );
 }
 
@@ -368,7 +396,9 @@ function readRawModelProviderConfig(): Record<string, unknown> {
   // a config that's merely unparseable — fail loudly instead.
   const raw = JSON.parse(readFileSync(path, "utf-8"));
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    throw new Error(`Cannot update ${path}: existing content is not a JSON object`);
+    throw new Error(
+      `Cannot update ${path}: existing content is not a JSON object`,
+    );
   }
   return raw as Record<string, unknown>;
 }
@@ -380,7 +410,9 @@ function writeRawModelProviderConfig(raw: Record<string, unknown>): void {
 }
 
 function rawProviders(raw: Record<string, unknown>): Record<string, unknown> {
-  return raw.providers && typeof raw.providers === "object" && !Array.isArray(raw.providers)
+  return raw.providers &&
+    typeof raw.providers === "object" &&
+    !Array.isArray(raw.providers)
     ? (raw.providers as Record<string, unknown>)
     : {};
 }
@@ -401,20 +433,30 @@ export function modelProviders(): Record<string, ModelProviderConfig> {
  */
 export function setModelProvider(id: string, cfg: ModelProviderConfig): void {
   if (!PROVIDER_ID_RE.test(id)) {
-    throw new Error(`Invalid provider id "${id}" (lowercase letters, digits and dashes only)`);
+    throw new Error(
+      `Invalid provider id "${id}" (lowercase letters, digits and dashes only)`,
+    );
   }
   if (BRIDGE_PROVIDER_IDS.has(id)) {
-    throw new Error(`"${id}" runs on the subscription bridge, not a raw API key`);
+    throw new Error(
+      `"${id}" runs on the subscription bridge, not a raw API key`,
+    );
   }
   const raw = readRawModelProviderConfig();
   const providers = rawProviders(raw);
   const existing =
-    providers[id] && typeof providers[id] === "object" && !Array.isArray(providers[id])
+    providers[id] &&
+    typeof providers[id] === "object" &&
+    !Array.isArray(providers[id])
       ? (providers[id] as Record<string, unknown>)
       : {};
   const next: ModelProviderConfig = {
-    ...(typeof existing.apiKey === "string" && existing.apiKey ? { apiKey: existing.apiKey } : {}),
-    ...(typeof existing.baseURL === "string" && existing.baseURL ? { baseURL: existing.baseURL } : {}),
+    ...(typeof existing.apiKey === "string" && existing.apiKey
+      ? { apiKey: existing.apiKey }
+      : {}),
+    ...(typeof existing.baseURL === "string" && existing.baseURL
+      ? { baseURL: existing.baseURL }
+      : {}),
   };
   if (cfg.apiKey !== undefined) {
     if (cfg.apiKey) next.apiKey = cfg.apiKey;

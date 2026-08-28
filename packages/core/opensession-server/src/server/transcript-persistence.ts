@@ -19,9 +19,11 @@ interface OwnerMapState {
   warned: Set<string>;
 }
 
-const ownerState: OwnerMapState = ((globalThis as Record<string, unknown> & {
-  __osEngineSessionOwners?: OwnerMapState;
-}).__osEngineSessionOwners ??= {
+const ownerState: OwnerMapState = ((
+  globalThis as Record<string, unknown> & {
+    __osEngineSessionOwners?: OwnerMapState;
+  }
+).__osEngineSessionOwners ??= {
   map: new Map(),
   loaded: false,
   warned: new Set(),
@@ -84,11 +86,15 @@ export function sessionForEngineId(
   return engineSessionId ? ownerMap().get(engineSessionId) : undefined;
 }
 
-const degraded: Set<string> = ((globalThis as Record<string, unknown> & {
-  __osTranscriptStoreDegraded?: Set<string>;
-}).__osTranscriptStoreDegraded ??= new Set());
+const degraded: Set<string> = ((
+  globalThis as Record<string, unknown> & {
+    __osTranscriptStoreDegraded?: Set<string>;
+  }
+).__osTranscriptStoreDegraded ??= new Set());
 
-export function markTranscriptStoreDegraded(id: string | null | undefined): void {
+export function markTranscriptStoreDegraded(
+  id: string | null | undefined,
+): void {
   if (id) degraded.add(id);
 }
 
@@ -108,16 +114,24 @@ const warnedFailures = new Set<string>();
 function warnFailureOnce(id: string, message: string, error: unknown): void {
   if (warnedFailures.has(id)) return;
   warnedFailures.add(id);
-  console.warn(`${message} (further warnings suppressed for this session)`, error);
+  console.warn(
+    `${message} (further warnings suppressed for this session)`,
+    error,
+  );
 }
 
-async function appendLines(engineSessionId: string, lines: JsonlLine[]): Promise<void> {
+async function appendLines(
+  engineSessionId: string,
+  lines: JsonlLine[],
+): Promise<void> {
   const sessionId = sessionForEngineId(engineSessionId);
   if (!sessionId) {
     markTranscriptStoreDegraded(engineSessionId);
     if (!ownerState.warned.has(engineSessionId)) {
       ownerState.warned.add(engineSessionId);
-      console.warn(`[transcript] no session owner mapped for ${engineSessionId}`);
+      console.warn(
+        `[transcript] no session owner mapped for ${engineSessionId}`,
+      );
     }
     return;
   }
@@ -126,7 +140,11 @@ async function appendLines(engineSessionId: string, lines: JsonlLine[]): Promise
     if (entries.length) await appendTranscriptEvents(sessionId, entries);
   } catch (error) {
     markTranscriptStoreDegraded(sessionId);
-    warnFailureOnce(sessionId, `[transcript] append failed for ${sessionId}`, error);
+    warnFailureOnce(
+      sessionId,
+      `[transcript] append failed for ${sessionId}`,
+      error,
+    );
   }
 }
 
@@ -145,7 +163,11 @@ export async function storeAppendUserLineEarly(
     const entries = parseJsonlLines([JSON.stringify(line)]);
     if (entries.length) await appendTranscriptEvents(sessionId, entries);
   } catch (error) {
-    warnFailureOnce(sessionId, `[transcript] early user-line persist failed for ${sessionId}`, error);
+    warnFailureOnce(
+      sessionId,
+      `[transcript] early user-line persist failed for ${sessionId}`,
+      error,
+    );
     if (options.required) throw error;
   }
 }
@@ -190,7 +212,7 @@ export function transcriptLineUser(
 export function transcriptLineRunnerNotice(
   text: string,
   id?: string,
-  ts?: string
+  ts?: string,
 ): JsonlLine {
   return transcriptLineUser(`<runner-notice>${text}</runner-notice>`, id, ts);
 }
@@ -204,9 +226,13 @@ export function transcriptLineRunnerNotice(
 export function transcriptLineCompactionSummary(
   text: string,
   id?: string,
-  ts?: string
+  ts?: string,
 ): JsonlLine {
-  return transcriptLineUser(`<compaction-summary>${text}</compaction-summary>`, id, ts);
+  return transcriptLineUser(
+    `<compaction-summary>${text}</compaction-summary>`,
+    id,
+    ts,
+  );
 }
 
 /** Session recap (away-summary): the one-liner recap.ts generates when a
@@ -217,7 +243,7 @@ export function transcriptLineCompactionSummary(
 export function transcriptLineRecap(
   text: string,
   id?: string,
-  ts?: string
+  ts?: string,
 ): JsonlLine {
   return transcriptLineUser(`<recap>${text}</recap>`, id, ts);
 }
@@ -250,7 +276,7 @@ export function transcriptLineContextInjection(
   body: string,
   meta: { source: string; turnId?: string },
   id?: string,
-  ts?: string
+  ts?: string,
 ): JsonlLine {
   const attrs = [
     ` source="${meta.source}"`,
@@ -259,7 +285,7 @@ export function transcriptLineContextInjection(
   return transcriptLineUser(
     `<context-injection${attrs}>${body}</context-injection>`,
     id,
-    ts
+    ts,
   );
 }
 
@@ -276,7 +302,7 @@ export function transcriptLineStandingContext(
   body: string,
   meta: { source: string; hash: string; bytes: number; turnId?: string },
   id?: string,
-  ts?: string
+  ts?: string,
 ): JsonlLine {
   const attrs = [
     ` source="${meta.source}"`,
@@ -287,7 +313,7 @@ export function transcriptLineStandingContext(
   return transcriptLineUser(
     `<standing-context${attrs}>${body}</standing-context>`,
     id,
-    ts
+    ts,
   );
 }
 
@@ -317,7 +343,7 @@ export function transcriptLineToolUse(
   toolUseId: string,
   name: string,
   input: unknown,
-  ts?: string
+  ts?: string,
 ): JsonlLine {
   return {
     type: "assistant",
@@ -380,7 +406,7 @@ export function transcriptLineForEntry(e: TranscriptEntry): JsonlLine | null {
           ...e.images.map((src) => ({
             type: "image",
             source: { type: "url", url: src },
-          }))
+          })),
         );
       }
       return line;
@@ -398,11 +424,17 @@ export function transcriptLineForEntry(e: TranscriptEntry): JsonlLine | null {
         e.toolUseId || e.id,
         e.toolName || "Tool",
         e.toolInput,
-        e.timestamp
+        e.timestamp,
       );
     case "tool_result":
       return e.toolUseId
-        ? transcriptLineToolResult(e.toolUseId, e.content, e.isError, e.timestamp, e.images)
+        ? transcriptLineToolResult(
+            e.toolUseId,
+            e.content,
+            e.isError,
+            e.timestamp,
+            e.images,
+          )
         : null;
     case "system":
       // Compaction summaries round-trip (engine transcripts emit them and
@@ -413,14 +445,13 @@ export function transcriptLineForEntry(e: TranscriptEntry): JsonlLine | null {
         ? transcriptLineCompactionSummary(
             e.content,
             e.id.startsWith("sys-") ? e.id.slice(4) : e.id,
-            e.timestamp
+            e.timestamp,
           )
         : null;
     default:
       return null;
   }
 }
-
 
 export async function appendTranscriptEntries(
   engineSessionId: string,
@@ -450,13 +481,19 @@ export async function applyForwardedTranscript(
   if (!sessionId || !lines.length) return;
   try {
     if (!engineSessionId || engineSessionId === sessionId) {
-      const entries = parseJsonlLines(lines.map((line) => JSON.stringify(line)));
+      const entries = parseJsonlLines(
+        lines.map((line) => JSON.stringify(line)),
+      );
       if (entries.length) await appendTranscriptEvents(sessionId, entries);
       return;
     }
     recordEngineSessionOwner(engineSessionId, sessionId);
     await appendTranscriptEntries(engineSessionId, lines);
   } catch (error) {
-    warnFailureOnce(sessionId, `[transcript] forwarded append failed for ${sessionId}`, error);
+    warnFailureOnce(
+      sessionId,
+      `[transcript] forwarded append failed for ${sessionId}`,
+      error,
+    );
   }
 }

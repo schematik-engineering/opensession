@@ -7,7 +7,27 @@ import React, {
   useState,
 } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { fetchWorktrees, fetchModels, fetchToolAccounts, fetchSandboxStatus, requestSandboxPrewarm, suggestBranch, configuredNewSessionRepo, fetchProviderAccounts, fetchRepos, cachedRepos, type OpenPr, type RepoInfo, createWorkspaceApi, updateWorkspaceApi, deleteWorkspaceApi, ApiError, type ProviderAccountOption, type ModelOption, type SandboxStatusInfo } from "../lib/api";
+import {
+  fetchWorktrees,
+  fetchModels,
+  fetchToolAccounts,
+  fetchSandboxStatus,
+  requestSandboxPrewarm,
+  suggestBranch,
+  configuredNewSessionRepo,
+  fetchProviderAccounts,
+  fetchRepos,
+  cachedRepos,
+  type OpenPr,
+  type RepoInfo,
+  createWorkspaceApi,
+  updateWorkspaceApi,
+  deleteWorkspaceApi,
+  ApiError,
+  type ProviderAccountOption,
+  type ModelOption,
+  type SandboxStatusInfo,
+} from "../lib/api";
 import { getCurrentUser } from "./UserPicker";
 import { type FileAttachment } from "../lib/images";
 import {
@@ -35,7 +55,10 @@ import { getSendKeyPref, onSendKeyChanged } from "../lib/send-key-pref";
 import { effectiveSendKey, MOD_ENTER_GLYPH } from "../lib/send-key";
 import { isApple } from "../lib/platform";
 import { NO_REPO } from "../lib/session-repo";
-import { getDefaultRepoPref, setDefaultRepoPref } from "../lib/default-repo-pref";
+import {
+  getDefaultRepoPref,
+  setDefaultRepoPref,
+} from "../lib/default-repo-pref";
 import {
   getSessionCheckoutPrefs,
   onSessionCheckoutPrefChanged,
@@ -63,7 +86,12 @@ import {
   IconNewBranch,
   IconX,
 } from "./icons";
-import type { UnifiedSession, Workspace, WSClientMessage, WSServerMessage } from "../lib/types";
+import type {
+  UnifiedSession,
+  Workspace,
+  WSClientMessage,
+  WSServerMessage,
+} from "../lib/types";
 import { findPrWorkspaceId } from "../lib/pr-workspace";
 import { newClientSessionId } from "../lib/session-id";
 import { errorMatchesPendingCreate } from "../lib/new-session-navigation";
@@ -88,14 +116,11 @@ import { composerMorph } from "../ui/motion";
 import { useShortcutKeys } from "../hooks/useShortcutBindings";
 import { matchesShortcut } from "../lib/shortcuts";
 import {
-	composerBox,
-	composerSend,
-	composerSendDefault,
+  composerBox,
+  composerSend,
+  composerSendDefault,
 } from "../lib/composer-classes";
-import {
-  foregroundFileComposerOwns,
-  hasDraggedFiles,
-} from "../lib/file-drag";
+import { foregroundFileComposerOwns, hasDraggedFiles } from "../lib/file-drag";
 import { FullPageFileDropOverlay } from "./FullPageFileDropOverlay";
 import { NewSessionPrPicker } from "./NewSessionPrPicker";
 import { askSurface } from "../lib/tinted-surface";
@@ -103,9 +128,9 @@ import { toast } from "../ui/toast";
 import { cn } from "../ui/cn";
 import { PhoneTopBar, PhoneTopBarAction } from "../ui/top-bar";
 import {
-	paletteIconBtn,
-	paletteIconBtnOn,
-	palettePill,
+  paletteIconBtn,
+  paletteIconBtnOn,
+  palettePill,
 } from "../lib/palette-classes";
 
 interface Props {
@@ -210,7 +235,7 @@ const LAST_REPO_KEY = "opensession-new-session-repo";
  *  than the strip a keyboard leaves visible, which cut the bar off the top of
  *  the screen as soon as an attachment took its own space. */
 const HEADER =
-	"flex items-center gap-2 border-b border-transparent px-4 pt-4 pb-[11px] phone:h-auto phone:px-[18px] phone:pb-3 phone:pt-[18px]";
+  "flex items-center gap-2 border-b border-transparent px-4 pt-4 pb-[11px] phone:h-auto phone:px-[18px] phone:pb-3 phone:pt-[18px]";
 /** Merged onto HEADER/FOOTER by `cn()`, which drops the transparent colour. */
 const EDGE_DIVIDER = "border-line";
 /** The header's picker, which doubles as the palette's title: bigger, solid,
@@ -222,14 +247,14 @@ const EDGE_DIVIDER = "border-line";
  *  sized below its content, so a long repo name would push the row wider than
  *  the card instead of ellipsizing. */
 const TRIGGER_STRONG =
-	"relative inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 rounded-control px-2 py-[5px] text-item-title font-semibold text-fg transition-colors hover:bg-hover disabled:cursor-default disabled:opacity-55";
+  "relative inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 rounded-control px-2 py-[5px] text-item-title font-semibold text-fg transition-colors hover:bg-hover disabled:cursor-default disabled:opacity-55";
 const CHEVRON = "-ml-0.5 shrink-0 text-faint phone:size-4";
 /** A pass-through on a desktop, where the picker is the header's one control.
  *  On a phone it is the middle slot of the title bar: it takes the space the
  *  two discs leave and centres the title inside it, so the row reads as one
  *  balanced bar rather than a label pushed against the close button. */
 const MOBILE_PICKER =
-	"desktop:contents phone:flex phone:min-w-0 phone:flex-1 phone:justify-center";
+  "desktop:contents phone:flex phone:min-w-0 phone:flex-1 phone:justify-center";
 /** On a phone the trigger is the sheet's title: the row's name, centred
  *  between the two discs that dismiss and commit. It carries no fill and no
  *  edge of its own. Those discs are the bar's only surfaces, and a third one
@@ -243,7 +268,7 @@ const MOBILE_PICKER =
  *  target, and it has to fit the row it shares, which is what `max-w-full`
  *  plus the label's own truncation buy. */
 const MOBILE_TRIGGER =
-	"phone:min-h-11 phone:gap-1 phone:rounded-[999px] phone:px-2.5 phone:py-1.5 phone:text-label phone:font-medium phone:[&_svg:first-child]:size-4";
+  "phone:min-h-11 phone:gap-1 phone:rounded-[999px] phone:px-2.5 phone:py-1.5 phone:text-label phone:font-medium phone:[&_svg:first-child]:size-4";
 /** The composer's own send disc, so the gesture that commits a prompt looks the
  *  same in the palette as it does in a session. Sized up to the 44px target the
  *  rest of this bar keeps. */
@@ -251,7 +276,8 @@ const PHONE_SEND = cn(composerSend, composerSendDefault, "phone:size-11");
 
 /* (The prompt's own surface — the scroller and the field — moved to
    NewSessionPrompt, with the draft state it belongs to.) */
-const ERROR = "mx-4 mb-2 rounded-md bg-red-soft px-2.5 py-[7px] text-supporting text-red";
+const ERROR =
+  "mx-4 mb-2 rounded-md bg-red-soft px-2.5 py-[7px] text-supporting text-red";
 
 /* Single-line footer: the model pill is the only flexible item — it gives way
    (its label ellipsizes) while the icon buttons and Create keep their size.
@@ -264,15 +290,17 @@ const ERROR = "mx-4 mb-2 rounded-md bg-red-soft px-2.5 py-[7px] text-supporting 
    inset clears the home indicator at rest, but the keyboard covers that edge
    while a field is focused, so the ordinary 12px pad takes over then. */
 const FOOTER =
-	"flex items-center justify-between gap-x-2 gap-y-2 border-t border-transparent px-4 pt-[9px] pb-3.5 phone:flex-wrap phone:px-3 phone:pb-[calc(0.75rem+env(safe-area-inset-bottom))] phone:[body.kb-open_&]:pb-3 max-[560px]:gap-x-1.5";
-const FOOTER_LEFT = "flex min-w-0 items-center gap-1.5 phone:flex-1 max-[560px]:gap-1";
-const FOOTER_RIGHT = "flex min-w-0 items-center gap-1.5 phone:contents max-[560px]:gap-1";
+  "flex items-center justify-between gap-x-2 gap-y-2 border-t border-transparent px-4 pt-[9px] pb-3.5 phone:flex-wrap phone:px-3 phone:pb-[calc(0.75rem+env(safe-area-inset-bottom))] phone:[body.kb-open_&]:pb-3 max-[560px]:gap-x-1.5";
+const FOOTER_LEFT =
+  "flex min-w-0 items-center gap-1.5 phone:flex-1 max-[560px]:gap-1";
+const FOOTER_RIGHT =
+  "flex min-w-0 items-center gap-1.5 phone:contents max-[560px]:gap-1";
 /** Round on a phone, where the bar's two controls are discs and the repo is a
  *  pill: a 12px corner among them is the one square thing on the card. The
  *  hover wash rides a pseudo-element, so it has to be rounded with them. */
 const FOOTER_ICON_BTN = cn(
-	paletteIconBtn,
-	"shrink-0 phone:size-11 phone:rounded-[999px] phone:before:rounded-[999px]",
+  paletteIconBtn,
+  "shrink-0 phone:size-11 phone:rounded-[999px] phone:before:rounded-[999px]",
 );
 /** Ask mode's toggle. Off, it is one of the footer's quiet icon tools. On, it
  *  wears the same green marker the session composer's toolbar shows for the
@@ -286,7 +314,7 @@ const FOOTER_ICON_BTN = cn(
  *  the size the icon buttons' hover wash paints, so the row keeps one rhythm;
  *  44px on a phone, where the whole row is thumb-sized. */
 const ASK_BTN_ON =
-	"inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-control px-2.5 text-label font-medium transition-colors phone:min-h-11 phone:rounded-[999px] phone:px-3.5 bg-[color-mix(in_srgb,var(--green)_18%,transparent)] text-green hover:bg-[color-mix(in_srgb,var(--green)_26%,transparent)] disabled:cursor-default disabled:opacity-50";
+  "inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-control px-2.5 text-label font-medium transition-colors phone:min-h-11 phone:rounded-[999px] phone:px-3.5 bg-[color-mix(in_srgb,var(--green)_18%,transparent)] text-green hover:bg-[color-mix(in_srgb,var(--green)_26%,transparent)] disabled:cursor-default disabled:opacity-50";
 /** Ask mode paints the whole card, not just its toggle — the same thing the
  *  session composer does for ask and for note mode, because the mode governs
  *  everything you are about to type rather than one control in the corner.
@@ -296,15 +324,15 @@ const ASK_BTN_ON =
  *  out with it intact. Children are lifted above it, and the shell's own
  *  `overflow-hidden` clips it to the rounded corner. */
 const ASK_SURFACE =
-	"isolate " +
-	"before:pointer-events-none before:absolute before:inset-0 before:z-0 before:rounded-[inherit] before:[corner-shape:inherit] before:bg-[var(--palette-ask-bg)] before:opacity-0 before:transition-opacity before:duration-150 before:ease-[cubic-bezier(0.32,0.72,0,1)] " +
-	"[&>*]:relative [&>*]:z-[1]";
+  "isolate " +
+  "before:pointer-events-none before:absolute before:inset-0 before:z-0 before:rounded-[inherit] before:[corner-shape:inherit] before:bg-[var(--palette-ask-bg)] before:opacity-0 before:transition-opacity before:duration-150 before:ease-[cubic-bezier(0.32,0.72,0,1)] " +
+  "[&>*]:relative [&>*]:z-[1]";
 /** The one flexible footer item. The palette has room for the model's full
  *  name, so it opts out of palettePill's generic 180px cap. On phones the
  *  effort suffix steps aside first and leaves that room to the model. */
 const MODEL_PILL = cn(
-	palettePill,
-	"shrink min-w-0 max-w-none phone:ml-auto phone:min-h-11 phone:[&_[data-effort]]:hidden max-[560px]:px-[9px]",
+  palettePill,
+  "shrink min-w-0 max-w-none phone:ml-auto phone:min-h-11 phone:[&_[data-effort]]:hidden max-[560px]:px-[9px]",
 );
 
 /* What a create does with the view behind the palette: "open" follows the new
@@ -328,9 +356,9 @@ const CYCLE_SHORTCUT = isApple ? ["⌘", "⌥", "↓"] : ["Ctrl", "Alt", "↓"];
 const MULTI_MODIFIER = isApple ? "⌘" : "Ctrl";
 
 const CREATE_LABELS: Record<CreateAction, string> = {
-	open: "Create",
-	background: "Create in background",
-	more: "Create more",
+  open: "Create",
+  background: "Create in background",
+  more: "Create more",
 };
 
 /* Split button: primary Create action + a caret that opens a mode dropdown.
@@ -343,9 +371,9 @@ const CREATE_LABELS: Record<CreateAction, string> = {
    `rounded-md` — one step down, 9.45px against 13.5px — which on a 36px-tall
    plate read visibly square next to its neighbours. */
 const CREATE_SPLIT =
-	"relative inline-flex shrink-0 items-stretch phone:order-2 phone:mt-0.5 phone:w-full";
+  "relative inline-flex shrink-0 items-stretch phone:order-2 phone:mt-0.5 phone:w-full";
 const CREATE_MAIN =
-	"inline-flex cursor-pointer items-center gap-[7px] border-none bg-accent px-3.5 py-[7px] text-label font-semibold text-on-accent transition-[background-color,opacity] enabled:hover:bg-accent-hover disabled:cursor-default disabled:opacity-40 phone:min-h-11 phone:flex-1 phone:justify-center max-[560px]:px-3";
+  "inline-flex cursor-pointer items-center gap-[7px] border-none bg-accent px-3.5 py-[7px] text-label font-semibold text-on-accent transition-[background-color,opacity] enabled:hover:bg-accent-hover disabled:cursor-default disabled:opacity-40 phone:min-h-11 phone:flex-1 phone:justify-center max-[560px]:px-3";
 /** The desktop corner, split between the two shapes the button takes: half of
  *  a split button beside its caret, or the whole button when there is no caret
  *  (inline). Written as two whole classes rather than one plus an override,
@@ -355,15 +383,16 @@ const CREATE_MAIN =
  *  The phone overlay moves Create into its title bar and does not render this
  *  pair. Only the inline card reaches these phone classes, where it has no
  *  caret and rounds the whole button. */
-const CREATE_MAIN_SPLIT = "desktop:rounded-l-control phone:rounded-l-[999px] phone:rounded-r-none";
+const CREATE_MAIN_SPLIT =
+  "desktop:rounded-l-control phone:rounded-l-[999px] phone:rounded-r-none";
 const CREATE_MAIN_WHOLE = "desktop:rounded-control phone:rounded-[999px]";
 const CREATE_CARET =
-	"inline-flex cursor-pointer items-center gap-[7px] rounded-r-control phone:min-w-11 phone:justify-center phone:rounded-r-[999px] border-none bg-accent p-[7px] text-label font-semibold text-on-accent shadow-[inset_1px_0_0_rgba(0,0,0,0.14)] transition-[background-color,opacity] enabled:hover:bg-accent-hover disabled:cursor-default disabled:opacity-40";
+  "inline-flex cursor-pointer items-center gap-[7px] rounded-r-control phone:min-w-11 phone:justify-center phone:rounded-r-[999px] border-none bg-accent p-[7px] text-label font-semibold text-on-accent shadow-[inset_1px_0_0_rgba(0,0,0,0.14)] transition-[background-color,opacity] enabled:hover:bg-accent-hover disabled:cursor-default disabled:opacity-40";
 const CREATE_KBD = "opacity-70";
 const CREATE_MENU =
-	"absolute bottom-[calc(100%+6px)] right-0 z-20 min-w-[208px] rounded-control bg-popup-glass [backdrop-filter:var(--popup-blur)] [--smooth-ring-color:var(--popup-ring)] p-[5px] smooth-shadow-ring-md";
+  "absolute bottom-[calc(100%+6px)] right-0 z-20 min-w-[208px] rounded-control bg-popup-glass [backdrop-filter:var(--popup-blur)] [--smooth-ring-color:var(--popup-ring)] p-[5px] smooth-shadow-ring-md";
 const CREATE_MENU_ITEM =
-	"flex w-full cursor-pointer items-start gap-[9px] rounded-md border-none bg-transparent px-[9px] py-[7px] text-left text-fg transition-colors hover:bg-hover";
+  "flex w-full cursor-pointer items-start gap-[9px] rounded-md border-none bg-transparent px-[9px] py-[7px] text-left text-fg transition-colors hover:bg-hover";
 
 /**
  * The same card rendered on the page rather than over a dimmed one: what the
@@ -382,9 +411,9 @@ const CREATE_MENU_ITEM =
  * HUD; `overflow-hidden` keeps the rows' dividers inside the rounded shell.
  */
 const INLINE_CARD = cn(
-	"relative flex w-full flex-col overflow-hidden rounded-2xl",
-	"max-h-[min(560px,68dvh)]",
-	composerBox,
+  "relative flex w-full flex-col overflow-hidden rounded-2xl",
+  "max-h-[min(560px,68dvh)]",
+  composerBox,
 );
 
 /**
@@ -414,7 +443,9 @@ function migratedRepoPref(): string {
 // creating from a repo-filtered view lands on that repo.
 function filteredRepo(): string | null {
   try {
-    const v = JSON.parse(localStorage.getItem("opensession-sidebar-filter") || "{}");
+    const v = JSON.parse(
+      localStorage.getItem("opensession-sidebar-filter") || "{}",
+    );
     return typeof v.repo === "string" ? v.repo : null;
   } catch {
     return null;
@@ -430,7 +461,8 @@ function readPrefill() {
   const rawRepoParam = params.get("repo") ?? params.get("project");
   // "auto" was a short-lived picker sentinel, never a repository id.
   const repoParam = rawRepoParam === "auto" ? "" : rawRepoParam;
-  const mode = params.get("mode") === "ask" ? ("ask" as const) : ("code" as const);
+  const mode =
+    params.get("mode") === "ask" ? ("ask" as const) : ("code" as const);
   // `?repo=none` is honored in either mode: Ask with no repo reads nothing,
   // Code with no repo is a scratch session. Ask defaults to no repo, matching
   // the toggle — otherwise an Ask deep link would silently inherit whichever
@@ -450,7 +482,12 @@ function readPrefill() {
  *  line, trimmed and capped. Mirrors the server's own follow in
  *  updateWorkspace (workspaces.ts). */
 function firstNonEmptyLine(text: string): string {
-  return text.split("\n").find((l) => l.trim())?.trim() ?? "";
+  return (
+    text
+      .split("\n")
+      .find((l) => l.trim())
+      ?.trim() ?? ""
+  );
 }
 
 type PendingDraftPark = {
@@ -489,7 +526,24 @@ function draftParkInFlight(text: string, workspaceId?: string): boolean {
   );
 }
 
-export function NewSession({ onBack, inline, focusSeq, send, addHandler, connected, prefillPrompt, initialMcpServers, forceMode, workspaceId, modelWorkspaceId, forceRepo, forceBranch, workspaces, sessions, onCreateStarted }: Props) {
+export function NewSession({
+  onBack,
+  inline,
+  focusSeq,
+  send,
+  addHandler,
+  connected,
+  prefillPrompt,
+  initialMcpServers,
+  forceMode,
+  workspaceId,
+  modelWorkspaceId,
+  forceRepo,
+  forceBranch,
+  workspaces,
+  sessions,
+  onCreateStarted,
+}: Props) {
   const [prefill] = useState(readPrefill);
   // What the session may do, and nothing else — the footer's Ask toggle. The
   // repo is a separate axis, so Scratch is not a third value here: it is what
@@ -510,7 +564,8 @@ export function NewSession({ onBack, inline, focusSeq, send, addHandler, connect
   // existing head branch rather than trying to create it again.
   const defaultStartPoint = (): SessionStartPoint =>
     forceBranch ? { kind: "worktree", branch: forceBranch } : { kind: "new" };
-  const [startPoint, setStartPoint] = useState<SessionStartPoint>(defaultStartPoint);
+  const [startPoint, setStartPoint] =
+    useState<SessionStartPoint>(defaultStartPoint);
   const selectedPullRequest =
     startPoint.kind === "pull-request" ? startPoint.pullRequest : null;
   /**
@@ -592,27 +647,30 @@ export function NewSession({ onBack, inline, focusSeq, send, addHandler, connect
     !startsInLocalCheckout;
   useEffect(() => {
     let live = true;
-    fetchRepos().then((items) => {
-      if (!live) return;
-      const options = repoOptions(items);
-      setRepos(options);
-      setConfiguredDefaultRepo(resolveDefaultRepo(options));
-    }).catch(() => {
-      // A failed refresh keeps the cached rows rather than emptying the picker.
-      if (!live) return;
-      setRepos((current) => current);
-    });
+    fetchRepos()
+      .then((items) => {
+        if (!live) return;
+        const options = repoOptions(items);
+        setRepos(options);
+        setConfiguredDefaultRepo(resolveDefaultRepo(options));
+      })
+      .catch(() => {
+        // A failed refresh keeps the cached rows rather than emptying the picker.
+        if (!live) return;
+        setRepos((current) => current);
+      });
     return () => {
       live = false;
     };
   }, []);
   useEffect(() => {
-	setRepo((current) => {
+    setRepo((current) => {
       // "No repo" is a real choice, not an unresolved id — without this it
       // fails the `repos.some(...)` membership test below and gets replaced by
       // the configured default the moment /repos lands.
       if (forceRepo === NO_REPO || current === NO_REPO) return current;
-      if (forceRepo && repos.some((item) => item.id === forceRepo)) return forceRepo;
+      if (forceRepo && repos.some((item) => item.id === forceRepo))
+        return forceRepo;
       if (repos.some((item) => item.id === current)) return current;
       return configuredDefaultRepo;
     });
@@ -653,22 +711,33 @@ export function NewSession({ onBack, inline, focusSeq, send, addHandler, connect
   // upload writes to and what a reopened palette reads back; keeping a second
   // copy authoritative here is what used to lose a screenshot pasted just
   // before the card closed.
-  const [images, setImages] = useState<string[]>(() => loadDraft(DRAFT_KEY).images);
-  const [files, setFiles] = useState<FileAttachment[]>(() => loadDraft(DRAFT_KEY).files);
+  const [images, setImages] = useState<string[]>(
+    () => loadDraft(DRAFT_KEY).images,
+  );
+  const [files, setFiles] = useState<FileAttachment[]>(
+    () => loadDraft(DRAFT_KEY).files,
+  );
   const uploads = useAttachmentUploads();
   const staging = uploads.staging;
   const [fileDragActive, setFileDragActive] = useState(false);
-  const fileDragWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fileDragWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   // Stable identity: module loader + setters only.
   const adoptDraftAttachments = useCallback(() => {
     const stored = loadDraft(DRAFT_KEY);
-    setImages((prev) => (sameImages(prev, stored.images) ? prev : stored.images));
+    setImages((prev) =>
+      sameImages(prev, stored.images) ? prev : stored.images,
+    );
     setFiles((prev) => (sameFiles(prev, stored.files) ? prev : stored.files));
   }, []);
   // An upload that lands while this palette is open belongs on screen even
   // though it was staged by the instance that closed: the store fires on an
   // attachment change for exactly this.
-  useEffect(() => onDraftsChanged(adoptDraftAttachments), [adoptDraftAttachments]);
+  useEffect(
+    () => onDraftsChanged(adoptDraftAttachments),
+    [adoptDraftAttachments],
+  );
   const [status, setStatus] = useState<CreateStatus>({ kind: "idle" });
   const busy = status.kind === "creating" || status.kind === "reconnecting";
   // Which edges of the prompt have content beyond them, and so earn a hairline.
@@ -687,7 +756,9 @@ export function NewSession({ onBack, inline, focusSeq, send, addHandler, connect
   const [accountId, setAccountId] = useState("");
   const [accounts, setAccounts] = useState<ProviderAccountOption[]>([]);
   useEffect(() => {
-    fetchProviderAccounts().then(setAccounts).catch(() => {});
+    fetchProviderAccounts()
+      .then(setAccounts)
+      .catch(() => {});
   }, []);
   const effectiveNewModel = model || defaultModel;
   const accountProvider = models.find(
@@ -733,56 +804,78 @@ export function NewSession({ onBack, inline, focusSeq, send, addHandler, connect
   // configured providers are offered, and the whole control hides when the
   // server has no sandbox config or the kill switch is on.
   const [sandboxProvider, setSandboxProvider] = useState("");
-  const [sandboxStatus, setSandboxStatus] = useState<SandboxStatusInfo | null>(null);
+  const [sandboxStatus, setSandboxStatus] = useState<SandboxStatusInfo | null>(
+    null,
+  );
   const sandboxSelectionTouched = useRef(false);
   useEffect(() => {
     fetchSandboxStatus(getCurrentUser())
       .then((status) => {
         setSandboxStatus(status);
-		// This machine remains the clear default. Sandbox configuration belongs
-		// behind the explicit Sandbox choice, never in an invisible default.
-		if (!sandboxSelectionTouched.current) setSandboxProvider("");
+        // This machine remains the clear default. Sandbox configuration belongs
+        // behind the explicit Sandbox choice, never in an invisible default.
+        if (!sandboxSelectionTouched.current) setSandboxProvider("");
       })
       .catch(() => {});
   }, []);
   const sandboxChoices = sandboxStatus?.connections?.length
     ? sandboxStatus.connections
         .filter((connection) => connection.state === "ready")
-        .map((connection) => ({ id: connection.provider, note: undefined as string | undefined }))
-    : (sandboxStatus?.providers || []).filter((p) => p.configured && p.certified);
+        .map((connection) => ({
+          id: connection.provider,
+          note: undefined as string | undefined,
+        }))
+    : (sandboxStatus?.providers || []).filter(
+        (p) => p.configured && p.certified,
+      );
   const selectedSandboxAvailable =
-    !sandboxProvider || sandboxChoices.some((choice) => choice.id === sandboxProvider);
+    !sandboxProvider ||
+    sandboxChoices.some((choice) => choice.id === sandboxProvider);
   const visibleSandboxChoices =
     sandboxProvider && !selectedSandboxAvailable
       ? [
           {
             id: sandboxProvider,
-					note: "Unavailable. Choose This machine or a ready Sandbox before creating.",
+            note: "Unavailable. Choose This machine or a ready Sandbox before creating.",
           },
           ...sandboxChoices,
         ]
       : sandboxChoices;
   const showSandboxPicker = !!sandboxStatus;
   const sandboxLabel = (id: string) =>
-		id === "" ? "This machine" : id === "docker" ? "Docker" : id === "daytona" ? "Daytona" : id === "e2b" ? "E2B" : id === "box" ? "Box" : id === "modal" ? "Modal" : id === "lambda-microvm" ? "AWS Lambda MicroVM" : id;
+    id === ""
+      ? "This machine"
+      : id === "docker"
+        ? "Docker"
+        : id === "daytona"
+          ? "Daytona"
+          : id === "e2b"
+            ? "E2B"
+            : id === "box"
+              ? "Box"
+              : id === "modal"
+                ? "Modal"
+                : id === "lambda-microvm"
+                  ? "AWS Lambda MicroVM"
+                  : id;
 
   // Provider-independent family check, driven by the same server list the
   // create path enforces.
   const effectiveModelId = model || defaultModel;
   const effectiveModelProvider = effectiveModelId.startsWith("pi/")
     ? "pi"
-    : models.find((m) => m.id === effectiveModelId)?.provider ?? "claude";
+    : (models.find((m) => m.id === effectiveModelId)?.provider ?? "claude");
   const modelFamily = (sandboxStatus?.modelFamilies || []).find(
     (f) => f.match.provider === effectiveModelProvider,
   );
   const sandboxModelWarning = (() => {
     if (sandboxProvider && !selectedSandboxAvailable) {
-		return `${sandboxLabel(sandboxProvider)} is unavailable. Choose This machine or a ready Sandbox.`;
+      return `${sandboxLabel(sandboxProvider)} is unavailable. Choose This machine or a ready Sandbox.`;
     }
-	    if (!sandboxProvider || !modelFamily) return null;
+    if (!sandboxProvider || !modelFamily) return null;
     if (modelFamily.sandboxable) return null;
     return (
-		`${modelFamily.label} models can't run in a Sandbox` +
+      `${modelFamily.label} models can't run in a Sandbox` +
       (modelFamily.hint ? ` · ${modelFamily.hint}` : "") +
       "."
     );
@@ -790,7 +883,12 @@ export function NewSession({ onBack, inline, focusSeq, send, addHandler, connect
 
   // Brain-inside remote/MicroVM sessions all adopt a full-runner prewarm.
   // Strictly fire-and-forget: failure must never surface or block typing.
-  const isRemoteSandbox = sandboxProvider === "daytona" || sandboxProvider === "e2b" || sandboxProvider === "box" || sandboxProvider === "modal" || sandboxProvider === "lambda-microvm";
+  const isRemoteSandbox =
+    sandboxProvider === "daytona" ||
+    sandboxProvider === "e2b" ||
+    sandboxProvider === "box" ||
+    sandboxProvider === "modal" ||
+    sandboxProvider === "lambda-microvm";
   const shouldPrewarm = isRemoteSandbox;
   const [sandboxWarmed, setSandboxWarmed] = useState(false);
   const lastPrewarmAtRef = useRef(0);
@@ -869,7 +967,10 @@ export function NewSession({ onBack, inline, focusSeq, send, addHandler, connect
   useEffect(() => {
     if (!createMenuOpen) return;
     function onDown(e: MouseEvent) {
-      if (createSplitRef.current && !createSplitRef.current.contains(e.target as Node)) {
+      if (
+        createSplitRef.current &&
+        !createSplitRef.current.contains(e.target as Node)
+      ) {
         setCreateMenuOpen(false);
       }
     }
@@ -890,7 +991,9 @@ export function NewSession({ onBack, inline, focusSeq, send, addHandler, connect
     e.preventDefault();
     const at = CREATE_ACTIONS.indexOf(createAction);
     setCreateAction(
-      CREATE_ACTIONS[(at + step + CREATE_ACTIONS.length) % CREATE_ACTIONS.length],
+      CREATE_ACTIONS[
+        (at + step + CREATE_ACTIONS.length) % CREATE_ACTIONS.length
+      ],
     );
   }
 
@@ -904,7 +1007,7 @@ export function NewSession({ onBack, inline, focusSeq, send, addHandler, connect
   }
 
   useEffect(() => {
-		fetchModels(modelWorkspaceId || workspaceId)
+    fetchModels(modelWorkspaceId || workspaceId)
       .then(async (m) => {
         setModels(m.models);
         setDefaultModel(m.default);
@@ -924,7 +1027,7 @@ export function NewSession({ onBack, inline, focusSeq, send, addHandler, connect
         });
       })
       .catch(() => {});
-	}, [modelWorkspaceId, workspaceId]);
+  }, [modelWorkspaceId, workspaceId]);
 
   // Worktrees are per-repo; refetch and reset the selection when it changes.
   // Inside a workspace, snap back to the shared sibling branch, not "New branch".
@@ -1097,13 +1200,18 @@ export function NewSession({ onBack, inline, focusSeq, send, addHandler, connect
       busy ||
       parkingDraftRef.current ||
       draftParkInFlight(text, workspaceId)
-    ) return;
+    )
+      return;
     parkingDraftRef.current = true;
     const operation: PendingDraftPark = { text, workspaceId, consumed: false };
     pendingDraftParks.add(operation);
-    const draft = { text, updatedAt: new Date().toISOString(), by: getCurrentUser() };
+    const draft = {
+      text,
+      updatedAt: new Date().toISOString(),
+      by: getCurrentUser(),
+    };
     await (async () => {
-const createWorkspace = () =>
+      const createWorkspace = () =>
         createWorkspaceApi({
           name: firstNonEmptyLine(text).slice(0, 80) || "Draft",
           ...(repo && repo !== NO_REPO ? { repo } : {}),
@@ -1150,18 +1258,20 @@ const createWorkspace = () =>
         });
       }
       window.dispatchEvent(new Event("opensession:workspaces-changed"));
-})().catch(async (e) => {
-if (!operation.consumed) {
-        toast(
-          e instanceof ApiError
-            ? `Couldn't save the draft: ${e.message}`
-            : "Couldn't save the draft. It is still in the composer.",
-        );
-      }
-}).finally(async () => {
-pendingDraftParks.delete(operation);
-      parkingDraftRef.current = false;
-});
+    })()
+      .catch(async (e) => {
+        if (!operation.consumed) {
+          toast(
+            e instanceof ApiError
+              ? `Couldn't save the draft: ${e.message}`
+              : "Couldn't save the draft. It is still in the composer.",
+          );
+        }
+      })
+      .finally(async () => {
+        pendingDraftParks.delete(operation);
+        parkingDraftRef.current = false;
+      });
   }
 
   function handleCreate() {
@@ -1197,7 +1307,9 @@ pendingDraftParks.delete(operation);
     const createWorkspaceId =
       workspaceId ||
       prWorkspaceId ||
-      (!selectedPullRequest ? getParkedNewSessionWorkspaceId() || undefined : undefined);
+      (!selectedPullRequest
+        ? getParkedNewSessionWorkspaceId() || undefined
+        : undefined);
     const worktreeMode =
       createMode === "ask"
         ? "ask"
@@ -1266,7 +1378,9 @@ pendingDraftParks.delete(operation);
       ...(files.length
         ? {
             files: files.map((f) =>
-              f.path ? { name: f.name, path: f.path } : { name: f.name, dataUrl: f.dataUrl },
+              f.path
+                ? { name: f.name, path: f.path }
+                : { name: f.name, dataUrl: f.dataUrl },
             ),
           }
         : {}),
@@ -1277,7 +1391,7 @@ pendingDraftParks.delete(operation);
     // not come from that workspace and must not clear a teammate's parked text.
     createWorkspaceIdRef.current = selectedPullRequest
       ? null
-      : createWorkspaceId ?? null;
+      : (createWorkspaceId ?? null);
     try {
       send(createMessage);
       consumePendingDraftParks(prompt, workspaceId, createWorkspaceId);
@@ -1344,20 +1458,21 @@ pendingDraftParks.delete(operation);
         : startsInLocalCheckout
           ? "Local checkout"
           : "New branch";
-  const createFromOptions: Array<{ label: string; point: SessionStartPoint }> = [
-    {
-      point: { kind: "new" },
-      label: startsInLocalCheckout
-        ? "Local checkout"
-        : workspaceId && forceBranch
-          ? `New stacked branch (off ${forceBranch})`
-          : "New branch",
-    },
-    ...worktrees.map((wt) => ({
-      point: { kind: "worktree" as const, branch: wt.branch },
-      label: wt.branch,
-    })),
-  ];
+  const createFromOptions: Array<{ label: string; point: SessionStartPoint }> =
+    [
+      {
+        point: { kind: "new" },
+        label: startsInLocalCheckout
+          ? "Local checkout"
+          : workspaceId && forceBranch
+            ? `New stacked branch (off ${forceBranch})`
+            : "New branch",
+      },
+      ...worktrees.map((wt) => ({
+        point: { kind: "worktree" as const, branch: wt.branch },
+        label: wt.branch,
+      })),
+    ];
   // The branch this palette starts on: a sibling's inside a workspace, a fresh
   // one everywhere else. Anything else is a deliberate pick, and one level
   // behind a button it has to light that button up to be visible at all.
@@ -1377,7 +1492,9 @@ pendingDraftParks.delete(operation);
   // scroller and reports; holding the previous object when nothing moved is
   // what keeps a scroll (or a keystroke) from re-rendering the card.
   function handlePromptEdges(next: { top: boolean; bottom: boolean }) {
-    setEdges((prev) => (prev.top === next.top && prev.bottom === next.bottom ? prev : next));
+    setEdges((prev) =>
+      prev.top === next.top && prev.bottom === next.bottom ? prev : next,
+    );
   }
 
   // One frame closed so the palette animates in; App mounts us already-open.
@@ -1419,7 +1536,8 @@ pendingDraftParks.delete(operation);
         return;
       }
       const next = event.relatedTarget;
-      if (next instanceof Node && document.documentElement.contains(next)) return;
+      if (next instanceof Node && document.documentElement.contains(next))
+        return;
       resetFileDrag();
     }
     function handleDragOver(event: DragEvent) {
@@ -1483,7 +1601,9 @@ pendingDraftParks.delete(operation);
           project, commit. One row rather than two, because a sheet over an
           open keyboard has about half a screen to spend and an attachment
           takes its share of it. */}
-      <PhoneTopBar className={cn(HEADER, !dictating && edges.top && EDGE_DIVIDER)}>
+      <PhoneTopBar
+        className={cn(HEADER, !dictating && edges.top && EDGE_DIVIDER)}
+      >
         {phoneBar && (
           <>
             <Modal.Close
@@ -1552,7 +1672,11 @@ pendingDraftParks.delete(operation);
                   }
                 : undefined
             }
-            multiHint={repoSelectionHint(extraRepos, repoOptionLabel, MULTI_MODIFIER)}
+            multiHint={repoSelectionHint(
+              extraRepos,
+              repoOptionLabel,
+              MULTI_MODIFIER,
+            )}
             // A feed workspace is repo-less by construction (its subject is a
             // a feed item, not a checkout), so its create doesn't offer one.
             disabled={busy || forceMode === "scratch"}
@@ -1622,221 +1746,243 @@ pendingDraftParks.delete(operation);
             dictating && "invisible",
           )}
         >
-
-      {/* Picked services, above the field like every other thing attached to
+          {/* Picked services, above the field like every other thing attached to
           what you are about to send. The picker is two levels inside a menu,
           so without this the only trace of a pick is a count on the overflow
           button, and the pick governs the whole session rather than one
           prompt. The row stays mounted so the last chip can animate out. */}
-      <div className="flex flex-wrap items-start gap-x-1 px-4 phone:px-3 phone:pt-1">
-        {selectedMcpServers.length > 0 && (
-          <span className="mr-1 self-center text-meta font-medium text-faint phone:block desktop:hidden">
-            Using
-          </span>
-        )}
-        <AnimatePresence initial={false}>
-          {selectedMcpServers.map((mcp) => (
-            <ComposerContextChip
-              key={mcp}
-              icon={<IconTile name={mcp} size={15} />}
-              label={displayName(mcp)}
-              title={`${displayName(mcp)} is on. A session gets only the services you pick here.`}
-              onRemove={() => toggleMcpServer(mcp, false)}
-              removeLabel={`Remove ${displayName(mcp)}`}
-              disabled={busy}
-            />
-          ))}
-        </AnimatePresence>
-      </div>
-
-        {/* Prompt. It owns the draft: see NewSessionPrompt for why the text
-            does not live in this component. */}
-        <NewSessionPrompt
-          initialText={initialPrompt}
-          textareaRef={promptRef}
-          valueRef={promptText}
-          handle={promptHandle}
-          repo={repo}
-          mcpServers={selectedMcpServers}
-          // Ask sessions read and explain; they never touch the code. Asking
-          // "what to work on" in that mode invites a prompt the session
-          // cannot carry out.
-          placeholder={
-            mode === "ask" ? "What do you want to find out?" : "What do you want to work on?"
-          }
-          disabled={busy}
-          images={images}
-          files={files}
-          staging={staging}
-          onRemovePendingImage={uploads.cancelPendingImage}
-          onRemovePendingFile={uploads.cancelPendingFile}
-          onRemoveImage={(i) => {
-            removeDraftImage(DRAFT_KEY, i);
-            adoptDraftAttachments();
-          }}
-          onRemoveFile={(i) => {
-            removeDraftFile(DRAFT_KEY, i);
-            adoptDraftAttachments();
-          }}
-          onAddAttachments={(picked) => void addAttachments(picked)}
-          sendKey={sendKey}
-          canCreate={canCreate}
-          onCreate={handleCreate}
-          onHasTextChange={setHasPromptText}
-          onDraftSettled={setSettledPrompt}
-          onEdgesChange={handlePromptEdges}
-          onMentionOpenChange={setMentionOpen}
-        />
-
-        {status.kind === "failed" && <div className={ERROR}>{status.message}</div>}
-        {sandboxModelWarning && (
-          <div className={ERROR} role="alert">
-            {sandboxModelWarning}
+          <div className="flex flex-wrap items-start gap-x-1 px-4 phone:px-3 phone:pt-1">
+            {selectedMcpServers.length > 0 && (
+              <span className="mr-1 self-center text-meta font-medium text-faint phone:block desktop:hidden">
+                Using
+              </span>
+            )}
+            <AnimatePresence initial={false}>
+              {selectedMcpServers.map((mcp) => (
+                <ComposerContextChip
+                  key={mcp}
+                  icon={<IconTile name={mcp} size={15} />}
+                  label={displayName(mcp)}
+                  title={`${displayName(mcp)} is on. A session gets only the services you pick here.`}
+                  onRemove={() => toggleMcpServer(mcp, false)}
+                  removeLabel={`Remove ${displayName(mcp)}`}
+                  disabled={busy}
+                />
+              ))}
+            </AnimatePresence>
           </div>
-        )}
 
-        {/* Footer toolbar */}
-        <div className={cn(FOOTER, edges.bottom && EDGE_DIVIDER)}>
-          <div className={FOOTER_LEFT}>
-            <Tooltip label="Attach a file" shortcut={attachKeys ?? undefined}>
-              <button
-                type="button"
-                className={FOOTER_ICON_BTN}
-                onClick={() => fileInputRef.current?.click()}
-                disabled={busy}
-                aria-label="Attach a file"
-              >
-                <IconPaperclip size={20} />
-              </button>
-            </Tooltip>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              hidden
-              onChange={(e) => {
-                if (e.target.files?.length) void addAttachments(e.target.files);
-                e.target.value = "";
-              }}
-            />
-            {/* Ask sits with the tools rather than in the header: Code is what
+          {/* Prompt. It owns the draft: see NewSessionPrompt for why the text
+            does not live in this component. */}
+          <NewSessionPrompt
+            initialText={initialPrompt}
+            textareaRef={promptRef}
+            valueRef={promptText}
+            handle={promptHandle}
+            repo={repo}
+            mcpServers={selectedMcpServers}
+            // Ask sessions read and explain; they never touch the code. Asking
+            // "what to work on" in that mode invites a prompt the session
+            // cannot carry out.
+            placeholder={
+              mode === "ask"
+                ? "What do you want to find out?"
+                : "What do you want to work on?"
+            }
+            disabled={busy}
+            images={images}
+            files={files}
+            staging={staging}
+            onRemovePendingImage={uploads.cancelPendingImage}
+            onRemovePendingFile={uploads.cancelPendingFile}
+            onRemoveImage={(i) => {
+              removeDraftImage(DRAFT_KEY, i);
+              adoptDraftAttachments();
+            }}
+            onRemoveFile={(i) => {
+              removeDraftFile(DRAFT_KEY, i);
+              adoptDraftAttachments();
+            }}
+            onAddAttachments={(picked) => void addAttachments(picked)}
+            sendKey={sendKey}
+            canCreate={canCreate}
+            onCreate={handleCreate}
+            onHasTextChange={setHasPromptText}
+            onDraftSettled={setSettledPrompt}
+            onEdgesChange={handlePromptEdges}
+            onMentionOpenChange={setMentionOpen}
+          />
+
+          {status.kind === "failed" && (
+            <div className={ERROR}>{status.message}</div>
+          )}
+          {sandboxModelWarning && (
+            <div className={ERROR} role="alert">
+              {sandboxModelWarning}
+            </div>
+          )}
+
+          {/* Footer toolbar */}
+          <div className={cn(FOOTER, edges.bottom && EDGE_DIVIDER)}>
+            <div className={FOOTER_LEFT}>
+              <Tooltip label="Attach a file" shortcut={attachKeys ?? undefined}>
+                <button
+                  type="button"
+                  className={FOOTER_ICON_BTN}
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={busy}
+                  aria-label="Attach a file"
+                >
+                  <IconPaperclip size={20} />
+                </button>
+              </Tooltip>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                hidden
+                onChange={(e) => {
+                  if (e.target.files?.length)
+                    void addAttachments(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+              {/* Ask sits with the tools rather than in the header: Code is what
                 you are almost always doing, so the header should show what you
                 are working on (the repo, the branch) and this is the one
                 switch that changes it. Off it is a quiet icon; on it names
                 itself and wears the green the card and the composer's Ask pill
                 also wear, because read-only running silently is the one state
                 worth being loud about. */}
-            {!workspaceId && forceMode !== "scratch" && (
-              <NewSessionPrPicker
-                repo={repo}
-                selected={selectedPullRequest}
-                disabled={busy}
-                onSelect={(pullRequest) => {
-                  setRepo(pullRequest.repo);
-                  setExtraRepos([]);
-                  setStartPoint({ kind: "pull-request", pullRequest });
-                }}
-                onClear={() => setStartPoint(defaultStartPoint())}
-              />
-            )}
-            {!forceMode && (
-              <Tooltip
-                label={
-                  permission === "ask"
-                    ? "Ask mode on · reads, changes nothing. Click to write code instead"
-                    : "Ask mode · read-only, and no repo unless you pick one"
-                }
-              >
-                <button
-                  type="button"
-                  className={permission === "ask" ? ASK_BTN_ON : FOOTER_ICON_BTN}
-                  onClick={togglePermission}
+              {!workspaceId && forceMode !== "scratch" && (
+                <NewSessionPrPicker
+                  repo={repo}
+                  selected={selectedPullRequest}
                   disabled={busy}
-                  aria-pressed={permission === "ask"}
-                  aria-label="Ask mode"
+                  onSelect={(pullRequest) => {
+                    setRepo(pullRequest.repo);
+                    setExtraRepos([]);
+                    setStartPoint({ kind: "pull-request", pullRequest });
+                  }}
+                  onClear={() => setStartPoint(defaultStartPoint())}
+                />
+              )}
+              {!forceMode && (
+                <Tooltip
+                  label={
+                    permission === "ask"
+                      ? "Ask mode on · reads, changes nothing. Click to write code instead"
+                      : "Ask mode · read-only, and no repo unless you pick one"
+                  }
                 >
-                  <IconEye size={permission === "ask" ? 14 : 20} />
-                  {permission === "ask" && "Ask"}
-                </button>
-              </Tooltip>
-            )}
-            {/* Rarely changed execution settings stay one level behind a single
+                  <button
+                    type="button"
+                    className={
+                      permission === "ask" ? ASK_BTN_ON : FOOTER_ICON_BTN
+                    }
+                    onClick={togglePermission}
+                    disabled={busy}
+                    aria-pressed={permission === "ask"}
+                    aria-label="Ask mode"
+                  >
+                    <IconEye size={permission === "ask" ? 14 : 20} />
+                    {permission === "ask" && "Ask"}
+                  </button>
+                </Tooltip>
+              )}
+              {/* Rarely changed execution settings stay one level behind a single
                 overflow button. Their current values remain visible in the
                 submenu rows, while attachment stays one tap away. */}
-            <Menu.Root>
-              <Tooltip label="More options">
-                <Menu.Trigger
-                  type="button"
-                  className={cn(
-                    FOOTER_ICON_BTN,
-						(branchPicked || sandboxProvider || modelEngine(effectiveModelId) !== "pi" || selectedMcpServers.length > 0) &&
-                      paletteIconBtnOn,
-                  )}
-                  disabled={busy}
-                  aria-label="More options"
+              <Menu.Root>
+                <Tooltip label="More options">
+                  <Menu.Trigger
+                    type="button"
+                    className={cn(
+                      FOOTER_ICON_BTN,
+                      (branchPicked ||
+                        sandboxProvider ||
+                        modelEngine(effectiveModelId) !== "pi" ||
+                        selectedMcpServers.length > 0) &&
+                        paletteIconBtnOn,
+                    )}
+                    disabled={busy}
+                    aria-label="More options"
+                  >
+                    <IconDotsHorizontal size={20} />
+                  </Menu.Trigger>
+                </Tooltip>
+                <Menu.Popup
+                  align="start"
+                  sideOffset={6}
+                  className="min-w-[260px] max-w-[min(360px,calc(100vw-1rem))]"
                 >
-                  <IconDotsHorizontal size={20} />
-                </Menu.Trigger>
-              </Tooltip>
-              <Menu.Popup
-                align="start"
-                sideOffset={6}
-                className="min-w-[260px] max-w-[min(360px,calc(100vw-1rem))]"
-              >
-                {showBranchPicker && (
-                  <Menu.SubmenuRoot>
-                    <Menu.SubmenuTrigger className="justify-between gap-3">
-                      <span className="flex flex-none items-center gap-2">
-                        <IconNewBranch className="shrink-0 text-dim" size={20} />
-                        <span>Branch</span>
-                      </span>
-                      <span className="flex min-w-0 items-center gap-1 text-dim">
-                        <span className="truncate">{createFromLabel}</span>
-                        <IconChevronRight className="shrink-0 text-faint" size={17} />
-                      </span>
-                    </Menu.SubmenuTrigger>
-                    <Menu.Popup className="max-w-[min(340px,calc(100vw-1rem))]">
-                      {createFromOptions.map((opt) => {
-                        const selected =
-                          opt.point.kind === startPoint.kind &&
-                          (opt.point.kind !== "worktree" ||
-                            (startPoint.kind === "worktree" &&
-                              opt.point.branch === startPoint.branch));
-                        return (
-                          <Menu.Item
-                            key={
-                              opt.point.kind === "worktree"
-                                ? opt.point.branch
-                                : opt.point.kind
-                            }
-                            onClick={() => setStartPoint(opt.point)}
-                          >
-                            <Menu.Check on={selected} className="text-dim" />
-                            <span className="min-w-0 truncate">{opt.label}</span>
-                          </Menu.Item>
-                        );
-                      })}
-                    </Menu.Popup>
-                  </Menu.SubmenuRoot>
-                )}
-                {showSandboxPicker && (
-                  <Menu.SubmenuRoot>
-                    <Menu.SubmenuTrigger className="justify-between gap-3">
-                      <span className="flex min-w-0 items-center gap-2">
-                        <IconBox className="shrink-0 text-dim" size={20} />
-                        <span className="truncate">Sandbox</span>
-                      </span>
-                      <span className="flex flex-none items-center gap-1 text-dim">
-                        {sandboxLabel(sandboxProvider)}
-                        {sandboxWarmed && shouldPrewarm && (
-                          <span className="text-faint">· ready</span>
-                        )}
-                        <IconChevronRight className="shrink-0 text-faint" size={17} />
-                      </span>
-                    </Menu.SubmenuTrigger>
-                    <Menu.Popup className="max-w-[min(340px,calc(100vw-1rem))]">
-                      {[{ id: "", note: undefined as string | undefined }, ...visibleSandboxChoices].map(
-                        (opt) => {
+                  {showBranchPicker && (
+                    <Menu.SubmenuRoot>
+                      <Menu.SubmenuTrigger className="justify-between gap-3">
+                        <span className="flex flex-none items-center gap-2">
+                          <IconNewBranch
+                            className="shrink-0 text-dim"
+                            size={20}
+                          />
+                          <span>Branch</span>
+                        </span>
+                        <span className="flex min-w-0 items-center gap-1 text-dim">
+                          <span className="truncate">{createFromLabel}</span>
+                          <IconChevronRight
+                            className="shrink-0 text-faint"
+                            size={17}
+                          />
+                        </span>
+                      </Menu.SubmenuTrigger>
+                      <Menu.Popup className="max-w-[min(340px,calc(100vw-1rem))]">
+                        {createFromOptions.map((opt) => {
+                          const selected =
+                            opt.point.kind === startPoint.kind &&
+                            (opt.point.kind !== "worktree" ||
+                              (startPoint.kind === "worktree" &&
+                                opt.point.branch === startPoint.branch));
+                          return (
+                            <Menu.Item
+                              key={
+                                opt.point.kind === "worktree"
+                                  ? opt.point.branch
+                                  : opt.point.kind
+                              }
+                              onClick={() => setStartPoint(opt.point)}
+                            >
+                              <Menu.Check on={selected} className="text-dim" />
+                              <span className="min-w-0 truncate">
+                                {opt.label}
+                              </span>
+                            </Menu.Item>
+                          );
+                        })}
+                      </Menu.Popup>
+                    </Menu.SubmenuRoot>
+                  )}
+                  {showSandboxPicker && (
+                    <Menu.SubmenuRoot>
+                      <Menu.SubmenuTrigger className="justify-between gap-3">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <IconBox className="shrink-0 text-dim" size={20} />
+                          <span className="truncate">Sandbox</span>
+                        </span>
+                        <span className="flex flex-none items-center gap-1 text-dim">
+                          {sandboxLabel(sandboxProvider)}
+                          {sandboxWarmed && shouldPrewarm && (
+                            <span className="text-faint">· ready</span>
+                          )}
+                          <IconChevronRight
+                            className="shrink-0 text-faint"
+                            size={17}
+                          />
+                        </span>
+                      </Menu.SubmenuTrigger>
+                      <Menu.Popup className="max-w-[min(340px,calc(100vw-1rem))]">
+                        {[
+                          { id: "", note: undefined as string | undefined },
+                          ...visibleSandboxChoices,
+                        ].map((opt) => {
                           const selected = sandboxProvider === opt.id;
                           return (
                             <Menu.Item
@@ -1847,11 +1993,12 @@ pendingDraftParks.delete(operation);
                               }}
                               className="items-start"
                             >
-                              <Menu.Check on={selected} className="mt-0.5 text-dim" />
+                              <Menu.Check
+                                on={selected}
+                                className="mt-0.5 text-dim"
+                              />
                               <span className="flex min-w-0 flex-col gap-0.5">
-                                <span>
-                                  {sandboxLabel(opt.id)}
-                                </span>
+                                <span>{sandboxLabel(opt.id)}</span>
                                 {opt.note && (
                                   <span className="whitespace-normal text-supporting leading-snug text-faint">
                                     {opt.note}
@@ -1860,231 +2007,257 @@ pendingDraftParks.delete(operation);
                               </span>
                             </Menu.Item>
                           );
-                        },
-                      )}
-                    </Menu.Popup>
-                  </Menu.SubmenuRoot>
-                )}
-                <Menu.SubmenuRoot>
-                  <Menu.SubmenuTrigger className="justify-between gap-3">
-                    <span className="flex min-w-0 items-center gap-2">
-                      <IconConnections className="shrink-0 text-dim" size={20} />
-                      <span className="truncate">Connected services</span>
-                    </span>
-                    <span className="flex flex-none items-center gap-1 text-dim">
-                      {/* Nothing picked is not "none": an empty allowlist means
+                        })}
+                      </Menu.Popup>
+                    </Menu.SubmenuRoot>
+                  )}
+                  <Menu.SubmenuRoot>
+                    <Menu.SubmenuTrigger className="justify-between gap-3">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <IconConnections
+                          className="shrink-0 text-dim"
+                          size={20}
+                        />
+                        <span className="truncate">Connected services</span>
+                      </span>
+                      <span className="flex flex-none items-center gap-1 text-dim">
+                        {/* Nothing picked is not "none": an empty allowlist means
                           the run gets every service you can see
                           (filterMcpServers, scope "all"), so the readout says
                           so rather than promising a session with no tools. */}
-                      {selectedMcpServers.length ? `${selectedMcpServers.length} on` : "All"}
-                      <IconChevronRight className="shrink-0 text-faint" size={17} />
-                    </span>
-                  </Menu.SubmenuTrigger>
-                  <Menu.Popup className="max-w-[min(360px,calc(100vw-1rem))]">
-                    {availableMcpServers.length > 0 && (
-                      <div className="max-w-[300px] px-2 pb-1 text-supporting leading-snug text-faint">
-                        Picked services are the only ones the session gets.
-                      </div>
-                    )}
-                    {availableMcpServers.length === 0 && (
-                      <Menu.Item disabled className="text-faint">
-                        No services available
-                      </Menu.Item>
-                    )}
-                    {availableMcpServers.map((mcp) => {
-                      const checked = selectedMcpServers.includes(mcp);
-                      return (
-                        <Menu.CheckboxItem
-                          key={mcp}
-                          checked={checked}
-                          closeOnClick={false}
-                          onCheckedChange={(on) => toggleMcpServer(mcp, on)}
-                          className={cn("justify-between gap-3", checked && "bg-hover")}
-                        >
-                          <span className="flex min-w-0 items-center gap-2.5">
-                            <IconTile name={mcp} size={20} />
-                            <span className="min-w-0 truncate">{displayName(mcp)}</span>
-                          </span>
-                          <Menu.Check on={checked} className="text-dim" />
-                        </Menu.CheckboxItem>
-                      );
-                    })}
-                  </Menu.Popup>
-                </Menu.SubmenuRoot>
-                {/* The phone's send is one round button, so what the desktop
+                        {selectedMcpServers.length
+                          ? `${selectedMcpServers.length} on`
+                          : "All"}
+                        <IconChevronRight
+                          className="shrink-0 text-faint"
+                          size={17}
+                        />
+                      </span>
+                    </Menu.SubmenuTrigger>
+                    <Menu.Popup className="max-w-[min(360px,calc(100vw-1rem))]">
+                      {availableMcpServers.length > 0 && (
+                        <div className="max-w-[300px] px-2 pb-1 text-supporting leading-snug text-faint">
+                          Picked services are the only ones the session gets.
+                        </div>
+                      )}
+                      {availableMcpServers.length === 0 && (
+                        <Menu.Item disabled className="text-faint">
+                          No services available
+                        </Menu.Item>
+                      )}
+                      {availableMcpServers.map((mcp) => {
+                        const checked = selectedMcpServers.includes(mcp);
+                        return (
+                          <Menu.CheckboxItem
+                            key={mcp}
+                            checked={checked}
+                            closeOnClick={false}
+                            onCheckedChange={(on) => toggleMcpServer(mcp, on)}
+                            className={cn(
+                              "justify-between gap-3",
+                              checked && "bg-hover",
+                            )}
+                          >
+                            <span className="flex min-w-0 items-center gap-2.5">
+                              <IconTile name={mcp} size={20} />
+                              <span className="min-w-0 truncate">
+                                {displayName(mcp)}
+                              </span>
+                            </span>
+                            <Menu.Check on={checked} className="text-dim" />
+                          </Menu.CheckboxItem>
+                        );
+                      })}
+                    </Menu.Popup>
+                  </Menu.SubmenuRoot>
+                  {/* The phone's send is one round button, so what the desktop
                     caret holds lives here instead. Flat rows rather than a
                     submenu: a submenu opens on hover, which a finger does not
                     have. A plain div rather than Menu.GroupLabel, which stops
                     the sibling submenus above from opening at all. */}
-                {phoneBar && (
-                  <>
-                    <div className="px-2 pb-1 pt-1.5 text-meta font-medium text-faint">
-                      On create
-                    </div>
-                    {CREATE_ACTIONS.map((action) => (
-                      <Menu.Item
-                        key={action}
-                        onClick={() => setCreateAction(action)}
-                      >
-                        <Menu.Check
-                          on={createAction === action}
-                          className="text-dim"
-                        />
-                        <span className="min-w-0 truncate">
-                          {CREATE_LABELS[action]}
-                        </span>
-                      </Menu.Item>
-                    ))}
-                  </>
-                )}
-              </Menu.Popup>
-            </Menu.Root>
-          </div>
+                  {phoneBar && (
+                    <>
+                      <div className="px-2 pb-1 pt-1.5 text-meta font-medium text-faint">
+                        On create
+                      </div>
+                      {CREATE_ACTIONS.map((action) => (
+                        <Menu.Item
+                          key={action}
+                          onClick={() => setCreateAction(action)}
+                        >
+                          <Menu.Check
+                            on={createAction === action}
+                            className="text-dim"
+                          />
+                          <span className="min-w-0 truncate">
+                            {CREATE_LABELS[action]}
+                          </span>
+                        </Menu.Item>
+                      ))}
+                    </>
+                  )}
+                </Menu.Popup>
+              </Menu.Root>
+            </div>
 
-          <div className={FOOTER_RIGHT}>
-            {/* Always visible — on phones too, so a non-default (dumber) model
+            <div className={FOOTER_RIGHT}>
+              {/* Always visible — on phones too, so a non-default (dumber) model
                 is never silently in effect. */}
-            <ModelEffortSelect
-              className={MODEL_PILL}
-              title="Model and reasoning effort"
-              models={models}
-              defaultModel={defaultModel}
-              model={model}
-              onModelChange={setModel}
-              effort={effort}
-              onEffortChange={setEffort}
-              fastMode={fastMode}
-              onFastModeChange={setFastMode}
-              accounts={accounts}
-              accountId={accountId}
-              onAccountChange={setAccountId}
-              disabled={busy}
-            />
-            <VoiceInput
-              className={FOOTER_ICON_BTN}
-              disabled={busy}
-              editTargetRef={promptRef}
-              overlayTargetRef={voiceOverlayRef}
-              onActiveChange={handleDictationActive}
-              onText={(t) => {
-                promptHandle.current?.appendText(t);
-                promptRef.current?.focus();
-              }}
-              onTextSend={(t) => {
-                promptHandle.current?.appendText(t);
-                // One turn of the loop before creating: the transcript reaches
-                // the prompt through its own state, and `canCreate` only
-                // catches up on the render after it. `createRef` is read then
-                // rather than captured now for the same reason.
-                setTimeout(() => createRef.current(), 0);
-              }}
-              // The parent card owns the only visible surface. This layer is
-              // just controls and waveform clipped by that card's outer edge.
-              overlayClassName="rounded-none bg-transparent [backdrop-filter:none]"
-            />
+              <ModelEffortSelect
+                className={MODEL_PILL}
+                title="Model and reasoning effort"
+                models={models}
+                defaultModel={defaultModel}
+                model={model}
+                onModelChange={setModel}
+                effort={effort}
+                onEffortChange={setEffort}
+                fastMode={fastMode}
+                onFastModeChange={setFastMode}
+                accounts={accounts}
+                accountId={accountId}
+                onAccountChange={setAccountId}
+                disabled={busy}
+              />
+              <VoiceInput
+                className={FOOTER_ICON_BTN}
+                disabled={busy}
+                editTargetRef={promptRef}
+                overlayTargetRef={voiceOverlayRef}
+                onActiveChange={handleDictationActive}
+                onText={(t) => {
+                  promptHandle.current?.appendText(t);
+                  promptRef.current?.focus();
+                }}
+                onTextSend={(t) => {
+                  promptHandle.current?.appendText(t);
+                  // One turn of the loop before creating: the transcript reaches
+                  // the prompt through its own state, and `canCreate` only
+                  // catches up on the render after it. `createRef` is read then
+                  // rather than captured now for the same reason.
+                  setTimeout(() => createRef.current(), 0);
+                }}
+                // The parent card owns the only visible surface. This layer is
+                // just controls and waveform clipped by that card's outer edge.
+                overlayClassName="rounded-none bg-transparent [backdrop-filter:none]"
+              />
 
-            {!phoneBar && (
-            <div className={CREATE_SPLIT} ref={createSplitRef}>
-              <button
-                className={cn(
-                  CREATE_MAIN,
-                  inline ? CREATE_MAIN_WHOLE : CREATE_MAIN_SPLIT,
-                )}
-                onClick={handleCreate}
-                disabled={!canCreate}
-              >
-                {status.kind === "reconnecting"
-                  ? "Reconnecting…"
-                  : status.kind === "creating"
-                    ? "Creating…"
-                    : isStaging(staging)
-                      ? "Attaching…"
-                      : CREATE_LABELS[createAction]}
-                {/* The hint has to match the preference — a bare ↩ next to a
+              {!phoneBar && (
+                <div className={CREATE_SPLIT} ref={createSplitRef}>
+                  <button
+                    className={cn(
+                      CREATE_MAIN,
+                      inline ? CREATE_MAIN_WHOLE : CREATE_MAIN_SPLIT,
+                    )}
+                    onClick={handleCreate}
+                    disabled={!canCreate}
+                  >
+                    {status.kind === "reconnecting"
+                      ? "Reconnecting…"
+                      : status.kind === "creating"
+                        ? "Creating…"
+                        : isStaging(staging)
+                          ? "Attaching…"
+                          : CREATE_LABELS[createAction]}
+                    {/* The hint has to match the preference — a bare ↩ next to a
                     field that only creates on ⌘↩ is what made Enter look
                     broken in the first place. */}
-                {sendKey === "mod-enter" ? (
-                  <span className={`${CREATE_KBD} mx-0 phone:hidden text-xs`}>
-                    {MOD_ENTER_GLYPH}
-                  </span>
-                ) : (
-                  /* Snug the return glyph up to the label and nudge it off the
+                    {sendKey === "mod-enter" ? (
+                      <span
+                        className={`${CREATE_KBD} mx-0 phone:hidden text-xs`}
+                      >
+                        {MOD_ENTER_GLYPH}
+                      </span>
+                    ) : (
+                      /* Snug the return glyph up to the label and nudge it off the
                      button edge. "Create more" is a desktop workflow, so the
                      hint goes away with the caret on phones. */
-                  <IconReturn
-                    className={`${CREATE_KBD} -mx-[3px] phone:hidden`}
-                    size={20}
-                  />
-                )}
-              </button>
-              {/* The tooltip is where the cycle shortcut is taught: the caret
+                      <IconReturn
+                        className={`${CREATE_KBD} -mx-[3px] phone:hidden`}
+                        size={20}
+                      />
+                    )}
+                  </button>
+                  {/* The tooltip is where the cycle shortcut is taught: the caret
                   is the only thing on screen that says these options exist.
                   Inline there are no options to pick between, so the button is
                   whole and the caret is gone. */}
-              {!inline && (
-              <Tooltip label="Create options" shortcut={CYCLE_SHORTCUT}>
-              <button
-                type="button"
-                className={CREATE_CARET}
-                onClick={() => setCreateMenuOpen((v) => !v)}
-                // Not having a prompt yet leaves the caret alone: the options
-                // are still worth reading, and picking one is how you change
-                // what Enter will do. A create in flight is the one thing that
-                // closes it off, and then it greys out with the main button
-                // beside it, so the pair still reads as one busy control. An
-                // attachment on its way to disk holds the same pair the same
-                // way, for the second or two it takes.
-                disabled={busy || isStaging(staging)}
-                aria-haspopup="menu"
-                aria-expanded={createMenuOpen}
-                aria-label="Create options"
-              >
-                <IconChevronDown
-                  className={`transition-transform ${createMenuOpen ? "rotate-180" : ""}`}
-                  size={22}
-                />
-              </button>
-              </Tooltip>
+                  {!inline && (
+                    <Tooltip label="Create options" shortcut={CYCLE_SHORTCUT}>
+                      <button
+                        type="button"
+                        className={CREATE_CARET}
+                        onClick={() => setCreateMenuOpen((v) => !v)}
+                        // Not having a prompt yet leaves the caret alone: the options
+                        // are still worth reading, and picking one is how you change
+                        // what Enter will do. A create in flight is the one thing that
+                        // closes it off, and then it greys out with the main button
+                        // beside it, so the pair still reads as one busy control. An
+                        // attachment on its way to disk holds the same pair the same
+                        // way, for the second or two it takes.
+                        disabled={busy || isStaging(staging)}
+                        aria-haspopup="menu"
+                        aria-expanded={createMenuOpen}
+                        aria-label="Create options"
+                      >
+                        <IconChevronDown
+                          className={`transition-transform ${createMenuOpen ? "rotate-180" : ""}`}
+                          size={22}
+                        />
+                      </button>
+                    </Tooltip>
+                  )}
+                  {!inline && createMenuOpen && (
+                    <div className={CREATE_MENU} role="menu">
+                      {[
+                        {
+                          action: "open" as const,
+                          title: "Create",
+                          desc: "Open the new session",
+                        },
+                        {
+                          action: "background" as const,
+                          title: "Create in background",
+                          desc: "Stay where you are",
+                        },
+                        {
+                          action: "more" as const,
+                          title: "Create more",
+                          desc: "Stay here to start another",
+                        },
+                      ].map((opt) => (
+                        <button
+                          key={opt.action}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={createAction === opt.action}
+                          className={CREATE_MENU_ITEM}
+                          onClick={() => {
+                            setCreateAction(opt.action);
+                            setCreateMenuOpen(false);
+                          }}
+                        >
+                          <Menu.Check
+                            on={createAction === opt.action}
+                            size={22}
+                            className="mt-px text-dim"
+                          />
+                          <span className="flex min-w-0 flex-col gap-px">
+                            <span className="text-label font-semibold">
+                              {opt.title}
+                            </span>
+                            <span className="text-supporting text-dim">
+                              {opt.desc}
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
-              {!inline && createMenuOpen && (
-                <div className={CREATE_MENU} role="menu">
-                  {[
-                    { action: "open" as const, title: "Create", desc: "Open the new session" },
-                    {
-                      action: "background" as const,
-                      title: "Create in background",
-                      desc: "Stay where you are",
-                    },
-                    { action: "more" as const, title: "Create more", desc: "Stay here to start another" },
-                  ].map((opt) => (
-                    <button
-                      key={opt.action}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={createAction === opt.action}
-                      className={CREATE_MENU_ITEM}
-                      onClick={() => {
-                        setCreateAction(opt.action);
-                        setCreateMenuOpen(false);
-                      }}
-                    >
-                      <Menu.Check
-                        on={createAction === opt.action}
-                        size={22}
-                        className="mt-px text-dim"
-                      />
-                      <span className="flex min-w-0 flex-col gap-px">
-                        <span className="text-label font-semibold">{opt.title}</span>
-                        <span className="text-supporting text-dim">{opt.desc}</span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
             </div>
-            )}
           </div>
-        </div>
         </div>
       </motion.div>
     </>

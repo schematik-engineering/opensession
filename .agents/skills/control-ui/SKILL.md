@@ -59,10 +59,14 @@ for (const candidate of pages) {
 }
 
 if (!page) {
-  console.log(await Promise.all(pages.map(async (p) => ({
-    title: await p.title(),
-    url: p.url(),
-  }))));
+  console.log(
+    await Promise.all(
+      pages.map(async (p) => ({
+        title: await p.title(),
+        url: p.url(),
+      })),
+    ),
+  );
   throw new Error("No matching app page found");
 }
 

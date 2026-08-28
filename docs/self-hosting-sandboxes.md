@@ -87,11 +87,11 @@ docker build -f deploy/sandbox/Dockerfile \
   -t opensession-runner:latest .
 ```
 
-| ARG | Default | Keep in lockstep with |
-| --- | --- | --- |
-| `BUN_VERSION` | 1.4.0 | host `bun --version` |
+| ARG              | Default | Keep in lockstep with   |
+| ---------------- | ------- | ----------------------- |
+| `BUN_VERSION`    | 1.4.0   | host `bun --version`    |
 | `CLAUDE_VERSION` | 2.1.218 | host `claude --version` |
-| `NODE_MAJOR` | 24 | host Node major |
+| `NODE_MAJOR`     | 24      | host Node major         |
 
 There is no `PI_VERSION` build argument; Pi is installed from `bun.lock`.
 Rebuild after a tool pin or lockfile change and after any runtime source copied
@@ -315,16 +315,16 @@ clone token, keep it mode `0600`.
   // state (apt/global caches), NOT workspace or engine state (those live on
   // volumes/bind mounts). Absent block = disabled.
   "snapshots": {
-    "enabled": false,          // master switch (default false)
-    "onIdle": true,            // snapshot right before the idle-stop
-    "maxPerSession": 2,        // keep at most N snapshot images per session
-    "quickSyncOnRestore": true // git fetch + status after a volume restore
+    "enabled": false, // master switch (default false)
+    "onIdle": true, // snapshot right before the idle-stop
+    "maxPerSession": 2, // keep at most N snapshot images per session
+    "quickSyncOnRestore": true, // git fetch + status after a volume restore
   },
 
   // Per-repo provider overrides for legacy/internal default resolution.
   // Image selection is currently global, not per-repo.
   "perRepo": {
-    "my-app": { "provider": "docker" }
+    "my-app": { "provider": "docker" },
   },
 
   // ── Transport (how the in-sandbox run host talks to opensession) ─────
@@ -342,23 +342,23 @@ clone token, keep it mode `0600`.
 
   // ── Experimental conformance providers ─────────────────────────────
   "e2b": {
-    "apiKey": "e2b_…",         // falls back to E2B_API_KEY
-    "template": "base"         // sandbox template id (default "base")
+    "apiKey": "e2b_…", // falls back to E2B_API_KEY
+    "template": "base", // sandbox template id (default "base")
   },
   "awsLambdaMicrovm": {
     "imageIdentifier": "arn:aws:lambda:us-east-1:123456789012:microvm-image:opensession",
-    "imageVersion": "1",       // optional; latest active version by default
+    "imageVersion": "1", // optional; latest active version by default
     "executionRoleArn": "arn:aws:iam::123456789012:role/OpenSessionMicrovm",
-    "region": "us-east-1",    // falls back to AGENT_AWS_REGION/AWS_REGION
-    "controlPort": 8080,       // must match the image daemon
+    "region": "us-east-1", // falls back to AGENT_AWS_REGION/AWS_REGION
+    "controlPort": 8080, // must match the image daemon
     "maximumDurationSeconds": 28800, // AWS hard max: eight hours
     // Optional: endpoint-idle suspension. Omit for long-running agents: their
     // outbound WebSocket does not count as endpoint activity.
     "idleSuspendSeconds": 3600,
     "suspendedDurationSeconds": 3600, // only used with idleSuspendSeconds
     "logGroup": "/aws/lambda/microvms/opensession",
-    "ingressConnectorArn": "…",       // optional VPC connectors
-    "egressConnectorArn": "…"
+    "ingressConnectorArn": "…", // optional VPC connectors
+    "egressConnectorArn": "…",
   },
   // How remote sandboxes authenticate `git clone` (they can't mount host
   // creds). "none" = public clone; "https-token" injects the token into the
@@ -373,15 +373,15 @@ clone token, keep it mode `0600`.
     "maxLive": 2,
     "keepReady": [
       { "provider": "box", "repoId": "tella-fusion" },
-      { "provider": "daytona", "repoId": "tella-fusion" }
-    ]
+      { "provider": "daytona", "repoId": "tella-fusion" },
+    ],
   },
 
   // Remote runner bootstrap. All sandboxable model families run the full
   // runner inside the Sandbox; native Codex is rejected before creation:
-  "runnerBundleUrl": null,     // tarball of the runner bundle (preferred)
-  "runnerRepoUrl": null,       // git URL fallback (default: this checkout's origin)
-  "runnerSha": null            // pinned ref (default: origin default branch)
+  "runnerBundleUrl": null, // tarball of the runner bundle (preferred)
+  "runnerRepoUrl": null, // git URL fallback (default: this checkout's origin)
+  "runnerSha": null, // pinned ref (default: origin default branch)
 }
 ```
 
@@ -402,14 +402,14 @@ canonical public origin as signed integration webhooks and workload identity.
 `packages/core/opensession-server/src/server/public-ingress.ts` binds the one
 fail-closed gateway on `127.0.0.1:3860`.
 
-| Path | What |
-| --- | --- |
-| registered webhook/OAuth paths | signature-checked integration intake |
-| `/run-ws/<hostId>` | authenticated run-host event stream |
-| `/rpc-ws?host=…` | authenticated MCP proxy channel |
-| `/sandbox-portal-ws` | authenticated remote Portal relay |
-| `/ingress-health` | bare `200 ok` |
-| `/workload-identity/*` | OIDC discovery, JWKS and token exchange |
+| Path                           | What                                    |
+| ------------------------------ | --------------------------------------- |
+| registered webhook/OAuth paths | signature-checked integration intake    |
+| `/run-ws/<hostId>`             | authenticated run-host event stream     |
+| `/rpc-ws?host=…`               | authenticated MCP proxy channel         |
+| `/sandbox-portal-ws`           | authenticated remote Portal relay       |
+| `/ingress-health`              | bare `200 ok`                           |
+| `/workload-identity/*`         | OIDC discovery, JWKS and token exchange |
 
 Every other method/path is a bodyless 404. The listener never exposes app
 routes, the general API, or the frontend. Sandbox upgrades use per-launch
@@ -458,7 +458,7 @@ resolver deliberately does not split old and new stores.
 
 ## What needs a restart
 
-The config file's *values* are read fresh per run. Code changes to the sandbox
+The config file's _values_ are read fresh per run. Code changes to the sandbox
 path are **runner internals** and need a service restart:
 
 - Connection enable/disable/test and runtime config values need no restart.
@@ -535,7 +535,7 @@ native (`autoStopInterval`).
   sealed-filesystem restore into a second sandbox, setup non-reexecution,
   real agent execution, and WS reconnect/steer/cancel, dialing back over
   the public ingress (`SBX_CONF_LISTEN_PORT=3860
-  SBX_CONF_PUBLIC_BASE=wss://your.domain`).
+SBX_CONF_PUBLIC_BASE=wss://your.domain`).
 
 ### E2B (implemented, NOT yet certified)
 
@@ -674,14 +674,14 @@ in `deploy/sandbox/lambda-microvm/`.
 - Certification still requires the live `lambda-microvm` conformance entry
   after the image and IAM resources exist. Its current credential loader has
   the legacy-path limitation noted above.
-Until then, the adapter is available only to the conformance harness; it is
-hidden from the picker and rejected by session creation.
+  Until then, the adapter is available only to the conformance harness; it is
+  hidden from the picker and rejected by session creation.
 
 ## Licensing notes
 
 - **Daytona** is AGPL-3.0. Open Session consumes it **over its API** (via the
   Apache-2.0 `@daytonaio/sdk`) and vendors none of its code, so AGPL
-  obligations sit with whoever *operates* the Daytona deployment, not with
+  obligations sit with whoever _operates_ the Daytona deployment, not with
   Open Session's codebase. Self-hosters running Daytona themselves take on
   AGPL's network-service obligations for their Daytona instance.
 - **E2B**: the JS SDK is MIT; the self-host infra repo is Apache-2.0.

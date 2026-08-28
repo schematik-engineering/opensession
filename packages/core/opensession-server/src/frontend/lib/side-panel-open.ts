@@ -6,14 +6,14 @@ export const SIDE_PANEL_OPEN_KEY = "opensession-panel-open";
  * closes the side panel, keep that choice across workspaces and reloads.
  */
 export function sidePanelOpen(
-	storage: Pick<Storage, "getItem"> = localStorage,
+  storage: Pick<Storage, "getItem"> = localStorage,
 ): boolean {
-	return storage.getItem(SIDE_PANEL_OPEN_KEY) === "true";
+  return storage.getItem(SIDE_PANEL_OPEN_KEY) === "true";
 }
 
 export function storeSidePanelOpen(
-	open: boolean,
-	storage: Pick<Storage, "setItem"> = localStorage,
+  open: boolean,
+  storage: Pick<Storage, "setItem"> = localStorage,
 ): void {
-	storage.setItem(SIDE_PANEL_OPEN_KEY, String(open));
+  storage.setItem(SIDE_PANEL_OPEN_KEY, String(open));
 }

@@ -52,95 +52,97 @@ import { duration, ease } from "./motion";
 type Size = "sm" | "md";
 
 const optionSizes: Record<Size, string> = {
-	sm: "px-2 py-0.5",
-	md: "px-2.5 py-1",
+  sm: "px-2 py-0.5",
+  md: "px-2.5 py-1",
 };
 
 const SegmentedContext = React.createContext<{
-	knobId: string;
-	value: string | null;
-	size: Size;
+  knobId: string;
+  value: string | null;
+  size: Size;
 }>({
-	knobId: "",
-	value: null,
-	size: "md",
+  knobId: "",
+  value: null,
+  size: "md",
 });
 
 export function Segmented({
-	label,
-	value,
-	onValueChange,
-	size = "md",
-	knobId: knobIdProp,
-	className,
-	children,
-	...props
+  label,
+  value,
+  onValueChange,
+  size = "md",
+  knobId: knobIdProp,
+  className,
+  children,
+  ...props
 }: Omit<
-	React.ComponentPropsWithoutRef<"div">,
-	"value" | "onChange" | "defaultValue"
+  React.ComponentPropsWithoutRef<"div">,
+  "value" | "onChange" | "defaultValue"
 > & {
-	label: string;
-	/** The option in effect. `null` leaves every option unpressed — for a
-	 *  control whose value can also be set from outside it (a custom date
-	 *  range that matches no preset). */
-	value: string | null;
-	onValueChange: (value: string) => void;
-	size?: Size;
-	/** Share the knob with a control outside the group that holds the same
-	 *  value, so it travels between the two instead of blinking across. Pass
-	 *  the same id to `SegmentedKnob` over there. */
-	knobId?: string;
+  label: string;
+  /** The option in effect. `null` leaves every option unpressed — for a
+   *  control whose value can also be set from outside it (a custom date
+   *  range that matches no preset). */
+  value: string | null;
+  onValueChange: (value: string) => void;
+  size?: Size;
+  /** Share the knob with a control outside the group that holds the same
+   *  value, so it travels between the two instead of blinking across. Pass
+   *  the same id to `SegmentedKnob` over there. */
+  knobId?: string;
 }) {
-	const ownId = React.useId();
-	const knobId = knobIdProp ?? ownId;
-	return (
-		<SegmentedContext.Provider value={{ knobId, value, size }}>
-			<ToggleGroup
-				aria-label={label}
-				value={value === null ? [] : [value]}
-				onValueChange={(next) => {
-					const picked = next[0];
-					if (picked !== undefined && picked !== value) onValueChange(picked);
-				}}
-				className={cn("inline-flex rounded-lg bg-hover p-0.5", className)}
-				{...props}
-			>
-				{children}
-			</ToggleGroup>
-		</SegmentedContext.Provider>
-	);
+  const ownId = React.useId();
+  const knobId = knobIdProp ?? ownId;
+  return (
+    <SegmentedContext.Provider value={{ knobId, value, size }}>
+      <ToggleGroup
+        aria-label={label}
+        value={value === null ? [] : [value]}
+        onValueChange={(next) => {
+          const picked = next[0];
+          if (picked !== undefined && picked !== value) onValueChange(picked);
+        }}
+        className={cn("inline-flex rounded-lg bg-hover p-0.5", className)}
+        {...props}
+      >
+        {children}
+      </ToggleGroup>
+    </SegmentedContext.Provider>
+  );
 }
 
 export function SegmentedOption({
-	value,
-	className,
-	children,
-	...props
-}: Omit<React.ComponentPropsWithoutRef<"button">, "value"> & { value: string }) {
-	const { knobId, value: current, size } = React.useContext(SegmentedContext);
-	const selected = current === value;
-	return (
-		<Toggle
-			value={value}
-			className={cn(
-				"relative inline-flex cursor-pointer items-center justify-center rounded-control border-0 bg-transparent text-center text-control-label font-medium",
-				optionSizes[size],
-				"whitespace-nowrap transition-colors duration-[var(--dur-micro)] ease-[var(--ease)]",
-				// Phones get the tap box; the desktop control is a reading size.
-				"phone:px-3 phone:py-2 phone:text-item-title",
-				selected ? "text-fg" : "text-dim hover:text-fg",
-				// An option the data can't offer yet stays in place, greyed: taking
-				// it out would shift the ones beside it as the page loads.
-				"disabled:cursor-default disabled:text-faint disabled:hover:text-faint",
-				className,
-			)}
-			{...props}
-		>
-			{selected && <SegmentedKnob knobId={knobId} />}
-			{/* Above the knob, which is absolutely positioned over the option. */}
-			<span className="relative flex items-center gap-1.5">{children}</span>
-		</Toggle>
-	);
+  value,
+  className,
+  children,
+  ...props
+}: Omit<React.ComponentPropsWithoutRef<"button">, "value"> & {
+  value: string;
+}) {
+  const { knobId, value: current, size } = React.useContext(SegmentedContext);
+  const selected = current === value;
+  return (
+    <Toggle
+      value={value}
+      className={cn(
+        "relative inline-flex cursor-pointer items-center justify-center rounded-control border-0 bg-transparent text-center text-control-label font-medium",
+        optionSizes[size],
+        "whitespace-nowrap transition-colors duration-[var(--dur-micro)] ease-[var(--ease)]",
+        // Phones get the tap box; the desktop control is a reading size.
+        "phone:px-3 phone:py-2 phone:text-item-title",
+        selected ? "text-fg" : "text-dim hover:text-fg",
+        // An option the data can't offer yet stays in place, greyed: taking
+        // it out would shift the ones beside it as the page loads.
+        "disabled:cursor-default disabled:text-faint disabled:hover:text-faint",
+        className,
+      )}
+      {...props}
+    >
+      {selected && <SegmentedKnob knobId={knobId} />}
+      {/* Above the knob, which is absolutely positioned over the option. */}
+      <span className="relative flex items-center gap-1.5">{children}</span>
+    </Toggle>
+  );
 }
 
 /**
@@ -153,12 +155,12 @@ export function SegmentedOption({
  * the knob fills the box it is dropped into.
  */
 export function SegmentedKnob({ knobId }: { knobId: string }) {
-	return (
-		<motion.span
-			layoutId={knobId}
-			aria-hidden
-			className="absolute inset-0 rounded-control border border-[var(--segmented-knob-edge)] bg-[var(--segmented-knob-surface)] smooth-shadow-sm"
-			transition={{ type: "tween", duration: duration.base, ease }}
-		/>
-	);
+  return (
+    <motion.span
+      layoutId={knobId}
+      aria-hidden
+      className="absolute inset-0 rounded-control border border-[var(--segmented-knob-edge)] bg-[var(--segmented-knob-surface)] smooth-shadow-sm"
+      transition={{ type: "tween", duration: duration.base, ease }}
+    />
+  );
 }

@@ -87,7 +87,9 @@ export const TurnBlock = function TurnBlock({
   const messages = items.filter((it) => it.type === "assistant");
   const lastMessage = messages[messages.length - 1];
   const activeReasoning =
-    live && lastMessage && reasoningEntry(lastMessage) ? lastMessage : undefined;
+    live && lastMessage && reasoningEntry(lastMessage)
+      ? lastMessage
+      : undefined;
   const hasNarration = messages.length > 0;
 
   // Default fold state follows the two preferences (Settings → Preferences),
@@ -99,7 +101,7 @@ export const TurnBlock = function TurnBlock({
   const [pref, setPref] = useState(getTurnActivityPrefs);
   useEffect(
     () => onTurnActivityChanged(() => setPref(getTurnActivityPrefs())),
-    []
+    [],
   );
   const defaultExpanded =
     pref.work === "open" ||
@@ -108,11 +110,11 @@ export const TurnBlock = function TurnBlock({
     transcriptDisclosureLedger.read(
       "turn",
       sessionId,
-      items.map((item) => item.id)
-    )
+      items.map((item) => item.id),
+    ),
   );
   const [expanded, setExpanded] = useState(
-    rememberedExpanded ?? defaultExpanded
+    rememberedExpanded ?? defaultExpanded,
   );
   // `tools` owns the nested grouped-call disclosures. Open renders each call
   // in place; folded keeps routine runs behind their compact step rows.
@@ -133,7 +135,7 @@ export const TurnBlock = function TurnBlock({
       "turn",
       sessionId,
       items.map((item) => item.id),
-      next
+      next,
     );
     setExpanded(next);
   }
@@ -144,7 +146,7 @@ export const TurnBlock = function TurnBlock({
   // Memoized against the house rule: a live turn re-renders on every stream
   // event, and this walks every step it has taken so far (collectTouchedFiles
   // skips non-tool entries itself, so `items` and `tools` give the same set).
-  const editedFiles = (collectTouchedFiles(items));
+  const editedFiles = collectTouchedFiles(items);
   // Presentation stats cover code-writing tools that do not expose their input
   // as a plain Edit or Write call. Keep the parsed files for the hover card,
   // but let the server-derived aggregate own the summary's total.
@@ -164,7 +166,9 @@ export const TurnBlock = function TurnBlock({
         : "";
   // One run of faint meta rather than three separately-shrinking ones, so the
   // line collapses by dropping characters off its tail instead of overflowing.
-  const metaLabel = [!live && duration, countsLabel].filter(Boolean).join(" · ");
+  const metaLabel = [!live && duration, countsLabel]
+    .filter(Boolean)
+    .join(" · ");
 
   // Interleave tools, intermediate narration, and provider reasoning. Adjacent
   // reasoning summaries are status revisions rather than separate moments:
@@ -224,7 +228,7 @@ export const TurnBlock = function TurnBlock({
         <span
           className={cn(
             "grid size-5 flex-shrink-0 self-center place-items-center leading-none text-faint transition-transform duration-150",
-            !expanded && "-rotate-90"
+            !expanded && "-rotate-90",
           )}
         >
           <IconChevronDown size={20} className="block" />
@@ -258,7 +262,7 @@ export const TurnBlock = function TurnBlock({
               lastTool.toolName || "Tool",
               lastTool.toolInput,
               lastTool.content,
-              pathRoots
+              pathRoots,
             )}
           </span>
         )}
@@ -276,7 +280,7 @@ export const TurnBlock = function TurnBlock({
             // the seam; the rail says "still inside the work" from any
             // scroll position). The 5px puts the hairline under the chevron's
             // center after the disclosure line's 8px left shift.
-            "relative mb-2 ml-[5px] border-l border-line pl-2.5"
+            "relative mb-2 ml-[5px] border-l border-line pl-2.5",
           )}
         >
           <button
@@ -291,7 +295,8 @@ export const TurnBlock = function TurnBlock({
                 key={sec.items[0].id}
                 entries={sec.items}
                 active={
-                  activeReasoning !== undefined && sec.items.includes(activeReasoning)
+                  activeReasoning !== undefined &&
+                  sec.items.includes(activeReasoning)
                 }
                 sessionId={sessionId}
               />
@@ -323,7 +328,7 @@ export const TurnBlock = function TurnBlock({
                   onOpenSubagent={onOpenSubagent}
                 />
               </div>
-            )
+            ),
           )}
         </div>
       </Fold>
@@ -415,7 +420,7 @@ export function ToolSection(props: ToolSectionProps) {
           />
         ))}
       </React.Fragment>
-    )
+    ),
   );
 }
 
@@ -434,27 +439,21 @@ function ToolRunBlock({
       transcriptDisclosureLedger.read(
         "tool-run",
         sessionId,
-        items.map((item) => item.id)
-      ) ?? false
+        items.map((item) => item.id),
+      ) ?? false,
   );
   function rememberExpansion(next: boolean) {
     transcriptDisclosureLedger.write(
       "tool-run",
       sessionId,
       items.map((item) => item.id),
-      next
+      next,
     );
     setExpanded(next);
   }
 
-  const {
-    label,
-    pending,
-    additions,
-    deletions,
-    statusLabel,
-    mediaLabel,
-  } = toolRunAggregate(items, toolResults, live);
+  const { label, pending, additions, deletions, statusLabel, mediaLabel } =
+    toolRunAggregate(items, toolResults, live);
 
   return (
     <div data-tool-run="true" data-eid={`${items[items.length - 1].id}#run`}>
@@ -473,16 +472,19 @@ function ToolRunBlock({
           <span
             className={cn(
               "absolute inset-0 transition-opacity duration-150 group-hover:opacity-0 group-focus-visible:opacity-0",
-              expanded && "opacity-0"
+              expanded && "opacity-0",
             )}
           >
-            <IconStack size={18} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" />
+            <IconStack
+              size={18}
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+            />
           </span>
           <IconChevronDown
             size={20}
             className={cn(
               "absolute block transition-[opacity,transform] duration-150 group-hover:opacity-100 group-focus-visible:opacity-100",
-              expanded ? "opacity-100" : "-rotate-90 opacity-0"
+              expanded ? "opacity-100" : "-rotate-90 opacity-0",
             )}
           />
         </span>
@@ -500,7 +502,9 @@ function ToolRunBlock({
         )}
         <span className="min-w-0 flex-1" />
         {mediaLabel && (
-          <span className="flex-shrink-0 text-meta text-faint">{mediaLabel}</span>
+          <span className="flex-shrink-0 text-meta text-faint">
+            {mediaLabel}
+          </span>
         )}
         {pending > 0 && (
           <span className="size-[11px] flex-shrink-0 animate-spin rounded-full border border-b-line-strong border-l-line-strong border-r-line-strong border-t-dim" />
@@ -517,9 +521,7 @@ function ToolRunBlock({
                 entry.toolUseId ? toolResults.get(entry.toolUseId) : undefined
               }
               pending={
-                live &&
-                !!entry.toolUseId &&
-                !toolResults.has(entry.toolUseId)
+                live && !!entry.toolUseId && !toolResults.has(entry.toolUseId)
               }
               onOpenSubagent={onOpenSubagent}
             />
@@ -532,7 +534,7 @@ function ToolRunBlock({
 
 function isCompactTool(
   entry: TranscriptEntry,
-  result: TranscriptEntry | undefined
+  result: TranscriptEntry | undefined,
 ): boolean {
   const name = entry.toolName || "Tool";
   const routine =
@@ -545,7 +547,7 @@ function isCompactTool(
 
 /** The run's tools in call order, each with how often it ran. */
 function groupedTools(
-  items: TranscriptEntry[]
+  items: TranscriptEntry[],
 ): Array<{ name: string; count: number }> {
   const counts = new Map<string, number>();
   for (const entry of items) {
@@ -602,7 +604,7 @@ const aggregateByRun = new WeakMap<
 function toolRunAggregate(
   items: TranscriptEntry[],
   toolResults: Map<string, TranscriptEntry>,
-  live: boolean
+  live: boolean,
 ): ToolRunAggregate {
   const key = items[items.length - 1];
   const hit = key ? aggregateByRun.get(key) : undefined;
@@ -610,7 +612,7 @@ function toolRunAggregate(
     return hit.value;
 
   const results = items.map((entry) =>
-    entry.toolUseId ? toolResults.get(entry.toolUseId) : undefined
+    entry.toolUseId ? toolResults.get(entry.toolUseId) : undefined,
   );
   let pending = 0;
   let images = 0;
@@ -640,7 +642,9 @@ function toolRunAggregate(
     statusLabel: [
       mediaCount > 0 ? `${mediaCount} media` : "",
       pending > 0 ? "running" : "",
-    ].filter(Boolean).join(", "),
+    ]
+      .filter(Boolean)
+      .join(", "),
     mediaLabel:
       mediaCount === 0
         ? ""
@@ -650,7 +654,8 @@ function toolRunAggregate(
             ? `${videos} video${videos === 1 ? "" : "s"}`
             : `${mediaCount} media`,
   };
-  if (key) aggregateByRun.set(key, { items: items.slice(), results, live, value });
+  if (key)
+    aggregateByRun.set(key, { items: items.slice(), results, live, value });
   return value;
 }
 
@@ -660,7 +665,7 @@ function sameRunInputs(
     results: Array<TranscriptEntry | undefined>;
   },
   items: TranscriptEntry[],
-  toolResults: Map<string, TranscriptEntry>
+  toolResults: Map<string, TranscriptEntry>,
 ): boolean {
   if (cached.items.length !== items.length) return false;
   for (let i = 0; i < items.length; i++) {
@@ -712,15 +717,12 @@ function ReasoningMessage({
   sessionId?: string;
 }) {
   const displays = entries.map((entry) => reasoningDisplay(entry.content));
-  const batchedTitle = displays.findLast((display) => display.title)?.title ?? "";
+  const batchedTitle =
+    displays.findLast((display) => display.title)?.title ?? "";
   const title = batchedTitle.split("\n").at(-1) ?? "";
   const last = entries[entries.length - 1];
   return (
-    <div
-      className="my-2 px-1"
-      data-eid={last.id}
-      data-reasoning=""
-    >
+    <div className="my-2 px-1" data-eid={last.id} data-reasoning="">
       {title ? (
         <div className={cn(msgReasoningTitle, active && msgReasoningShimmer)}>
           {title}
@@ -728,7 +730,9 @@ function ReasoningMessage({
       ) : active ? (
         // Some providers expose prose thinking rather than a short status
         // heading. Keep that prose readable and shimmer a stable activity label.
-        <div className={cn(msgReasoningTitle, msgReasoningShimmer)}>Thinking</div>
+        <div className={cn(msgReasoningTitle, msgReasoningShimmer)}>
+          Thinking
+        </div>
       ) : null}
       {entries.map((entry, index) => {
         const body = displays[index].body;
@@ -769,13 +773,15 @@ function ReasoningMessage({
  */
 function featuredTurnMedia(
   items: TranscriptEntry[],
-  toolResults: Map<string, TranscriptEntry>
+  toolResults: Map<string, TranscriptEntry>,
 ): { images: string[]; videos: string[] } {
   const images: string[] = [];
   const videos: string[] = [];
   const seen = new Set<string>();
   for (const entry of items) {
-    const result = entry.toolUseId ? toolResults.get(entry.toolUseId) : undefined;
+    const result = entry.toolUseId
+      ? toolResults.get(entry.toolUseId)
+      : undefined;
     if (!result?.featuredMedia?.length) continue;
     // Take the srcs off images[]/videos[] rather than off featuredMedia, so
     // what renders is always something the entry can resolve — bounded entries
@@ -813,7 +819,7 @@ function turnBlockPropsEqual(prev: Props, next: Props): boolean {
 
 function blockDuration(
   items: TranscriptEntry[],
-  toolResults: Map<string, TranscriptEntry>
+  toolResults: Map<string, TranscriptEntry>,
 ): string | null {
   if (items.length === 0) return null;
   const first = new Date(items[0].timestamp).getTime();

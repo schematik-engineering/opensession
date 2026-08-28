@@ -10,7 +10,11 @@ import { CodeHighlight } from "./LazyCode";
 import { ToolInputDiff } from "./ToolInputDiff";
 import { langForFile, langForGrep } from "../lib/lang";
 import { toolInputDiff } from "../lib/tool-input-diff";
-import { currentPlanItem, parsePlanItems, planDoneCount } from "@tellahq/opensession-protocol/todo-plan";
+import {
+  currentPlanItem,
+  parsePlanItems,
+  planDoneCount,
+} from "@tellahq/opensession-protocol/todo-plan";
 import { PlanChecklist } from "./PlanChecklist";
 import { resolveEntryImageSrc } from "../lib/osBlob";
 import { BASE_PATH } from "../lib/base";
@@ -79,13 +83,16 @@ interface Props {
   sessionId?: string;
 }
 
-type FullEntryDetail = Pick<TranscriptEntry, "content" | "toolInput" | "images">;
+type FullEntryDetail = Pick<
+  TranscriptEntry,
+  "content" | "toolInput" | "images"
+>;
 
 function useHydratedTranscriptEntry(
   target: TranscriptEntry | undefined,
   enabled: boolean,
   sessionId: string | undefined,
-  legacyVoiceInput = false
+  legacyVoiceInput = false,
 ): TranscriptEntry | null {
   const [hydrated, setHydrated] = useState<{
     sessionId: string;
@@ -102,7 +109,7 @@ function useHydratedTranscriptEntry(
     const controller = new AbortController();
     void fetch(
       `${BASE_PATH}/api/sessions/${encodeURIComponent(sessionId)}/entry/${encodeURIComponent(target.id)}`,
-      { signal: controller.signal }
+      { signal: controller.signal },
     )
       .then(async (res) => {
         if (!res.ok) return;
@@ -110,10 +117,10 @@ function useHydratedTranscriptEntry(
         let toolInput = detail.toolInput;
         if (legacyVoiceInput && toolInput === undefined && detail.content) {
           await (async () => {
-toolInput = JSON.parse(detail.content);
-})().catch(async () => {
-toolInput = detail.content;
-});
+            toolInput = JSON.parse(detail.content);
+          })().catch(async () => {
+            toolInput = detail.content;
+          });
         }
         setHydrated({
           sessionId,
@@ -126,7 +133,8 @@ toolInput = detail.content;
         });
       })
       .catch((error) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (error instanceof DOMException && error.name === "AbortError")
+          return;
         // Keep the bounded transcript row visible if full-detail loading fails.
       });
     return () => controller.abort();
@@ -170,7 +178,7 @@ export function useToolPathRoots(): readonly PathRoot[] {
  */
 export type LiveSubagent = { id?: string; status: string };
 const LiveSubagentsContext = createContext<ReadonlyMap<string, LiveSubagent>>(
-  new Map()
+  new Map(),
 );
 export const LiveSubagentsProvider = LiveSubagentsContext.Provider;
 
@@ -186,18 +194,27 @@ export function toolSummary(
   rawName: string,
   rawInput: unknown,
   fallback: string,
-  roots: readonly PathRoot[] = []
+  roots: readonly PathRoot[] = [],
 ): string {
   // Pi routes every bridged MCP call through its `mcp_call` dispatcher, so the
   // envelope is what a transcript stores. Summarize the call inside it.
   const { toolName, input } = unwrapMcpDispatcher(rawName, rawInput);
-  const detail = formatToolDetail(toolDetail(toolName, input), (p) => tidyPath(p, roots));
+  const detail = formatToolDetail(toolDetail(toolName, input), (p) =>
+    tidyPath(p, roots),
+  );
   if (detail) return detail;
-  if (parseMcpTool(toolName) && fallback.trim() === `Using ${toolName}`) return "";
+  if (parseMcpTool(toolName) && fallback.trim() === `Using ${toolName}`)
+    return "";
   return fallback;
 }
 
-export function ToolGlyph({ toolName, size = 20 }: { toolName: string; size?: number }) {
+export function ToolGlyph({
+  toolName,
+  size = 20,
+}: {
+  toolName: string;
+  size?: number;
+}) {
   switch (toolFamily(toolName)) {
     case "run":
       return <IconTerminal size={size} />;
@@ -262,11 +279,12 @@ export function PathSummary({ path }: { path: string }) {
 export function toolDurationMs(
   entry: TranscriptEntry,
   result?: TranscriptEntry,
-  nowMs?: number
+  nowMs?: number,
 ): number | null {
   const startedAt = new Date(entry.timestamp).getTime();
   const endedAt = result ? new Date(result.timestamp).getTime() : nowMs;
-  if (!isFinite(startedAt) || endedAt === undefined || !isFinite(endedAt)) return null;
+  if (!isFinite(startedAt) || endedAt === undefined || !isFinite(endedAt))
+    return null;
   const durationMs = endedAt - startedAt;
   return durationMs >= 0 ? durationMs : null;
 }
@@ -275,7 +293,10 @@ function formatToolDuration(durationMs: number): string {
   return formatDuration(durationMs) ?? "0s";
 }
 
-function stepDuration(entry: TranscriptEntry, result?: TranscriptEntry): string | null {
+function stepDuration(
+  entry: TranscriptEntry,
+  result?: TranscriptEntry,
+): string | null {
   const durationMs = toolDurationMs(entry, result);
   if (durationMs === null || durationMs < 1500) return null;
   return formatToolDuration(durationMs);
@@ -311,7 +332,8 @@ export const ToolCallBlock = function ToolCallBlock({
   onOpenSubagent,
   sessionId,
 }: Props) {
-  const entryNeedsHydration = entry.contentClamped || isBoundedToolInput(entry.toolInput);
+  const entryNeedsHydration =
+    entry.contentClamped || isBoundedToolInput(entry.toolInput);
   const resultNeedsHydration = Boolean(result?.contentClamped);
   // Default closed, and open only for media the agent asked to SHOW. Keep an
   // explicit choice on the transcript entry rather than this component: the
@@ -319,10 +341,10 @@ export const ToolCallBlock = function ToolCallBlock({
   // children whenever its last-entry key changes. Component-local state made
   // either path forget that a person had opened or closed this detail.
   const [rememberedExpanded] = useState(() =>
-    transcriptDisclosureLedger.read("tool-call", sessionId, [entry.id])
+    transcriptDisclosureLedger.read("tool-call", sessionId, [entry.id]),
   );
   const [expanded, setExpanded] = useState(
-    rememberedExpanded ?? Boolean(result?.featuredMedia?.length)
+    rememberedExpanded ?? Boolean(result?.featuredMedia?.length),
   );
   const userToggledRef = useRef(rememberedExpanded !== undefined);
   const [durationVisible, setDurationVisible] = useState(false);
@@ -335,12 +357,12 @@ export const ToolCallBlock = function ToolCallBlock({
     entry,
     expanded && Boolean(entryNeedsHydration),
     sessionId,
-    entry.id.startsWith("voice-tu-")
+    entry.id.startsWith("voice-tu-"),
   );
   const fullResult = useHydratedTranscriptEntry(
     result,
     expanded && resultNeedsHydration,
-    sessionId
+    sessionId,
   );
   const shownInput = fullEntry?.toolInput ?? entry.toolInput;
   const shownResult = fullResult ?? result;
@@ -365,15 +387,17 @@ export const ToolCallBlock = function ToolCallBlock({
   // that: the label, the glyph, the summary, the expanded input.
   const { toolName, input: callInput } = unwrapMcpDispatcher(
     entry.toolName || "Tool",
-    shownInput
+    shownInput,
   );
   const canonical = canonicalToolName(toolName);
   const roots = useToolPathRoots();
   const mcp = parseMcpTool(toolName);
   const mcpParts = mcp ? mcpLabelParts(mcp.server, mcp.tool) : [];
-  const scopedOpenSession = mcpParts[0] === "Open Session" && mcpParts.length > 2;
+  const scopedOpenSession =
+    mcpParts[0] === "Open Session" && mcpParts.length > 2;
   const summary = toolSummary(toolName, callInput, entry.content, roots);
-  const isFileTool = canonical === "Read" || canonical === "Edit" || canonical === "Write";
+  const isFileTool =
+    canonical === "Read" || canonical === "Edit" || canonical === "Write";
   const lineStats = toolLineStats(toolName, callInput);
   const duration = stepDuration(entry, result);
   const failed = Boolean(shownResult?.isError);
@@ -383,10 +407,16 @@ export const ToolCallBlock = function ToolCallBlock({
   // scanned by language rather than by reading every path to its last word.
   // A name with no extension has no mark, and keeps the path it always had.
   const baseName = isFileTool
-    ? (filePathOf((callInput || {}) as Record<string, unknown>).split("/").pop() ?? "")
+    ? (filePathOf((callInput || {}) as Record<string, unknown>)
+        .split("/")
+        .pop() ?? "")
     : "";
   const fileMark = fileExt(baseName) ? baseName : "";
-  const resultContent = visibleResultContent(shownResult?.content, hasMedia, failed);
+  const resultContent = visibleResultContent(
+    shownResult?.content,
+    hasMedia,
+    failed,
+  );
 
   // A scratch file this call named: openable straight from the row, because
   // assets live outside every worktree and nothing else in the transcript can
@@ -426,249 +456,280 @@ export const ToolCallBlock = function ToolCallBlock({
       {/* Tool rows have no spare inline space for a timestamp, so reveal the
           call's wall-clock time on hover or keyboard focus. */}
       <Tooltip label={fullTime(entry.timestamp)}>
-      <button
-        type="button"
-        aria-expanded={expanded}
-        onClick={() => rememberExpansion(!expanded)}
-        onMouseEnter={pending ? () => setDurationVisible(true) : undefined}
-        onMouseLeave={pending ? () => setDurationVisible(false) : undefined}
-        onFocus={pending ? () => setDurationVisible(true) : undefined}
-        onBlur={pending ? () => setDurationVisible(false) : undefined}
-        className={cn(
-          // Baseline, not centre: the 14px tool name, the 13px mono path and
-          // the 11px trailing meta all ride this row, and centring aligns
-          // their boxes rather than their text. Items with no text baseline
-          // (the glyph, the spinner, the failure mark) opt back into centring.
-          "group flex w-full min-w-0 cursor-pointer items-baseline gap-2 rounded-control border-0 bg-transparent px-1 py-[3px] text-left font-sans transition-colors",
-          "hover:bg-hover/40"
-        )}
-      >
-        <span className="relative z-[1] flex size-[22px] flex-shrink-0 self-center items-center justify-center text-faint">
-          <span className="transition-opacity duration-150 group-hover:opacity-0">
-            <ToolGlyph toolName={toolName} size={20} />
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => rememberExpansion(!expanded)}
+          onMouseEnter={pending ? () => setDurationVisible(true) : undefined}
+          onMouseLeave={pending ? () => setDurationVisible(false) : undefined}
+          onFocus={pending ? () => setDurationVisible(true) : undefined}
+          onBlur={pending ? () => setDurationVisible(false) : undefined}
+          className={cn(
+            // Baseline, not centre: the 14px tool name, the 13px mono path and
+            // the 11px trailing meta all ride this row, and centring aligns
+            // their boxes rather than their text. Items with no text baseline
+            // (the glyph, the spinner, the failure mark) opt back into centring.
+            "group flex w-full min-w-0 cursor-pointer items-baseline gap-2 rounded-control border-0 bg-transparent px-1 py-[3px] text-left font-sans transition-colors",
+            "hover:bg-hover/40",
+          )}
+        >
+          <span className="relative z-[1] flex size-[22px] flex-shrink-0 self-center items-center justify-center text-faint">
+            <span className="transition-opacity duration-150 group-hover:opacity-0">
+              <ToolGlyph toolName={toolName} size={20} />
+            </span>
+            <IconChevronDown
+              size={20}
+              className={cn(
+                "absolute block text-dim opacity-0 transition-[opacity,transform] duration-150 group-hover:opacity-100",
+                expanded && "rotate-180",
+              )}
+            />
           </span>
-          <IconChevronDown
-            size={20}
-            className={cn(
-              "absolute block text-dim opacity-0 transition-[opacity,transform] duration-150 group-hover:opacity-100",
-              expanded && "rotate-180"
-            )}
-          />
-        </span>
 
-        {mcp ? (
-          // Most general part first, leaf last, and only the leaf at full
-          // strength: down a fold of Open Session calls the product name is the
-          // same on every row, so it should read as the path to the part that
-          // differs rather than compete with it.
-          <span
-            className="flex min-w-0 items-baseline gap-1 overflow-hidden text-item-title leading-5 font-medium text-dim transition-colors group-hover:text-fg phone:flex-shrink-0"
-            title={mcpParts.join(" · ")}
-          >
-            {mcpParts.map((part, i) => {
-              const context = i < mcpParts.length - 1;
-              return (
-                <React.Fragment key={i}>
-                  {i > 0 && (
+          {mcp ? (
+            // Most general part first, leaf last, and only the leaf at full
+            // strength: down a fold of Open Session calls the product name is the
+            // same on every row, so it should read as the path to the part that
+            // differs rather than compete with it.
+            <span
+              className="flex min-w-0 items-baseline gap-1 overflow-hidden text-item-title leading-5 font-medium text-dim transition-colors group-hover:text-fg phone:flex-shrink-0"
+              title={mcpParts.join(" · ")}
+            >
+              {mcpParts.map((part, i) => {
+                const context = i < mcpParts.length - 1;
+                return (
+                  <React.Fragment key={i}>
+                    {i > 0 && (
+                      <span
+                        className={cn(
+                          "flex-shrink-0 text-faint",
+                          scopedOpenSession && i === 1 && "phone:hidden",
+                        )}
+                      >
+                        ·
+                      </span>
+                    )}
                     <span
                       className={cn(
-                        "flex-shrink-0 text-faint",
-                        scopedOpenSession && i === 1 && "phone:hidden"
+                        context
+                          ? "flex-shrink-0 font-normal opacity-70"
+                          : "truncate phone:flex-shrink-0",
+                        scopedOpenSession && i === 0 && "phone:hidden",
                       )}
                     >
-                      ·
+                      {part}
                     </span>
-                  )}
-                  <span
-                    className={cn(
-                      context
-                        ? "flex-shrink-0 font-normal opacity-70"
-                        : "truncate phone:flex-shrink-0",
-                      scopedOpenSession && i === 0 && "phone:hidden"
-                    )}
-                  >
-                    {part}
-                  </span>
-                </React.Fragment>
-              );
-            })}
-          </span>
-        ) : (
-          <span className="flex-shrink-0 text-item-title leading-5 font-medium text-dim transition-colors group-hover:text-fg">{toolName}</span>
-        )}
+                  </React.Fragment>
+                );
+              })}
+            </span>
+          ) : (
+            <span className="flex-shrink-0 text-item-title leading-5 font-medium text-dim transition-colors group-hover:text-fg">
+              {toolName}
+            </span>
+          )}
 
-        {/* Baseline, not centre: the path is mono and the ± counts are sans, so
+          {/* Baseline, not centre: the path is mono and the ± counts are sans, so
             at one size their line boxes still centre to different baselines.
             The mark opts back out: it has no text baseline of its own, so
             aligning it to one hangs the drawn logo below the path it labels.
             Nothing grows into spare room here: changes and duration should
             follow the tool summary instead of lining up against the right edge. */}
-        <span
-          className={cn(
-            "flex min-w-0 items-baseline gap-2",
-            mcp && "phone:hidden"
-          )}
-        >
-          <span className="flex min-w-0 items-baseline gap-1.5">
-            {fileMark && <ExtBadge name={fileMark} className="self-center" />}
-            <span
-              className={cn(
-                "min-w-0 text-label leading-4 text-dim",
-                isFileTool ? "flex overflow-hidden" : "truncate"
-              )}
-            >
-              {isFileTool ? <PathSummary path={summary} /> : summary}
-            </span>
-          </span>
-          {lineStats && (
-            <span className="flex flex-shrink-0 gap-1.5 text-label leading-4">
-              {lineStats.additions > 0 && (
-                <span className="text-green">+{lineStats.additions}</span>
-              )}
-              {lineStats.deletions > 0 && (
-                <span className="text-red">-{lineStats.deletions}</span>
-              )}
-            </span>
-          )}
-        </span>
-
-        {canOpenAsset && (
-          // Never hover-gated: the artifact is the point of the call, and a
-          // hover-only way to it doesn't exist on a phone at all.
           <span
-            role="button"
-            tabIndex={0}
-            className={TOOL_ROW_CHIP}
-            onClick={(e) => {
-              e.stopPropagation();
-              showAsset();
-            }}
-            onKeyDown={(e) => {
-              if (e.key !== "Enter" && e.key !== " ") return;
-              e.preventDefault();
-              e.stopPropagation();
-              showAsset();
-            }}
-            title="Open this file"
-          >
-            Open
-            <IconArrowUpRight className="size-4 shrink-0 opacity-70" />
-          </span>
-        )}
-
-        {canOpenSubagent && (
-          <span
-            role="button"
-            tabIndex={0}
             className={cn(
-              TOOL_ROW_CHIP,
-              "opacity-100 transition-[opacity,color,background-color] focus:opacity-100",
-              !subagentLive && "md:opacity-0 md:group-hover:opacity-100"
+              "flex min-w-0 items-baseline gap-2",
+              mcp && "phone:hidden",
             )}
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenSubagent!(agentId!, summary);
-            }}
-            title="Open this sub-agent's conversation"
           >
-            {subagentLive ? "Watch" : "Open"}
-            <IconArrowUpRight className="size-4 shrink-0 opacity-70" />
+            <span className="flex min-w-0 items-baseline gap-1.5">
+              {fileMark && <ExtBadge name={fileMark} className="self-center" />}
+              <span
+                className={cn(
+                  "min-w-0 text-label leading-4 text-dim",
+                  isFileTool ? "flex overflow-hidden" : "truncate",
+                )}
+              >
+                {isFileTool ? <PathSummary path={summary} /> : summary}
+              </span>
+            </span>
+            {lineStats && (
+              <span className="flex flex-shrink-0 gap-1.5 text-label leading-4">
+                {lineStats.additions > 0 && (
+                  <span className="text-green">+{lineStats.additions}</span>
+                )}
+                {lineStats.deletions > 0 && (
+                  <span className="text-red">-{lineStats.deletions}</span>
+                )}
+              </span>
+            )}
           </span>
-        )}
 
-        {!expanded && hasMedia && (
-          // The only sign a folded row is holding a screenshot. Always shown,
-          // never hover-gated — hover isn't a way to discover anything on a
-          // phone, and this is the whole discovery path now that incidental
-          // media no longer opens its own row.
-          <span className={TOOL_ROW_MEDIA_HINT}>{mediaLabel}</span>
-        )}
+          {canOpenAsset && (
+            // Never hover-gated: the artifact is the point of the call, and a
+            // hover-only way to it doesn't exist on a phone at all.
+            <span
+              role="button"
+              tabIndex={0}
+              className={TOOL_ROW_CHIP}
+              onClick={(e) => {
+                e.stopPropagation();
+                showAsset();
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
+                e.stopPropagation();
+                showAsset();
+              }}
+              title="Open this file"
+            >
+              Open
+              <IconArrowUpRight className="size-4 shrink-0 opacity-70" />
+            </span>
+          )}
 
-        {duration && (
-          <span className="flex-shrink-0 text-meta tabular-nums text-faint">{duration}</span>
-        )}
-        {pending && durationVisible && <RunningToolDuration entry={entry} />}
+          {canOpenSubagent && (
+            <span
+              role="button"
+              tabIndex={0}
+              className={cn(
+                TOOL_ROW_CHIP,
+                "opacity-100 transition-[opacity,color,background-color] focus:opacity-100",
+                !subagentLive && "md:opacity-0 md:group-hover:opacity-100",
+              )}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenSubagent!(agentId!, summary);
+              }}
+              title="Open this sub-agent's conversation"
+            >
+              {subagentLive ? "Watch" : "Open"}
+              <IconArrowUpRight className="size-4 shrink-0 opacity-70" />
+            </span>
+          )}
 
-        {pending ? (
-          // Neutral, not green: green on this row already means "added" (the
-          // +N stat) and "passed" elsewhere, so a green ring on a step that can
-          // still fail reads as a verdict instead of a state. Border written
-          // one side at a time — a `border-color` shorthand next to a
-          // `border-top-color` is a two-utilities-one-property race.
-          <span className="size-[11px] flex-shrink-0 self-center animate-spin rounded-full border border-b-line-strong border-l-line-strong border-r-line-strong border-t-dim" />
-        ) : !result ? (
-          <span className="flex-shrink-0 text-meta text-faint">–</span>
-        ) : null}
-      </button>
+          {!expanded &&
+            hasMedia && (
+              // The only sign a folded row is holding a screenshot. Always shown,
+              // never hover-gated — hover isn't a way to discover anything on a
+              // phone, and this is the whole discovery path now that incidental
+              // media no longer opens its own row.
+              <span className={TOOL_ROW_MEDIA_HINT}>{mediaLabel}</span>
+            )}
+
+          {duration && (
+            <span className="flex-shrink-0 text-meta tabular-nums text-faint">
+              {duration}
+            </span>
+          )}
+          {pending && durationVisible && <RunningToolDuration entry={entry} />}
+
+          {pending ? (
+            // Neutral, not green: green on this row already means "added" (the
+            // +N stat) and "passed" elsewhere, so a green ring on a step that can
+            // still fail reads as a verdict instead of a state. Border written
+            // one side at a time — a `border-color` shorthand next to a
+            // `border-top-color` is a two-utilities-one-property race.
+            <span className="size-[11px] flex-shrink-0 self-center animate-spin rounded-full border border-b-line-strong border-l-line-strong border-r-line-strong border-t-dim" />
+          ) : !result ? (
+            <span className="flex-shrink-0 text-meta text-faint">–</span>
+          ) : null}
+        </button>
       </Tooltip>
 
       <Fold open={expanded}>
         <div className="relative z-[1] mb-1.5 ml-[30px] mt-1 space-y-1.5">
           <ToolInputDetail toolName={canonical} input={callInput} />
           {shownResult &&
-            (resultContent || shownResult.images?.length || shownResult.videos?.length) && (
-            <>
-              {resultContent && (
-                <div className="space-y-1">
-                  <div className="px-1 text-meta font-medium leading-4 text-faint">
-                    {failed ? "Error" : "Output"}
-                  </div>
-                  <div className={TOOL_CODE_WELL}>
-                    {renderResultContent(canonical, shownInput, resultContent)}
-                  </div>
-                </div>
-              )}
-              {shownResult.images && shownResult.images.length > 0 && (
-                <div className={cn(TOOL_RESULT_MEDIA, !resultContent && "!mt-0")}>
-                  {shownResult.images.map((raw, i) => {
-                    const src = resolveEntryImageSrc(raw, sessionId);
-                    return (
-                      <a key={i} href={src} target="_blank" rel="noopener noreferrer" className="md-image-link">
-                        <img
-                          className={cn("md-image", !resultContent && "!my-0")}
-                          src={src}
-                          alt=""
-                          loading="lazy"
-                        />
-                      </a>
-                    );
-                  })}
-                </div>
-              )}
-              {shownResult.videos && shownResult.videos.length > 0 && (
-                <div className={TOOL_RESULT_MEDIA}>
-                  {shownResult.videos.map((src, i) => {
-                    // A recording the call saved to the scratch folder opens as
-                    // that asset, so the file is one press from Download instead
-                    // of something to hunt for in the Assets tab.
-                    const videoAsset = assetPathForMediaSrc(src, assetPaths);
-                    const opensAsset = Boolean(videoAsset) && asset.available;
-                    return (
-                    <div key={i} className="md-video-wrap">
-                      <video className="md-video" src={src} controls playsInline preload="metadata" />
-                      <button
-                        type="button"
-                        className="md-video-expand"
-                        aria-label={opensAsset ? "Open asset" : "Expand"}
-                        title={opensAsset ? "Open asset" : "Expand"}
-                        onClick={(e) => {
-                          if (opensAsset) {
-                            asset.open(videoAsset!);
-                            return;
-                          }
-                          const vid = e.currentTarget.parentElement?.querySelector("video");
-                          if (vid) openGalleryFrom(vid);
-                        }}
-                      >
-                        <IconExpand size={20} />
-                      </button>
+            (resultContent ||
+              shownResult.images?.length ||
+              shownResult.videos?.length) && (
+              <>
+                {resultContent && (
+                  <div className="space-y-1">
+                    <div className="px-1 text-meta font-medium leading-4 text-faint">
+                      {failed ? "Error" : "Output"}
                     </div>
-                    );
-                  })}
-                </div>
-              )}
-            </>
-          )}
+                    <div className={TOOL_CODE_WELL}>
+                      {renderResultContent(
+                        canonical,
+                        shownInput,
+                        resultContent,
+                      )}
+                    </div>
+                  </div>
+                )}
+                {shownResult.images && shownResult.images.length > 0 && (
+                  <div
+                    className={cn(TOOL_RESULT_MEDIA, !resultContent && "!mt-0")}
+                  >
+                    {shownResult.images.map((raw, i) => {
+                      const src = resolveEntryImageSrc(raw, sessionId);
+                      return (
+                        <a
+                          key={i}
+                          href={src}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="md-image-link"
+                        >
+                          <img
+                            className={cn(
+                              "md-image",
+                              !resultContent && "!my-0",
+                            )}
+                            src={src}
+                            alt=""
+                            loading="lazy"
+                          />
+                        </a>
+                      );
+                    })}
+                  </div>
+                )}
+                {shownResult.videos && shownResult.videos.length > 0 && (
+                  <div className={TOOL_RESULT_MEDIA}>
+                    {shownResult.videos.map((src, i) => {
+                      // A recording the call saved to the scratch folder opens as
+                      // that asset, so the file is one press from Download instead
+                      // of something to hunt for in the Assets tab.
+                      const videoAsset = assetPathForMediaSrc(src, assetPaths);
+                      const opensAsset = Boolean(videoAsset) && asset.available;
+                      return (
+                        <div key={i} className="md-video-wrap">
+                          <video
+                            className="md-video"
+                            src={src}
+                            controls
+                            playsInline
+                            preload="metadata"
+                          />
+                          <button
+                            type="button"
+                            className="md-video-expand"
+                            aria-label={opensAsset ? "Open asset" : "Expand"}
+                            title={opensAsset ? "Open asset" : "Expand"}
+                            onClick={(e) => {
+                              if (opensAsset) {
+                                asset.open(videoAsset!);
+                                return;
+                              }
+                              const vid =
+                                e.currentTarget.parentElement?.querySelector(
+                                  "video",
+                                );
+                              if (vid) openGalleryFrom(vid);
+                            }}
+                          >
+                            <IconExpand size={20} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
         </div>
       </Fold>
     </div>
@@ -679,10 +740,15 @@ export const ToolCallBlock = function ToolCallBlock({
 export function visibleResultContent(
   content: string | undefined,
   hasMedia: boolean,
-  failed: boolean
+  failed: boolean,
 ): string {
   if (!content) return "";
-  if (!failed && hasMedia && /^Image read successfully\.?$/.test(content.trim())) return "";
+  if (
+    !failed &&
+    hasMedia &&
+    /^Image read successfully\.?$/.test(content.trim())
+  )
+    return "";
   return content;
 }
 
@@ -698,7 +764,7 @@ function ToolInputDetail({
   return (
     <div
       className={cn(
-        toolName === "TodoWrite" && "overflow-hidden rounded-lg bg-panel p-1.5"
+        toolName === "TodoWrite" && "overflow-hidden rounded-lg bg-panel p-1.5",
       )}
     >
       {inputNode}
@@ -712,8 +778,14 @@ function ToolInputDetail({
  * content in the file's language. Everything else falls back to pretty JSON.
  * All variants sit on a code well (its own surface in both themes).
  */
-function toolInputNode(toolName: string, input: unknown): React.ReactNode | null {
-  const inp = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+function toolInputNode(
+  toolName: string,
+  input: unknown,
+): React.ReactNode | null {
+  const inp = (input && typeof input === "object" ? input : {}) as Record<
+    string,
+    unknown
+  >;
 
   if (toolName === "Bash" && bashCommand(input)) {
     return (
@@ -747,14 +819,16 @@ function toolInputNode(toolName: string, input: unknown): React.ReactNode | null
   // the status flap above the composer uses).
   if (toolName === "TodoWrite") {
     const items = parsePlanItems(input);
-    if (items.length > 0) return <PlanChecklist items={items} className="px-1 py-1.5" />;
+    if (items.length > 0)
+      return <PlanChecklist items={items} className="px-1 py-1.5" />;
   }
 
   // Read's input is fully covered by the row summary (plus offset/limit when
   // present — only show those).
   if (toolName === "Read") {
     const extras = Object.entries(inp).filter(
-      ([k]) => k !== "file_path" && k !== "filePath" && !isHiddenToolInputKey(k)
+      ([k]) =>
+        k !== "file_path" && k !== "filePath" && !isHiddenToolInputKey(k),
     );
     if (extras.length === 0) return null;
     return (
@@ -775,7 +849,11 @@ function toolInputNode(toolName: string, input: unknown): React.ReactNode | null
  * from path/glob/type — only highlighted when the gutter format is detected,
  * so file-list output stays plain).
  */
-function renderResultContent(toolName: string, input: unknown, content: string) {
+function renderResultContent(
+  toolName: string,
+  input: unknown,
+  content: string,
+) {
   const text = content;
   const lang =
     toolName === "Read"
@@ -794,7 +872,10 @@ function renderResultContent(toolName: string, input: unknown, content: string) 
     );
   }
   // Unified diffs (git diff/show in Bash output) highlight as diff
-  if (toolName === "Bash" && (text.startsWith("diff --git") || /^@@ -\d/m.test(text))) {
+  if (
+    toolName === "Bash" &&
+    (text.startsWith("diff --git") || /^@@ -\d/m.test(text))
+  ) {
     return <ExpandableCode code={text} lang="diff" />;
   }
   return <ExpandablePre text={text} className={TOOL_PRE} />;
@@ -825,7 +906,9 @@ function DetailDisclosure({
       className="mt-1 rounded-control border-0 bg-transparent px-1.5 py-1 font-sans text-meta font-medium text-faint hover:bg-hover/40 hover:text-fg"
       onClick={onClick}
     >
-      {expanded ? "Show preview" : `Show full detail · ${Math.round(length / 1024)} KB`}
+      {expanded
+        ? "Show preview"
+        : `Show full detail · ${Math.round(length / 1024)} KB`}
     </button>
   );
 }
@@ -840,7 +923,10 @@ function ExpandableCode(props: {
   const long = props.code.length > TOOL_DETAIL_PREVIEW_CHARS;
   return (
     <>
-      <CodeHighlight {...props} code={showAll ? props.code : detailPreview(props.code)} />
+      <CodeHighlight
+        {...props}
+        code={showAll ? props.code : detailPreview(props.code)}
+      />
       {long && (
         <DetailDisclosure
           expanded={showAll}
@@ -852,7 +938,13 @@ function ExpandableCode(props: {
   );
 }
 
-function ExpandablePre({ text, className }: { text: string; className: string }) {
+function ExpandablePre({
+  text,
+  className,
+}: {
+  text: string;
+  className: string;
+}) {
   const [showAll, setShowAll] = useState(false);
   const long = text.length > TOOL_DETAIL_PREVIEW_CHARS;
   return (
@@ -906,7 +998,9 @@ function formatInput(input: unknown): string {
   if (typeof input === "string") return input;
   if (typeof input === "object" && !Array.isArray(input)) {
     const visible = Object.fromEntries(
-      Object.entries(input as Record<string, unknown>).filter(([k]) => !isHiddenToolInputKey(k))
+      Object.entries(input as Record<string, unknown>).filter(
+        ([k]) => !isHiddenToolInputKey(k),
+      ),
     );
     return JSON.stringify(visible, null, 2);
   }

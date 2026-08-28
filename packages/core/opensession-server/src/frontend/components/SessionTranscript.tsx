@@ -2,11 +2,11 @@ import React, { useLayoutEffect, useSyncExternalStore } from "react";
 import { renderMarkdown } from "../lib/markdown";
 import type { LiveTurnStore } from "../lib/live-turn-store";
 import {
-	msgBodyStreaming,
-	msgReasoningShimmer,
-	msgReasoningTitle,
-	msgRow,
-	msgStreamingRow,
+  msgBodyStreaming,
+  msgReasoningShimmer,
+  msgReasoningTitle,
+  msgRow,
+  msgStreamingRow,
 } from "../lib/msg-classes";
 import { useOpenAssetPaths } from "../lib/open-asset";
 import { cn } from "../ui/cn";
@@ -17,10 +17,10 @@ import { TranscriptBlocks } from "./TranscriptBlocks";
 type TranscriptBlocksProps = React.ComponentProps<typeof TranscriptBlocks>;
 
 type SessionTranscriptProps = Omit<TranscriptBlocksProps, "sessionId"> & {
-	sessionId: string;
-	liveTurnStore: LiveTurnStore;
-	/** Re-measure the host scroll region after the live bubble DOM commits. */
-	onLiveLayout?: () => void;
+  sessionId: string;
+  liveTurnStore: LiveTurnStore;
+  /** Re-measure the host scroll region after the live bubble DOM commits. */
+  onLiveLayout?: () => void;
 };
 
 /**
@@ -29,66 +29,66 @@ type SessionTranscriptProps = Omit<TranscriptBlocksProps, "sessionId"> & {
  * stream reconciliation, and transcript grouping cannot drift apart.
  */
 export const SessionTranscript = function SessionTranscript({
-	sessionId,
-	liveTurnStore,
-	onLiveLayout,
-	...blocks
+  sessionId,
+  liveTurnStore,
+  onLiveLayout,
+  ...blocks
 }: SessionTranscriptProps) {
-	return (
-		<>
-			<TranscriptBlocks {...blocks} sessionId={sessionId} />
-			<StreamingMessage
-				store={liveTurnStore}
-				sessionId={sessionId}
-				onLayout={onLiveLayout}
-			/>
-		</>
-	);
+  return (
+    <>
+      <TranscriptBlocks {...blocks} sessionId={sessionId} />
+      <StreamingMessage
+        store={liveTurnStore}
+        sessionId={sessionId}
+        onLayout={onLiveLayout}
+      />
+    </>
+  );
 };
 
 function StreamingMessage({
-	store,
-	sessionId,
-	onLayout,
+  store,
+  sessionId,
+  onLayout,
 }: {
-	store: LiveTurnStore;
-	sessionId: string;
-	onLayout?: () => void;
+  store: LiveTurnStore;
+  sessionId: string;
+  onLayout?: () => void;
 }) {
-	const snapshot = useSyncExternalStore(
-		store.subscribe,
-		store.getSnapshot,
-		store.getServerSnapshot,
-	);
-	const repo = useMarkdownRepo();
-	const assetPaths = useOpenAssetPaths();
-	useLayoutEffect(() => {
-		onLayout?.();
-	}, [snapshot.revision, onLayout]);
-	if (!snapshot.text) return null;
-	const reasoningHeading = liveReasoningHeading(snapshot.text);
-	if (reasoningHeading) {
-		return (
-			<div className={cn(msgRow, msgStreamingRow, "mb-2")} role="status">
-				<span className={cn(msgReasoningTitle, msgReasoningShimmer)}>
-					{reasoningHeading}
-				</span>
-			</div>
-		);
-	}
+  const snapshot = useSyncExternalStore(
+    store.subscribe,
+    store.getSnapshot,
+    store.getServerSnapshot,
+  );
+  const repo = useMarkdownRepo();
+  const assetPaths = useOpenAssetPaths();
+  useLayoutEffect(() => {
+    onLayout?.();
+  }, [snapshot.revision, onLayout]);
+  if (!snapshot.text) return null;
+  const reasoningHeading = liveReasoningHeading(snapshot.text);
+  if (reasoningHeading) {
+    return (
+      <div className={cn(msgRow, msgStreamingRow, "mb-2")} role="status">
+        <span className={cn(msgReasoningTitle, msgReasoningShimmer)}>
+          {reasoningHeading}
+        </span>
+      </div>
+    );
+  }
 
-	const html = renderMarkdown(snapshot.text, { repo, sessionId, assetPaths });
-	// Always rendered, never raw source: the server cuts frames at block
-	// boundaries, so what arrives here is markdown that stands on its own.
-	return (
-		/* .msg-streaming + .msg-body-assistant stay as hooks: the streaming caret
+  const html = renderMarkdown(snapshot.text, { repo, sessionId, assetPaths });
+  // Always rendered, never raw source: the server cuts frames at block
+  // boundaries, so what arrives here is markdown that stands on its own.
+  return (
+    /* .msg-streaming + .msg-body-assistant stay as hooks: the streaming caret
 		   is a ::after on that pair, and the reduced-motion exception names it. */
-		<div className={cn(msgRow, msgStreamingRow)}>
-			<MarkdownBody
-				className={cn(msgBodyStreaming, "markdown")}
-				html={html}
-				enhance={false}
-			/>
-		</div>
-	);
+    <div className={cn(msgRow, msgStreamingRow)}>
+      <MarkdownBody
+        className={cn(msgBodyStreaming, "markdown")}
+        html={html}
+        enhance={false}
+      />
+    </div>
+  );
 }

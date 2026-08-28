@@ -52,18 +52,26 @@ const SPARSE_PROJECTION_MUTATIONS = new Set([
 ]);
 
 export function isSessionKernelCentralStoreFailure(error: unknown): boolean {
-  return !!error && typeof error === "object" && "code" in error &&
-    (error as { code?: unknown }).code === CENTRAL_STORE_FAILURE;
+  return (
+    !!error &&
+    typeof error === "object" &&
+    "code" in error &&
+    (error as { code?: unknown }).code === CENTRAL_STORE_FAILURE
+  );
 }
 
 export function isSessionKernelInfrastructureFailure(error: unknown): boolean {
   if (isSessionKernelCentralStoreFailure(error)) return true;
-  const code = error && typeof error === "object" && "code" in error
-    ? String((error as { code?: unknown }).code ?? "")
-    : "";
-  if (code.startsWith("SQLITE_") && !code.startsWith("SQLITE_CONSTRAINT")) return true;
+  const code =
+    error && typeof error === "object" && "code" in error
+      ? String((error as { code?: unknown }).code ?? "")
+      : "";
+  if (code.startsWith("SQLITE_") && !code.startsWith("SQLITE_CONSTRAINT"))
+    return true;
   const message = error instanceof Error ? error.message : String(error);
-  return /database is locked|disk i\/o|disk full|database.*(?:malformed|corrupt)|not a database|readonly database/i.test(message);
+  return /database is locked|disk i\/o|disk full|database.*(?:malformed|corrupt)|not a database|readonly database/i.test(
+    message,
+  );
 }
 
 function centralStoreFailure(error: unknown): Error & { code: string } {
@@ -115,11 +123,15 @@ export class SessionKernelStoreHost {
   }
 
   recordSqliteBusy(error: unknown): void {
-    const code = error && typeof error === "object" && "code" in error
-      ? String((error as { code?: unknown }).code ?? "")
-      : "";
+    const code =
+      error && typeof error === "object" && "code" in error
+        ? String((error as { code?: unknown }).code ?? "")
+        : "";
     const message = error instanceof Error ? error.message : String(error);
-    if (code.startsWith("SQLITE_BUSY") || /sqlite_busy|database is locked/i.test(message))
+    if (
+      code.startsWith("SQLITE_BUSY") ||
+      /sqlite_busy|database is locked/i.test(message)
+    )
       this.laneMetrics.sqliteBusy += 1;
   }
 
@@ -155,7 +167,8 @@ export class SessionKernelStoreHost {
     if (
       quarantine.commandKind !== "core:ack_outbox" &&
       quarantine.commandKind !== "core:fail_outbox"
-    ) return false;
+    )
+      return false;
     const match = /^Outbox (\d+) crossed session ownership$/.exec(
       quarantine.reason,
     );
@@ -163,10 +176,11 @@ export class SessionKernelStoreHost {
     const outboxId = Number(match[1]);
     if (!Number.isSafeInteger(outboxId)) return false;
     if (
-      this.centralOperation(
-        () => this.central.isolatedOutboxSessionId(outboxId),
+      this.centralOperation(() =>
+        this.central.isolatedOutboxSessionId(outboxId),
       ) !== sessionId
-    ) return false;
+    )
+      return false;
     const settled = this.containIsolated(
       sessionId,
       "storage:outbox-settlement-evidence",
@@ -176,12 +190,14 @@ export class SessionKernelStoreHost {
   }
 
   quarantinedSession(sessionId: string): DurableSessionQuarantine | undefined {
-    const infrastructure = this.centralOperation(
-      () => this.central.quarantinedSession(sessionId),
+    const infrastructure = this.centralOperation(() =>
+      this.central.quarantinedSession(sessionId),
     );
     if (infrastructure) {
-      const committedOutboxSettlement =
-        this.committedOutboxSettlementEvidence(sessionId, infrastructure);
+      const committedOutboxSettlement = this.committedOutboxSettlementEvidence(
+        sessionId,
+        infrastructure,
+      );
       if (
         (!infrastructure.repairable && !committedOutboxSettlement) ||
         !this.isIsolated(sessionId)
@@ -190,12 +206,13 @@ export class SessionKernelStoreHost {
       const evidence = this.containIsolated(
         sessionId,
         "storage:quarantine-repair-evidence",
-        () => this.openIsolated(sessionId).quarantineRepairEvidence(
-          sessionId,
-          infrastructure.commandKind,
-          infrastructure.reason,
-          committedOutboxSettlement,
-        ),
+        () =>
+          this.openIsolated(sessionId).quarantineRepairEvidence(
+            sessionId,
+            infrastructure.commandKind,
+            infrastructure.reason,
+            committedOutboxSettlement,
+          ),
       );
       return {
         ...infrastructure,
@@ -209,7 +226,9 @@ export class SessionKernelStoreHost {
       () => this.openIsolated(sessionId).quarantinedSession(sessionId),
     );
     if (!isolated.ok)
-      return this.centralOperation(() => this.central.quarantinedSession(sessionId));
+      return this.centralOperation(() =>
+        this.central.quarantinedSession(sessionId),
+      );
     if (!isolated.value || isolated.value.repairable) return isolated.value;
     const committedOutboxSettlement = this.committedOutboxSettlementEvidence(
       sessionId,
@@ -236,27 +255,30 @@ export class SessionKernelStoreHost {
   ): DurableSessionQuarantine {
     const isolatedBefore = this.isIsolated(sessionId);
     if (isolatedBefore)
-      this.centralOperation(
-        () => this.central.markIsolatedSessionProjectionDirty(sessionId),
+      this.centralOperation(() =>
+        this.central.markIsolatedSessionProjectionDirty(sessionId),
       );
-    const quarantine = infrastructure && isolatedBefore
-      ? this.centralOperation(
-          () => this.central.quarantineSession(sessionId, reason, commandKind),
-        )
-      : this.storeForSession(sessionId, true, true).quarantineSession(
-          sessionId,
-          reason,
-          commandKind,
-        );
+    const quarantine =
+      infrastructure && isolatedBefore
+        ? this.centralOperation(() =>
+            this.central.quarantineSession(sessionId, reason, commandKind),
+          )
+        : this.storeForSession(sessionId, true, true).quarantineSession(
+            sessionId,
+            reason,
+            commandKind,
+          );
     const isolated = isolatedBefore || this.isIsolated(sessionId);
     if (isolated) {
       if (infrastructure)
-        this.centralOperation(() => this.central.settleIsolatedSessionProjection(
-          sessionId,
-          undefined,
-          undefined,
-          quarantine,
-        ));
+        this.centralOperation(() =>
+          this.central.settleIsolatedSessionProjection(
+            sessionId,
+            undefined,
+            undefined,
+            quarantine,
+          ),
+        );
       else this.refreshSessionProjections(sessionId);
     }
     return quarantine;
@@ -267,26 +289,31 @@ export class SessionKernelStoreHost {
     mutation = false,
     projectionMutation = false,
   ): SessionKernelStore {
-    const placement = this.centralOperation(
-      () => this.central.sessionPlacement(sessionId),
+    const placement = this.centralOperation(() =>
+      this.central.sessionPlacement(sessionId),
     );
     if (placement) {
       if (mutation)
-        this.centralOperation(() => this.central.markIsolatedSessionDirty(sessionId));
+        this.centralOperation(() =>
+          this.central.markIsolatedSessionDirty(sessionId),
+        );
       if (projectionMutation)
-        this.centralOperation(
-          () => this.central.markIsolatedSessionProjectionDirty(sessionId),
+        this.centralOperation(() =>
+          this.central.markIsolatedSessionProjectionDirty(sessionId),
         );
       return this.openIsolated(sessionId);
     }
     if (
       !mutation ||
-      this.centralOperation(() => this.central.hasSessionDurableState(sessionId))
-    ) return this.central;
+      this.centralOperation(() =>
+        this.central.hasSessionDurableState(sessionId),
+      )
+    )
+      return this.central;
     this.centralOperation(() => this.central.claimIsolatedSession(sessionId));
     if (projectionMutation)
-      this.centralOperation(
-        () => this.central.markIsolatedSessionProjectionDirty(sessionId),
+      this.centralOperation(() =>
+        this.central.markIsolatedSessionProjectionDirty(sessionId),
       );
     return this.openIsolated(sessionId);
   }
@@ -299,11 +326,14 @@ export class SessionKernelStoreHost {
     const kernelStore = mutation
       ? this.storeForSession(request.sessionId, true)
       : undefined;
-    const placement = this.centralOperation(
-      () => this.central.sessionPlacement(request.sessionId),
+    const placement = this.centralOperation(() =>
+      this.central.sessionPlacement(request.sessionId),
     );
-    if (!placement || placement.placement !== "isolated" ||
-        placement.transcriptAuthority !== "actor")
+    if (
+      !placement ||
+      placement.placement !== "isolated" ||
+      placement.transcriptAuthority !== "actor"
+    )
       throw new Error(
         `Session ${request.sessionId} has no isolated actor transcript placement`,
       );
@@ -320,7 +350,9 @@ export class SessionKernelStoreHost {
       }) as TranscriptActorResult<T>;
     }
     if (request.op === "agent_query_destination_receipt") {
-      if (this.storeForSession(request.sessionId).isTombstoned(request.sessionId))
+      if (
+        this.storeForSession(request.sessionId).isTombstoned(request.sessionId)
+      )
         throw new Error(`Session ${request.sessionId} was deleted`);
       return transcriptStore.queryAgentTranscriptReceiptRef({
         sessionId: request.sessionId,
@@ -333,7 +365,9 @@ export class SessionKernelStoreHost {
       }) as TranscriptActorResult<T>;
     }
     if (request.op === "agent_validate_destination_receipt") {
-      if (this.storeForSession(request.sessionId).isTombstoned(request.sessionId))
+      if (
+        this.storeForSession(request.sessionId).isTombstoned(request.sessionId)
+      )
         throw new Error(`Session ${request.sessionId} was deleted`);
       return transcriptStore.validateAgentTranscriptReceiptRef({
         sessionId: request.sessionId,
@@ -346,21 +380,29 @@ export class SessionKernelStoreHost {
     }
     if (request.op === "append_destination") {
       if (transcriptStore.replayActorRequest(request))
-        return transcriptStore.applyActorRequest(request) as TranscriptActorResult<T>;
+        return transcriptStore.applyActorRequest(
+          request,
+        ) as TranscriptActorResult<T>;
       kernelStore!.assertTranscriptDestinationFence(request);
     }
-    return transcriptStore.applyActorRequest(request) as TranscriptActorResult<T>;
+    return transcriptStore.applyActorRequest(
+      request,
+    ) as TranscriptActorResult<T>;
   }
 
   private outboxRoute(id: number): { central?: string; isolated?: string } {
-    const central = this.centralOperation(() => this.central.outboxSessionId(id));
-    const isolated = this.centralOperation(
-      () => this.central.isolatedOutboxSessionId(id),
+    const central = this.centralOperation(() =>
+      this.central.outboxSessionId(id),
+    );
+    const isolated = this.centralOperation(() =>
+      this.central.isolatedOutboxSessionId(id),
     );
     if (central && isolated)
-      throw centralStoreFailure(new Error(
-        `Outbox ${id} has conflicting central and isolated route evidence`,
-      ));
+      throw centralStoreFailure(
+        new Error(
+          `Outbox ${id} has conflicting central and isolated route evidence`,
+        ),
+      );
     return { central, isolated };
   }
 
@@ -389,28 +431,28 @@ export class SessionKernelStoreHost {
       const sessionId = String(args[0] ?? "");
       const quarantine = this.quarantinedSession(sessionId);
       if (!quarantine?.repairable) return false;
-      const committedOutboxSettlement =
-        this.committedOutboxSettlementEvidence(sessionId, quarantine);
+      const committedOutboxSettlement = this.committedOutboxSettlementEvidence(
+        sessionId,
+        quarantine,
+      );
       let isolatedReleased = false;
       if (this.isIsolated(sessionId)) {
-        this.centralOperation(
-          () => this.central.markIsolatedSessionProjectionDirty(sessionId),
+        this.centralOperation(() =>
+          this.central.markIsolatedSessionProjectionDirty(sessionId),
         );
         const isolated = this.containIsolated(
           sessionId,
           "storage:quarantine-release",
-          () => this.openIsolated(sessionId).releaseQuarantine(
-            sessionId,
-            committedOutboxSettlement,
-          ),
+          () =>
+            this.openIsolated(sessionId).releaseQuarantine(
+              sessionId,
+              committedOutboxSettlement,
+            ),
         );
         if (isolated.ok) isolatedReleased = isolated.value;
       }
-      const centralReleased = this.centralOperation(
-        () => this.central.releaseQuarantine(
-          sessionId,
-          committedOutboxSettlement,
-        ),
+      const centralReleased = this.centralOperation(() =>
+        this.central.releaseQuarantine(sessionId, committedOutboxSettlement),
       );
       if (centralReleased || isolatedReleased)
         this.refreshSessionProjections(sessionId);
@@ -425,8 +467,13 @@ export class SessionKernelStoreHost {
       if (
         (method === "ackOutbox" ||
           (method === "discardDeadOutbox" && result === true)) &&
-        this.centralOperation(() => this.central.isolatedOutboxSessionId(route.id))
-      ) this.centralOperation(() => this.central.forgetIsolatedOutboxRoute(route.id));
+        this.centralOperation(() =>
+          this.central.isolatedOutboxSessionId(route.id),
+        )
+      )
+        this.centralOperation(() =>
+          this.central.forgetIsolatedOutboxRoute(route.id),
+        );
       return result;
     }
     const result = this.invoke(
@@ -450,20 +497,26 @@ export class SessionKernelStoreHost {
       this.centralOperation(() => this.central.quarantinedSession(sessionId)) ||
       store.quarantinedSession(sessionId);
     const ask = quarantined ? undefined : store.askSnapshot(sessionId);
-    const delivery = quarantined ? undefined : store.deliverySnapshot(sessionId);
-    const sparseDelivery = delivery && (
-      delivery.queued.length > 0 ||
-      delivery.steered.length > 0 ||
-      delivery.pendingSteers.length > 0 ||
-      delivery.dispatch !== undefined ||
-      delivery.interrupt !== undefined
-    ) ? delivery : undefined;
-    this.centralOperation(() => this.central.settleIsolatedSessionProjection(
-      sessionId,
-      ask,
-      sparseDelivery,
-      quarantined,
-    ));
+    const delivery = quarantined
+      ? undefined
+      : store.deliverySnapshot(sessionId);
+    const sparseDelivery =
+      delivery &&
+      (delivery.queued.length > 0 ||
+        delivery.steered.length > 0 ||
+        delivery.pendingSteers.length > 0 ||
+        delivery.dispatch !== undefined ||
+        delivery.interrupt !== undefined)
+        ? delivery
+        : undefined;
+    this.centralOperation(() =>
+      this.central.settleIsolatedSessionProjection(
+        sessionId,
+        ask,
+        sparseDelivery,
+        quarantined,
+      ),
+    );
   }
 
   allAskEntries(): Array<[string, unknown]> {
@@ -474,7 +527,9 @@ export class SessionKernelStoreHost {
     return structuredClone(entries);
   }
 
-  allDeliveryEntries(slot: Parameters<SessionKernelStoreApi["deliveryEntries"]>[0]) {
+  allDeliveryEntries(
+    slot: Parameters<SessionKernelStoreApi["deliveryEntries"]>[0],
+  ) {
     const entries = [
       ...this.central.deliveryEntries(slot),
       ...this.central.isolatedDeliveryProjectionEntries(slot),
@@ -490,7 +545,8 @@ export class SessionKernelStoreHost {
     for (const entry of [
       ...this.central.quarantinedSessions(Number.MAX_SAFE_INTEGER, 0),
       ...this.central.isolatedQuarantineProjectionEntries(),
-    ]) unique.set(entry.sessionId, entry);
+    ])
+      unique.set(entry.sessionId, entry);
     return structuredClone(
       [...unique.values()]
         .sort((a, b) => b.quarantinedAt - a.quarantinedAt)
@@ -508,12 +564,19 @@ export class SessionKernelStoreHost {
       limit: number;
     }> = [],
     activeOutbox: Array<{ id: number; sessionId: string }> = [],
-  ): { sessionIds: string[]; timers: DurableTimer[]; outbox: DurableOutboxItem[] } {
+  ): {
+    sessionIds: string[];
+    timers: DurableTimer[];
+    outbox: DurableOutboxItem[];
+  } {
     const outboxGroups = [
       { effectKinds, limit },
       ...additionalOutboxGroups,
     ].map((group) => ({ ...group, items: [] as DurableOutboxItem[] }));
-    const largestLimit = Math.max(limit, ...outboxGroups.map((group) => group.limit));
+    const largestLimit = Math.max(
+      limit,
+      ...outboxGroups.map((group) => group.limit),
+    );
     const sessionIds = this.runtimeCandidates(now, largestLimit);
     const quota = (groupLimit: number) =>
       Math.max(1, Math.ceil(groupLimit / (sessionIds.length + 1)));
@@ -524,12 +587,14 @@ export class SessionKernelStoreHost {
     );
     const activeIds = activeOutbox.map((item) => item.id);
     for (const group of outboxGroups) {
-      group.items.push(...this.central.pendingOutbox(
-        now,
-        Math.min(quota(group.limit), group.limit),
-        group.effectKinds,
-        activeIds,
-      ));
+      group.items.push(
+        ...this.central.pendingOutbox(
+          now,
+          Math.min(quota(group.limit), group.limit),
+          group.effectKinds,
+          activeIds,
+        ),
+      );
     }
     const outbox = new Map<number, DurableOutboxItem>();
     for (const group of outboxGroups)
@@ -560,20 +625,16 @@ export class SessionKernelStoreHost {
     const scanned = this.containIsolated(sessionId, "runtime:scan", () => {
       const store = this.openIsolated(sessionId);
       return {
-        timers: store.dueTimers(
-          now,
-          Math.min(quota(limit), limit),
-          timerKinds,
+        timers: store.dueTimers(now, Math.min(quota(limit), limit), timerKinds),
+        outbox: [{ effectKinds, limit }, ...additionalOutboxGroups].flatMap(
+          (group) =>
+            store.pendingOutbox(
+              now,
+              Math.min(quota(group.limit), group.limit),
+              group.effectKinds,
+              activeIds,
+            ),
         ),
-        outbox: [
-          { effectKinds, limit },
-          ...additionalOutboxGroups,
-        ].flatMap((group) => store.pendingOutbox(
-          now,
-          Math.min(quota(group.limit), group.limit),
-          group.effectKinds,
-          activeIds,
-        )),
         nextTimerWakeAt: store.nextTimerWakeAt(),
         nextOutboxWakeAt: store.nextOutboxWakeAt(
           activeIds,
@@ -582,11 +643,13 @@ export class SessionKernelStoreHost {
       };
     });
     if (!scanned.ok) return { timers: [], outbox: [] };
-    this.centralOperation(() => this.central.settleIsolatedSessionWake(
-      sessionId,
-      scanned.value.nextTimerWakeAt,
-      scanned.value.nextOutboxWakeAt,
-    ));
+    this.centralOperation(() =>
+      this.central.settleIsolatedSessionWake(
+        sessionId,
+        scanned.value.nextTimerWakeAt,
+        scanned.value.nextOutboxWakeAt,
+      ),
+    );
     const outbox = new Map<number, DurableOutboxItem>();
     for (const item of scanned.value.outbox) outbox.set(item.id, item);
     return { timers: scanned.value.timers, outbox: [...outbox.values()] };
@@ -603,7 +666,8 @@ export class SessionKernelStoreHost {
     const priorityLimit = Math.min(4, candidateLimit);
     const recentLimit = Math.ceil(priorityLimit / 2);
     const dueLimit = priorityLimit - recentLimit;
-    const candidates = this.central.isolatedRecentDirtyWakeCandidates(recentLimit);
+    const candidates =
+      this.central.isolatedRecentDirtyWakeCandidates(recentLimit);
     const seen = new Set(candidates);
     if (dueLimit > 0) {
       let due = this.central.isolatedDueWakeCandidates(
@@ -659,8 +723,12 @@ export class SessionKernelStoreHost {
     if (this.centralPath === ":memory:") return 0;
     let migrated = 0;
     for (const sessionId of this.central.legacySessionIds(limit)) {
-      const targetPath = sessionKernelSessionDbPath(sessionId, this.isolatedRoot);
-      if (this.central.migrateLegacySession(sessionId, targetPath)) migrated += 1;
+      const targetPath = sessionKernelSessionDbPath(
+        sessionId,
+        this.isolatedRoot,
+      );
+      if (this.central.migrateLegacySession(sessionId, targetPath))
+        migrated += 1;
     }
     return migrated;
   }
@@ -688,7 +756,9 @@ export class SessionKernelStoreHost {
       this.laneMetrics.transcriptStoreCacheEvictions += 1;
     }
     if (this.centralPath === ":memory:")
-      throw new Error("Actor transcript storage requires an isolated file database");
+      throw new Error(
+        "Actor transcript storage requires an isolated file database",
+      );
     store = new TranscriptStore(
       sessionKernelSessionDbPath(sessionId, this.isolatedRoot),
       { actorOwned: false },
@@ -708,7 +778,9 @@ export class SessionKernelStoreHost {
     }
     this.laneMetrics.kernelStoreCacheMisses += 1;
     while (this.isolated.size >= this.maxOpenSessionStores) {
-      const oldestSessionId = this.isolated.keys().next().value as string | undefined;
+      const oldestSessionId = this.isolated.keys().next().value as
+        | string
+        | undefined;
       if (!oldestSessionId) break;
       const oldest = this.isolated.get(oldestSessionId);
       this.isolated.delete(oldestSessionId);
@@ -748,19 +820,29 @@ export class SessionKernelStoreHost {
       if (
         isSessionKernelCentralStoreFailure(error) ||
         !isSessionKernelInfrastructureFailure(error)
-      ) throw error;
-      this.centralOperation(() => this.central.quarantineSession(
-        sessionId,
-        error instanceof Error ? error.message : String(error),
-        commandKind,
-      ));
+      )
+        throw error;
+      this.centralOperation(() =>
+        this.central.quarantineSession(
+          sessionId,
+          error instanceof Error ? error.message : String(error),
+          commandKind,
+        ),
+      );
       return { ok: false };
     }
   }
 
-  private invoke(store: SessionKernelStore, method: string, args: unknown[]): unknown {
-    const fn = (store as unknown as Record<string, (...values: unknown[]) => unknown>)[method];
-    if (typeof fn !== "function") throw new Error(`Unknown store method ${method}`);
+  private invoke(
+    store: SessionKernelStore,
+    method: string,
+    args: unknown[],
+  ): unknown {
+    const fn = (
+      store as unknown as Record<string, (...values: unknown[]) => unknown>
+    )[method];
+    if (typeof fn !== "function")
+      throw new Error(`Unknown store method ${method}`);
     return fn.apply(store, args);
   }
 
@@ -770,15 +852,24 @@ export class SessionKernelStoreHost {
         Number(args[0] ?? 100),
         String(args[1] ?? ""),
       );
-    if (method === "askMigrationComplete") return this.central.askMigrationComplete();
-    if (method === "markAskMigrationComplete") return this.central.markAskMigrationComplete();
-    if (method === "deliveryMigrationComplete") return this.central.deliveryMigrationComplete();
-    if (method === "markDeliveryMigrationComplete") return this.central.markDeliveryMigrationComplete();
+    if (method === "askMigrationComplete")
+      return this.central.askMigrationComplete();
+    if (method === "markAskMigrationComplete")
+      return this.central.markAskMigrationComplete();
+    if (method === "deliveryMigrationComplete")
+      return this.central.deliveryMigrationComplete();
+    if (method === "markDeliveryMigrationComplete")
+      return this.central.markDeliveryMigrationComplete();
     if (method === "askEntries") return this.allAskEntries();
     if (method === "deliveryEntries")
-      return this.allDeliveryEntries(args[0] as Parameters<SessionKernelStoreApi["deliveryEntries"]>[0]);
+      return this.allDeliveryEntries(
+        args[0] as Parameters<SessionKernelStoreApi["deliveryEntries"]>[0],
+      );
     if (method === "quarantinedSessions")
-      return this.allQuarantinedSessions(Number(args[0] ?? 100), Number(args[1] ?? 0));
+      return this.allQuarantinedSessions(
+        Number(args[0] ?? 100),
+        Number(args[1] ?? 0),
+      );
     if (method === "stats") return this.stats();
     if (method === "maintain") return this.maintain();
     if (method === "compact") {
@@ -792,12 +883,13 @@ export class SessionKernelStoreHost {
       return;
     }
     if (method === "clearAskRecords") {
-      const sessionIds = this.central.isolatedAskProjectionEntries()
+      const sessionIds = this.central
+        .isolatedAskProjectionEntries()
         .map(([sessionId]) => sessionId);
       this.central.clearAskRecords();
       for (const sessionId of sessionIds) {
-        this.centralOperation(
-          () => this.central.markIsolatedSessionProjectionDirty(sessionId),
+        this.centralOperation(() =>
+          this.central.markIsolatedSessionProjectionDirty(sessionId),
         );
         this.storeForSession(sessionId, true, true).clearAskRecords();
         this.refreshSessionProjections(sessionId);
@@ -805,13 +897,16 @@ export class SessionKernelStoreHost {
       return;
     }
     if (method === "clearDeliverySlot") {
-      const slot = args[0] as Parameters<SessionKernelStoreApi["clearDeliverySlot"]>[0];
-      const sessionIds = this.central.isolatedDeliveryProjectionEntries(slot)
+      const slot = args[0] as Parameters<
+        SessionKernelStoreApi["clearDeliverySlot"]
+      >[0];
+      const sessionIds = this.central
+        .isolatedDeliveryProjectionEntries(slot)
         .map(([sessionId]) => sessionId);
       this.central.clearDeliverySlot(slot);
       for (const sessionId of sessionIds) {
-        this.centralOperation(
-          () => this.central.markIsolatedSessionProjectionDirty(sessionId),
+        this.centralOperation(() =>
+          this.central.markIsolatedSessionProjectionDirty(sessionId),
         );
         this.storeForSession(sessionId, true, true).clearDeliverySlot(slot);
         this.refreshSessionProjections(sessionId);
@@ -820,15 +915,17 @@ export class SessionKernelStoreHost {
     }
     if (method === "settlePendingSteers") {
       let settled = this.central.settlePendingSteers();
-      const candidates = this.central.isolatedPendingSteerProjectionSessionIds();
+      const candidates =
+        this.central.isolatedPendingSteerProjectionSessionIds();
       for (const sessionId of candidates) {
-        this.centralOperation(
-          () => this.central.markIsolatedSessionProjectionDirty(sessionId),
+        this.centralOperation(() =>
+          this.central.markIsolatedSessionProjectionDirty(sessionId),
         );
         const result = this.containIsolated(
           sessionId,
           "global:settle-pending-steers",
-          () => this.storeForSession(sessionId, true, true).settlePendingSteers(),
+          () =>
+            this.storeForSession(sessionId, true, true).settlePendingSteers(),
         );
         if (result.ok) {
           settled += result.value;
@@ -865,7 +962,8 @@ export class SessionKernelStoreHost {
             allQuarantines.length,
             central.totals.timers,
             central.totals.outbox,
-          ) > offset + limit
+          ) >
+          offset + limit
             ? offset + limit
             : undefined,
       };

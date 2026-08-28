@@ -1,9 +1,18 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { generateKeyPairSync } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { bootstrapUserAuthOnConnect, handleConnectionsRoutes } from "./connections";
+import {
+  bootstrapUserAuthOnConnect,
+  handleConnectionsRoutes,
+} from "./connections";
 import {
   __setGithubAppKeyPathForTest,
   commitGithubAppKeyMutation,
@@ -51,11 +60,16 @@ afterEach(() => {
 /** Operator mode: userPrAuth + a client id makes webAuthRequired() true. A
  *  fresh path each call sidesteps getConfig's mtime cache. */
 function enableOperatorMode(): void {
-  const path = join(dir, `operator-${Math.random().toString(36).slice(2)}.json`);
+  const path = join(
+    dir,
+    `operator-${Math.random().toString(36).slice(2)}.json`,
+  );
   writeFileSync(
     path,
     JSON.stringify({
-      integrations: { github: { userPrAuth: true, oauthClientId: "test-client-id" } },
+      integrations: {
+        github: { userPrAuth: true, oauthClientId: "test-client-id" },
+      },
     }),
   );
   process.env.OPENSESSION_CONFIG = path;
@@ -72,7 +86,10 @@ function context(
     req: new Request(url, {
       method,
       ...(body !== undefined
-        ? { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }
+        ? {
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          }
         : {}),
     }),
     url,
@@ -83,7 +100,6 @@ function context(
 }
 
 const DEVICE = "/api/connections/github/device";
-
 
 describe("GitHub App key transaction", () => {
   test("restores the previous key when config persistence fails", async () => {
@@ -114,7 +130,9 @@ describe("GitHub App key transaction", () => {
 
 describe("GitHub connect gating", () => {
   test("simple mode without a configured app rejects the connect (400)", async () => {
-    const response = await handleConnectionsRoutes(context(DEVICE, "POST", null));
+    const response = await handleConnectionsRoutes(
+      context(DEVICE, "POST", null),
+    );
     expect(response?.status).toBe(400);
     expect(await response?.json()).toEqual({
       error: "GitHub connect is not configured",
@@ -123,9 +141,13 @@ describe("GitHub connect gating", () => {
 
   test("operator mode requires sign-in before starting a connection (403)", async () => {
     enableOperatorMode();
-    const response = await handleConnectionsRoutes(context(DEVICE, "POST", null));
+    const response = await handleConnectionsRoutes(
+      context(DEVICE, "POST", null),
+    );
     expect(response?.status).toBe(403);
-    expect(await response?.json()).toEqual({ error: "Sign in to connect GitHub" });
+    expect(await response?.json()).toEqual({
+      error: "Sign in to connect GitHub",
+    });
   });
 
   test("connect is decoupled from the sign-in gate", async () => {
@@ -203,8 +225,6 @@ describe("GitHub disconnect ownership", () => {
   });
 });
 
-
-
 function validPrivateKey(): string {
   const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
   return privateKey.export({ format: "pem", type: "pkcs8" }).toString();
@@ -216,14 +236,22 @@ const GET = "/api/connections/github";
 describe("GitHub App config (simple mode)", () => {
   test("POST writes client id + slug + secret to config, connect goes live, and userPrAuth is untouched", async () => {
     const res = await handleConnectionsRoutes(
-      context(APP, "POST", null, { clientId: "Iv1.abc", slug: "my-app", secret: "shh", appOrg: "acme", privateKey: validPrivateKey() }),
+      context(APP, "POST", null, {
+        clientId: "Iv1.abc",
+        slug: "my-app",
+        secret: "shh",
+        appOrg: "acme",
+        privateKey: validPrivateKey(),
+      }),
     );
     expect(res?.status).toBe(200);
     expect(await res?.json()).toEqual({ ok: true });
 
     // On disk: the App and connect-time sign-in intent are set, but userPrAuth
     // is not introduced until a verified account connects.
-    const written = JSON.parse(readFileSync(process.env.OPENSESSION_CONFIG!, "utf-8"));
+    const written = JSON.parse(
+      readFileSync(process.env.OPENSESSION_CONFIG!, "utf-8"),
+    );
     expect(written.integrations.github.oauthClientId).toBe("Iv1.abc");
     expect(written.integrations.github.appSlug).toBe("my-app");
     expect(written.integrations.github.oauthClientSecret).toBe("shh");
@@ -251,7 +279,9 @@ describe("GitHub App config (simple mode)", () => {
     );
     expect(res?.status).toBe(200);
 
-    const written = JSON.parse(readFileSync(process.env.OPENSESSION_CONFIG!, "utf-8"));
+    const written = JSON.parse(
+      readFileSync(process.env.OPENSESSION_CONFIG!, "utf-8"),
+    );
     expect(written.integrations.github.authOnConnect).toBe(true);
     expect(written.integrations.github.appOrg).toBeUndefined();
     expect(written.integrations.github.installationOwner).toBeUndefined();
@@ -263,7 +293,11 @@ describe("GitHub App config (simple mode)", () => {
     expect(
       (
         await handleConnectionsRoutes(
-          context(APP, "POST", null, { clientId: "", slug: "my-app", secret: "shh" }),
+          context(APP, "POST", null, {
+            clientId: "",
+            slug: "my-app",
+            secret: "shh",
+          }),
         )
       )?.status,
     ).toBe(400);
@@ -297,7 +331,11 @@ describe("GitHub App config (simple mode)", () => {
     writeFileSync(keyPath, "app-a-key\n", { mode: 0o600 });
 
     const replace = await handleConnectionsRoutes(
-      context(APP, "POST", null, { clientId: "Iv1.app-b", slug: "app-b", secret: "shh" }),
+      context(APP, "POST", null, {
+        clientId: "Iv1.app-b",
+        slug: "app-b",
+        secret: "shh",
+      }),
     );
     expect(replace?.status).toBe(409);
     expect(readFileSync(keyPath, "utf-8")).toBe("app-a-key\n");
@@ -309,13 +347,23 @@ describe("GitHub App config (simple mode)", () => {
 
   test("changing App identity without a new key is rejected", async () => {
     await handleConnectionsRoutes(
-      context(APP, "POST", null, { clientId: "Iv1.app-a", slug: "app-a", secret: "shh", appOrg: "acme", privateKey: validPrivateKey() }),
+      context(APP, "POST", null, {
+        clientId: "Iv1.app-a",
+        slug: "app-a",
+        secret: "shh",
+        appOrg: "acme",
+        privateKey: validPrivateKey(),
+      }),
     );
     const keyPath = join(dir, "github-app.pem");
     writeFileSync(keyPath, "app-a-key\n", { mode: 0o600 });
 
     const response = await handleConnectionsRoutes(
-      context(APP, "POST", null, { clientId: "Iv1.app-b", slug: "app-b", secret: "shh" }),
+      context(APP, "POST", null, {
+        clientId: "Iv1.app-b",
+        slug: "app-b",
+        secret: "shh",
+      }),
     );
     expect(response?.status).toBe(409);
     expect(existsSync(keyPath)).toBe(true);
@@ -323,7 +371,13 @@ describe("GitHub App config (simple mode)", () => {
 
   test("DELETE clears the App keys but leaves other github config intact", async () => {
     await handleConnectionsRoutes(
-      context(APP, "POST", null, { clientId: "Iv1.abc", slug: "my-app", secret: "shh", appOrg: "acme", privateKey: validPrivateKey() }),
+      context(APP, "POST", null, {
+        clientId: "Iv1.abc",
+        slug: "my-app",
+        secret: "shh",
+        appOrg: "acme",
+        privateKey: validPrivateKey(),
+      }),
     );
     // A UI-managed key must be removed with the App; an unrelated github
     // config key proves the config clear remains surgical.
@@ -402,9 +456,12 @@ function stubGithubDeviceFetch(login: string, name?: string): () => void {
         { status: 200 },
       );
     if (u.includes("api.github.com/user"))
-      return new Response(JSON.stringify({ login, ...(name ? { name } : {}) }), {
-        status: 200,
-      });
+      return new Response(
+        JSON.stringify({ login, ...(name ? { name } : {}) }),
+        {
+          status: 200,
+        },
+      );
     return new Response("{}", { status: 404 });
   }) as unknown as typeof fetch;
   return () => {
@@ -433,7 +490,9 @@ describe("connect-time auth bootstrap", () => {
       expect(body.authEnabled).toBe(true);
       expect(body.admin).toBe(true);
       // The browser is signed in on this very response.
-      expect(res?.headers.get("set-cookie") || "").toContain("opensession_auth=");
+      expect(res?.headers.get("set-cookie") || "").toContain(
+        "opensession_auth=",
+      );
 
       const written = JSON.parse(readFileSync(cfg, "utf-8"));
       // Rostered admin AND the flip live in the SAME persisted file — a single
@@ -470,13 +529,23 @@ describe("connect-time auth bootstrap", () => {
     // enabling sign-in for Alice would roster an admin whose token is gone
     // (githubCredentialForLogin("alice") is null). The in-lock revalidation must
     // refuse and leave the gate + intent untouched.
-    const cfg = writeGithubConfig({ oauthClientId: "cid", authOnConnect: true });
-    const storePath = join(dir, `gh-auth-${Math.random().toString(36).slice(2)}.json`);
+    const cfg = writeGithubConfig({
+      oauthClientId: "cid",
+      authOnConnect: true,
+    });
+    const storePath = join(
+      dir,
+      `gh-auth-${Math.random().toString(36).slice(2)}.json`,
+    );
     writeFileSync(
       storePath,
       JSON.stringify({
         users: {
-          bob: { login: "bob", token: "tok-bob", connectedAt: "2020-01-01T00:00:00.000Z" },
+          bob: {
+            login: "bob",
+            token: "tok-bob",
+            connectedAt: "2020-01-01T00:00:00.000Z",
+          },
         },
       }),
     );
@@ -533,15 +602,26 @@ describe("connect-time auth bootstrap", () => {
   });
 
   test("refuses a second bootstrap once the intent is consumed (TOCTOU)", async () => {
-    const cfg = writeGithubConfig({ oauthClientId: "cid", authOnConnect: true });
+    const cfg = writeGithubConfig({
+      oauthClientId: "cid",
+      authOnConnect: true,
+    });
     // The connecting account is in the store (pollGithubDeviceFlow stored it
     // before the lock), so the in-lock revalidation passes for @alice.
-    const storePath = join(dir, `gh-auth-${Math.random().toString(36).slice(2)}.json`);
+    const storePath = join(
+      dir,
+      `gh-auth-${Math.random().toString(36).slice(2)}.json`,
+    );
     writeFileSync(
       storePath,
       JSON.stringify({
         users: {
-          alice: { login: "alice", token: "tok-alice", source: "device", connectedAt: "2020-01-01T00:00:00.000Z" },
+          alice: {
+            login: "alice",
+            token: "tok-alice",
+            source: "device",
+            connectedAt: "2020-01-01T00:00:00.000Z",
+          },
         },
       }),
     );

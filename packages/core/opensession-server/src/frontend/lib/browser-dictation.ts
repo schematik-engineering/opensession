@@ -47,7 +47,9 @@ type DesktopDictationAPI = {
   push(id: string, samples: Float32Array): void;
   finish(id: string): Promise<{ text?: string }>;
   cancel(id: string): void;
-  onText(callback: (payload: { id?: string; text?: string }) => void): () => void;
+  onText(
+    callback: (payload: { id?: string; text?: string }) => void,
+  ): () => void;
 };
 
 declare global {
@@ -119,7 +121,11 @@ function startDesktopDictation(
     }
   });
   const started = api
-    .start(id, context.sampleRate, navigator.languages?.[0] || navigator.language || "en-US")
+    .start(
+      id,
+      context.sampleRate,
+      navigator.languages?.[0] || navigator.language || "en-US",
+    )
     .catch(() => ({ ok: false }));
 
   processor.onaudioprocess = (event) => {
@@ -150,7 +156,9 @@ function startDesktopDictation(
         api.cancel(id);
         return "";
       }
-      return (await api.finish(id).catch(() => ({ text: "" }))).text?.trim() || "";
+      return (
+        (await api.finish(id).catch(() => ({ text: "" }))).text?.trim() || ""
+      );
     },
     cancel() {
       stopCapture();
@@ -174,7 +182,8 @@ export function startBrowserDictation(
     const native = startDesktopDictation(desktop, stream, onTranscript);
     if (native) return native;
   }
-  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const Recognition =
+    window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!Recognition) return null;
 
   let recognition: SpeechRecognizer;

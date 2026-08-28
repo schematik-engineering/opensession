@@ -3,7 +3,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TranscriptStore } from "./transcript-store";
-import { subscribeTranscript, transcriptSubscriberCount } from "./transcript-bus";
+import {
+  subscribeTranscript,
+  transcriptSubscriberCount,
+} from "./transcript-bus";
 import { startTranscriptWatch } from "./transcript-watch";
 import type { TranscriptEntry } from "./types";
 
@@ -44,7 +47,7 @@ function watch(
   state: ReturnType<typeof setup>,
   sessionId: string,
   sinceChangeSeq?: number,
-  afterResetSnapshot?: () => void
+  afterResetSnapshot?: () => void,
 ) {
   return startTranscriptWatch({
     sessionId,
@@ -109,7 +112,9 @@ describe("race-free transcript watch", () => {
       "transcript_init",
       "transcript_append",
     ]);
-    expect(state.frames[1].entries.map((e: TranscriptEntry) => e.id)).toEqual(["b"]);
+    expect(state.frames[1].entries.map((e: TranscriptEntry) => e.id)).toEqual([
+      "b",
+    ]);
     expect(handle.changeSeq()).toBe(2);
   });
 
@@ -154,7 +159,9 @@ describe("race-free transcript watch", () => {
     await Bun.sleep(0);
 
     expect(state.frames).toHaveLength(1);
-    expect(state.frames[0].entries.map((e: TranscriptEntry) => e.id)).toEqual(["a"]);
+    expect(state.frames[0].entries.map((e: TranscriptEntry) => e.id)).toEqual([
+      "a",
+    ]);
   });
 
   test("preserves an ordered feed envelope for the matching durable wake", async () => {
@@ -217,7 +224,7 @@ describe("race-free transcript watch", () => {
     let resetSnapshots = 0;
     state.store.appendTranscriptEvents(
       sid,
-      Array.from({ length: 30 }, (_, i) => entry(`old-${i}`, String(i)))
+      Array.from({ length: 30 }, (_, i) => entry(`old-${i}`, String(i))),
     );
     const handle = await watch(state, sid, undefined, () => resetSnapshots++);
     cleanups.push(() => handle.unsubscribe());
@@ -255,7 +262,7 @@ describe("race-free transcript watch", () => {
     const sid = `bks-stage-${crypto.randomUUID()}`;
     state.store.appendTranscriptEvents(
       sid,
-      Array.from({ length: 140 }, (_, i) => entry(`e${i}`, String(i)))
+      Array.from({ length: 140 }, (_, i) => entry(`e${i}`, String(i))),
     );
     const handle = await watch(state, sid);
     expect(state.frames).toHaveLength(1);
@@ -301,7 +308,7 @@ describe("race-free transcript watch", () => {
 
     const sent = state.frames[0].entries as TranscriptEntry[];
     const messages = sent.filter(
-      (e) => e.type === "user" || e.type === "assistant"
+      (e) => e.type === "user" || e.type === "assistant",
     );
     expect(sent.length).toBeGreaterThan(132);
     expect(messages.length).toBeGreaterThanOrEqual(4);
@@ -317,7 +324,7 @@ describe("race-free transcript watch", () => {
     const sid = `bks-window-chatty-${crypto.randomUUID()}`;
     state.store.appendTranscriptEvents(
       sid,
-      Array.from({ length: 300 }, (_, i) => entry(`e${i}`, String(i)))
+      Array.from({ length: 300 }, (_, i) => entry(`e${i}`, String(i))),
     );
     const handle = await watch(state, sid);
     cleanups.push(() => handle.unsubscribe());
@@ -334,7 +341,7 @@ describe("race-free transcript watch", () => {
     const sid = `bks-window-legacy-${crypto.randomUUID()}`;
     state.store.appendTranscriptEvents(
       sid,
-      Array.from({ length: 200 }, (_, i) => entry(`e${i}`, String(i)))
+      Array.from({ length: 200 }, (_, i) => entry(`e${i}`, String(i))),
     );
     const legacy = {
       getLastChangeSeq: (id: string) => state.store.getLastChangeSeq(id),
@@ -398,8 +405,6 @@ describe("race-free transcript watch", () => {
     });
     cleanups.push(() => fresh.unsubscribe());
     expect(state.frames[0].type).toBe("transcript_init");
-    expect(
-      state.frames[0].entries.every((e: any) => e.prepared)
-    ).toBe(true);
+    expect(state.frames[0].entries.every((e: any) => e.prepared)).toBe(true);
   });
 });

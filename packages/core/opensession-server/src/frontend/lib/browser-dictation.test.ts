@@ -11,15 +11,15 @@ function results(...transcripts: string[]) {
 
 describe("speechResultsText", () => {
   test("joins final and interim browser results", () => {
-    expect(speechResultsText(results("Open the pull request.", "Then review it"))).toBe(
-      "Open the pull request. Then review it",
-    );
+    expect(
+      speechResultsText(results("Open the pull request.", "Then review it")),
+    ).toBe("Open the pull request. Then review it");
   });
 
   test("normalizes service whitespace without changing words", () => {
-    expect(speechResultsText(results("  First thought ", " and another  "))).toBe(
-      "First thought and another",
-    );
+    expect(
+      speechResultsText(results("  First thought ", " and another  ")),
+    ).toBe("First thought and another");
   });
 
   test("ignores an empty recognition result", () => {
@@ -36,12 +36,16 @@ describe("Electron dictation", () => {
     const pushed: Float32Array[] = [];
     let transcript = "";
     const api = {
-      start: async (_id: string, sampleRate: number) => ({ ok: sampleRate === 48_000 }),
+      start: async (_id: string, sampleRate: number) => ({
+        ok: sampleRate === 48_000,
+      }),
       push: (_id: string, samples: Float32Array) => pushed.push(samples),
       finish: async () => ({ text: "Native result" }),
       cancel: () => {},
       onText: (callback: (payload: { id: string; text: string }) => void) => {
-        queueMicrotask(() => callback({ id: "native-id", text: "Live result" }));
+        queueMicrotask(() =>
+          callback({ id: "native-id", text: "Live result" }),
+        );
         return () => {};
       },
     };
@@ -93,12 +97,18 @@ describe("Electron dictation", () => {
       expect([...pushed[0]]).toEqual([0.25, -0.5]);
       expect(await dictation!.finish()).toBe("Native result");
     } finally {
-      Object.defineProperty(globalThis, "window", { configurable: true, value: originalWindow });
+      Object.defineProperty(globalThis, "window", {
+        configurable: true,
+        value: originalWindow,
+      });
       Object.defineProperty(globalThis, "navigator", {
         configurable: true,
         value: originalNavigator,
       });
-      Object.defineProperty(globalThis, "crypto", { configurable: true, value: originalCrypto });
+      Object.defineProperty(globalThis, "crypto", {
+        configurable: true,
+        value: originalCrypto,
+      });
     }
   });
 });

@@ -16,7 +16,13 @@ import type { GitStatusInfo, PrDetails } from "./types";
  * the agent does the work, not a bare button.
  */
 /** Status-dot colours for a Git status row — the state, not a step marker. */
-export type GitDotTone = "green" | "yellow" | "red" | "blue" | "purple" | "muted";
+export type GitDotTone =
+  | "green"
+  | "yellow"
+  | "red"
+  | "blue"
+  | "purple"
+  | "muted";
 
 export type GitTask = {
   key: "conflicts" | "behind" | "ahead" | "dirty";
@@ -78,7 +84,11 @@ export function gitTasks(
       tone: "yellow",
       run: {
         label: "commit the changes",
-        prompt: commitPrompt(git.uncommittedFiles, git.sharedCheckout, git.uncommittedPaths),
+        prompt: commitPrompt(
+          git.uncommittedFiles,
+          git.sharedCheckout,
+          git.uncommittedPaths,
+        ),
       },
     });
   return tasks;

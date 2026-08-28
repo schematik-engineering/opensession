@@ -21,9 +21,14 @@ import { handleGithubPrEvent } from "./webhook";
 const GITHUB_WEBHOOK_BODY_LIMIT = 1024 * 1024;
 const GITHUB_WEBHOOK_SECRET = process.env.GITHUB_WEBHOOK_SECRET || "";
 
-function integrationEnabled(id: "github" | "slack", flag: "ENABLE_GITHUB_AGENT" | "ENABLE_SLACK_AGENT"): boolean {
+function integrationEnabled(
+  id: "github" | "slack",
+  flag: "ENABLE_GITHUB_AGENT" | "ENABLE_SLACK_AGENT",
+): boolean {
   const env = process.env[flag];
-  return env == null ? configuredIntegration(id).enabled === true : env === "true";
+  return env == null
+    ? configuredIntegration(id).enabled === true
+    : env === "true";
 }
 
 /** Whether Slack must register the GitHub route for legacy Slack-only setups. */
@@ -54,27 +59,45 @@ export async function handleGithubWebhook(req: Request): Promise<Response> {
 
   const event = req.headers.get("x-github-event") || "";
   const deliveryId = req.headers.get("x-github-delivery");
-  const deliveryClaim = deliveryId ? claimGithubDelivery(deliveryId) : "claimed";
+  const deliveryClaim = deliveryId
+    ? claimGithubDelivery(deliveryId)
+    : "claimed";
   if (deliveryClaim === "processed") {
     console.log(`[github] Duplicate GitHub delivery ${deliveryId} - skipping`);
     return Response.json({ ok: true, duplicate: true });
   }
   if (deliveryClaim === "in_flight") {
-    return Response.json({ error: "Webhook admission in progress" }, { status: 503 });
+    return Response.json(
+      { error: "Webhook admission in progress" },
+      { status: 503 },
+    );
   }
 
   try {
     const payload = JSON.parse(body);
     incrementGithubWebhooks();
-    console.log(`[github] GitHub webhook: event=${event}, action=${payload.action}`);
+    console.log(
+      `[github] GitHub webhook: event=${event}, action=${payload.action}`,
+    );
 
     // Slack remains optional: don't load any Slack module in GitHub-only mode.
     if (event === "pull_request_review" && slackAgentEnabled()) {
-      const reviewerLogin: string = payload?.review?.user?.login || payload?.sender?.login || "";
-      if (isGithubBotLogin(reviewerLogin) || isTrustedGithubLogin(reviewerLogin)) {
-        Promise.all([import("../slack/github-reviews"), import("../slack/worktree-channels")])
-          .then(([reviews, channels]) => reviews.handlePullRequestReview(payload, channels.branchToChannel))
-          .catch((e) => console.error("[github] Error handling PR review webhook:", e));
+      const reviewerLogin: string =
+        payload?.review?.user?.login || payload?.sender?.login || "";
+      if (
+        isGithubBotLogin(reviewerLogin) ||
+        isTrustedGithubLogin(reviewerLogin)
+      ) {
+        Promise.all([
+          import("../slack/github-reviews"),
+          import("../slack/worktree-channels"),
+        ])
+          .then(([reviews, channels]) =>
+            reviews.handlePullRequestReview(payload, channels.branchToChannel),
+          )
+          .catch((e) =>
+            console.error("[github] Error handling PR review webhook:", e),
+          );
       } else {
         console.warn(
           `[github] Ignoring PR review notification from untrusted @${reviewerLogin || "unknown"}`,
@@ -102,6 +125,9 @@ export async function handleGithubWebhook(req: Request): Promise<Response> {
   } catch (error) {
     if (deliveryId) releaseGithubDelivery(deliveryId);
     console.error("[github] durable webhook admission failed:", error);
-    return Response.json({ error: "Webhook admission failed" }, { status: 503 });
+    return Response.json(
+      { error: "Webhook admission failed" },
+      { status: 503 },
+    );
   }
 }

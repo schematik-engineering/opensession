@@ -31,11 +31,20 @@ describe("validateFrontendBuild", () => {
   });
 
   test("rejects stale metadata and missing assets", () => {
-    const stale = fixture({ inputsHash: "old", assets: ["App-a.js"] }, ["App-a.js"]);
-    const incomplete = fixture({ inputsHash: "source-one", assets: ["missing.js"] });
+    const stale = fixture({ inputsHash: "old", assets: ["App-a.js"] }, [
+      "App-a.js",
+    ]);
+    const incomplete = fixture({
+      inputsHash: "source-one",
+      assets: ["missing.js"],
+    });
     try {
-      expect(() => validateFrontendBuild(stale, "source-one")).toThrow("input hash mismatch");
-      expect(() => validateFrontendBuild(incomplete, "source-one")).toThrow("bundle is incomplete");
+      expect(() => validateFrontendBuild(stale, "source-one")).toThrow(
+        "input hash mismatch",
+      );
+      expect(() => validateFrontendBuild(incomplete, "source-one")).toThrow(
+        "bundle is incomplete",
+      );
     } finally {
       rmSync(stale, { recursive: true, force: true });
       rmSync(incomplete, { recursive: true, force: true });
@@ -44,10 +53,16 @@ describe("validateFrontendBuild", () => {
 
   test("rejects missing or empty metadata", () => {
     const empty = fixture({ inputsHash: "source-one", assets: [] });
-    const missing = mkdtempSync(join(tmpdir(), "opensession-frontend-validate-missing-"));
+    const missing = mkdtempSync(
+      join(tmpdir(), "opensession-frontend-validate-missing-"),
+    );
     try {
-      expect(() => validateFrontendBuild(empty, "source-one")).toThrow("has no assets");
-      expect(() => validateFrontendBuild(missing, "source-one")).toThrow("metadata is missing or invalid");
+      expect(() => validateFrontendBuild(empty, "source-one")).toThrow(
+        "has no assets",
+      );
+      expect(() => validateFrontendBuild(missing, "source-one")).toThrow(
+        "metadata is missing or invalid",
+      );
     } finally {
       rmSync(empty, { recursive: true, force: true });
       rmSync(missing, { recursive: true, force: true });

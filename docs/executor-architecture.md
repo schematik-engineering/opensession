@@ -101,13 +101,13 @@ and retain the built-in default.
 
 ## Failure behavior
 
-| Failure | Behavior |
-| --- | --- |
-| Executor unavailable before detached launch | Delegated launch fails closed and does not invoke the direct helper or absorb the engine into the gateway. |
-| Executor incompatible | Detached launch fails without a direct-helper or in-process fallback. |
-| Executor disconnects after launch request | The gateway checks the host locally and retries through the executor, then preserves recovery state if the launch remains uncertain. |
-| Executor restarts during an active run | Run host and engine continue; the gateway remains attached directly. |
-| Gateway restarts during an active run | Existing run-host journal and socket reattachment recover the turn. |
+| Failure                                     | Behavior                                                                                                                             |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Executor unavailable before detached launch | Delegated launch fails closed and does not invoke the direct helper or absorb the engine into the gateway.                           |
+| Executor incompatible                       | Detached launch fails without a direct-helper or in-process fallback.                                                                |
+| Executor disconnects after launch request   | The gateway checks the host locally and retries through the executor, then preserves recovery state if the launch remains uncertain. |
+| Executor restarts during an active run      | Run host and engine continue; the gateway remains attached directly.                                                                 |
+| Gateway restarts during an active run       | Existing run-host journal and socket reattachment recover the turn.                                                                  |
 
 The executor is not the parent of active run hosts. Hosts run in transient
 systemd units, so restarting `opensession-executor.service` affects only launch

@@ -3,7 +3,10 @@ import { basename, isAbsolute, resolve } from "path";
 import { fileURLToPath } from "url";
 import { parseCsRemote } from "../codestorage/remote";
 
-async function git(args: string[], cwd?: string): Promise<{ exitCode: number; stdout: string }> {
+async function git(
+  args: string[],
+  cwd?: string,
+): Promise<{ exitCode: number; stdout: string }> {
   const proc = Bun.spawn(["git", ...args], {
     ...(cwd ? { cwd } : {}),
     stdout: "pipe",
@@ -18,17 +21,30 @@ async function git(args: string[], cwd?: string): Promise<{ exitCode: number; st
 }
 
 export function repoIdFromName(input: string): string {
-  const name = basename(input.replace(/[\\/]+$/, "").replace(/\.git$/i, "").replace(/^.*:/, ""));
-  const id = name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[._-]+|[._-]+$/g, "");
+  const name = basename(
+    input
+      .replace(/[\\/]+$/, "")
+      .replace(/\.git$/i, "")
+      .replace(/^.*:/, ""),
+  );
+  const id = name
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[._-]+|[._-]+$/g, "");
   return id || "repo";
 }
 
 function remotePathIdentity(path: string): string {
-  return path.replace(/^\/+/, "").replace(/[\\/]+$/, "").replace(/\.git$/i, "");
+  return path
+    .replace(/^\/+/, "")
+    .replace(/[\\/]+$/, "")
+    .replace(/\.git$/i, "");
 }
 
 function localOriginIdentity(path: string, cwd?: string): string {
-  const resolved = isAbsolute(path) ? path : resolve(cwd || process.cwd(), path);
+  const resolved = isAbsolute(path)
+    ? path
+    : resolve(cwd || process.cwd(), path);
   let canonical = resolved;
   try {
     canonical = realpathSync(resolved);
@@ -65,7 +81,9 @@ export function normalizeRepoOrigin(remote: string, cwd?: string): string {
 
 function githubRepoFromRemote(remote: string): string | undefined {
   const normalized = remote.trim().replace(/\.git$/i, "");
-  const match = normalized.match(/^(?:https?:\/\/github\.com\/|ssh:\/\/git@github\.com\/|git@github\.com:)([^/]+\/[^/]+)$/i);
+  const match = normalized.match(
+    /^(?:https?:\/\/github\.com\/|ssh:\/\/git@github\.com\/|git@github\.com:)([^/]+\/[^/]+)$/i,
+  );
   return match?.[1];
 }
 
@@ -75,11 +93,14 @@ function defaultBranchFromLsRemote(output: string): string | undefined {
 
 async function hasCommit(path: string, ref: string): Promise<boolean> {
   return (
-    await git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], path)
-  ).exitCode === 0;
+    (await git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], path))
+      .exitCode === 0
+  );
 }
 
-export async function repoOriginIdentity(repoPath: string): Promise<string | null> {
+export async function repoOriginIdentity(
+  repoPath: string,
+): Promise<string | null> {
   try {
     const origin = await git(["remote", "get-url", "origin"], repoPath);
     if (origin.exitCode !== 0 || !origin.stdout) return null;
@@ -97,7 +118,8 @@ export async function inspectRepo(repoPath: string): Promise<{
   cs?: { org: string; repoId: string };
 }> {
   const root = await git(["rev-parse", "--show-toplevel"], repoPath);
-  if (root.exitCode !== 0 || !root.stdout) throw new Error("Path is not a Git repository");
+  if (root.exitCode !== 0 || !root.stdout)
+    throw new Error("Path is not a Git repository");
   const path = realpathSync(root.stdout);
   const [origin, remoteSymref, remoteHead] = await Promise.all([
     git(["remote", "get-url", "origin"], path),
@@ -147,13 +169,29 @@ export async function inspectRepo(repoPath: string): Promise<{
 }
 
 /** Whether a candidate default branch currently exists on origin. */
-export async function repoHasBranch(repoPath: string, branch: string): Promise<boolean> {
+export async function repoHasBranch(
+  repoPath: string,
+  branch: string,
+): Promise<boolean> {
   return (
-    await git(["ls-remote", "--exit-code", "--heads", "origin", `refs/heads/${branch}`], repoPath)
-  ).exitCode === 0;
+    (
+      await git(
+        [
+          "ls-remote",
+          "--exit-code",
+          "--heads",
+          "origin",
+          `refs/heads/${branch}`,
+        ],
+        repoPath,
+      )
+    ).exitCode === 0
+  );
 }
 
-export async function repoCurrentBranch(repoPath: string): Promise<string | null> {
+export async function repoCurrentBranch(
+  repoPath: string,
+): Promise<string | null> {
   const current = await git(["branch", "--show-current"], repoPath);
   return current.exitCode === 0 && current.stdout ? current.stdout : null;
 }

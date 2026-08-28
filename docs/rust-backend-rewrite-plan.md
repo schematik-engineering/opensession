@@ -122,22 +122,22 @@ minimal environments, credentials, and independent capacity limits.
 
 ### Proposed Cargo workspace
 
-| Crate | Responsibility |
-| --- | --- |
-| `opensession-protocol` | Versioned HTTP, WebSocket, executor, run-host, MCP, and record types using `serde` |
-| `opensession-domain` | IDs, fences, state machines, policy decisions, errors, and pure reducers |
-| `opensession-storage` | SQLite schemas, migrations, transactions, placement routing, actor connection LRU, and writer claims |
-| `opensession-kernel` | Per-session command mailboxes, timers, outbox, quarantine, and actor RPC |
-| `opensession-gateway` | Axum routes, WebSockets, auth, static frontend, limits, and request lifecycle |
-| `opensession-coordinator` | Schedulers, effect dispatch, recovery, projections, and shutdown fencing |
-| `opensession-executor` | Fixed-policy detached host launch, inspect, stop, and capacity admission |
-| `opensession-run-host` | Engine lifecycle, journaling, cancellation, transcript relay, and MCP proxying |
-| `opensession-agent` | Native agent loop, conversation state, steering, compaction, retries, presets, and tool scheduling |
-| `opensession-tools` | Contained local tools, MCP client/runtime, JSON Schema validation, and tool-result rendering |
-| `opensession-providers` | Native Anthropic, OpenAI, and OpenAI-compatible HTTP streaming clients plus account-pool policy |
-| `opensession-integrations` | GitHub, Slack, storage, webhooks, and other HTTP integrations |
-| `opensession-observability` | `tracing`, metrics, health/readiness, audit fields, and redaction |
-| `opensession` | Multi-call binary, config loading, service composition, and CLI |
+| Crate                       | Responsibility                                                                                       |
+| --------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `opensession-protocol`      | Versioned HTTP, WebSocket, executor, run-host, MCP, and record types using `serde`                   |
+| `opensession-domain`        | IDs, fences, state machines, policy decisions, errors, and pure reducers                             |
+| `opensession-storage`       | SQLite schemas, migrations, transactions, placement routing, actor connection LRU, and writer claims |
+| `opensession-kernel`        | Per-session command mailboxes, timers, outbox, quarantine, and actor RPC                             |
+| `opensession-gateway`       | Axum routes, WebSockets, auth, static frontend, limits, and request lifecycle                        |
+| `opensession-coordinator`   | Schedulers, effect dispatch, recovery, projections, and shutdown fencing                             |
+| `opensession-executor`      | Fixed-policy detached host launch, inspect, stop, and capacity admission                             |
+| `opensession-run-host`      | Engine lifecycle, journaling, cancellation, transcript relay, and MCP proxying                       |
+| `opensession-agent`         | Native agent loop, conversation state, steering, compaction, retries, presets, and tool scheduling   |
+| `opensession-tools`         | Contained local tools, MCP client/runtime, JSON Schema validation, and tool-result rendering         |
+| `opensession-providers`     | Native Anthropic, OpenAI, and OpenAI-compatible HTTP streaming clients plus account-pool policy      |
+| `opensession-integrations`  | GitHub, Slack, storage, webhooks, and other HTTP integrations                                        |
+| `opensession-observability` | `tracing`, metrics, health/readiness, audit fields, and redaction                                    |
+| `opensession`               | Multi-call binary, config loading, service composition, and CLI                                      |
 
 Keep dependency direction one way: transport and integrations may call domain
 interfaces, but domain reducers must not import HTTP clients, process launchers,
@@ -185,15 +185,15 @@ Phase 0 must record baselines on the same hardware, data fixture, release build,
 and kernel settings. Ratify exact targets after collecting the baseline. The
 initial program targets are:
 
-| Area | Provisional target at final completion |
-| --- | --- |
-| Non-model HTTP throughput | At least 2x at the same or lower p95 latency |
-| Independent kernel commands | At least 70% parallel efficiency from 1 to 8 cores |
-| Kernel p95 latency | No regression while handling 4x the baseline concurrent sessions |
+| Area                        | Provisional target at final completion                                                        |
+| --------------------------- | --------------------------------------------------------------------------------------------- |
+| Non-model HTTP throughput   | At least 2x at the same or lower p95 latency                                                  |
+| Independent kernel commands | At least 70% parallel efficiency from 1 to 8 cores                                            |
+| Kernel p95 latency          | No regression while handling 4x the baseline concurrent sessions                              |
 | WebSocket fanout and resume | No messages lost; p95 processing latency at least 50% lower under the baseline stress fixture |
-| Process RSS | At least 30% lower for the same idle and active-session fixture |
-| Cold readiness | At least 2x faster without skipping recovery or migration checks |
-| Reliability | No increase in indeterminate commands, quarantines, dead letters, or recovery failures |
+| Process RSS                 | At least 30% lower for the same idle and active-session fixture                               |
+| Cold readiness              | At least 2x faster without skipping recovery or migration checks                              |
+| Reliability                 | No increase in indeterminate commands, quarantines, dead letters, or recovery failures        |
 
 Measure at least these workloads:
 
@@ -641,19 +641,19 @@ has not reconciled journals, actor ownership, or durable effects is not ready.
 
 ## Main risks and mitigations
 
-| Risk | Mitigation |
-| --- | --- |
-| Semantic drift across a large rewrite | Schema-first contracts, golden fixtures, differential tests, and vertical slices |
-| Rust is faster in microbenchmarks but not in real turns | Phase 0 profiles, production-shaped load, and separate Open Session overhead from provider time |
-| New concurrency creates races | Preserve per-session actors, use bounded message passing, avoid shared mutable maps, and property/fault test |
-| SQLite blocks async workers | Dedicated storage lanes, short busy bounds, per-session quarantine, and no SQLite on network tasks |
-| Two writers corrupt authority | Role-level cutovers with clients stopped, writer claims, and no dual-write mode |
-| A subscription account depends on an undocumented or JavaScript-only transport | Resolve in phase 2: implement a permitted native protocol, move that mode to documented API credentials, or remove it; never hide a JavaScript fallback |
-| Provider protocols drift faster than the Rust clients | Capability tables, captured wire fixtures, strict decoding at security boundaries, tolerant decoding of additive events, and per-provider live smoke tests |
-| Gateway proxy weakens authentication | Private authenticated hop, strip synthetic headers, one auth owner per route, remove proxy incrementally |
-| Rust build increases platform/release complexity | Prove packaging with read-only and executor roles before kernel or gateway cutover |
-| Rewrite stalls while TypeScript keeps changing | Protocol ownership, domain freeze windows per slice, small mergeable phases, and delete migrated code promptly |
-| Team lacks Rust operating experience | Establish coding, review, profiling, unsafe-code, dependency, and incident practices in phase 1 |
+| Risk                                                                           | Mitigation                                                                                                                                                 |
+| ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Semantic drift across a large rewrite                                          | Schema-first contracts, golden fixtures, differential tests, and vertical slices                                                                           |
+| Rust is faster in microbenchmarks but not in real turns                        | Phase 0 profiles, production-shaped load, and separate Open Session overhead from provider time                                                            |
+| New concurrency creates races                                                  | Preserve per-session actors, use bounded message passing, avoid shared mutable maps, and property/fault test                                               |
+| SQLite blocks async workers                                                    | Dedicated storage lanes, short busy bounds, per-session quarantine, and no SQLite on network tasks                                                         |
+| Two writers corrupt authority                                                  | Role-level cutovers with clients stopped, writer claims, and no dual-write mode                                                                            |
+| A subscription account depends on an undocumented or JavaScript-only transport | Resolve in phase 2: implement a permitted native protocol, move that mode to documented API credentials, or remove it; never hide a JavaScript fallback    |
+| Provider protocols drift faster than the Rust clients                          | Capability tables, captured wire fixtures, strict decoding at security boundaries, tolerant decoding of additive events, and per-provider live smoke tests |
+| Gateway proxy weakens authentication                                           | Private authenticated hop, strip synthetic headers, one auth owner per route, remove proxy incrementally                                                   |
+| Rust build increases platform/release complexity                               | Prove packaging with read-only and executor roles before kernel or gateway cutover                                                                         |
+| Rewrite stalls while TypeScript keeps changing                                 | Protocol ownership, domain freeze windows per slice, small mergeable phases, and delete migrated code promptly                                             |
+| Team lacks Rust operating experience                                           | Establish coding, review, profiling, unsafe-code, dependency, and incident practices in phase 1                                                            |
 
 ## Recommended first implementation sequence
 

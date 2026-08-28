@@ -29,7 +29,11 @@ export const EXECUTOR_PROVIDERS = ["box", "daytona", "modal"] as const;
 export type ExecutorProvider = (typeof EXECUTOR_PROVIDERS)[number];
 
 export type ExecutorLifecycle =
-  "preparing" | "awake" | "sleeping" | "waking" | "needs_attention";
+  | "preparing"
+  | "awake"
+  | "sleeping"
+  | "waking"
+  | "needs_attention";
 
 /** Where tool and workspace operations execute. This state contains no model
  * or conversation identity. Omission at creation normalizes to `local`. */

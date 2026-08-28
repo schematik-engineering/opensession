@@ -22,7 +22,9 @@ describe("MCP OAuth client registration", () => {
           scopes_supported: ["mcp:connect"],
         });
       }
-      if (url === "https://api.figma.com/.well-known/oauth-authorization-server") {
+      if (
+        url === "https://api.figma.com/.well-known/oauth-authorization-server"
+      ) {
         return Response.json({
           authorization_endpoint: "https://www.figma.com/oauth/mcp",
           token_endpoint: "https://api.figma.com/v1/oauth/token",
@@ -59,7 +61,10 @@ describe("manual MCP token providers", () => {
 
   test("validates a Vero key against the MCP initialize endpoint", async () => {
     let request: Request | undefined;
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
       request = new Request(input, init);
       return Response.json({ jsonrpc: "2.0", id: 1, result: {} });
     }) as typeof fetch;

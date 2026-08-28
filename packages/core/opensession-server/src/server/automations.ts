@@ -4,8 +4,14 @@
  * normal opensession session so it shows up in the sessions list and UI.
  */
 import { randomUUIDv7 } from "bun";
-import { OPENSESSION_SESSIONS_DIR , newSessionId} from "./paths";
-import { mkdirSync, readdirSync, readFileSync, unlinkSync, existsSync } from "fs";
+import { OPENSESSION_SESSIONS_DIR, newSessionId } from "./paths";
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  unlinkSync,
+  existsSync,
+} from "fs";
 import { join } from "path";
 import { writeJsonAtomic } from "./shared/atomic-write";
 import {
@@ -33,7 +39,14 @@ import {
   modelLabel,
   toPiModel,
 } from "./models";
-import { createWorktree, ensureAskCheckout, getRepo, listWorktrees, REPOS, worktreeHeadBranch } from "./worktree";
+import {
+  createWorktree,
+  ensureAskCheckout,
+  getRepo,
+  listWorktrees,
+  REPOS,
+  worktreeHeadBranch,
+} from "./worktree";
 import { engineSessionPatch } from "./sessions";
 import { updateSessionFile } from "./session-cache";
 import { resolvePlainWorkspace } from "./workspace-resolve";
@@ -306,7 +319,9 @@ export function listAutomations(): AutomationWithNext[] {
   for (const file of readdirSync(AUTOMATIONS_DIR)) {
     if (!file.endsWith(".json")) continue;
     try {
-      const a = JSON.parse(readFileSync(`${AUTOMATIONS_DIR}/${file}`, "utf-8")) as Automation;
+      const a = JSON.parse(
+        readFileSync(`${AUTOMATIONS_DIR}/${file}`, "utf-8"),
+      ) as Automation;
       out.push({
         ...a,
         nextRunAt: !a.enabled
@@ -339,14 +354,19 @@ export function saveAutomation(a: Automation): void {
 
 function sanitizeMcpList(list?: unknown): string[] | undefined {
   if (!Array.isArray(list)) return undefined;
-  const names = list.filter((s): s is string => typeof s === "string" && !!s.trim());
+  const names = list.filter(
+    (s): s is string => typeof s === "string" && !!s.trim(),
+  );
   // [] is meaningful: no MCP servers at all
   return names.map((s) => s.trim());
 }
 
-function sanitizeGrafanaPoll(cfg?: unknown): GrafanaPollConfig | { error: string } | undefined {
+function sanitizeGrafanaPoll(
+  cfg?: unknown,
+): GrafanaPollConfig | { error: string } | undefined {
   if (cfg === undefined || cfg === null) return undefined;
-  if (typeof cfg !== "object") return { error: "grafanaPoll must be an object" };
+  if (typeof cfg !== "object")
+    return { error: "grafanaPoll must be an object" };
   const c = cfg as Record<string, unknown>;
   const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
   const lokiQuery = str(c.lokiQuery);
@@ -354,32 +374,50 @@ function sanitizeGrafanaPoll(cfg?: unknown): GrafanaPollConfig | { error: string
   const slackChannel = str(c.slackChannel);
   const cardTitle = str(c.cardTitle);
   if (!lokiQuery || !dedupLabel || !slackChannel || !cardTitle) {
-    return { error: "grafanaPoll requires lokiQuery, dedupLabel, slackChannel, and cardTitle" };
+    return {
+      error:
+        "grafanaPoll requires lokiQuery, dedupLabel, slackChannel, and cardTitle",
+    };
   }
-  const out: GrafanaPollConfig = { lokiQuery, dedupLabel, slackChannel, cardTitle };
+  const out: GrafanaPollConfig = {
+    lokiQuery,
+    dedupLabel,
+    slackChannel,
+    cardTitle,
+  };
   if (str(c.lookback)) out.lookback = str(c.lookback);
   if (typeof c.namespace === "string") out.namespace = c.namespace.trim(); // "" = no filter
-  if (typeof c.pollMinutes === "number" && c.pollMinutes > 0) out.pollMinutes = c.pollMinutes;
-  if (typeof c.dedupDays === "number" && c.dedupDays > 0) out.dedupDays = c.dedupDays;
+  if (typeof c.pollMinutes === "number" && c.pollMinutes > 0)
+    out.pollMinutes = c.pollMinutes;
+  if (typeof c.dedupDays === "number" && c.dedupDays > 0)
+    out.dedupDays = c.dedupDays;
   return out;
 }
 
-function sanitizeSlackWatch(cfg?: unknown): SlackWatchConfig | { error: string } | undefined {
+function sanitizeSlackWatch(
+  cfg?: unknown,
+): SlackWatchConfig | { error: string } | undefined {
   if (cfg === undefined || cfg === null) return undefined;
   if (typeof cfg !== "object") return { error: "slackWatch must be an object" };
-  const channel = typeof (cfg as any).channel === "string" ? (cfg as any).channel.trim() : "";
+  const channel =
+    typeof (cfg as any).channel === "string" ? (cfg as any).channel.trim() : "";
   if (!channel) return undefined; // {channel: ""} = clear the watch
   if (!/^[CG][A-Z0-9]{6,}$/i.test(channel)) {
-    return { error: `slackWatch.channel must be a Slack channel id (C…), got "${channel}"` };
+    return {
+      error: `slackWatch.channel must be a Slack channel id (C…), got "${channel}"`,
+    };
   }
   return { channel: channel.toUpperCase() };
 }
 
 /** Validate + normalize a one-off ISO8601 instant. "" / nullish → undefined
  *  (no one-off). Past times are allowed (they fire on the next tick). */
-function sanitizeRunOnceAt(v?: unknown): string | { error: string } | undefined {
+function sanitizeRunOnceAt(
+  v?: unknown,
+): string | { error: string } | undefined {
   if (v === undefined || v === null || v === "") return undefined;
-  if (typeof v !== "string") return { error: "runOnceAt must be an ISO8601 string" };
+  if (typeof v !== "string")
+    return { error: "runOnceAt must be an ISO8601 string" };
   const t = Date.parse(v.trim());
   if (Number.isNaN(t)) return { error: `Invalid date/time: "${v}"` };
   return new Date(t).toISOString();
@@ -387,12 +425,14 @@ function sanitizeRunOnceAt(v?: unknown): string | { error: string } | undefined 
 
 function generateSecret(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(24)), (b) =>
-    b.toString(16).padStart(2, "0")
+    b.toString(16).padStart(2, "0"),
   ).join("");
 }
 
 /** Validate a pinned model-account id; ""/nullish clears the pin. */
-function sanitizeAccountId(v?: unknown): string | { error: string } | undefined {
+function sanitizeAccountId(
+  v?: unknown,
+): string | { error: string } | undefined {
   if (v === undefined || v === null || v === "") return undefined;
   if (typeof v !== "string") return { error: "accountId must be a string" };
   const id = v.trim();
@@ -412,7 +452,10 @@ function validateSandboxAutomation(
   };
 }
 
-function sanitizeModel(model?: unknown, allowNone = false): string | { error: string } | undefined {
+function sanitizeModel(
+  model?: unknown,
+  allowNone = false,
+): string | { error: string } | undefined {
   if (typeof model !== "string" || !model.trim()) return undefined;
   if (allowNone && model.trim().toLowerCase() === "none") return "none";
   const resolved = resolveModel(model);
@@ -424,7 +467,9 @@ function sanitizeRepo(repo?: unknown): string | { error: string } | undefined {
   if (typeof repo !== "string" || !repo.trim()) return undefined;
   const id = repo.trim();
   if (!(id in REPOS)) {
-    return { error: `Unknown repo "${id}" — registered: ${Object.keys(REPOS).join(", ")}` };
+    return {
+      error: `Unknown repo "${id}" — registered: ${Object.keys(REPOS).join(", ")}`,
+    };
   }
   return id;
 }
@@ -443,12 +488,17 @@ function sanitizePrReviewer(
   for (const raw of reviewer.split(",")) {
     const entry = raw.trim();
     if (!entry) continue;
-    if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\/[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)?$/.test(entry)) {
+    if (
+      !/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\/[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)?$/.test(
+        entry,
+      )
+    ) {
       return {
         error: `Invalid PR reviewer "${entry}" — use a GitHub login or an org/team slug`,
       };
     }
-    if (!entries.some((e) => e.toLowerCase() === entry.toLowerCase())) entries.push(entry);
+    if (!entries.some((e) => e.toLowerCase() === entry.toLowerCase()))
+      entries.push(entry);
   }
   return entries.length ? entries.join(",") : undefined;
 }
@@ -663,7 +713,8 @@ export function ensureConfiguredAutomations(): void {
     const value = candidate as Record<string, unknown>;
     const name = typeof value.name === "string" ? value.name.trim() : "";
     const prompt = typeof value.prompt === "string" ? value.prompt.trim() : "";
-    const eventKey = typeof value.eventKey === "string" ? value.eventKey.trim() : "";
+    const eventKey =
+      typeof value.eventKey === "string" ? value.eventKey.trim() : "";
     if (!name || !prompt) continue;
     if (
       listAutomations().some(
@@ -671,7 +722,8 @@ export function ensureConfiguredAutomations(): void {
           (eventKey && automation.eventKey === eventKey) ||
           (!eventKey && automation.name === name),
       )
-    ) continue;
+    )
+      continue;
     const result = createAutomation({
       ...(value as any),
       name,
@@ -686,7 +738,9 @@ export function ensureConfiguredAutomations(): void {
           : `${personaName()} (config seed)`,
     });
     if ("error" in result) {
-      console.warn(`[automations] Config seed "${name}" skipped: ${result.error}`);
+      console.warn(
+        `[automations] Config seed "${name}" skipped: ${result.error}`,
+      );
     } else {
       console.log(`[automations] Seeded configured automation "${name}"`);
     }
@@ -695,7 +749,38 @@ export function ensureConfiguredAutomations(): void {
 
 export function updateAutomation(
   id: string,
-  patch: Partial<Pick<Automation, "name" | "prompt" | "schedule" | "runOnceAt" | "mode" | "enabled" | "eventKey" | "mcpServers" | "repo" | "prReviewer" | "owner" | "workspaceId" | "selfImprove" | "workflows" | "claudeCliEnv" | "codexCliEnv" | "model" | "fallbackModel" | "accountId" | "accountStrict" | "usageCredits" | "sandbox" | "grafanaPoll" | "slackWatch" | "inputs" | "outputs" | "webhookEnabled">>
+  patch: Partial<
+    Pick<
+      Automation,
+      | "name"
+      | "prompt"
+      | "schedule"
+      | "runOnceAt"
+      | "mode"
+      | "enabled"
+      | "eventKey"
+      | "mcpServers"
+      | "repo"
+      | "prReviewer"
+      | "owner"
+      | "workspaceId"
+      | "selfImprove"
+      | "workflows"
+      | "claudeCliEnv"
+      | "codexCliEnv"
+      | "model"
+      | "fallbackModel"
+      | "accountId"
+      | "accountStrict"
+      | "usageCredits"
+      | "sandbox"
+      | "grafanaPoll"
+      | "slackWatch"
+      | "inputs"
+      | "outputs"
+      | "webhookEnabled"
+    >
+  >,
 ): Automation | { error: string } {
   const a = getAutomation(id);
   if (!a) return { error: "Automation not found" };
@@ -717,7 +802,7 @@ export function updateAutomation(
 function updateAutomationPromptSelf(
   id: string,
   newPrompt: string,
-  reason: string
+  reason: string,
 ): { ok: true; backupPath: string } | { ok: false; error: string } {
   const a = getAutomation(id);
   if (!a) return { ok: false, error: "Automation not found." };
@@ -728,7 +813,8 @@ function updateAutomationPromptSelf(
       error: `Refused: new prompt is ${prompt.length} chars — a full replacement this short would drop the prompt's structure/guardrails. Pass the COMPLETE prompt.`,
     };
   }
-  if (!reason?.trim()) return { ok: false, error: "A one-line reason is required (audited)." };
+  if (!reason?.trim())
+    return { ok: false, error: "A one-line reason is required (audited)." };
   const stamp = new Date().toISOString().slice(0, 16).replace(/[-T:]/g, "");
   const backupPath = `${AUTOMATIONS_DIR}/${id}.json.bak.self-${stamp}`;
   writeJsonAtomic(backupPath, a);
@@ -755,7 +841,7 @@ function updateAutomationPromptSelf(
  */
 export function selfImproveMcpServers(
   a: Automation,
-  sessionId: string
+  sessionId: string,
 ): Record<string, unknown> {
   return {
     "opensession-sessions": createSessionsMcpServer({
@@ -772,7 +858,8 @@ export function selfImproveMcpServers(
         const { name, prompt, schedule, mode, repo, model, mcpServers } = cur;
         return { name, prompt, schedule, mode, repo, model, mcpServers };
       },
-      updateOwnPrompt: (p, reason) => updateAutomationPromptSelf(a.id, p, reason),
+      updateOwnPrompt: (p, reason) =>
+        updateAutomationPromptSelf(a.id, p, reason),
     }),
   };
 }
@@ -781,7 +868,7 @@ export function selfImproveMcpServers(
  *  stamped on the session) — undefined unless that automation has the flag. */
 export function selfImproveMcpForSession(
   session: { automation?: string },
-  sessionId: string
+  sessionId: string,
 ): Record<string, unknown> | undefined {
   if (!session.automation) return undefined;
   const a = listAutomations().find((x) => x.name === session.automation);
@@ -794,7 +881,7 @@ export function selfImproveMcpForSession(
  * automation-safe bar: no customer data, identity mutation, or run control. */
 export function automationBaselineMcpServers(
   a: Pick<Automation, "id" | "name">,
-  sessionId: string
+  sessionId: string,
 ): Record<string, unknown> {
   return {
     "opensession-report": createReportMcpServer({
@@ -816,7 +903,7 @@ export function automationBaselineMcpServers(
  *  admin/sessions siblings. */
 export function automationRunMcpForSession(
   session: { automation?: string; worktreeDir?: string | null },
-  sessionId: string
+  sessionId: string,
 ): Record<string, unknown> | undefined {
   if (!session.automation) return undefined;
   const a = listAutomations().find((x) => x.name === session.automation);
@@ -858,7 +945,7 @@ function automationRunInProcessMcp(
     cwd: string;
     /** Live view of the run's model — a mid-run fallback swaps it (papercuts defaults). */
     model: () => string | undefined;
-  }
+  },
 ): Record<string, unknown> {
   return {
     ...automationBaselineMcpServers(a, sessionId),
@@ -904,7 +991,7 @@ function automationRunInProcessMcp(
  */
 export function automationResumeMcpForSession(
   session: { automation?: string; worktreeDir?: string | null; model?: string },
-  sessionId: string
+  sessionId: string,
 ): Record<string, unknown> | undefined {
   if (!session.automation) return undefined;
   const a = listAutomations().find((x) => x.name === session.automation);
@@ -947,7 +1034,9 @@ function recordRunStart(id: string, run: AutomationRun): void {
     lastTrigger: run.trigger,
     runs: (fresh.runs || []).some((entry) => entry.sessionId === run.sessionId)
       ? (fresh.runs || []).map((entry) =>
-          entry.sessionId === run.sessionId ? { ...entry, status: "running" as const } : entry,
+          entry.sessionId === run.sessionId
+            ? { ...entry, status: "running" as const }
+            : entry,
         )
       : [run, ...(fresh.runs || [])].slice(0, RUNS_CAP),
   });
@@ -955,7 +1044,11 @@ function recordRunStart(id: string, run: AutomationRun): void {
 
 /** Settle the ledger entry for `sessionId` (matched by id, not position, so
  *  overlapping runs settle independently). */
-function settleRun(id: string, sessionId: string, patch: Pick<AutomationRun, "status" | "error" | "durationMs">): void {
+function settleRun(
+  id: string,
+  sessionId: string,
+  patch: Pick<AutomationRun, "status" | "error" | "durationMs">,
+): void {
   const fresh = getAutomation(id);
   if (!fresh) return;
   saveAutomation({
@@ -963,7 +1056,9 @@ function settleRun(id: string, sessionId: string, patch: Pick<AutomationRun, "st
     ...(fresh.lastRunSessionId === sessionId
       ? { lastRunStatus: patch.status, lastRunError: patch.error }
       : {}),
-    runs: (fresh.runs || []).map((r) => (r.sessionId === sessionId ? { ...r, ...patch } : r)),
+    runs: (fresh.runs || []).map((r) =>
+      r.sessionId === sessionId ? { ...r, ...patch } : r,
+    ),
   });
 }
 
@@ -977,7 +1072,10 @@ function settleRun(id: string, sessionId: string, patch: Pick<AutomationRun, "st
  * this hook stay as they are — this settles runs the sweep actually drove
  * to an end, it does not rewrite history.
  */
-export function settleResumedAutomationRun(sessionId: string, error: string | null): boolean {
+export function settleResumedAutomationRun(
+  sessionId: string,
+  error: string | null,
+): boolean {
   for (const automation of listAutomations()) {
     const run = (automation.runs || []).find((r) => r.sessionId === sessionId);
     if (!run || run.status !== "running") continue;
@@ -990,13 +1088,12 @@ export function settleResumedAutomationRun(sessionId: string, error: string | nu
     if (completedIntent?.deleteAutomationAfterRun)
       deleteAutomation(automation.id);
     console.log(
-      `[automations] Settled resumed run ${sessionId} for "${automation.name}" (${error ? "error" : "ok"})`
+      `[automations] Settled resumed run ${sessionId} for "${automation.name}" (${error ? "error" : "ok"})`,
     );
     return true;
   }
   return false;
 }
-
 
 /** Tool-permission denials applied to every automation run (and to interactive
  *  resumes of automation-owned sessions). Read-only toward customers/identity. */
@@ -1024,7 +1121,13 @@ export function automationModel(model?: string): string | undefined {
 }
 
 function slugify(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "automation";
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 40) || "automation"
+  );
 }
 
 const automationPreparations = new Set<string>();
@@ -1051,15 +1154,23 @@ type PendingAutomationIntent = {
   terminalError?: string;
 };
 
-const automationIntentDir = join(OPENSESSION_SESSIONS_DIR, "automation-intents");
+const automationIntentDir = join(
+  OPENSESSION_SESSIONS_DIR,
+  "automation-intents",
+);
 const automationIntentPath = (sessionId: string) =>
-  join(automationIntentDir, `${sessionId.replace(/[^a-zA-Z0-9._-]/g, "_")}.json`);
+  join(
+    automationIntentDir,
+    `${sessionId.replace(/[^a-zA-Z0-9._-]/g, "_")}.json`,
+  );
 
 function persistAutomationIntent(intent: PendingAutomationIntent): void {
   mkdirSync(automationIntentDir, { recursive: true, mode: 0o700 });
   const path = automationIntentPath(intent.sessionId);
   if (existsSync(path)) {
-    const existing = JSON.parse(readFileSync(path, "utf8")) as PendingAutomationIntent;
+    const existing = JSON.parse(
+      readFileSync(path, "utf8"),
+    ) as PendingAutomationIntent;
     const identity = ({
       acceptedAt: _acceptedAt,
       terminalAt: _terminalAt,
@@ -1078,7 +1189,9 @@ function recordAutomationIntentTerminal(
   error?: string,
 ): void {
   const path = automationIntentPath(sessionId);
-  const intent = JSON.parse(readFileSync(path, "utf8")) as PendingAutomationIntent;
+  const intent = JSON.parse(
+    readFileSync(path, "utf8"),
+  ) as PendingAutomationIntent;
   writeJsonAtomic(
     path,
     {
@@ -1091,10 +1204,14 @@ function recordAutomationIntentTerminal(
   );
 }
 
-function clearAutomationIntent(sessionId: string): PendingAutomationIntent | undefined {
+function clearAutomationIntent(
+  sessionId: string,
+): PendingAutomationIntent | undefined {
   const path = automationIntentPath(sessionId);
   try {
-    const intent = JSON.parse(readFileSync(path, "utf8")) as PendingAutomationIntent;
+    const intent = JSON.parse(
+      readFileSync(path, "utf8"),
+    ) as PendingAutomationIntent;
     unlinkSync(path);
     return intent;
   } catch (error) {
@@ -1123,10 +1240,14 @@ export function resumePendingAutomationRuns(
         !intent.automationId ||
         !intent.sessionId ||
         !["cron", "webhook", "manual", "event"].includes(intent.trigger)
-      ) throw new Error("invalid automation intent");
+      )
+        throw new Error("invalid automation intent");
       const automation = getAutomation(intent.automationId);
-      if (!automation) throw new Error(`automation ${intent.automationId} is unavailable`);
-      if (automationIntentAlreadySettled(intent.sessionId, automation.runs || [])) {
+      if (!automation)
+        throw new Error(`automation ${intent.automationId} is unavailable`);
+      if (
+        automationIntentAlreadySettled(intent.sessionId, automation.runs || [])
+      ) {
         const completedIntent = clearAutomationIntent(intent.sessionId);
         if (completedIntent?.deleteAutomationAfterRun)
           deleteAutomation(automation.id);
@@ -1137,7 +1258,10 @@ export function resumePendingAutomationRuns(
         settleRun(automation.id, intent.sessionId, {
           status: intent.terminalError ? "error" : "ok",
           error: intent.terminalError,
-          durationMs: Math.max(0, Date.parse(intent.terminalAt) - Date.parse(intent.acceptedAt)),
+          durationMs: Math.max(
+            0,
+            Date.parse(intent.terminalAt) - Date.parse(intent.acceptedAt),
+          ),
         });
         const completedIntent = clearAutomationIntent(intent.sessionId);
         if (completedIntent?.deleteAutomationAfterRun)
@@ -1148,7 +1272,9 @@ export function resumePendingAutomationRuns(
       if (
         automationPreparations.has(intent.sessionId) ||
         activeAutomationIntentSessions.has(intent.sessionId) ||
-        activeRunRecords().some((run) => run.osSessionId === intent.sessionId) ||
+        activeRunRecords().some(
+          (run) => run.osSessionId === intent.sessionId,
+        ) ||
         // Boot may find several durable cron/manual intents for the same
         // automation. The first starts synchronously before this loop reaches
         // the next one. Starting that next intent would hit runAutomation's
@@ -1158,7 +1284,8 @@ export function resumePendingAutomationRuns(
         // invokes this scan again and advances the queue one entry at a time.
         ((intent.trigger === "cron" || intent.trigger === "manual") &&
           isAutomationRunning(automation.id))
-      ) continue;
+      )
+        continue;
       void runAutomation(automation, onSessionCreated, {
         trigger: intent.trigger,
         eventContext: intent.eventContext,
@@ -1171,7 +1298,10 @@ export function resumePendingAutomationRuns(
       });
       resumed++;
     } catch (error) {
-      console.error(`[automations] Pending intent ${entry} could not resume:`, error);
+      console.error(
+        `[automations] Pending intent ${entry} could not resume:`,
+        error,
+      );
     }
   }
   return resumed;
@@ -1199,7 +1329,7 @@ export async function runAutomation(
      * model. Callers pass an already-resolved model id.
      */
     modelOverride?: string;
-  }
+  },
 ): Promise<void> {
   const trigger = options?.trigger || "manual";
   // Cron/manual runs don't stack; event/webhook runs are per-event, so they may overlap
@@ -1221,7 +1351,9 @@ export async function runAutomation(
     deleteAutomationAfterRun: options?.deleteAutomationAfterRun,
   });
   if (isShuttingDown()) {
-    console.log(`[automations] "${automation.name}" durably parked during shutdown`);
+    console.log(
+      `[automations] "${automation.name}" durably parked during shutdown`,
+    );
     return;
   }
   runningCounts.set(automation.id, (runningCounts.get(automation.id) || 0) + 1);
@@ -1234,7 +1366,8 @@ export async function runAutomation(
 
   try {
     const runtimeSandboxValidation = validateSandboxAutomation(automation);
-    if (runtimeSandboxValidation) throw new Error(runtimeSandboxValidation.error);
+    if (runtimeSandboxValidation)
+      throw new Error(runtimeSandboxValidation.error);
     // The automation's repo (instance default when omitted). Ask mode reads the repo's
     // pinned ask checkout (default branch — never the mutable main checkout);
     // code mode gets an isolated worktree — `isolated` matters for
@@ -1314,13 +1447,17 @@ export async function runAutomation(
     // Read-only here — automation runs don't get the memory tools.
     if (automation.slackWatch) {
       try {
-        const { renderMemoryForPrompt } = await import("../agents/slack/memory");
-        const memory = await renderMemoryForPrompt({
-          channel: automation.slackWatch.channel,
-          userId: "",
-          isDM: false,
-          isPrivate: true, // per-channel scope + read-only workspace view
-        }, memoryQuery);
+        const { renderMemoryForPrompt } =
+          await import("../agents/slack/memory");
+        const memory = await renderMemoryForPrompt(
+          {
+            channel: automation.slackWatch.channel,
+            userId: "",
+            isDM: false,
+            isPrivate: true, // per-channel scope + read-only workspace view
+          },
+          memoryQuery,
+        );
         if (memory) prompt += `\n\n${memory}`;
       } catch {}
     }
@@ -1331,25 +1468,25 @@ export async function runAutomation(
     // standing context). Channel-watch runs already carry the workspace store
     // via the channel memory above, so skip the team scope for them.
     try {
-      const { renderSessionMemoryNote, sessionMemoryScopes } = await import(
-        "./session-memory"
-      );
+      const { renderSessionMemoryNote, sessionMemoryScopes } =
+        await import("./session-memory");
       const scopes = sessionMemoryScopes({
         repos: [getRepo(automation.repo).id],
         includeTeam: !automation.slackWatch,
       });
-      const { memoryRolloutMode, retrieveMemoryForPrompt } = await import(
-        "./memory-v2"
-      );
+      const { memoryRolloutMode, retrieveMemoryForPrompt } =
+        await import("./memory-v2");
       const mode = memoryRolloutMode();
-      const note = mode === "v2"
-        ? (
-            await retrieveMemoryForPrompt(memoryQuery, {
-              scopeKeys: scopes.map((scope) => scope.key),
-              primaryRepoKey: scopes.find((scope) => scope.kind === "repo")?.key,
-            })
-          ).text
-        : await renderSessionMemoryNote(scopes);
+      const note =
+        mode === "v2"
+          ? (
+              await retrieveMemoryForPrompt(memoryQuery, {
+                scopeKeys: scopes.map((scope) => scope.key),
+                primaryRepoKey: scopes.find((scope) => scope.kind === "repo")
+                  ?.key,
+              })
+            ).text
+          : await renderSessionMemoryNote(scopes);
       if (mode === "shadow") {
         void retrieveMemoryForPrompt(memoryQuery, {
           scopeKeys: scopes.map((scope) => scope.key),
@@ -1367,7 +1504,8 @@ export async function runAutomation(
     if (options?.eventContext) {
       try {
         const parsed = JSON.parse(options.eventContext);
-        if (typeof parsed.threadId === "string") plainThreadId = parsed.threadId;
+        if (typeof parsed.threadId === "string")
+          plainThreadId = parsed.threadId;
         if (typeof parsed.title === "string" && parsed.title.trim()) {
           eventTitle = parsed.title.trim().slice(0, 100);
         }
@@ -1389,7 +1527,9 @@ export async function runAutomation(
     // Automations dispatch on Pi (tier-preserving mapping; see
     // automationModel). The effective model/provider can change mid-run on a
     // usage-limit fallback, so track it from runner events for persistence.
-    const runModel = automationModel(options?.modelOverride || automation.model);
+    const runModel = automationModel(
+      options?.modelOverride || automation.model,
+    );
     let effectiveModel = runModel;
     let selectedModel = runModel;
     let effectiveProvider = providerFor(effectiveModel);
@@ -1408,7 +1548,11 @@ export async function runAutomation(
       threadTs?: string,
     ) => {
       if (!channel || !threadTs) return;
-      if (slackThreads.some((t) => t.channel === channel && t.threadTs === threadTs))
+      if (
+        slackThreads.some(
+          (t) => t.channel === channel && t.threadTs === threadTs,
+        )
+      )
         return;
       slackThreads.push({ channel, threadTs });
       // Live-link + persist immediately so a fast reply routes even while
@@ -1416,7 +1560,7 @@ export async function runAutomation(
       // orders it against the init/final persists).
       linkThreadInIndex(bksId, channel, threadTs);
       persistSession(engineSessionId).catch((e) =>
-        console.error(`[automations] session persist failed for ${bksId}:`, e)
+        console.error(`[automations] session persist failed for ${bksId}:`, e),
       );
     };
     // Field-scoped write: creation fields are create-if-absent defaults (an
@@ -1468,14 +1612,16 @@ export async function runAutomation(
           // Code-mode runs can rename their auto-generated branch before opening
           // a PR — record the worktree's actual HEAD so PR lookups and the
           // review handoff keep resolving this session.
-          branch: sandbox ? branch : (branch && worktreeHeadBranch(cwd)) || branch,
+          branch: sandbox
+            ? branch
+            : (branch && worktreeHeadBranch(cwd)) || branch,
           ...(slackThreads.length ? { slackThreads: [...slackThreads] } : {}),
           lastActivity: new Date().toISOString(),
         };
       });
 
     console.log(
-      `[automations] Running "${automation.name}" → ${bksId}${runModel ? ` (${runModel})` : ""}${options?.modelOverride ? " [routed]" : ""}`
+      `[automations] Running "${automation.name}" → ${bksId}${runModel ? ` (${runModel})` : ""}${options?.modelOverride ? " [routed]" : ""}`,
     );
 
     // In-process servers for automation runs — the full automation-bar set
@@ -1502,14 +1648,18 @@ export async function runAutomation(
     // Opt-in by emission — automations that never declare are unaffected.
     let textTail = "";
     const fallbackModel = (() => {
-      if (automation.fallbackModel === "none" || automation.sandbox) return undefined;
-      const fb = automation.fallbackModel || automaticFallbackModel(effectiveModel);
+      if (automation.fallbackModel === "none" || automation.sandbox)
+        return undefined;
+      const fb =
+        automation.fallbackModel || automaticFallbackModel(effectiveModel);
       return fb ? automationModel(fb) : undefined;
     })();
     // This run was admitted before shutdown. Keep it visible to the bounded
     // drain until physical launch journals ownership; no later intake can join it.
     if (isShuttingDown())
-      console.log(`[automations] "${automation.name}" completing accepted setup during shutdown`);
+      console.log(
+        `[automations] "${automation.name}" completing accepted setup during shutdown`,
+      );
     let events: AsyncGenerator<StreamEvent>;
     if (sandbox) {
       sandboxRpcToken = crypto.randomUUID();
@@ -1558,7 +1708,8 @@ export async function runAutomation(
         claudeCliEnv: !!automation.claudeCliEnv,
         codexCliEnv: !!automation.codexCliEnv,
         accountId: automation.accountId,
-        accountStrict: !!automation.accountId && automation.accountStrict !== false,
+        accountStrict:
+          !!automation.accountId && automation.accountStrict !== false,
         usageCredits: automation.usageCredits,
         fallbackModel,
         prReviewer: automation.prReviewer,
@@ -1566,20 +1717,21 @@ export async function runAutomation(
         // instance identity would otherwise collapse every routine into one.
         author: labelIdentity(automation.name),
       };
-      events = providerFor(runModel) === "pi"
-        ? runAgentHosted({
-            ...common,
-            osSessionId: bksId,
-            proxyMcpServers: Object.keys(inProcessMcp),
-            fallbackInProcessMcp: () => inProcessMcp,
-            journalKind: "automation",
-            trustProfile: "automation",
-          })
-        : runAgent({
-            ...common,
-            inProcessMcp,
-            journal: { osSessionId: bksId, kind: "automation" },
-          });
+      events =
+        providerFor(runModel) === "pi"
+          ? runAgentHosted({
+              ...common,
+              osSessionId: bksId,
+              proxyMcpServers: Object.keys(inProcessMcp),
+              fallbackInProcessMcp: () => inProcessMcp,
+              journalKind: "automation",
+              trustProfile: "automation",
+            })
+          : runAgent({
+              ...common,
+              inProcessMcp,
+              journal: { osSessionId: bksId, kind: "automation" },
+            });
     }
     for await (const event of events) {
       // The engine stream is now physically adopted by agent-runner accounting.
@@ -1649,7 +1801,7 @@ export async function runAutomation(
     if (completedIntent?.deleteAutomationAfterRun)
       deleteAutomation(automation.id);
     console.log(
-      `[automations] "${automation.name}" finished ${errorMsg ? `with error: ${errorMsg}` : "ok"}`
+      `[automations] "${automation.name}" finished ${errorMsg ? `with error: ${errorMsg}` : "ok"}`,
     );
   } catch (e: any) {
     console.error(`[automations] "${automation.name}" failed:`, e);
@@ -1728,16 +1880,24 @@ export function retriggerAutomationSession(
 /** True when at least one enabled automation watches this Slack channel —
  *  cheap pre-check so the Slack intake doesn't build payloads for nothing. */
 export function isChannelWatched(channelId: string): boolean {
-  return listAutomations().some((a) => a.enabled && a.slackWatch?.channel === channelId);
+  return listAutomations().some(
+    (a) => a.enabled && a.slackWatch?.channel === channelId,
+  );
 }
 
 /** Fire every enabled automation watching `channelId` (one run per message —
  *  these may overlap, like event runs). Returns how many fired. */
-export function fireAutomationsForSlackChannel(channelId: string, payload: string): number {
+export function fireAutomationsForSlackChannel(
+  channelId: string,
+  payload: string,
+): number {
   let fired = 0;
   for (const automation of listAutomations()) {
-    if (!automation.enabled || automation.slackWatch?.channel !== channelId) continue;
-    console.log(`[automations] Watched channel ${channelId} → "${automation.name}"`);
+    if (!automation.enabled || automation.slackWatch?.channel !== channelId)
+      continue;
+    console.log(
+      `[automations] Watched channel ${channelId} → "${automation.name}"`,
+    );
     void runAutomation(automation, eventSessionCallback, {
       trigger: "event",
       eventContext: payload,
@@ -1750,7 +1910,7 @@ export function fireAutomationsForSlackChannel(channelId: string, payload: strin
 export function fireAutomationsForEvent(
   eventKey: string,
   payload: string,
-  opts?: { modelOverride?: string }
+  opts?: { modelOverride?: string },
 ): number {
   let fired = 0;
   for (const automation of listAutomations()) {
@@ -1771,7 +1931,9 @@ export function fireAutomationsForEvent(
 let schedulerInterval: ReturnType<typeof setInterval> | null = null;
 let lastFiredMinute = "";
 
-export function startScheduler(onSessionCreated?: (sessionId: string) => void): void {
+export function startScheduler(
+  onSessionCreated?: (sessionId: string) => void,
+): void {
   if (schedulerInterval) return;
 
   schedulerInterval = setInterval(() => {
@@ -1790,7 +1952,11 @@ export function startScheduler(onSessionCreated?: (sessionId: string) => void): 
       // never double-fire on a later tick; the file is deleted once it settles.
       if (automation.runOnceAt) {
         if (Date.parse(automation.runOnceAt) <= now.getTime()) {
-          saveAutomation({ ...automation, runOnceAt: undefined, enabled: false });
+          saveAutomation({
+            ...automation,
+            runOnceAt: undefined,
+            enabled: false,
+          });
           const osSessionId = newSessionId();
           void runAutomation(
             { ...automation, runOnceAt: undefined, enabled: false },
@@ -1802,7 +1968,8 @@ export function startScheduler(onSessionCreated?: (sessionId: string) => void): 
             },
           ).finally(() => {
             // Pre-launch failure stays durable and retains its disabled config.
-            if (!hasAutomationIntent(osSessionId)) deleteAutomation(automation.id);
+            if (!hasAutomationIntent(osSessionId))
+              deleteAutomation(automation.id);
           });
         }
         continue;
@@ -1825,9 +1992,12 @@ export function startScheduler(onSessionCreated?: (sessionId: string) => void): 
 // long-random and rotatable by editing the automation file.
 
 export function getWebhookRoutes(
-  onSessionCreated?: (sessionId: string) => void
+  onSessionCreated?: (sessionId: string) => void,
 ): Map<string, (req: Request, url: URL) => Promise<Response>> {
-  const routes = new Map<string, (req: Request, url: URL) => Promise<Response>>();
+  const routes = new Map<
+    string,
+    (req: Request, url: URL) => Promise<Response>
+  >();
 
   routes.set("POST /automations/*", async (req, url) => {
     if (isShuttingDown())
@@ -1856,7 +2026,8 @@ export function getWebhookRoutes(
     try {
       payload = await readRequestTextWithinLimit(req, 10_000);
     } catch (error) {
-      if (error instanceof RequestBodyTooLargeError) return webhookBodyTooLargeResponse(10_000);
+      if (error instanceof RequestBodyTooLargeError)
+        return webhookBodyTooLargeResponse(10_000);
       throw error;
     }
 

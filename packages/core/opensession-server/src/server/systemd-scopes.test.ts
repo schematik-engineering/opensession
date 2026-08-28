@@ -50,21 +50,28 @@ describe("systemd scope resource controls", () => {
   });
 
   test("gateway-owned shell commands escape into the low-priority agent slice", () => {
-    expect(processRunsInControlPlane(
-      "0::/opensession.slice/opensession-control.slice/opensession.service",
-    )).toBe(true);
+    expect(
+      processRunsInControlPlane(
+        "0::/opensession.slice/opensession-control.slice/opensession.service",
+      ),
+    ).toBe(true);
     const scoped = controlPlaneWorkloadCommand(
       ["setsid", "/bin/bash", "-c", "cargo test"],
       "opensession-agent-cmd-test",
       {
         env: { PATH: "/bin" },
-        cgroup: "0::/opensession.slice/opensession-control.slice/opensession.service",
+        cgroup:
+          "0::/opensession.slice/opensession-control.slice/opensession.service",
         scopesAvailable: true,
       },
     );
     expect(scoped.unit).toBe("opensession-agent-cmd-test");
     expect(scoped.command).toEqual([
-      "systemd-run", "--user", "--scope", "--collect", "--quiet",
+      "systemd-run",
+      "--user",
+      "--scope",
+      "--collect",
+      "--quiet",
       "--unit=opensession-agent-cmd-test",
       "--slice=opensession-agents.slice",
       "--property=MemoryHigh=6G",
@@ -74,17 +81,23 @@ describe("systemd scope resource controls", () => {
       "--property=OOMPolicy=stop",
       "--property=TimeoutStopSec=2",
       "--",
-      "setsid", "/bin/bash", "-c", "cargo test",
+      "setsid",
+      "/bin/bash",
+      "-c",
+      "cargo test",
     ]);
   });
 
   test("commands already owned by a run host stay in its system workload unit", () => {
     const command = ["/bin/bash", "-c", "cargo test"];
-    expect(controlPlaneWorkloadCommand(command, "unused", {
-      env: { PATH: "/bin" },
-      cgroup: "0::/opensession.slice/opensession-workloads.slice/bks-run.service",
-      scopesAvailable: true,
-    })).toEqual({ command, env: { PATH: "/bin" } });
+    expect(
+      controlPlaneWorkloadCommand(command, "unused", {
+        env: { PATH: "/bin" },
+        cgroup:
+          "0::/opensession.slice/opensession-workloads.slice/bks-run.service",
+        scopesAvailable: true,
+      }),
+    ).toEqual({ command, env: { PATH: "/bin" } });
   });
 
   test("preview unit names are stable without exposing worktree paths", () => {

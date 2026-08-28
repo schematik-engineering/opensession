@@ -36,7 +36,9 @@ export function ingressHostsFromCaddy(config: unknown): string[] {
     let hosts = inheritedHosts;
     if (Array.isArray(object.match)) {
       const matched = object.match.flatMap((entry: any) =>
-        Array.isArray(entry?.host) ? entry.host.filter((host: unknown) => typeof host === "string") : [],
+        Array.isArray(entry?.host)
+          ? entry.host.filter((host: unknown) => typeof host === "string")
+          : [],
       );
       if (matched.length) hosts = matched;
     }
@@ -55,7 +57,11 @@ export function ingressHostsFromCaddy(config: unknown): string[] {
 const MANAGED_START = "# BEGIN OPENSESSION SANDBOX INGRESS";
 const MANAGED_END = "# END OPENSESSION SANDBOX INGRESS";
 
-function managedRoutes(indent = "    ", bindAddress?: string, pathPrefix = ""): string {
+function managedRoutes(
+  indent = "    ",
+  bindAddress?: string,
+  pathPrefix = "",
+): string {
   const bind = bindAddress ? `${indent}bind ${bindAddress}\n` : "";
   const handler = pathPrefix ? `handle_path ${pathPrefix}/*` : "handle";
   return `${indent}${MANAGED_START}
@@ -95,7 +101,10 @@ function hostLabelMatches(label: string, host: string): boolean {
     .includes(host);
 }
 
-function siteRanges(source: string, host: string): Array<{ opening: number; closing: number }> {
+function siteRanges(
+  source: string,
+  host: string,
+): Array<{ opening: number; closing: number }> {
   const ranges: Array<{ opening: number; closing: number }> = [];
   const headers = /^([^\n#{}]+)\{/gm;
   for (const match of source.matchAll(headers)) {
@@ -155,30 +164,41 @@ export function upsertCaddyIngress(
   let next = caddyfile.replace(managed, "");
   const matches = siteRanges(next, host);
   if (matches.length > 1) {
-    throw new Error(`Caddyfile defines ${host} more than once; consolidate it before setup`);
+    throw new Error(
+      `Caddyfile defines ${host} more than once; consolidate it before setup`,
+    );
   }
   if (!matches.length) {
     return `${next.trimEnd()}\n\n${caddyIngressSnippet(origin, bindAddress)}\n`;
   }
   const range = matches[0]!;
-  const site = stripKnownSandboxRoutes(next.slice(range.opening + 1, range.closing));
+  const site = stripKnownSandboxRoutes(
+    next.slice(range.opening + 1, range.closing),
+  );
   return `${next.slice(0, range.opening + 1)}\n${managedRoutes("    ", bindAddress, pathPrefix)}\n${site.replace(/^\s*\n/, "")}${next.slice(range.closing)}`;
 }
 
-export function caddyIngressSnippet(origin: string, bindAddress?: string): string {
+export function caddyIngressSnippet(
+  origin: string,
+  bindAddress?: string,
+): string {
   const parsedOrigin = new URL(origin);
   const host = parsedOrigin.host;
   const pathPrefix = parsedOrigin.pathname.replace(/\/+$/, "");
   return `${host} {\n${managedRoutes("    ", bindAddress, pathPrefix)}\n}`;
 }
 
-async function health(origin: string | undefined): Promise<"ready" | "unreachable" | "not_configured"> {
+async function health(
+  origin: string | undefined,
+): Promise<"ready" | "unreachable" | "not_configured"> {
   if (!origin) return "not_configured";
   try {
     const response = await fetch(`${origin}/ingress-health`, {
       signal: AbortSignal.timeout(5_000),
     });
-    return response.ok && (await response.text()).trim() === "ok" ? "ready" : "unreachable";
+    return response.ok && (await response.text()).trim() === "ok"
+      ? "ready"
+      : "unreachable";
   } catch {
     return "unreachable";
   }
@@ -189,15 +209,19 @@ export async function sandboxIngressStatus(): Promise<SandboxIngressStatus> {
   let caddyAdminReachable = false;
   let caddyHosts: string[] = [];
   try {
-    const response = await fetch(`${configuredServer().caddyAdmin.replace(/\/$/, "")}/config/`, {
-      signal: AbortSignal.timeout(2_000),
-    });
+    const response = await fetch(
+      `${configuredServer().caddyAdmin.replace(/\/$/, "")}/config/`,
+      {
+        signal: AbortSignal.timeout(2_000),
+      },
+    );
     if (response.ok) {
       caddyAdminReachable = true;
       caddyHosts = ingressHostsFromCaddy(await response.json());
     }
   } catch {}
-  const caddyOrigin = caddyHosts.length === 1 ? `https://${caddyHosts[0]}` : undefined;
+  const caddyOrigin =
+    caddyHosts.length === 1 ? `https://${caddyHosts[0]}` : undefined;
   const proposed = configured || caddyOrigin;
   const source: SandboxIngressStatus["source"] = configured
     ? "config"
@@ -210,13 +234,21 @@ export async function sandboxIngressStatus(): Promise<SandboxIngressStatus> {
     source,
     health: await health(configured),
     caddyAdminReachable,
-    generatedSnippet: caddyIngressSnippet(proposed || "https://ingress.example.com"),
+    generatedSnippet: caddyIngressSnippet(
+      proposed || "https://ingress.example.com",
+    ),
     ...(caddyHosts.length > 1
-      ? { note: "More than one Caddy host routes to the webhook listener; choose the public origin explicitly." }
+      ? {
+          note: "More than one Caddy host routes to the webhook listener; choose the public origin explicitly.",
+        }
       : !configured && caddyOrigin
-        ? { note: "An existing public webhook origin was found. Confirm it before Open Session uses it for sandbox callbacks." }
+        ? {
+            note: "An existing public webhook origin was found. Confirm it before Open Session uses it for sandbox callbacks.",
+          }
         : !configured
-          ? { note: "Enter a public HTTPS origin or add the generated routes to Caddy." }
+          ? {
+              note: "Enter a public HTTPS origin or add the generated routes to Caddy.",
+            }
           : {}),
   };
 }

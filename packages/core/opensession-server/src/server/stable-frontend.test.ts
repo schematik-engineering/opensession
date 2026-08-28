@@ -10,7 +10,8 @@ import {
 
 const roots: string[] = [];
 afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  for (const root of roots.splice(0))
+    rmSync(root, { recursive: true, force: true });
 });
 
 function fixture() {
@@ -20,7 +21,10 @@ function fixture() {
   const releaseRoot = join(state, "releases", sha);
   mkdirSync(join(releaseRoot, ".frontend-dist"), { recursive: true });
   writeFileSync(join(releaseRoot, ".opensession-release"), `${sha}\n`);
-  writeFileSync(join(releaseRoot, ".frontend-dist", "App-hash.js"), "window.loaded = true;");
+  writeFileSync(
+    join(releaseRoot, ".frontend-dist", "App-hash.js"),
+    "window.loaded = true;",
+  );
   publishStableFrontendSnapshot(state, {
     releaseRoot,
     version: "App-hash.js|styles.css",
@@ -29,7 +33,11 @@ function fixture() {
   return { state, releaseRoot };
 }
 
-function request(path: string, accept = "text/html", userAgent = "OS1 test browser"): Buffer {
+function request(
+  path: string,
+  accept = "text/html",
+  userAgent = "OS1 test browser",
+): Buffer {
   return Buffer.from(
     `GET ${path} HTTP/1.1\r\nHost: os.test\r\nAccept: ${accept}\r\nUser-Agent: ${userAgent}\r\n\r\n`,
   );
@@ -50,7 +58,9 @@ describe("stable frontend ingress", () => {
       state,
       request("/App-hash.js", "*/*"),
     );
-    expect(asset?.toString()).toContain("Cache-Control: public, max-age=31536000, immutable");
+    expect(asset?.toString()).toContain(
+      "Cache-Control: public, max-age=31536000, immutable",
+    );
     expect(body(asset!)).toBe("window.loaded = true;");
   });
 
@@ -58,7 +68,9 @@ describe("stable frontend ingress", () => {
     const { state } = fixture();
     const result = stableFrontendHttpResponse(
       state,
-      Buffer.from("HEAD /App-hash.js HTTP/1.1\r\nHost: os.test\r\nAccept: */*\r\n\r\n"),
+      Buffer.from(
+        "HEAD /App-hash.js HTTP/1.1\r\nHost: os.test\r\nAccept: */*\r\n\r\n",
+      ),
     );
     expect(result?.toString()).toContain("Content-Length: 21");
     expect(body(result!)).toBe("");
@@ -73,7 +85,10 @@ describe("stable frontend ingress", () => {
     const releaseRoot = join(state, "releases", sha);
     mkdirSync(join(releaseRoot, ".frontend-dist"), { recursive: true });
     writeFileSync(join(releaseRoot, ".opensession-release"), `${sha}\n`);
-    writeFileSync(join(releaseRoot, ".frontend-dist", "App-next.js"), "window.next = true;");
+    writeFileSync(
+      join(releaseRoot, ".frontend-dist", "App-next.js"),
+      "window.next = true;",
+    );
     publishStableFrontendSnapshot(state, {
       releaseRoot,
       version: "App-next.js|styles.css",
@@ -82,7 +97,9 @@ describe("stable frontend ingress", () => {
 
     expect(body(respond(request("/workspace/demo"))!)).toContain("App-next.js");
     expect(respond(request("/App-hash.js", "*/*"))).toBeNull();
-    expect(body(respond(request("/App-next.js", "*/*"))!)).toBe("window.next = true;");
+    expect(body(respond(request("/App-next.js", "*/*"))!)).toBe(
+      "window.next = true;",
+    );
   });
 
   test("owns liveness, publishes ingress telemetry, and leaves APIs to the backend", () => {
@@ -100,16 +117,33 @@ describe("stable frontend ingress", () => {
       backendSelected: true,
       proxy: { pending: 2, rejected: 1 },
     });
-    expect(stableFrontendHttpResponse(state, request("/ready", "*/*"))).toBeNull();
-    expect(stableFrontendHttpResponse(state, request("/api/sessions", "application/json"))).toBeNull();
-    expect(stableFrontendHttpResponse(state, request("/../secret.js", "*/*"))).toBeNull();
-    expect(stableFrontendHttpResponse(
-      state,
-      request("/session/social-preview", "text/html", "Slackbot-LinkExpanding 1.0"),
-    )).toBeNull();
-    expect(stableFrontendHttpResponse(
-      state,
-      Buffer.from("POST /workspace HTTP/1.1\r\nHost: os.test\r\n\r\n"),
-    )).toBeNull();
+    expect(
+      stableFrontendHttpResponse(state, request("/ready", "*/*")),
+    ).toBeNull();
+    expect(
+      stableFrontendHttpResponse(
+        state,
+        request("/api/sessions", "application/json"),
+      ),
+    ).toBeNull();
+    expect(
+      stableFrontendHttpResponse(state, request("/../secret.js", "*/*")),
+    ).toBeNull();
+    expect(
+      stableFrontendHttpResponse(
+        state,
+        request(
+          "/session/social-preview",
+          "text/html",
+          "Slackbot-LinkExpanding 1.0",
+        ),
+      ),
+    ).toBeNull();
+    expect(
+      stableFrontendHttpResponse(
+        state,
+        Buffer.from("POST /workspace HTTP/1.1\r\nHost: os.test\r\n\r\n"),
+      ),
+    ).toBeNull();
   });
 });

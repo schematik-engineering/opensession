@@ -157,9 +157,7 @@ export function CodeDisplaySettings({
           label="Diff layout"
           size="sm"
           value={diffStyle}
-          onValueChange={(next) =>
-            changeDiffStyle(next as "unified" | "split")
-          }
+          onValueChange={(next) => changeDiffStyle(next as "unified" | "split")}
         >
           <SegmentedOption value="split">Split</SegmentedOption>
           <SegmentedOption value="unified">Unified</SegmentedOption>

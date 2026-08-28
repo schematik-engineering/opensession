@@ -29,18 +29,20 @@ export function LinkPrControl({
     if (!url || busy) return;
     setBusy(true);
     await (async () => {
-const res = await linkPrApi(sessionId, url);
+      const res = await linkPrApi(sessionId, url);
       onLinked(res.all, res.linked);
       toast(
         `Linked ${res.linked.repo}${res.linked.number ? ` #${res.linked.number}` : ""}`,
       );
       setVal("");
       setOpen(false);
-})().catch(async (e: any) => {
-toast(e.message || "Couldn't link that PR");
-}).finally(async () => {
-setBusy(false);
-});
+    })()
+      .catch(async (e: any) => {
+        toast(e.message || "Couldn't link that PR");
+      })
+      .finally(async () => {
+        setBusy(false);
+      });
   }
 
   const tab = variant === "tab";

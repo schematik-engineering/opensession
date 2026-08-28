@@ -19,10 +19,7 @@ export function SessionSafetyNotice({
       aria-labelledby="session-safety-title"
       className="mx-auto my-4 w-full max-w-[46rem] rounded-2xl bg-yellow-soft p-4 text-fg phone:my-3 phone:rounded-xl"
     >
-      <h2
-        id="session-safety-title"
-        className="m-0 text-body font-semibold"
-      >
+      <h2 id="session-safety-title" className="m-0 text-body font-semibold">
         Paused for safety
       </h2>
       <p className="mt-1 text-pretty text-body leading-relaxed text-dim">

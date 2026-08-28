@@ -26,15 +26,15 @@
  * out-runs a phone-width pane — the run of tabs hangs past the edge instead
  * of wrapping. */
 export const TOOL_PRE =
-	"tool-pre m-0 max-h-80 overflow-y-auto font-mono text-meta leading-[1.5] " +
-	"whitespace-pre-wrap [word-break:break-word] [tab-size:2] text-dim";
+  "tool-pre m-0 max-h-80 overflow-y-auto font-mono text-meta leading-[1.5] " +
+  "whitespace-pre-wrap [word-break:break-word] [tab-size:2] text-dim";
 
 /** The sunk surface a snippet sits on. */
 export const TOOL_CODE_WELL =
-	"overflow-x-auto rounded-md border border-code-well-line bg-code-well " +
-	"px-2.5 py-2 [tab-size:2] " +
-	"[&_.tool-pre]:text-code-well-ink [&.tool-pre]:text-code-well-ink " +
-	"[&_.shiki-gutter]:text-code-well-gutter";
+  "overflow-x-auto rounded-md border border-code-well-line bg-code-well " +
+  "px-2.5 py-2 [tab-size:2] " +
+  "[&_.tool-pre]:text-code-well-ink [&.tool-pre]:text-code-well-ink " +
+  "[&_.shiki-gutter]:text-code-well-gutter";
 
 /**
  * The highlighter's output wrapper. Shiki emits its own `pre.shiki` with a
@@ -42,12 +42,12 @@ export const TOOL_CODE_WELL =
  * that so the snippet inherits the well instead.
  */
 export const TOOL_PRE_CODE =
-	`${TOOL_PRE} ` +
-	"[&_pre.shiki]:m-0 [&_pre.shiki]:p-0 [&_pre.shiki]:!bg-transparent " +
-	"[&_pre.shiki]:font-[inherit] [&_pre.shiki]:text-[length:inherit] " +
-	"[&_pre.shiki]:leading-[inherit] [&_pre.shiki]:whitespace-pre-wrap " +
-	"[&_pre.shiki]:[word-break:break-word] " +
-	"[&_pre.shiki_code]:font-[inherit] [&_pre.shiki_code]:text-[length:inherit]";
+  `${TOOL_PRE} ` +
+  "[&_pre.shiki]:m-0 [&_pre.shiki]:p-0 [&_pre.shiki]:!bg-transparent " +
+  "[&_pre.shiki]:font-[inherit] [&_pre.shiki]:text-[length:inherit] " +
+  "[&_pre.shiki]:leading-[inherit] [&_pre.shiki]:whitespace-pre-wrap " +
+  "[&_pre.shiki]:[word-break:break-word] " +
+  "[&_pre.shiki_code]:font-[inherit] [&_pre.shiki_code]:text-[length:inherit]";
 
 /** Image and video grids under a tool result. */
 export const TOOL_RESULT_MEDIA = "mt-1.5 flex flex-wrap gap-2";
@@ -59,10 +59,10 @@ export const TOOL_RESULT_MEDIA = "mt-1.5 flex flex-wrap gap-2";
  * translucent plate instead of a hairline box that reads like an input.
  */
 export const TOOL_ROW_CHIP =
-	"inline-flex flex-shrink-0 self-center items-center gap-0.5 rounded-control " +
-	"bg-hover py-[2px] pl-2 pr-1 text-meta font-medium leading-4 text-dim " +
-	"transition-[color,background-color,scale] hover:bg-pressed hover:text-fg " +
-	"active:scale-[0.96] focus-ring";
+  "inline-flex flex-shrink-0 self-center items-center gap-0.5 rounded-control " +
+  "bg-hover py-[2px] pl-2 pr-1 text-meta font-medium leading-4 text-dim " +
+  "transition-[color,background-color,scale] hover:bg-pressed hover:text-fg " +
+  "active:scale-[0.96] focus-ring";
 
 /**
  * Says a collapsed row is holding media the agent didn't ask to show — a Read
@@ -72,5 +72,5 @@ export const TOOL_ROW_CHIP =
  * competing with the "Open ↗" chip beside it.
  */
 export const TOOL_ROW_MEDIA_HINT =
-	"inline-flex flex-shrink-0 self-center items-center gap-1 text-meta " +
-	"leading-4 text-faint transition-colors group-hover:text-dim";
+  "inline-flex flex-shrink-0 self-center items-center gap-1 text-meta " +
+  "leading-4 text-faint transition-colors group-hover:text-dim";

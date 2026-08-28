@@ -1,4 +1,10 @@
-import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
+import {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useCallback,
+} from "react";
 import type { WSServerMessage, WSClientMessage } from "../lib/types";
 import { API_BASE, getWebSocketUrl } from "../lib/api";
 import { countSessionPerf } from "../lib/session-performance";
@@ -163,13 +169,23 @@ export function useWebSocket(presenceActive = true) {
     wsRef.current = ws;
     aliveRef.current = true;
 
-    const finishCommandNegotiation = (supported: boolean, commandScope?: string) => {
+    const finishCommandNegotiation = (
+      supported: boolean,
+      commandScope?: string,
+    ) => {
       if (wsRef.current !== ws || commandNegotiatedRef.current) return;
       commandResultsRef.current = supported;
-      const commandOutbox = wsCommandOutboxForScope(commandScope || localCommandScope());
+      const commandOutbox = wsCommandOutboxForScope(
+        commandScope || localCommandScope(),
+      );
       const provisional = wsCommandOutboxForScope(localCommandScope());
       commandOutboxRef.current = commandOutbox;
-      try { localStorage.setItem("opensession-command-scope", commandScope || localCommandScope()); } catch {}
+      try {
+        localStorage.setItem(
+          "opensession-command-scope",
+          commandScope || localCommandScope(),
+        );
+      } catch {}
       const inMemory = [...negotiatingCommandsRef.current.values()];
       negotiatingCommandsRef.current.clear();
       commandNegotiatedRef.current = true;
@@ -187,12 +203,16 @@ export function useWebSocket(presenceActive = true) {
         return;
       }
       for (const ack of commandOutbox.pendingAcks()) {
-        try { ws.send(JSON.stringify(ack)); } catch {}
+        try {
+          ws.send(JSON.stringify(ack));
+        } catch {}
       }
       const existing = commandOutbox.pending();
       const existingIds = new Set(existing.map((command) => command.requestId));
       for (const command of existing) {
-        try { ws.send(JSON.stringify(command)); } catch {}
+        try {
+          ws.send(JSON.stringify(command));
+        } catch {}
       }
       const candidates = new Map<string, WSClientMessage>();
       for (const candidate of [...provisional.pending(), ...inMemory])
@@ -260,10 +280,7 @@ export function useWebSocket(presenceActive = true) {
           } else finishCommandNegotiation(false);
         }
         if (msg.type === "server_restarting") handoffPendingRef.current = true;
-        if (
-          msg.type === "command_result" &&
-          shouldRetireCommandResult(msg)
-        ) {
+        if (msg.type === "command_result" && shouldRetireCommandResult(msg)) {
           const acknowledged = commandOutboxRef.current.ack(
             msg.requestId,
             msg.sessionId,
@@ -284,9 +301,12 @@ export function useWebSocket(presenceActive = true) {
           for (const [requestId, command] of negotiatingCommandsRef.current) {
             if (!commandOutboxRef.current.put(command)) continue;
             negotiatingCommandsRef.current.delete(requestId);
-            try { ws.send(JSON.stringify(command)); } catch {}
+            try {
+              ws.send(JSON.stringify(command));
+            } catch {}
             const provisional = wsCommandOutboxForScope(localCommandScope());
-            if (provisional !== commandOutboxRef.current) provisional.forget(requestId);
+            if (provisional !== commandOutboxRef.current)
+              provisional.forget(requestId);
           }
           return;
         }
@@ -529,7 +549,6 @@ export function useWebSocket(presenceActive = true) {
     syncPresenceRef.current();
   }, [presenceActive]);
 
-
   useEffect(() => {
     const reconnectForIdentity = () => {
       commandNegotiatedRef.current = false;
@@ -540,14 +559,23 @@ export function useWebSocket(presenceActive = true) {
       connect();
     };
     window.addEventListener("opensession-user-changed", reconnectForIdentity);
-    window.addEventListener("opensession-command-outbox-retry", reconnectForIdentity);
+    window.addEventListener(
+      "opensession-command-outbox-retry",
+      reconnectForIdentity,
+    );
     const onStorage = (event: StorageEvent) => {
       if (event.key === "opensession-user") reconnectForIdentity();
     };
     window.addEventListener("storage", onStorage);
     return () => {
-      window.removeEventListener("opensession-user-changed", reconnectForIdentity);
-      window.removeEventListener("opensession-command-outbox-retry", reconnectForIdentity);
+      window.removeEventListener(
+        "opensession-user-changed",
+        reconnectForIdentity,
+      );
+      window.removeEventListener(
+        "opensession-command-outbox-retry",
+        reconnectForIdentity,
+      );
       window.removeEventListener("storage", onStorage);
     };
   }, [connect]);
@@ -562,7 +590,9 @@ export function useWebSocket(presenceActive = true) {
       if (mutationRequestId && !commandNegotiatedRef.current) {
         const provisional = wsCommandOutboxForScope(localCommandScope());
         if (!provisional.put(msg))
-          throw new Error("Pending sends are using local storage. Reconnect or forget one before sending more.");
+          throw new Error(
+            "Pending sends are using local storage. Reconnect or forget one before sending more.",
+          );
         negotiatingCommandsRef.current.set(mutationRequestId, msg);
         const pendingSocket = wsRef.current;
         if (!pendingSocket || pendingSocket.readyState === WebSocket.CLOSED) {
@@ -575,7 +605,9 @@ export function useWebSocket(presenceActive = true) {
         ? commandOutboxRef.current.put(msg)
         : false;
       if (mutationRequestId && commandResultsRef.current && !durableMutation)
-        throw new Error("Could not save this command for reconnect. It was not sent.");
+        throw new Error(
+          "Could not save this command for reconnect. It was not sent.",
+        );
       if (msg.type === "watch") {
         const cursor = feedCursorsRef.current.get(msg.sessionId);
         msg = {
@@ -659,7 +691,9 @@ export function useWebSocket(presenceActive = true) {
       const socket = wsRef.current;
       if (socket?.readyState === WebSocket.OPEN) {
         try {
-          socket.send(JSON.stringify({ type: "typing", sessionId, typing: false }),);
+          socket.send(
+            JSON.stringify({ type: "typing", sessionId, typing: false }),
+          );
         } catch {}
       }
       latest.active = false;

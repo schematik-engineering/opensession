@@ -13,10 +13,12 @@ export function githubDeliveriesStore(): string {
 }
 const GITHUB_DELIVERY_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_GITHUB_DELIVERIES = 500;
-const githubDeliveryExpiry: Map<string, number> = ((globalThis as any).__githubDeliveryExpiry ??=
-  new Map<string, number>());
-const githubDeliveriesInFlight: Set<string> = ((globalThis as any).__githubDeliveriesInFlight ??=
-  new Set<string>());
+const githubDeliveryExpiry: Map<string, number> = ((
+  globalThis as any
+).__githubDeliveryExpiry ??= new Map<string, number>());
+const githubDeliveriesInFlight: Set<string> = ((
+  globalThis as any
+).__githubDeliveriesInFlight ??= new Set<string>());
 let githubDeliveriesLoaded = false;
 
 function pruneGithubDeliveries(now = Date.now()): void {
@@ -51,10 +53,17 @@ export function loadGithubDeliveries(force = false): void {
   try {
     const store = githubDeliveriesStore();
     if (existsSync(store)) {
-      const entries = JSON.parse(readFileSync(store, "utf-8")) as [string, number][];
+      const entries = JSON.parse(readFileSync(store, "utf-8")) as [
+        string,
+        number,
+      ][];
       const now = Date.now();
       for (const [id, expiresAt] of entries) {
-        if (typeof id === "string" && Number.isFinite(expiresAt) && expiresAt > now) {
+        if (
+          typeof id === "string" &&
+          Number.isFinite(expiresAt) &&
+          expiresAt > now
+        ) {
           githubDeliveryExpiry.set(id, expiresAt);
         }
       }

@@ -31,25 +31,55 @@ afterEach(() => {
 
 describe("remote repo template index", () => {
   test("keeps credential-free stopped artifacts until an input changes", async () => {
-    const mod = await import(`./remote-repo-template?roundtrip=${Math.random()}`);
+    const mod = await import(
+      `./remote-repo-template?roundtrip=${Math.random()}`
+    );
     mod.writeRemoteRepoTemplate("modal", "app", "im-1", 1_000);
-    expect(mod.readRemoteRepoTemplate("modal", "app", 2_000)?.artifactId).toBe("im-1");
-    expect(mod.readRemoteRepoTemplate("modal", "app", 365 * 24 * 60 * 60_000)?.artifactId).toBe("im-1");
+    expect(mod.readRemoteRepoTemplate("modal", "app", 2_000)?.artifactId).toBe(
+      "im-1",
+    );
+    expect(
+      mod.readRemoteRepoTemplate("modal", "app", 365 * 24 * 60 * 60_000)
+        ?.artifactId,
+    ).toBe("im-1");
   });
 
   test("refreshes source images every 30 minutes without expiring the old mapping", async () => {
     const mod = await import(`./remote-repo-template?refresh=${Math.random()}`);
-    const { current } = mod.writeRemoteRepoTemplate("modal", "app", "im-1", 1_000);
-    expect(mod.remoteRepoTemplateNeedsRefresh(current, 1_000 + 29 * 60_000)).toBe(false);
-    expect(mod.remoteRepoTemplateNeedsRefresh(current, 1_000 + 30 * 60_000)).toBe(true);
-    expect(mod.readRemoteRepoTemplate("modal", "app", 1_000 + 30 * 60_000)?.artifactId).toBe("im-1");
+    const { current } = mod.writeRemoteRepoTemplate(
+      "modal",
+      "app",
+      "im-1",
+      1_000,
+    );
+    expect(
+      mod.remoteRepoTemplateNeedsRefresh(current, 1_000 + 29 * 60_000),
+    ).toBe(false);
+    expect(
+      mod.remoteRepoTemplateNeedsRefresh(current, 1_000 + 30 * 60_000),
+    ).toBe(true);
+    expect(
+      mod.readRemoteRepoTemplate("modal", "app", 1_000 + 30 * 60_000)
+        ?.artifactId,
+    ).toBe("im-1");
   });
 
   test("preserves Box's daily start quota with a six-hour source refresh", async () => {
-    const mod = await import(`./remote-repo-template?box-refresh=${Math.random()}`);
-    const { current } = mod.writeRemoteRepoTemplate("box", "app", "snapshot-1", 1_000);
-    expect(mod.remoteRepoTemplateNeedsRefresh(current, 1_000 + 30 * 60_000)).toBe(false);
-    expect(mod.remoteRepoTemplateNeedsRefresh(current, 1_000 + 6 * 60 * 60_000)).toBe(true);
+    const mod = await import(
+      `./remote-repo-template?box-refresh=${Math.random()}`
+    );
+    const { current } = mod.writeRemoteRepoTemplate(
+      "box",
+      "app",
+      "snapshot-1",
+      1_000,
+    );
+    expect(
+      mod.remoteRepoTemplateNeedsRefresh(current, 1_000 + 30 * 60_000),
+    ).toBe(false);
+    expect(
+      mod.remoteRepoTemplateNeedsRefresh(current, 1_000 + 6 * 60 * 60_000),
+    ).toBe(true);
   });
 
   test("a runner commit pin bump alone keeps the artifact mapping", async () => {
@@ -107,14 +137,23 @@ describe("repo-declared preparation inputs", () => {
     ).toEqual(["Cargo.lock", "patches"]);
     expect(mod.parsePreparationInputs({})).toEqual([]);
     expect(mod.parsePreparationInputs(null)).toEqual([]);
-    expect(mod.parsePreparationInputs({ preparationInputs: "Cargo.lock" })).toEqual([]);
+    expect(
+      mod.parsePreparationInputs({ preparationInputs: "Cargo.lock" }),
+    ).toEqual([]);
   });
 
   test("declaredPreparationInputs reads the committed environment file, not the worktree", async () => {
-    const mod = await import(`./remote-repo-template?declared=${Math.random()}`);
+    const mod = await import(
+      `./remote-repo-template?declared=${Math.random()}`
+    );
     const repoDir = join(scratch, "declared-repo");
     const sh = (...cmd: string[]) => {
-      const r = Bun.spawnSync({ cmd, cwd: repoDir, stdout: "pipe", stderr: "pipe" });
+      const r = Bun.spawnSync({
+        cmd,
+        cwd: repoDir,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
       if (r.exitCode !== 0) throw new Error(r.stderr.toString());
     };
     mkdirSync(join(repoDir, ".agents"), { recursive: true });
@@ -123,21 +162,32 @@ describe("repo-declared preparation inputs", () => {
       JSON.stringify({ preparationInputs: ["Cargo.lock", "bun.lock"] }),
     );
     // No HEAD yet: falls back to working-tree bytes.
-    expect(mod.declaredPreparationInputs(repoDir, false)).toEqual(["Cargo.lock"]);
+    expect(mod.declaredPreparationInputs(repoDir, false)).toEqual([
+      "Cargo.lock",
+    ]);
     sh("git", "init", "-q");
     sh("git", "-c", "user.email=t@t", "-c", "user.name=t", "add", "-A");
     sh(
       "git",
-      "-c", "user.email=t@t",
-      "-c", "user.name=t",
-      "commit", "-q", "-m", "init",
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "-q",
+      "-m",
+      "init",
     );
-    expect(mod.declaredPreparationInputs(repoDir, true)).toEqual(["Cargo.lock"]);
+    expect(mod.declaredPreparationInputs(repoDir, true)).toEqual([
+      "Cargo.lock",
+    ]);
     // A dirty edit must not change what the committed signature sees.
     await Bun.write(
       join(repoDir, ".agents/sandbox-environment.json"),
       JSON.stringify({ preparationInputs: ["patches"] }),
     );
-    expect(mod.declaredPreparationInputs(repoDir, true)).toEqual(["Cargo.lock"]);
+    expect(mod.declaredPreparationInputs(repoDir, true)).toEqual([
+      "Cargo.lock",
+    ]);
   });
 });

@@ -1,11 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { pathToFileURL } from "url";
@@ -28,9 +22,9 @@ describe("normalizeRepoOrigin", () => {
     expect(normalizeRepoOrigin("git@gitlab.com:acme/widget.git")).toBe(
       "gitlab.com/acme/widget",
     );
-    expect(normalizeRepoOrigin("https://token@gitlab.com/acme/widget.git")).toBe(
-      "gitlab.com/acme/widget",
-    );
+    expect(
+      normalizeRepoOrigin("https://token@gitlab.com/acme/widget.git"),
+    ).toBe("gitlab.com/acme/widget");
   });
 
   test("normalizes local paths, file URLs, and resolvable symlinks", () => {
@@ -65,14 +59,26 @@ describe("inspectRepo", () => {
       writeFileSync(join(source, "README.md"), "test\n");
       git("-C", source, "add", "README.md");
       git(
-        "-C", source,
-        "-c", "user.name=Test",
-        "-c", "user.email=test@example.com",
-        "commit", "-q", "-m", "initial",
+        "-C",
+        source,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-q",
+        "-m",
+        "initial",
       );
       git("clone", "-q", "--bare", source, remote);
       git("clone", "-q", remote, checkout);
-      git("-C", checkout, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+      git(
+        "-C",
+        checkout,
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/main",
+      );
 
       expect((await inspectRepo(checkout)).defaultBranch).toBe("master");
     } finally {
@@ -91,10 +97,16 @@ describe("repoHasBranch", () => {
       writeFileSync(join(source, "README.md"), "test\n");
       git("-C", source, "add", "README.md");
       git(
-        "-C", source,
-        "-c", "user.name=Test",
-        "-c", "user.email=test@example.com",
-        "commit", "-q", "-m", "initial",
+        "-C",
+        source,
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-q",
+        "-m",
+        "initial",
       );
       git("-C", source, "branch", "local-only");
       git("init", "-q", "--bare", remote);

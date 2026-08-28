@@ -7,24 +7,25 @@ import { TeamSection } from "../SetupTeam";
 // it, so it long outlives the Setup wizard step that first fills it in.
 
 export function MembersPanel() {
-	return (
-		<SettingsPanel>
-			<SettingsHeader
-				title="Members"
-				description={
-					<>
-						Members identify who sessions act as. Configure who can sign in under{" "}
-						<a
-							href={`${BASE_PATH}/settings/authentication`}
-							className="text-link hover:underline"
-						>
-							Authentication
-						</a>
-						.
-					</>
-				}
-			/>
-			<TeamSection onChanged={() => {}} />
-		</SettingsPanel>
-	);
+  return (
+    <SettingsPanel>
+      <SettingsHeader
+        title="Members"
+        description={
+          <>
+            Members identify who sessions act as. Configure who can sign in
+            under{" "}
+            <a
+              href={`${BASE_PATH}/settings/authentication`}
+              className="text-link hover:underline"
+            >
+              Authentication
+            </a>
+            .
+          </>
+        }
+      />
+      <TeamSection onChanged={() => {}} />
+    </SettingsPanel>
+  );
 }

@@ -7,14 +7,14 @@ import { IconRobot } from "../icons";
  * stays aligned with every ordinary row.
  */
 export function AutoCreatedMark() {
-	return (
-		<span
-			className="ml-1 flex shrink-0 items-center text-faint"
-			role="img"
-			aria-label="Started by an agent, not by a person"
-			title="Started by an agent, not by a person"
-		>
-			<IconRobot size={20} />
-		</span>
-	);
+  return (
+    <span
+      className="ml-1 flex shrink-0 items-center text-faint"
+      role="img"
+      aria-label="Started by an agent, not by a person"
+      title="Started by an agent, not by a person"
+    >
+      <IconRobot size={20} />
+    </span>
+  );
 }

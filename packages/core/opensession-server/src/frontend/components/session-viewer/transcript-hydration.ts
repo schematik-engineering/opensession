@@ -1,8 +1,8 @@
 import type { TranscriptIndexedRange } from "../../lib/transcript-index";
 
 export interface TranscriptHydrationOutlineItem {
-	key: string;
-	ranges: readonly TranscriptIndexedRange[];
+  key: string;
+  ranges: readonly TranscriptIndexedRange[];
 }
 
 /**
@@ -22,29 +22,29 @@ export interface TranscriptHydrationOutlineItem {
  * array means the real visible rows are safe to reveal.
  */
 export function visibleTranscriptHydrationDemand(
-	outline: readonly TranscriptHydrationOutlineItem[],
-	visibleKeys: ReadonlySet<string>,
-	hasPayload: (entryId: string) => boolean,
+  outline: readonly TranscriptHydrationOutlineItem[],
+  visibleKeys: ReadonlySet<string>,
+  hasPayload: (entryId: string) => boolean,
 ): TranscriptIndexedRange[] | null {
-	if (!outline.some((item) => visibleKeys.has(item.key))) return null;
+  if (!outline.some((item) => visibleKeys.has(item.key))) return null;
 
-	const wanted: TranscriptIndexedRange[] = [];
-	const seen = new Set<string>();
-	for (const item of outline) {
-		if (!visibleKeys.has(item.key)) continue;
-		for (const range of item.ranges) {
-			if (range.entryIds.every(hasPayload)) continue;
-			const firstLoaded = range.entryIds.findIndex(hasPayload);
-			if (
-				firstLoaded > 0 &&
-				range.entryIds.slice(firstLoaded).every(hasPayload)
-			)
-				continue;
-			const key = `${range.firstSeq}:${range.lastSeq}`;
-			if (seen.has(key)) continue;
-			seen.add(key);
-			wanted.push(range);
-		}
-	}
-	return wanted;
+  const wanted: TranscriptIndexedRange[] = [];
+  const seen = new Set<string>();
+  for (const item of outline) {
+    if (!visibleKeys.has(item.key)) continue;
+    for (const range of item.ranges) {
+      if (range.entryIds.every(hasPayload)) continue;
+      const firstLoaded = range.entryIds.findIndex(hasPayload);
+      if (
+        firstLoaded > 0 &&
+        range.entryIds.slice(firstLoaded).every(hasPayload)
+      )
+        continue;
+      const key = `${range.firstSeq}:${range.lastSeq}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      wanted.push(range);
+    }
+  }
+  return wanted;
 }

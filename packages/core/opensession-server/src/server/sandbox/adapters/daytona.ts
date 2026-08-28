@@ -36,7 +36,10 @@
 import type { Daytona, Sandbox as DaytonaSandbox } from "@daytonaio/sdk";
 import { getRepo, worktreePathFor } from "../../worktree";
 import { sandboxConfig } from "../config";
-import { getSandboxConnection, sandboxProviderCredential } from "../connections";
+import {
+  getSandboxConnection,
+  sandboxProviderCredential,
+} from "../connections";
 import type {
   PortMap,
   Sandbox,
@@ -93,11 +96,15 @@ export function parseDaytonaExecResult(res: {
 }): { exitCode: number; stdout: string; stderr: string } {
   const out = String(res.result ?? "");
   const exitIdx = out.lastIndexOf(EXIT_DELIM);
-  const encodedExit = exitIdx >= 0 ? Number(out.slice(exitIdx + EXIT_DELIM.length)) : NaN;
-  const streams = exitIdx >= 0 && Number.isInteger(encodedExit) ? out.slice(0, exitIdx) : out;
+  const encodedExit =
+    exitIdx >= 0 ? Number(out.slice(exitIdx + EXIT_DELIM.length)) : NaN;
+  const streams =
+    exitIdx >= 0 && Number.isInteger(encodedExit) ? out.slice(0, exitIdx) : out;
   const stderrIdx = streams.indexOf(ERR_DELIM);
   return {
-    exitCode: Number.isInteger(encodedExit) ? encodedExit : Number(res.exitCode ?? 1),
+    exitCode: Number.isInteger(encodedExit)
+      ? encodedExit
+      : Number(res.exitCode ?? 1),
     stdout: stderrIdx >= 0 ? streams.slice(0, stderrIdx) : streams,
     stderr: stderrIdx >= 0 ? streams.slice(stderrIdx + ERR_DELIM.length) : "",
   };
@@ -150,19 +157,27 @@ export function daytonaCreateSource(
   resources?: { cpu?: number; memory?: number; disk?: number },
 ):
   | { snapshot: string }
-  | { image: string; resources: { cpu?: number; memory?: number; disk?: number } }
+  | {
+      image: string;
+      resources: { cpu?: number; memory?: number; disk?: number };
+    }
   | Record<string, never> {
   if (snapshot) return { snapshot };
   if (resources) return { image: DEFAULT_DAYTONA_IMAGE, resources };
   return {};
 }
 
-export function daytonaSnapshotIsRecoverable(snapshot: {
-  state?: unknown;
-  createdAt?: unknown;
-  updatedAt?: unknown;
-}, now = Date.now()): boolean {
-  const completedAt = Date.parse(String(snapshot.updatedAt || snapshot.createdAt || ""));
+export function daytonaSnapshotIsRecoverable(
+  snapshot: {
+    state?: unknown;
+    createdAt?: unknown;
+    updatedAt?: unknown;
+  },
+  now = Date.now(),
+): boolean {
+  const completedAt = Date.parse(
+    String(snapshot.updatedAt || snapshot.createdAt || ""),
+  );
   const age = now - completedAt;
   return (
     String(snapshot.state || "").toLowerCase() === "active" &&
@@ -174,19 +189,29 @@ export function daytonaSnapshotIsRecoverable(snapshot: {
 
 function daytonaNotFound(error: unknown): boolean {
   const detail = error as { statusCode?: number; errorCode?: string };
-  return detail?.statusCode === 404 || /not.?found/i.test(detail?.errorCode || "");
+  return (
+    detail?.statusCode === 404 || /not.?found/i.test(detail?.errorCode || "")
+  );
 }
 
-export function daytonaSnapshotIsRecent(snapshot: {
-  createdAt?: unknown;
-  updatedAt?: unknown;
-}, now = Date.now()): boolean {
-  const startedAt = Date.parse(String(snapshot.updatedAt || snapshot.createdAt || ""));
+export function daytonaSnapshotIsRecent(
+  snapshot: {
+    createdAt?: unknown;
+    updatedAt?: unknown;
+  },
+  now = Date.now(),
+): boolean {
+  const startedAt = Date.parse(
+    String(snapshot.updatedAt || snapshot.createdAt || ""),
+  );
   const age = now - startedAt;
   return Number.isFinite(startedAt) && age >= 0 && age < 60 * 60_000;
 }
 
-async function getDaytonaSnapshot(client: Daytona, name: string): Promise<any | null> {
+async function getDaytonaSnapshot(
+  client: Daytona,
+  name: string,
+): Promise<any | null> {
   try {
     return await client.snapshot.get(name);
   } catch (error) {
@@ -195,10 +220,7 @@ async function getDaytonaSnapshot(client: Daytona, name: string): Promise<any | 
   }
 }
 
-async function recoverDaytonaRepoTemplate(
-  client: Daytona,
-  repoId: string,
-) {
+async function recoverDaytonaRepoTemplate(client: Daytona, repoId: string) {
   const stored = readRemoteRepoTemplate("daytona", repoId);
   if (stored) return stored;
   const name = remoteRepoTemplateName("daytona", repoId);
@@ -236,12 +258,16 @@ async function waitForDaytonaSnapshotGone(
     if (!(await getDaytonaSnapshot(client, name))) return;
     await new Promise((resolve) => setTimeout(resolve, 2_000));
   }
-  throw new Error(`Daytona snapshot ${name} was not deleted after ${timeoutMs}ms`);
+  throw new Error(
+    `Daytona snapshot ${name} was not deleted after ${timeoutMs}ms`,
+  );
 }
 
 async function daytonaClient(): Promise<Daytona> {
   const cfg = daytonaConfig().daytona || {};
-  const apiKey = (sandboxProviderCredential("daytona") as { apiKey: string } | undefined)?.apiKey;
+  const apiKey = (
+    sandboxProviderCredential("daytona") as { apiKey: string } | undefined
+  )?.apiKey;
   if (!apiKey) {
     throw new Error("Daytona workspace credentials are not configured");
   }
@@ -280,9 +306,12 @@ function daytonaDriver(sbx: DaytonaSandbox): RemoteDriver {
       const sid = `bks-run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
       await sbx.process.createSession(sid);
       const cd = opts?.cwd ? `cd ${shellQuoteWord(opts.cwd)} && ` : "";
-      const env = opts?.env && Object.keys(opts.env).length
-        ? `env ${Object.entries(opts.env).map(([key, value]) => `${key}=${shellQuoteWord(value)}`).join(" ")} `
-        : "";
+      const env =
+        opts?.env && Object.keys(opts.env).length
+          ? `env ${Object.entries(opts.env)
+              .map(([key, value]) => `${key}=${shellQuoteWord(value)}`)
+              .join(" ")} `
+          : "";
       await sbx.process.executeSessionCommand(sid, {
         command: `${cd}${env}${cmd}`,
         runAsync: true,
@@ -372,9 +401,12 @@ export async function daytonaPtySession(
 function stateOf(sbx: DaytonaSandbox): SandboxStatus {
   const s = String((sbx as any).state || "");
   if (s === "started") return "running";
-  if (["stopped", "archived", "paused", "stopping", "starting"].includes(s)) return "stopped";
+  if (["stopped", "archived", "paused", "stopping", "starting"].includes(s))
+    return "stopped";
   if (!s) return "stopped";
-  return s === "destroyed" || s === "destroying" || s === "error" ? "gone" : "stopped";
+  return s === "destroyed" || s === "destroying" || s === "error"
+    ? "gone"
+    : "stopped";
 }
 
 // ── Provider ──────────────────────────────────────────────────────────────────
@@ -383,14 +415,21 @@ export class DaytonaProvider implements SandboxProvider {
   readonly id = "daytona" as const;
 
   ensure(spec: SandboxSessionSpec): Promise<Sandbox> {
-    return withRemoteEnsureLock(this.id, spec.sessionId, () => this.ensureInner(spec));
+    return withRemoteEnsureLock(this.id, spec.sessionId, () =>
+      this.ensureInner(spec),
+    );
   }
 
   private async ensureInner(spec: SandboxSessionSpec): Promise<Sandbox> {
     const startedAt = Date.now();
-    const mark = (stage: string) => console.log(`[sandbox:daytona] ${spec.sessionId}: ${stage} (+${Date.now() - startedAt}ms)`);
+    const mark = (stage: string) =>
+      console.log(
+        `[sandbox:daytona] ${spec.sessionId}: ${stage} (+${Date.now() - startedAt}ms)`,
+      );
     if (spec.attachedDirs?.length) {
-      throw new Error("attached repos are not supported in remote sandboxes — detach them or use docker/local");
+      throw new Error(
+        "attached repos are not supported in remote sandboxes — detach them or use docker/local",
+      );
     }
     const cfg = daytonaConfig();
     const client = await daytonaClient();
@@ -445,9 +484,14 @@ export class DaytonaProvider implements SandboxProvider {
           if (cand && stateOf(cand) !== "gone") {
             // setLabels REPLACES the label map — the prewarm labels vanish
             // here, which is what retires it from the pool's orphan audit.
-            await cand.setLabels({ [SESSION_LABEL]: spec.sessionId, "opensession.sandbox": "1" });
+            await cand.setLabels({
+              [SESSION_LABEL]: spec.sessionId,
+              "opensession.sandbox": "1",
+            });
             // Swap the pool's short-TTL backstops for the session lifecycle.
-            await cand.setAutostopInterval(cfg.idleStopMinutes || DEFAULT_IDLE_STOP_MINUTES);
+            await cand.setAutostopInterval(
+              cfg.idleStopMinutes || DEFAULT_IDLE_STOP_MINUTES,
+            );
             await cand.setAutoDeleteInterval(-1);
             sbx = cand;
             preparedWorkspace = true;
@@ -458,7 +502,10 @@ export class DaytonaProvider implements SandboxProvider {
             discardClaimedPrewarm(this.id, claim.sandboxId);
           }
         } catch (e) {
-          console.warn(`[sandbox:daytona] prewarm adoption failed (cold-creating):`, e);
+          console.warn(
+            `[sandbox:daytona] prewarm adoption failed (cold-creating):`,
+            e,
+          );
           sbx = null;
           discardClaimedPrewarm(this.id, claim.sandboxId);
         }
@@ -540,54 +587,61 @@ export class DaytonaProvider implements SandboxProvider {
 
     try {
       const driver = daytonaDriver(sbx);
-    // client.create resolves only after Daytona reports the sandbox started.
-    // A second refresh/start round trip added 2–3s to every snapshot restore.
-    if (!newlyCreated) await driver.ensureStarted();
-    mark("sandbox started");
-    const prepareRunner = async () => {
-      if (sourceVerification) return;
-      // A sandbox that cannot reach our callback URL can never run anything.
-      await assertDialbackReachable(driver, "daytona");
-      mark("dial-back verified");
-      await bootstrapRemoteSandbox(driver, "daytona");
-      mark("runner ready");
-    };
-    const prepareWorkspace = async () => {
-      await setupRemoteWorkspace(
-        driver,
+      // client.create resolves only after Daytona reports the sandbox started.
+      // A second refresh/start round trip added 2–3s to every snapshot restore.
+      if (!newlyCreated) await driver.ensureStarted();
+      mark("sandbox started");
+      const prepareRunner = async () => {
+        if (sourceVerification) return;
+        // A sandbox that cannot reach our callback URL can never run anything.
+        await assertDialbackReachable(driver, "daytona");
+        mark("dial-back verified");
+        await bootstrapRemoteSandbox(driver, "daytona");
+        mark("runner ready");
+      };
+      const prepareWorkspace = async () => {
+        await setupRemoteWorkspace(
+          driver,
+          cwd,
+          await remoteCloneUrl(repo, { credential: spec.cloneCredential }),
+          branch,
+          repo.defaultBranch,
+          repo.id,
+          {
+            sandboxId: sbx.id,
+            provider: this.id,
+            sessionId: spec.sessionId,
+            repoId: repo.id,
+            trustProfile: trust.trustProfile,
+          },
+          {
+            seedPrivateFiles: !sourceVerification,
+            runLifecycleHooks: !sourceVerification,
+          },
+        );
+        mark("workspace ready");
+      };
+      // Repo snapshots and adopted prewarms already contain both the runner and
+      // lifecycle stamp, so these independent command lanes can overlap. A cold
+      // workspace remains sequential because .agents/setup may need the runner's
+      // workload-identity client.
+      if (preparedWorkspace)
+        await Promise.all([prepareRunner(), prepareWorkspace()]);
+      else {
+        await prepareRunner();
+        await prepareWorkspace();
+      }
+      writeRemoteState({
+        sandboxId: sbx.id,
+        provider: this.id,
+        sessionId: spec.sessionId,
         cwd,
-        await remoteCloneUrl(repo, { credential: spec.cloneCredential }),
+        repoId: repo.id,
         branch,
-        repo.defaultBranch,
-        repo.id,
-        { sandboxId: sbx.id, provider: this.id, sessionId: spec.sessionId, repoId: repo.id, trustProfile: trust.trustProfile },
-        {
-          seedPrivateFiles: !sourceVerification,
-          runLifecycleHooks: !sourceVerification,
-        },
-      );
-      mark("workspace ready");
-    };
-    // Repo snapshots and adopted prewarms already contain both the runner and
-    // lifecycle stamp, so these independent command lanes can overlap. A cold
-    // workspace remains sequential because .agents/setup may need the runner's
-    // workload-identity client.
-    if (preparedWorkspace) await Promise.all([prepareRunner(), prepareWorkspace()]);
-    else {
-      await prepareRunner();
-      await prepareWorkspace();
-    }
-    writeRemoteState({
-      sandboxId: sbx.id,
-      provider: this.id,
-      sessionId: spec.sessionId,
-      cwd,
-      repoId: repo.id,
-      branch,
-      createdAt: prevState?.createdAt || new Date().toISOString(),
-      lastActivityAt: new Date().toISOString(),
-      ...trust,
-    });
+        createdAt: prevState?.createdAt || new Date().toISOString(),
+        lastActivityAt: new Date().toISOString(),
+        ...trust,
+      });
       return this.makeHandle(sbx, spec.sessionId, cwd);
     } catch (error) {
       if (sourceVerification) {
@@ -604,7 +658,11 @@ export class DaytonaProvider implements SandboxProvider {
     }
   }
 
-  private makeHandle(sbx: DaytonaSandbox, sessionId: string, cwd: string): Sandbox {
+  private makeHandle(
+    sbx: DaytonaSandbox,
+    sessionId: string,
+    cwd: string,
+  ): Sandbox {
     const providerId = this.id;
     return makeRemoteSandbox({
       providerId,
@@ -627,13 +685,18 @@ export class DaytonaProvider implements SandboxProvider {
               map[port] = {
                 url: link.url,
                 requestHeaders: {
-                  ...(link.token ? { "X-Daytona-Preview-Token": link.token } : {}),
+                  ...(link.token
+                    ? { "X-Daytona-Preview-Token": link.token }
+                    : {}),
                   "X-Daytona-Skip-Preview-Warning": "true",
                 },
               };
             }
           } catch (e) {
-            console.warn(`[sandbox:daytona] getPreviewLink(${port}) failed:`, e);
+            console.warn(
+              `[sandbox:daytona] getPreviewLink(${port}) failed:`,
+              e,
+            );
           }
         }
         return map;
@@ -700,7 +763,9 @@ export class DaytonaProvider implements SandboxProvider {
           if (!daytonaNotFound(error)) throw error;
         }
         if (remaining && stateOf(remaining) !== "gone") {
-          throw new Error(`Daytona sandbox ${sandboxId} still exists after deletion`);
+          throw new Error(
+            `Daytona sandbox ${sandboxId} still exists after deletion`,
+          );
         }
       }
       removeRemoteState(this.id, sandboxId);
@@ -727,8 +792,11 @@ export const daytonaPrewarmAdapter: PrewarmAdapter = {
   async create(labels, opts) {
     const cfg = daytonaConfig();
     const key = labels[PREWARM_KEY_LABEL] || "";
-    const repoId = key.startsWith("daytona:") ? key.slice("daytona:".length) : "";
-    if (!repoId) throw new Error(`invalid Daytona prewarm key: ${key || "(missing)"}`);
+    const repoId = key.startsWith("daytona:")
+      ? key.slice("daytona:".length)
+      : "";
+    if (!repoId)
+      throw new Error(`invalid Daytona prewarm key: ${key || "(missing)"}`);
     const client = await daytonaClient();
     const template = await recoverDaytonaRepoTemplate(client, repoId);
     const create = (snapshot?: string) => {
@@ -813,7 +881,9 @@ export const daytonaPrewarmAdapter: PrewarmAdapter = {
   async listPrewarmed() {
     const client = await daytonaClient();
     const out: Array<{ id: string; key: string }> = [];
-    for await (const s of client.list({ labels: { [PREWARM_LABEL]: "1" } } as any)) {
+    for await (const s of client.list({
+      labels: { [PREWARM_LABEL]: "1" },
+    } as any)) {
       // Mid-teardown sandboxes still list with their labels for a few
       // seconds — same guard as the conformance leftovers audit.
       const state = String((s as any).state || "");
@@ -852,7 +922,8 @@ export async function qualifyDaytonaConnection(): Promise<void> {
       "set -eu; uname -s; printf opensession-qualified > /tmp/opensession-qualification",
       { timeoutMs: 60_000 },
     );
-    if (probe.exitCode !== 0) throw new Error("Daytona qualification command failed");
+    if (probe.exitCode !== 0)
+      throw new Error("Daytona qualification command failed");
     const semantics = await sourceDriver.exec(
       "printf qualification-out; printf qualification-err >&2; exit 7",
       { timeoutMs: 60_000 },
@@ -862,19 +933,26 @@ export async function qualifyDaytonaConnection(): Promise<void> {
       !semantics.stdout.includes("qualification-out") ||
       !semantics.stderr.includes("qualification-err")
     ) {
-      throw new Error("Daytona exec stream or exit-code semantics are incompatible");
+      throw new Error(
+        "Daytona exec stream or exit-code semantics are incompatible",
+      );
     }
     await sourceDriver.writeFile("/tmp/opensession-upload", "uploaded");
-    const upload = await sourceDriver.exec("test \"$(cat /tmp/opensession-upload)\" = uploaded");
-    if (upload.exitCode !== 0) throw new Error("Daytona file upload check failed");
+    const upload = await sourceDriver.exec(
+      'test "$(cat /tmp/opensession-upload)" = uploaded',
+    );
+    if (upload.exitCode !== 0)
+      throw new Error("Daytona file upload check failed");
     const preview = await source.getPreviewLink(8765);
-    if (!preview?.url) throw new Error("Daytona encrypted preview link check failed");
+    if (!preview?.url)
+      throw new Error("Daytona encrypted preview link check failed");
     await source.stop(120);
     await source.start(120);
     const lifecycle = await sourceDriver.exec(
-      "test \"$(cat /tmp/opensession-qualification)\" = opensession-qualified",
+      'test "$(cat /tmp/opensession-qualification)" = opensession-qualified',
     );
-    if (lifecycle.exitCode !== 0) throw new Error("Daytona stop/start lost filesystem state");
+    if (lifecycle.exitCode !== 0)
+      throw new Error("Daytona stop/start lost filesystem state");
     // Even a nearly-empty Daytona sandbox can take 8–10 minutes to seal when
     // the provider is busy. Keep this aligned with repository templates: a
     // shorter client wait reports a false SNAPSHOT_FAILED while Daytona keeps
@@ -889,13 +967,16 @@ export async function qualifyDaytonaConnection(): Promise<void> {
       } as any,
       { timeout: 300 },
     );
-    if (restored.id === source.id) throw new Error("Daytona snapshot restore was not distinct");
+    if (restored.id === source.id)
+      throw new Error("Daytona snapshot restore was not distinct");
     const restoreProbe = await daytonaDriver(restored).exec(
-      "test \"$(cat /tmp/opensession-qualification)\" = opensession-qualified",
+      'test "$(cat /tmp/opensession-qualification)" = opensession-qualified',
       { timeoutMs: 60_000 },
     );
     if (restoreProbe.exitCode !== 0) {
-      throw new Error("Daytona qualification snapshot did not restore filesystem state");
+      throw new Error(
+        "Daytona qualification snapshot did not restore filesystem state",
+      );
     }
   } finally {
     for (const sandbox of [restored, source]) {
@@ -924,7 +1005,9 @@ export async function qualifyDaytonaConnection(): Promise<void> {
   throw new Error("Daytona qualification cleanup left a sandbox behind");
 }
 
-export async function deleteDaytonaTemplateArtifact(artifactId: string): Promise<void> {
+export async function deleteDaytonaTemplateArtifact(
+  artifactId: string,
+): Promise<void> {
   const client = await daytonaClient();
   try {
     const snapshot = await client.snapshot.get(artifactId);

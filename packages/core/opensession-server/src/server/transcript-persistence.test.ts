@@ -35,7 +35,12 @@ describe("transcript persistence", () => {
   test("builders round-trip through the shared parser", () => {
     const lines = [
       transcriptLineUser("hello", "u1", "2026-01-01T00:00:00.000Z"),
-      transcriptLineAssistantText("hi", "a1", "2026-01-01T00:00:01.000Z", "pi/anthropic/claude-fable-5"),
+      transcriptLineAssistantText(
+        "hi",
+        "a1",
+        "2026-01-01T00:00:01.000Z",
+        "pi/anthropic/claude-fable-5",
+      ),
       transcriptLineAssistantText(
         "**Checking the repository**",
         "r1",

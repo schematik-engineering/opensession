@@ -1,16 +1,24 @@
 import React, {
-	useEffect,
-	useEffectEvent,
-	useLayoutEffect,
-	useRef,
-	useState,
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useRef,
+  useState,
 } from "react";
 import {
   useShortcutKeys,
   useShortcutLabel,
 } from "../hooks/useShortcutBindings";
-import type { ModelOption, FileMention, ProviderAccountOption } from "../lib/api";
-import { splitAttachments, imageFilesFromPaste, type FileAttachment } from "../lib/images";
+import type {
+  ModelOption,
+  FileMention,
+  ProviderAccountOption,
+} from "../lib/api";
+import {
+  splitAttachments,
+  imageFilesFromPaste,
+  type FileAttachment,
+} from "../lib/images";
 import {
   appendImageAttachmentComment,
   deleteImageAttachmentComment,
@@ -18,7 +26,12 @@ import {
   rebaseImageAttachmentReferences,
   updateImageAttachmentComment,
 } from "../lib/image-attachment-comment";
-import { clearDraft, loadDraft, onDraftsChanged, saveDraft } from "../lib/drafts";
+import {
+  clearDraft,
+  loadDraft,
+  onDraftsChanged,
+  saveDraft,
+} from "../lib/drafts";
 import { appendDictation } from "../lib/dictation";
 import {
   attachingLabel,
@@ -404,10 +417,7 @@ function GoalModal({
 
         <Modal.Footer>
           {initial && (
-            <Button
-              variant="danger"
-              onClick={() => onSubmit(null)}
-            >
+            <Button variant="danger" onClick={() => onSubmit(null)}>
               Clear goal
             </Button>
           )}
@@ -456,12 +466,7 @@ function StopConfirmModal({
         </div>
         <Modal.Footer className="mt-3 gap-3">
           <Modal.Close render={<Button size="lg">Keep going</Button>} />
-          <Button
-            ref={stopRef}
-            variant="primary"
-            size="lg"
-            onClick={onConfirm}
-          >
+          <Button ref={stopRef} variant="primary" size="lg" onClick={onConfirm}>
             Stop
           </Button>
         </Modal.Footer>
@@ -597,7 +602,7 @@ export function Composer({
   useEffect(() => onVimModeChanged(() => setVimEnabled(getVimModePref())), []);
   const isControlled = value !== undefined;
   const text = isControlled ? value : innerValue;
-  const setText = isControlled ? onChange ?? (() => {}) : setInnerValue;
+  const setText = isControlled ? (onChange ?? (() => {})) : setInnerValue;
   // The lightbox is hosted above the composer and keeps the callback from the
   // moment it opened. Keep its draft source current across several Shift+Enter
   // comments without making the global viewer own composer state.
@@ -640,9 +645,10 @@ export function Composer({
   const applyPrefill = useEffectEvent(() => {
     if (!prefill || prefill.seq === prefillSeqRef.current) return;
     prefillSeqRef.current = prefill.seq;
-    const next = !prefill.replace && text.trim()
-      ? `${text.replace(/\s+$/, "")}\n${prefill.text}`
-      : prefill.text;
+    const next =
+      !prefill.replace && text.trim()
+        ? `${text.replace(/\s+$/, "")}\n${prefill.text}`
+        : prefill.text;
     // Persist the handoff before React commits it. Restoring queued attachments
     // can emit a draft-store change in the same pass; if the store still holds
     // the old empty text, that event otherwise erases the restored message.
@@ -654,7 +660,10 @@ export function Composer({
       const el = textareaRef.current;
       if (el) {
         el.focus();
-        const at = composerDisplayOffset(projectComposerSessions(next), next.length);
+        const at = composerDisplayOffset(
+          projectComposerSessions(next),
+          next.length,
+        );
         el.selectionStart = el.selectionEnd = at;
       }
     });
@@ -675,7 +684,9 @@ export function Composer({
      *  the `setDisplayText` beside it has not committed. */
     overrideText?: string,
   ) {
-    const sentPastedIds = new Set(pastedTexts.map((attachment) => attachment.id));
+    const sentPastedIds = new Set(
+      pastedTexts.map((attachment) => attachment.id),
+    );
     const consume = () => {
       onTyping?.(false);
       if (!isControlled) {
@@ -725,7 +736,11 @@ export function Composer({
   useEffect(() => {
     if (!attachmentShortcutActive || !canAttach) return;
     function onKeyDown(e: KeyboardEvent) {
-      if (e.defaultPrevented || e.repeat || !matchesShortcut(e, "composer-attach"))
+      if (
+        e.defaultPrevented ||
+        e.repeat ||
+        !matchesShortcut(e, "composer-attach")
+      )
         return;
       e.preventDefault();
       fileInputRef.current?.click();
@@ -786,7 +801,9 @@ export function Composer({
   // Notes bypass the busy queue/steer machinery entirely — they post straight
   // to the team whether or not a turn is running.
   const steerSend =
-    !noteMode && !!busy && (modifierPicks && sendModifierHeld ? modSteer : entSteer);
+    !noteMode &&
+    !!busy &&
+    (modifierPicks && sendModifierHeld ? modSteer : entSteer);
   // Picking a busy action from the send button's menu hands the OTHER one to
   // ⌘/Ctrl+Enter, so both actions always keep a key and each row shows exactly
   // one — with both prefs on the same action there is no way to reach the other
@@ -859,7 +876,8 @@ export function Composer({
     // `mousedown` on non-interactive elements, so listen for `touchstart` too —
     // otherwise the menu gets stuck open on mobile.
     function onDown(e: Event) {
-      if (!(e.target as HTMLElement).closest(".composer-pop-wrap")) setMenu(null);
+      if (!(e.target as HTMLElement).closest(".composer-pop-wrap"))
+        setMenu(null);
     }
     document.addEventListener("mousedown", onDown);
     document.addEventListener("touchstart", onDown);
@@ -910,36 +928,42 @@ export function Composer({
     skillsFetch,
     actions: [
       ...(canAttach
-        ? [{
-            id: "add-files",
-            label: "Add files and folders",
-            description: "Attach context to this message",
-            keywords: ["upload", "attach"],
-            icon: <IconPaperclip size={16} />,
-            run: () => fileInputRef.current?.click(),
-          }]
+        ? [
+            {
+              id: "add-files",
+              label: "Add files and folders",
+              description: "Attach context to this message",
+              keywords: ["upload", "attach"],
+              icon: <IconPaperclip size={16} />,
+              run: () => fileInputRef.current?.click(),
+            },
+          ]
         : []),
       ...(onSetGoal
-        ? [{
-            id: "session-goal",
-            label: goal ? "Edit session goal" : "Set session goal",
-            description: "Guide every prompt in this session",
-            keywords: ["target", "objective"],
-            icon: <IconCrosshair size={16} />,
-            run: () => setMenu("goal"),
-          }]
+        ? [
+            {
+              id: "session-goal",
+              label: goal ? "Edit session goal" : "Set session goal",
+              description: "Guide every prompt in this session",
+              keywords: ["target", "objective"],
+              icon: <IconCrosshair size={16} />,
+              run: () => setMenu("goal"),
+            },
+          ]
         : []),
       ...(onNoteModeChange
-        ? [{
-            id: "team-note",
-            label: noteMode ? "Back to prompting" : "Write a team note",
-            description: noteMode
-              ? "Send the next message to the agent"
-              : "Only your team will see it",
-            keywords: ["internal", "note"],
-            icon: <IconNote size={16} />,
-            run: () => onNoteModeChange(!noteMode),
-          }]
+        ? [
+            {
+              id: "team-note",
+              label: noteMode ? "Back to prompting" : "Write a team note",
+              description: noteMode
+                ? "Send the next message to the agent"
+                : "Only your team will see it",
+              keywords: ["internal", "note"],
+              icon: <IconNote size={16} />,
+              run: () => onNoteModeChange(!noteMode),
+            },
+          ]
         : []),
     ],
   });
@@ -951,13 +975,19 @@ export function Composer({
       return;
     }
     const selected = Array.from(picked);
-    const noteImageTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+    const noteImageTypes = new Set([
+      "image/png",
+      "image/jpeg",
+      "image/gif",
+      "image/webp",
+    ]);
     const allowed = (file: File) =>
-      file.type.startsWith("image/") && (!noteMode || noteImageTypes.has(file.type));
-    const disallowed = canAttachFiles ? [] : selected.filter((file) => !allowed(file));
-    const accepted = canAttachFiles
-      ? selected
-      : selected.filter(allowed);
+      file.type.startsWith("image/") &&
+      (!noteMode || noteImageTypes.has(file.type));
+    const disallowed = canAttachFiles
+      ? []
+      : selected.filter((file) => !allowed(file));
+    const accepted = canAttachFiles ? selected : selected.filter(allowed);
     const results = await localUploads.upload(accepted, (file, signal) =>
       splitAttachments([file], signal),
     );
@@ -1035,7 +1065,8 @@ export function Composer({
       setTimeout(() => {
         const field = textareaRef.current;
         field?.focus({ preventScroll: true });
-        if (field) field.selectionStart = field.selectionEnd = field.value.length;
+        if (field)
+          field.selectionStart = field.selectionEnd = field.value.length;
       }, 0);
     }
   }
@@ -1181,10 +1212,10 @@ export function Composer({
   const hlRef = useRef<HTMLDivElement>(null);
   const sessionRanges = sessionNames.sessions;
   const hlActive = needsComposerHighlight(displayText, people, sessionRanges);
-  const hlHtml = (hlActive
-        ? composerHighlightHtml(displayText, people, sessionRanges)
-        : "");
-  const mentionRanges = (composerMentionRanges(displayText, people));
+  const hlHtml = hlActive
+    ? composerHighlightHtml(displayText, people, sessionRanges)
+    : "";
+  const mentionRanges = composerMentionRanges(displayText, people);
   // A mention pill's padding is bought out of the space beside it, so the draft
   // pays a wider word space only while it holds one. Both the field and the
   // mirror wear it, or the painted text slides off the caret behind it. Session
@@ -1220,10 +1251,18 @@ export function Composer({
       (s) => caret > s.start && caret < s.end,
     );
     if (session)
-      return { kind: "session" as const, start: session.start, end: session.end };
+      return {
+        kind: "session" as const,
+        start: session.start,
+        end: session.end,
+      };
     const mention = mentionRanges.find((r) => caret > r.start && caret < r.end);
     if (mention)
-      return { kind: "mention" as const, start: mention.start, end: mention.end };
+      return {
+        kind: "mention" as const,
+        start: mention.start,
+        end: mention.end,
+      };
     return null;
   }
 
@@ -1233,7 +1272,11 @@ export function Composer({
   // way at all to point a reference somewhere else short of deleting it and
   // starting over. Pressing one now selects it and offers what you can do to
   // it; Remove is a row in that menu rather than the whole interaction.
-  function openPillMenu(el: HTMLTextAreaElement, x: number, y: number): boolean {
+  function openPillMenu(
+    el: HTMLTextAreaElement,
+    x: number,
+    y: number,
+  ): boolean {
     const hit = pillAtCaret(el);
     if (!hit) return false;
     // Selected, because the menu is ABOUT that reference and a menu that
@@ -1247,7 +1290,12 @@ export function Composer({
     setPillMenu({
       ...hit,
       rect: rect
-        ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height }
+        ? {
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+          }
         : { left: x, top: y, width: 0, height: 0 },
     });
     return true;
@@ -1256,17 +1304,17 @@ export function Composer({
   // Base UI positions against an element; a pill is a box of text with no
   // element of its own, so it is handed the box instead. Rebuilt with the
   // menu's own state, which is the only thing that moves it.
-  const pillAnchor = (pillMenu
-        ? {
-            getBoundingClientRect: () =>
-              new DOMRect(
-                pillMenu.rect.left,
-                pillMenu.rect.top,
-                pillMenu.rect.width,
-                pillMenu.rect.height,
-              ),
-          }
-        : null);
+  const pillAnchor = pillMenu
+    ? {
+        getBoundingClientRect: () =>
+          new DOMRect(
+            pillMenu.rect.left,
+            pillMenu.rect.top,
+            pillMenu.rect.width,
+            pillMenu.rect.height,
+          ),
+      }
+    : null;
 
   /** Point the reference somewhere else, rather than at nothing. */
   function changePill() {
@@ -1345,8 +1393,7 @@ export function Composer({
     const back = key === "Backspace";
     const hit = mentionRanges.find((r) =>
       back
-        ? caret === r.end ||
-          (caret === r.end + 1 && displayText[r.end] === " ")
+        ? caret === r.end || (caret === r.end + 1 && displayText[r.end] === " ")
         : caret === r.start,
     );
     if (!hit) return false;
@@ -1407,11 +1454,7 @@ export function Composer({
     insertDictation(t);
     const nextCanonical = appendDictation(text, t);
     if (disabled || sendBlockedFor(nextCanonical)) return;
-    fireSend(
-      onSend,
-      steerSend ? { steer: true } : undefined,
-      nextCanonical,
-    );
+    fireSend(onSend, steerSend ? { steer: true } : undefined, nextCanonical);
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -1543,8 +1586,16 @@ export function Composer({
         // rounded bottom, and the seam where they meet squares off.
         initial={false}
         animate={{
-          borderTopLeftRadius: minimized ? 999 : hasAttached ? 0 : composerRadius(),
-          borderTopRightRadius: minimized ? 999 : hasAttached ? 0 : composerRadius(),
+          borderTopLeftRadius: minimized
+            ? 999
+            : hasAttached
+              ? 0
+              : composerRadius(),
+          borderTopRightRadius: minimized
+            ? 999
+            : hasAttached
+              ? 0
+              : composerRadius(),
           borderBottomLeftRadius: minimized ? 999 : composerRadius(),
           borderBottomRightRadius: minimized ? 999 : composerRadius(),
           // The controls stay in their toolbar positions while the top edge
@@ -1672,14 +1723,18 @@ export function Composer({
           comments={imageComments}
           onComment={canAttachImages ? commentOnImage : undefined}
           onDeleteComment={canAttachImages ? deleteCommentOnImage : undefined}
-          onRemovePending={staging ? onRemovePendingImage : localUploads.cancelPendingImage}
+          onRemovePending={
+            staging ? onRemovePendingImage : localUploads.cancelPendingImage
+          }
           disabled={disabled}
         />
         <FileChips
           files={fls}
           pending={activeStaging.files}
           onRemove={removeFile}
-          onRemovePending={staging ? onRemovePendingFile : localUploads.cancelPendingFile}
+          onRemovePending={
+            staging ? onRemovePendingFile : localUploads.cancelPendingFile
+          }
           disabled={disabled}
         />
         {attachingLabel(activeStaging) && (
@@ -1697,10 +1752,7 @@ export function Composer({
           layoutDependency={minimized}
           // Positioned for the code mirror below (and the scroll-fade mask the
           // auto-grow effect writes onto it).
-          className={cn(
-            "relative",
-            minimized && "order-2 min-w-0 flex-auto",
-          )}
+          className={cn("relative", minimized && "order-2 min-w-0 flex-auto")}
           ref={mentionInputWrapRef}
         >
           {mentionPopup}
@@ -1811,8 +1863,13 @@ export function Composer({
               onTyping?.(false);
               const remote = pendingRemoteText.current;
               pendingRemoteText.current = null;
-              if (remote !== null && (!draftKey || loadDraft(draftKey).text === remote)) {
-                setInnerValue((current) => (current === remote ? current : remote));
+              if (
+                remote !== null &&
+                (!draftKey || loadDraft(draftKey).text === remote)
+              ) {
+                setInnerValue((current) =>
+                  current === remote ? current : remote,
+                );
               }
               // Let a click on a suggestion (mousedown) win the race first.
               setTimeout(closeMentions, 120);
@@ -1949,7 +2006,9 @@ export function Composer({
                       <span className={composerMenuIcon}>
                         <IconAtSign size={22} />
                       </span>
-                      <span className="grow whitespace-nowrap">Reference a file</span>
+                      <span className="grow whitespace-nowrap">
+                        Reference a file
+                      </span>
                       {/* Not a chord: typing @ in the field opens the same
                           picker, which is the faster way once you know it.
                           Hidden on phones, where there are no keys to press —
@@ -2027,7 +2086,11 @@ export function Composer({
                 type="file"
                 {...(canAttachFiles
                   ? {}
-                  : { accept: noteMode ? "image/png,image/jpeg,image/gif,image/webp" : "image/*" })}
+                  : {
+                      accept: noteMode
+                        ? "image/png,image/jpeg,image/gif,image/webp"
+                        : "image/*",
+                    })}
                 multiple
                 hidden
                 onChange={(e) => {
@@ -2164,7 +2227,9 @@ export function Composer({
                 )}
                 onPress={onStop}
                 disabled={disabled}
-                aria-label={stopping ? "Stopping current turn" : "Stop current turn"}
+                aria-label={
+                  stopping ? "Stopping current turn" : "Stop current turn"
+                }
               >
                 <IconStopSquare size={24} />
               </ComposerPressButton>
@@ -2252,9 +2317,7 @@ export function Composer({
                   </ContextMenu.Trigger>
                 </Tooltip>
                 <ContextMenu.Popup className="min-w-[230px]">
-                  <ContextMenu.Item
-                    onClick={() => pickBusySend("queue")}
-                  >
+                  <ContextMenu.Item onClick={() => pickBusySend("queue")}>
                     <IconReturn size={20} />
                     <span className="grow">Queue after run finishes</span>
                     {busySendKeys("queue") && (
@@ -2262,11 +2325,12 @@ export function Composer({
                         {busySendKeys("queue")}
                       </ContextMenu.Shortcut>
                     )}
-                    <ContextMenu.Check on={busySendPrefs.enter === "queue"} size={16} />
+                    <ContextMenu.Check
+                      on={busySendPrefs.enter === "queue"}
+                      size={16}
+                    />
                   </ContextMenu.Item>
-                  <ContextMenu.Item
-                    onClick={() => pickBusySend("steer")}
-                  >
+                  <ContextMenu.Item onClick={() => pickBusySend("steer")}>
                     <IconArrowUp size={20} />
                     <span className="grow">Steer into running turn</span>
                     {busySendKeys("steer") && (
@@ -2274,7 +2338,10 @@ export function Composer({
                         {busySendKeys("steer")}
                       </ContextMenu.Shortcut>
                     )}
-                    <ContextMenu.Check on={busySendPrefs.enter === "steer"} size={16} />
+                    <ContextMenu.Check
+                      on={busySendPrefs.enter === "steer"}
+                      size={16}
+                    />
                   </ContextMenu.Item>
                 </ContextMenu.Popup>
               </ContextMenu.Root>
@@ -2298,38 +2365,41 @@ export function Composer({
             stays for mouse/pen, with a recent-touch guard for browsers that
             fire both. The bar also stays mounted outside insert mode even if
             focus is lost, so it can never vanish mid-interaction. */}
-        {vimEnabled && isPhone && !minimized && (focused || vim.mode !== "insert") && (
-          <div
-            className="mt-1.5 flex gap-1.5 border-t border-line pt-1.5"
-            onPointerDown={(e) => e.preventDefault()}
-            onMouseDown={(e) => e.preventDefault()}
-          >
-            {(
-              [
-                ["esc", "Escape"],
-                ["tab", "Tab"],
-                ["←", "ArrowLeft"],
-                ["↓", "ArrowDown"],
-                ["↑", "ArrowUp"],
-                ["→", "ArrowRight"],
-              ] as const
-            ).map(([label, key]) => (
-              <ComposerPressButton
-                key={key}
-                type="button"
-                className={`h-8 flex-1 select-none rounded-md border border-line bg-surface text-label font-semibold text-dim active:bg-panel ${
-                  key === "Escape" && vim.mode !== "insert"
-                    ? "border-accent text-fg"
-                    : ""
-                }`}
-                onPress={() => vim.injectKey(key)}
-                aria-label={key}
-              >
-                {label}
-              </ComposerPressButton>
-            ))}
-          </div>
-        )}
+        {vimEnabled &&
+          isPhone &&
+          !minimized &&
+          (focused || vim.mode !== "insert") && (
+            <div
+              className="mt-1.5 flex gap-1.5 border-t border-line pt-1.5"
+              onPointerDown={(e) => e.preventDefault()}
+              onMouseDown={(e) => e.preventDefault()}
+            >
+              {(
+                [
+                  ["esc", "Escape"],
+                  ["tab", "Tab"],
+                  ["←", "ArrowLeft"],
+                  ["↓", "ArrowDown"],
+                  ["↑", "ArrowUp"],
+                  ["→", "ArrowRight"],
+                ] as const
+              ).map(([label, key]) => (
+                <ComposerPressButton
+                  key={key}
+                  type="button"
+                  className={`h-8 flex-1 select-none rounded-md border border-line bg-surface text-label font-semibold text-dim active:bg-panel ${
+                    key === "Escape" && vim.mode !== "insert"
+                      ? "border-accent text-fg"
+                      : ""
+                  }`}
+                  onPress={() => vim.injectKey(key)}
+                  aria-label={key}
+                >
+                  {label}
+                </ComposerPressButton>
+              ))}
+            </div>
+          )}
       </motion.div>
       {/* The keyboard-shortcut hint is irrelevant on touch and eats vertical
           space right where the keyboard appears. */}

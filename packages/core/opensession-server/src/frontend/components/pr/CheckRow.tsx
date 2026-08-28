@@ -7,7 +7,8 @@ import type { PrCheck } from "../../lib/types";
  *  !important and a utility therefore cannot. */
 export function CheckRow({ check }: { check: PrCheck }) {
   const cls = checkClass(check.status, check.conclusion);
-  const mark = cls === "check-success" ? "✓" : cls === "check-failure" ? "✕" : "●";
+  const mark =
+    cls === "check-success" ? "✓" : cls === "check-failure" ? "✕" : "●";
   const duration = formatCheckDuration(check);
   return (
     <div className="group flex items-center gap-2 rounded-row px-1.5 py-1 text-label text-fg transition-[background] hover:bg-hover">
@@ -19,15 +20,21 @@ export function CheckRow({ check }: { check: PrCheck }) {
       >
         <span
           className={`w-3.5 shrink-0 text-center text-label ${CHECK_TEXT[cls]} ${
-            cls === "check-pending" ? "pr-check-mark-pending animate-[pulse_1.4s_infinite]" : ""
+            cls === "check-pending"
+              ? "pr-check-mark-pending animate-[pulse_1.4s_infinite]"
+              : ""
           }`}
         >
           {mark}
         </span>
         <span className="flex-1 truncate">{check.name}</span>
-        {duration && <span className="text-meta tabular-nums text-faint">{duration}</span>}
+        {duration && (
+          <span className="text-meta tabular-nums text-faint">{duration}</span>
+        )}
         {check.url && (
-          <span className="text-item-title text-faint group-hover:text-fg">↗</span>
+          <span className="text-item-title text-faint group-hover:text-fg">
+            ↗
+          </span>
         )}
       </a>
     </div>

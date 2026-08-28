@@ -18,7 +18,7 @@ describe("buildRunInstructions", () => {
       "## Media",
     ]);
     expect(prompt).toContain(
-      "For PRs outside the current primary repository, write `<repo>#<number>`, never bare `#<number>`."
+      "For PRs outside the current primary repository, write `<repo>#<number>`, never bare `#<number>`.",
     );
     expect(prompt.length).toBeLessThan(700);
   });

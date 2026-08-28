@@ -48,10 +48,7 @@ import {
   registerActiveRunProbe,
   type ActiveRunRecord,
 } from "./run-journal";
-import {
-  shouldPersistModelSwitch,
-  type ImageInput,
-} from "./run-events";
+import { shouldPersistModelSwitch, type ImageInput } from "./run-events";
 import type { TranscriptEntry } from "./types";
 import {
   appendTranscriptEntries,
@@ -156,10 +153,12 @@ const DISABLE_FILE = `${OPENSESSION_SESSIONS_DIR}/disable-run-hosts`;
 // starting. Reserve its key before launch so takeInterruptedRuns does not
 // attach a second HostHandle to a run this process already drives. HostHandle
 // registration takes over once launch completes.
-const activeHostedRunKeys: Set<string> = ((globalThis as any)
-  .__activeHostedRunKeys ??= new Set());
-const pendingRunHostAdmissions: Set<symbol> = ((globalThis as any)
-  .__pendingRunHostAdmissions ??= new Set());
+const activeHostedRunKeys: Set<string> = ((
+  globalThis as any
+).__activeHostedRunKeys ??= new Set());
+const pendingRunHostAdmissions: Set<symbol> = ((
+  globalThis as any
+).__pendingRunHostAdmissions ??= new Set());
 registerActiveRunProbe(
   (runKey) => activeHostedRunKeys.has(runKey) || hostRunBusy(runKey),
 );
@@ -267,7 +266,9 @@ export interface HostedRunOpts {
  * runAgent. A Linux host never falls back into the gateway: launch failure is
  * visible and retryable, while non-systemd platforms retain in-process mode.
  */
-export async function* runAgentHosted(opts: HostedRunOpts): AsyncGenerator<StreamEvent> {
+export async function* runAgentHosted(
+  opts: HostedRunOpts,
+): AsyncGenerator<StreamEvent> {
   if (opts.shouldCancel?.()) return;
   if (forceInProcessForTest) {
     yield* runAgentInProcess(opts);
@@ -295,7 +296,8 @@ export async function* runAgentHosted(opts: HostedRunOpts): AsyncGenerator<Strea
       onAdmit: () => pendingRunHostAdmissions.add(admission),
       shouldCancel: opts.shouldCancel,
     })) === "cancelled"
-  ) return;
+  )
+    return;
   if (opts.shouldCancel?.()) {
     pendingRunHostAdmissions.delete(admission);
     return;
@@ -318,7 +320,8 @@ export async function* runAgentHosted(opts: HostedRunOpts): AsyncGenerator<Strea
       spawned.handle.requestCancel();
       // Drain through the host's `end`, not merely its terminal event: the
       // source owns cleanup and may still be waiting to close its transport.
-      for await (const _event of spawned.handle.events()) {}
+      for await (const _event of spawned.handle.events()) {
+      }
       return;
     }
     yield* hostedEventsWithJournal(spawned.handle, spawned.spec);
@@ -344,7 +347,8 @@ export interface AuxiliaryHostedRunOpts extends HostedRunOpts {
 export async function* runAuxiliaryAgentHosted(
   opts: AuxiliaryHostedRunOpts,
 ): AsyncGenerator<StreamEvent> {
-  const shouldCancel = () => Boolean(opts.signal?.aborted || opts.shouldCancel?.());
+  const shouldCancel = () =>
+    Boolean(opts.signal?.aborted || opts.shouldCancel?.());
   if (forceInProcessForTest) {
     yield* runAgentInProcess({ ...opts, shouldCancel }, "auxiliary");
     return;
@@ -369,7 +373,8 @@ export async function* runAuxiliaryAgentHosted(
       onAdmit: () => pendingRunHostAdmissions.add(admission),
       shouldCancel,
     })) === "cancelled"
-  ) return;
+  )
+    return;
   if (shouldCancel()) {
     pendingRunHostAdmissions.delete(admission);
     return;
@@ -470,7 +475,9 @@ async function* hostedEventsWithJournal(
   if (
     owner.currentRunId &&
     owner.currentRunId !== record.runKey &&
-    ["running", "ask_blocked", "interrupted", "reattaching"].includes(owner.state)
+    ["running", "ask_blocked", "interrupted", "reattaching"].includes(
+      owner.state,
+    )
   ) {
     handle.requestCancel();
     audit({
@@ -483,7 +490,9 @@ async function* hostedEventsWithJournal(
   }
   handle.setHostChangeHandler(async (hostId) => {
     record.hostId = hostId;
-    await hostedKernelCall(spec, "host_change_journal", () => journalSet(record));
+    await hostedKernelCall(spec, "host_change_journal", () =>
+      journalSet(record),
+    );
   });
   await hostedKernelCall(spec, "initial_journal", () => journalSet(record));
   let sourceCompleted = false;
@@ -503,7 +512,11 @@ async function* hostedEventsWithJournal(
         });
         continue;
       }
-      if (ev.type === "init" && ev.sessionId && ev.sessionId !== record.claudeSessionId) {
+      if (
+        ev.type === "init" &&
+        ev.sessionId &&
+        ev.sessionId !== record.claudeSessionId
+      ) {
         record.claudeSessionId = ev.sessionId;
         await hostedKernelCall(spec, "engine_session_journal", () =>
           journalSet(record),
@@ -522,7 +535,8 @@ async function* hostedEventsWithJournal(
     }
     sourceCompleted = true;
   } finally {
-    if (handle.ended && sourceCompleted && sawTerminal) journalClear(record.runKey);
+    if (handle.ended && sourceCompleted && sawTerminal)
+      journalClear(record.runKey);
     else if (handle.ended && sourceCompleted)
       await hostedKernelCall(spec, "abnormal_completion_journal", () =>
         journalRecordAbnormalCompletion(record),
@@ -577,7 +591,9 @@ async function spawnHostRun(
   const dir = `${HOSTS_DIR}/${hostId}`;
   mkdirSync(dir, { recursive: true });
 
-  const rpcToken = opts.proxyMcpServers?.length ? crypto.randomUUID() : undefined;
+  const rpcToken = opts.proxyMcpServers?.length
+    ? crypto.randomUUID()
+    : undefined;
   const spec: RunHostSpec = {
     hostId,
     osSessionId: opts.osSessionId,
@@ -619,7 +635,11 @@ async function spawnHostRun(
     lastResumeAt: opts.lastResumeAt,
   };
   writeJsonAtomic(`${dir}/${HOST_SPEC_NAME}`, spec);
-  if (rpcToken) registerRunToken(rpcToken, { sessionId: opts.osSessionId, user: opts.user });
+  if (rpcToken)
+    registerRunToken(rpcToken, {
+      sessionId: opts.osSessionId,
+      user: opts.user,
+    });
 
   let handle: HostHandle | undefined;
   let launchCompleted = false;
@@ -702,7 +722,10 @@ async function launchHostUnit(hostId: string, dir: string): Promise<void> {
   }
 }
 
-async function stopAndVerifyHostAbsent(hostId: string, dir: string): Promise<void> {
+async function stopAndVerifyHostAbsent(
+  hostId: string,
+  dir: string,
+): Promise<void> {
   try {
     await stopHostUnitDirect(hostId);
   } catch {}
@@ -715,7 +738,10 @@ async function stopAndVerifyHostAbsent(hostId: string, dir: string): Promise<voi
         const matches = sameProcess(meta);
         if (matches !== undefined) processAlive = matches;
         else {
-          try { process.kill(meta.pid, 0); processAlive = true; } catch {}
+          try {
+            process.kill(meta.pid, 0);
+            processAlive = true;
+          } catch {}
         }
       }
       if (
@@ -772,7 +798,9 @@ export interface HostLauncher {
   /** Stop a disconnected host and prove it absent before ownership is cleared. */
   stop?(hostId: string, dir: string): Promise<void>;
   /** Inspect durable host evidence before destructive reconciliation. */
-  evidence?(dir: string): Promise<HostExecutionEvidence> | HostExecutionEvidence;
+  evidence?(
+    dir: string,
+  ): Promise<HostExecutionEvidence> | HostExecutionEvidence;
   /**
    * Transport override: how the handle reaches the launched host. Default
    * (undefined return) = the unix socket at `<dir>/host.sock`. The WS
@@ -880,8 +908,12 @@ const systemdHostLauncher: HostLauncher = {
     if (!meta?.pid) return false;
     const matches = sameProcess(meta);
     if (matches !== undefined) return matches;
-    try { process.kill(meta.pid, 0); return true; }
-    catch { return false; }
+    try {
+      process.kill(meta.pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
   },
   newRunDir: (hostId) => `${HOSTS_DIR}/${hostId}`,
   launch: launchHostUnit,
@@ -891,7 +923,9 @@ const systemdHostLauncher: HostLauncher = {
     const privateRun = readHostJournal(dir);
     return {
       started: !!meta?.pid || !!privateRun,
-      ...(meta?.engineSessionId ? { engineSessionId: meta.engineSessionId } : {}),
+      ...(meta?.engineSessionId
+        ? { engineSessionId: meta.engineSessionId }
+        : {}),
       ...(meta?.done ? { done: meta.done } : {}),
     };
   },
@@ -913,7 +947,8 @@ class AsyncEventQueue {
   end(): void {
     if (this.closed) return;
     this.closed = true;
-    for (const w of this.waiters.splice(0)) w({ value: undefined as any, done: true });
+    for (const w of this.waiters.splice(0))
+      w({ value: undefined as any, done: true });
   }
 
   async *[Symbol.asyncIterator](): AsyncGenerator<StreamEvent> {
@@ -924,7 +959,7 @@ class AsyncEventQueue {
       }
       if (this.closed) return;
       const r = await new Promise<IteratorResult<StreamEvent>>((res) =>
-        this.waiters.push(res)
+        this.waiters.push(res),
       );
       if (r.done) return;
       yield r.value;
@@ -954,7 +989,10 @@ export class HostHandle {
   private handlingAsks = new Set<string>();
   private steerRetractions = new Map<
     string,
-    { resolve: (retracted: boolean) => void; timer: ReturnType<typeof setTimeout> }
+    {
+      resolve: (retracted: boolean) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
   >();
   /** Sent steer ids awaiting their host-forwarded user transcript row. Active
    * hosts from an older release still mint a random uuid for that row; this
@@ -994,8 +1032,11 @@ export class HostHandle {
         if (
           sent &&
           steerId &&
-          !this.pendingSteerTranscripts.some((pending) => pending.id === steerId)
-        ) this.pendingSteerTranscripts.push({ id: steerId, text });
+          !this.pendingSteerTranscripts.some(
+            (pending) => pending.id === steerId,
+          )
+        )
+          this.pendingSteerTranscripts.push({ id: steerId, text });
         return sent;
       },
       retractSteer: (steerId) => this.retractSteer(steerId),
@@ -1060,7 +1101,9 @@ export class HostHandle {
     return this.stopRequested || this.endedClean;
   }
 
-  setHostChangeHandler(handler: (hostId: string) => void | Promise<void>): void {
+  setHostChangeHandler(
+    handler: (hostId: string) => void | Promise<void>,
+  ): void {
     this.onHostChanged = handler;
   }
 
@@ -1077,7 +1120,9 @@ export class HostHandle {
     const meta = readJsonSafe<RunHostMeta>(`${this.dir}/${HOST_META_NAME}`);
     return {
       started: !!meta?.pid,
-      ...(meta?.engineSessionId ? { engineSessionId: meta.engineSessionId } : {}),
+      ...(meta?.engineSessionId
+        ? { engineSessionId: meta.engineSessionId }
+        : {}),
       ...(meta?.done ? { done: meta.done } : {}),
     };
   }
@@ -1089,8 +1134,7 @@ export class HostHandle {
     if (this.ended) return true;
     this.send({ t: "cancel" });
     const deadline = Date.now() + timeoutMs;
-    while (!this.ended && Date.now() < deadline)
-      await Bun.sleep(50);
+    while (!this.ended && Date.now() < deadline) await Bun.sleep(50);
     if (this.ended) return true;
     if (!this.launcher.stop) return false;
     try {
@@ -1116,7 +1160,8 @@ export class HostHandle {
     // while all of its now-stale frames are rejected.
     this.stopRequested = true;
     void (async () => {
-      if (delivered && this.cancelGraceMs > 0) await Bun.sleep(this.cancelGraceMs);
+      if (delivered && this.cancelGraceMs > 0)
+        await Bun.sleep(this.cancelGraceMs);
       if (this.endedClean) return;
       try {
         await this.launcher.stop!(this.ctl.hostId, this.dir);
@@ -1175,7 +1220,9 @@ export class HostHandle {
           new Promise<"stall">((res) => setTimeout(() => res("stall"), 5_000)),
         ]);
         if (r === "ok") return;
-        lastErr = new Error("connect attempt stalled >5s (promise never settled)");
+        lastErr = new Error(
+          "connect attempt stalled >5s (promise never settled)",
+        );
         console.warn(
           `[host-client] ${this.spec.hostId.slice(0, 11)}: connect attempt ${attempts} stalled >5s`,
         );
@@ -1184,7 +1231,7 @@ export class HostHandle {
       }
       if (Date.now() >= deadline) {
         throw new Error(
-          `run host ${this.spec.hostId} never became connectable after ${attempts} attempt(s): ${lastErr}`
+          `run host ${this.spec.hostId} never became connectable after ${attempts} attempt(s): ${lastErr}`,
         );
       }
       await new Promise((r) => setTimeout(r, 300));
@@ -1281,7 +1328,8 @@ export class HostHandle {
     if (this.pendingSteerTranscripts.length === 0) return lines;
     return lines.map((line) => {
       if (line.type !== "user") return line;
-      const content = (line.message as { content?: unknown } | undefined)?.content;
+      const content = (line.message as { content?: unknown } | undefined)
+        ?.content;
       const text = Array.isArray(content)
         ? content
             .filter(
@@ -1294,10 +1342,8 @@ export class HostHandle {
             .map((block) => block.text)
             .join("\n")
         : "";
-      if (
-        line.uuid === this.spec.promptEntryId ||
-        text === this.spec.prompt
-      ) return line;
+      if (line.uuid === this.spec.promptEntryId || text === this.spec.prompt)
+        return line;
       let index = this.pendingSteerTranscripts.findIndex(
         (pending) => pending.text === text,
       );
@@ -1383,8 +1429,12 @@ export class HostHandle {
           });
         }
         this.connectedBefore = true;
-        if (msg.pendingAsks?.length && this.acceptsSideEffectFrame("hello.pendingAsks"))
-          for (const ask of msg.pendingAsks) this.handleAsk(ask.askId, ask.input);
+        if (
+          msg.pendingAsks?.length &&
+          this.acceptsSideEffectFrame("hello.pendingAsks")
+        )
+          for (const ask of msg.pendingAsks)
+            this.handleAsk(ask.askId, ask.input);
         if (msg.state === "ended") {
           if (msg.done && !this.sawTerminal) {
             this.sawTerminal = true;
@@ -1407,7 +1457,8 @@ export class HostHandle {
           this.effectiveModel = ev.toModel;
           this.transientFallback = ev.temporaryFallback === true;
           this.ctl.steerable = modelSupportsSteer(ev.toModel);
-          if (shouldPersistModelSwitch(ev)) this.reportedSelectedModel = ev.toModel;
+          if (shouldPersistModelSwitch(ev))
+            this.reportedSelectedModel = ev.toModel;
         }
         if (ev.type === "done" || ev.type === "error") {
           this.sawTerminal = true;
@@ -1563,11 +1614,13 @@ export class HostHandle {
     // to resume it — transparent to whoever is consuming events().
     const journal = readHostJournal(this.dir);
     const engineId =
-      journal?.claudeSessionId || this.engineSessionId || this.spec.engineSessionId;
+      journal?.claudeSessionId ||
+      this.engineSessionId ||
+      this.spec.engineSessionId;
     if (engineId && this.respawns < 2) {
       this.respawns++;
       console.warn(
-        `[host-client] run host ${this.spec.hostId} died mid-run — respawning to resume ${this.spec.osSessionId}`
+        `[host-client] run host ${this.spec.hostId} died mid-run — respawning to resume ${this.spec.osSessionId}`,
       );
       try {
         await this.respawn(engineId, meta);
@@ -1601,7 +1654,10 @@ export class HostHandle {
     this.finish();
   }
 
-  private async respawn(engineId: string, meta?: RunHostMeta | null): Promise<void> {
+  private async respawn(
+    engineId: string,
+    meta?: RunHostMeta | null,
+  ): Promise<void> {
     const oldDir = this.dir;
     const hostId = `rh-${Bun.randomUUIDv7()}`;
     const dir = this.launcher.newRunDir(hostId);
@@ -1668,7 +1724,9 @@ export async function* reconcileUncertainHostEvents(
   let reportedUncertain = false;
   while (!handle.ended) {
     try {
-      await handle.connectWithWait(Math.min(30_000, Math.max(1_000, deadline - Date.now())));
+      await handle.connectWithWait(
+        Math.min(30_000, Math.max(1_000, deadline - Date.now())),
+      );
       yield* handle.events();
       return;
     } catch (error) {
@@ -1697,9 +1755,10 @@ export async function* reconcileUncertainHostEvents(
         }
         yield {
           type: "error",
-          content: evidence.started || finalEvidence.started
-            ? `${label} may have executed before it was stopped. Recovery evidence was retained.`
-            : `${label} was not observed and its process was stopped.`,
+          content:
+            evidence.started || finalEvidence.started
+              ? `${label} may have executed before it was stopped. Recovery evidence was retained.`
+              : `${label} was not observed and its process was stopped.`,
         };
         return;
       }
@@ -1726,7 +1785,9 @@ function readJsonSafe<T>(path: string): T | null {
 }
 
 function readHostJournal(dir: string): ActiveRunRecord | null {
-  const j = readJsonSafe<Record<string, ActiveRunRecord>>(`${dir}/${HOST_JOURNAL_NAME}`);
+  const j = readJsonSafe<Record<string, ActiveRunRecord>>(
+    `${dir}/${HOST_JOURNAL_NAME}`,
+  );
   if (!j) return null;
   const records = Object.values(j);
   return records[0] || null;
@@ -1741,7 +1802,9 @@ export function resolveInactiveHostRecovery(
   | { kind: "uncertain" }
   | { kind: "replay" } {
   const engineSessionId =
-    meta?.engineSessionId || privateJournal?.claudeSessionId || sharedEngineSessionId;
+    meta?.engineSessionId ||
+    privateJournal?.claudeSessionId ||
+    sharedEngineSessionId;
   if (engineSessionId) return { kind: "resume", engineSessionId };
   if (meta || privateJournal) return { kind: "uncertain" };
   return { kind: "replay" };
@@ -1819,9 +1882,18 @@ export async function resumeLocalHostRun(
     return null;
   }
   if (spec.rpcToken) {
-    registerRunToken(spec.rpcToken, { sessionId: spec.osSessionId, user: spec.user });
+    registerRunToken(spec.rpcToken, {
+      sessionId: spec.osSessionId,
+      user: spec.user,
+    });
   }
-  const handle = new HostHandle(dir, spec, callbacks, systemdHostLauncher, run.runKey);
+  const handle = new HostHandle(
+    dir,
+    spec,
+    callbacks,
+    systemdHostLauncher,
+    run.runKey,
+  );
   handle.setHostChangeHandler(async (hostId) => {
     run.hostId = hostId;
     await hostedKernelCall(spec, "reattach_host_change_journal", () =>
@@ -1831,7 +1903,10 @@ export async function resumeLocalHostRun(
   try {
     await handle.connectWithWait(20_000);
   } catch (e) {
-    console.warn(`[host-client] local host reattach failed for ${run.hostId}:`, e);
+    console.warn(
+      `[host-client] local host reattach failed for ${run.hostId}:`,
+      e,
+    );
     handle.abandon();
     try {
       if (await hostUnitActive(run.hostId)) return "uncertain";
@@ -1871,7 +1946,8 @@ export async function resumeLocalHostRun(
         if (event.type === "model_switch" && event.toModel) {
           run.model = event.toModel;
           run.transientFallback = event.temporaryFallback === true;
-          if (shouldPersistModelSwitch(event)) run.selectedModel = event.toModel;
+          if (shouldPersistModelSwitch(event))
+            run.selectedModel = event.toModel;
           changed = true;
         }
         if (changed) await journalSet({ ...run, claimedAt: undefined });

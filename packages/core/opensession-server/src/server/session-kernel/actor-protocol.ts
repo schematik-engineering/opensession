@@ -110,7 +110,8 @@ export type KernelActorServiceResponse = KernelActorResponse & {
 };
 
 export type KernelActorClientRequest =
-  KernelActorAsyncRequest | KernelActorClientCallRequest;
+  | KernelActorAsyncRequest
+  | KernelActorClientCallRequest;
 
 export type KernelActorClientResponse = KernelActorResponse;
 

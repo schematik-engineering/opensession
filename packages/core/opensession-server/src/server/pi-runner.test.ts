@@ -59,8 +59,16 @@ describe("acceptSteerOnce", () => {
     ).toThrow("not accepted");
     expect(accepted.has("one")).toBe(false);
     let calls = 0;
-    expect(acceptSteerOnce(accepted, "one", () => { calls += 1; })).toBe(true);
-    expect(acceptSteerOnce(accepted, "one", () => { calls += 1; })).toBe(true);
+    expect(
+      acceptSteerOnce(accepted, "one", () => {
+        calls += 1;
+      }),
+    ).toBe(true);
+    expect(
+      acceptSteerOnce(accepted, "one", () => {
+        calls += 1;
+      }),
+    ).toBe(true);
     expect(calls).toBe(1);
   });
 });
@@ -78,7 +86,10 @@ describe("piSteeringBoundaryTools", () => {
           parameters: {} as any,
           async execute() {
             executed.push("first");
-            return { content: [{ type: "text", text: "first result" }], details: {} };
+            return {
+              content: [{ type: "text", text: "first result" }],
+              details: {},
+            };
           },
         },
         {
@@ -88,7 +99,10 @@ describe("piSteeringBoundaryTools", () => {
           parameters: {} as any,
           async execute() {
             executed.push("second");
-            return { content: [{ type: "text", text: "second result" }], details: {} };
+            return {
+              content: [{ type: "text", text: "second result" }],
+              details: {},
+            };
           },
         },
       ],
@@ -123,11 +137,13 @@ describe("retractPendingSteer", () => {
       { steerId: "second", text: "same", images: ["second-image"] },
       { steerId: "third", text: "after" },
     ];
-    let replayed: readonly typeof pending[number][] = [];
+    let replayed: readonly (typeof pending)[number][] = [];
 
-    expect(retractPendingSteer(pending, "second", (remaining) => {
-      replayed = [...remaining];
-    })).toBe(true);
+    expect(
+      retractPendingSteer(pending, "second", (remaining) => {
+        replayed = [...remaining];
+      }),
+    ).toBe(true);
     expect(pending.map((item) => item.steerId)).toEqual(["first", "third"]);
     expect(replayed).toEqual(pending);
     expect(retractPendingSteer(pending, "missing", () => {})).toBe(false);
@@ -150,7 +166,12 @@ describe("assistant transcript output", () => {
       piAssistantTranscriptEntries(
         [
           { type: "thinking", thinking: "I should inspect the repository." },
-          { type: "toolCall", id: "t1", name: "read", arguments: { path: "README.md" } },
+          {
+            type: "toolCall",
+            id: "t1",
+            name: "read",
+            arguments: { path: "README.md" },
+          },
           { type: "text", text: "The repository is ready." },
         ],
         "2026-08-24T12:00:00.000Z",
@@ -189,8 +210,12 @@ describe("assistant transcript output", () => {
     // The exact os-01a02486 shape: content: [] with stopReason "stop".
     expect(assistantRenderableBlockCount([])).toBe(0);
     expect(assistantRenderableBlockCount(undefined)).toBe(0);
-    expect(assistantRenderableBlockCount([{ type: "text", text: "  \n" }])).toBe(0);
-    expect(assistantRenderableBlockCount([{ type: "thinking", thinking: "  \n" }])).toBe(0);
+    expect(
+      assistantRenderableBlockCount([{ type: "text", text: "  \n" }]),
+    ).toBe(0);
+    expect(
+      assistantRenderableBlockCount([{ type: "thinking", thinking: "  \n" }]),
+    ).toBe(0);
     expect(assistantRenderableBlockCount([null, 42, {}])).toBe(0);
   });
 });
@@ -242,14 +267,16 @@ describe("resolvePiRoutedModel", () => {
     expect(resolvePiRoutedModel("pi/orchestrator/nope")).toBeNull();
     // A workspace preset id with no live workspace behind it resolves to
     // nothing rather than minting a bogus "workspace-preset" provider.
-    expect(resolvePiRoutedModel("pi/workspace-preset/ws-not-a-workspace/nope")).toBeNull();
+    expect(
+      resolvePiRoutedModel("pi/workspace-preset/ws-not-a-workspace/nope"),
+    ).toBeNull();
   });
 
   test("preset wiring on the STORED id survives dispatch of the concrete lead", () => {
     // agent-runner dispatches presets as their concrete model; the stored
     // session id is where the preset (and its oracle/effort) still lives.
     expect(
-      resolvePiRoutedModel("pi/anthropic/claude-fable-5", "dial/ultra")
+      resolvePiRoutedModel("pi/anthropic/claude-fable-5", "dial/ultra"),
     ).toMatchObject({
       providerID: "anthropic",
       modelID: "claude-fable-5",
@@ -257,7 +284,7 @@ describe("resolvePiRoutedModel", () => {
       effort: "high",
     });
     expect(
-      resolvePiRoutedModel("pi/openai/gpt-5.6-sol", "pi/orchestrator/sol")
+      resolvePiRoutedModel("pi/openai/gpt-5.6-sol", "pi/orchestrator/sol"),
     ).toMatchObject({
       providerID: "openai",
       modelID: "gpt-5.6-sol",
@@ -267,7 +294,7 @@ describe("resolvePiRoutedModel", () => {
     // A non-preset stored id attaches nothing.
     const plain = resolvePiRoutedModel(
       "pi/anthropic/claude-opus-5",
-      "pi/anthropic/claude-opus-5"
+      "pi/anthropic/claude-opus-5",
     );
     expect(plain?.dial).toBeUndefined();
     expect(plain?.orchestrator).toBeUndefined();
@@ -306,7 +333,10 @@ const WS_PRESETS: Record<string, ResolvedWorkspaceModelPreset> = {
 
 describe("resolvePiPresetWiring (workspace presets)", () => {
   test("a routed workspace preset id resolves to its lead with the preset attached", () => {
-    const out = resolvePiPresetWiring("pi/workspace-preset/ws-test/opus", WS_PRESETS.opus);
+    const out = resolvePiPresetWiring(
+      "pi/workspace-preset/ws-test/opus",
+      WS_PRESETS.opus,
+    );
     expect(out).toMatchObject({
       providerID: "anthropic",
       modelID: "claude-opus-5",
@@ -319,7 +349,7 @@ describe("resolvePiPresetWiring (workspace presets)", () => {
   test("follows enginePresetId so a restated built-in keeps its oracle", () => {
     const out = resolvePiPresetWiring(
       "pi/workspace-preset/ws-test/opus-fable",
-      WS_PRESETS.opusFable
+      WS_PRESETS.opusFable,
     );
     expect(out).toMatchObject({
       modelID: "claude-opus-5",
@@ -332,7 +362,7 @@ describe("resolvePiPresetWiring (workspace presets)", () => {
   test("follows enginePresetId on the orchestrator side too", () => {
     const out = resolvePiPresetWiring(
       "pi/workspace-preset/ws-test/lead",
-      WS_PRESETS.lead
+      WS_PRESETS.lead,
     );
     expect(out).toMatchObject({
       modelID: "claude-fable-5",
@@ -343,10 +373,11 @@ describe("resolvePiPresetWiring (workspace presets)", () => {
 
   test("wiring rides the stored id while the routed id is the concrete lead", () => {
     // The agent-runner path: dispatch got the lead, opts.model kept the preset.
-    const out = resolvePiPresetWiring("pi/anthropic/claude-opus-5", WS_PRESETS.opusFable, [
+    const out = resolvePiPresetWiring(
       "pi/anthropic/claude-opus-5",
-      WS_PRESETS.opusFable.id,
-    ]);
+      WS_PRESETS.opusFable,
+      ["pi/anthropic/claude-opus-5", WS_PRESETS.opusFable.id],
+    );
     expect(out).toMatchObject({
       modelID: "claude-opus-5",
       dial: { id: "dial/opus-fable" },
@@ -402,7 +433,9 @@ describe("buildPiThirdPartyProviderPlan", () => {
     const ids = models.map((m) => m.id);
     expect(ids).toContain("deepseek-v4-flash-0731-fast");
     expect(ids).toContain("kimi-k3");
-    const deepseek = models.find((m) => m.id === "deepseek-v4-flash-0731-fast")!;
+    const deepseek = models.find(
+      (m) => m.id === "deepseek-v4-flash-0731-fast",
+    )!;
     // Pi's six-rung ladder onto Wafer's four: only the off-ladder rungs map.
     expect(deepseek.thinkingLevelMap).toEqual({ minimal: "low", xhigh: "max" });
     expect(deepseek.contextWindow).toBe(1_048_576);
@@ -520,17 +553,32 @@ describe("resolvePiDialModel", () => {
 
 describe("piGateReason", () => {
   test("interactive and unattended kinds pass", () => {
-    for (const kind of ["prompt", "goal", "create", "linear", "slack", "workflow"]) {
+    for (const kind of [
+      "prompt",
+      "goal",
+      "create",
+      "linear",
+      "slack",
+      "workflow",
+    ]) {
       expect(piGateReason({ journal: { kind } })).toBeNull();
     }
-    for (const kind of ["automation", "plain", "action", "security-scan", "github-review"]) {
+    for (const kind of [
+      "automation",
+      "plain",
+      "action",
+      "security-scan",
+      "github-review",
+    ]) {
       expect(piGateReason({ journal: { kind } })).toBeNull();
     }
   });
 
   test("resume/rerun/fallback suffixes resolve to the base kind", () => {
     expect(piGateReason({ journal: { kind: "prompt-resume" } })).toBeNull();
-    expect(piGateReason({ journal: { kind: "automation-resume-fallback" } })).toBeNull();
+    expect(
+      piGateReason({ journal: { kind: "automation-resume-fallback" } }),
+    ).toBeNull();
   });
 
   test("kind-less runs are refused (deny by default)", () => {
@@ -539,13 +587,17 @@ describe("piGateReason", () => {
   });
 
   test("unknown kinds are refused by name", () => {
-    expect(piGateReason({ journal: { kind: "mystery" } })).toContain('"mystery"');
+    expect(piGateReason({ journal: { kind: "mystery" } })).toContain(
+      '"mystery"',
+    );
   });
 
   test("the smoke kind is refused unless the harness armed its bypass", () => {
     // Request/automation data can NAME the kind, but only runPiSmokeTurn can
     // arm the module-scoped bypass — from out here it must stay refused.
-    expect(piGateReason({ journal: { kind: "pi-smoke" } })).toContain('"pi-smoke"');
+    expect(piGateReason({ journal: { kind: "pi-smoke" } })).toContain(
+      '"pi-smoke"',
+    );
   });
 });
 
@@ -557,11 +609,7 @@ describe("piToolNames", () => {
       { name: "oracle" },
     ];
 
-    expect(piToolNames(definitions)).toEqual([
-      "read",
-      "mcp_search",
-      "oracle",
-    ]);
+    expect(piToolNames(definitions)).toEqual(["read", "mcp_search", "oracle"]);
     expect(piToolNames(definitions.slice(1))).not.toContain("read");
   });
 });
@@ -569,24 +617,30 @@ describe("piToolNames", () => {
 describe("isPiUsageLimitShape (provider-aware)", () => {
   test("anthropic runs match the loopback bridge's shapes", () => {
     expect(isPiUsageLimitShape("HTTP 429 from bridge", "anthropic")).toBe(true);
-    expect(isPiUsageLimitShape("upstream returned 529", "anthropic")).toBe(true);
+    expect(isPiUsageLimitShape("upstream returned 529", "anthropic")).toBe(
+      true,
+    );
     expect(isPiUsageLimitShape("overloaded_error", "anthropic")).toBe(true);
-    expect(isPiUsageLimitShape("no designated bridge account", "anthropic")).toBe(true);
+    expect(
+      isPiUsageLimitShape("no designated bridge account", "anthropic"),
+    ).toBe(true);
     expect(
       isPiUsageLimitShape(
         "Your organization has disabled Claude subscription access for Claude Code",
         "anthropic",
       ),
     ).toBe(true);
-    expect(isPiUsageLimitShape("ordinary tool failure", "anthropic")).toBe(false);
+    expect(isPiUsageLimitShape("ordinary tool failure", "anthropic")).toBe(
+      false,
+    );
   });
 
   test("openai runs match the shared codex classifier plus the raw code shapes", () => {
     expect(
       isPiUsageLimitShape(
         "You have hit your ChatGPT usage limit (Plus plan). Try again in ~3 hr.",
-        "openai"
-      )
+        "openai",
+      ),
     ).toBe(true);
     expect(isPiUsageLimitShape("usage_limit_reached", "openai")).toBe(true);
     expect(isPiUsageLimitShape("usage_not_included", "openai")).toBe(true);
@@ -596,7 +650,9 @@ describe("isPiUsageLimitShape (provider-aware)", () => {
     expect(isPiUsageLimitShape("status 429", "openai")).toBe(true);
     // Bridge-only shapes must NOT flag openai runs (overload/529 is transient
     // there, not exhaustion).
-    expect(isPiUsageLimitShape("no designated bridge account", "openai")).toBe(false);
+    expect(isPiUsageLimitShape("no designated bridge account", "openai")).toBe(
+      false,
+    );
     expect(isPiUsageLimitShape("overloaded_error", "openai")).toBe(false);
     expect(isPiUsageLimitShape("upstream returned 529", "openai")).toBe(false);
     expect(isPiUsageLimitShape("ordinary tool failure", "openai")).toBe(false);
@@ -609,13 +665,21 @@ describe("pi/openai in-band account rotation gate", () => {
     // usage limit. The terminal is handled after the queue drains, so the
     // snapshot must not masquerade as assistant output and block rotation.
     expect(piStreamEventBlocksAccountRotation({ type: "init" })).toBe(false);
-    expect(piStreamEventBlocksAccountRotation({ type: "usage_snapshot" })).toBe(false);
+    expect(piStreamEventBlocksAccountRotation({ type: "usage_snapshot" })).toBe(
+      false,
+    );
 
     // Real output and durable operational notices still make replay unsafe.
-    expect(piStreamEventBlocksAccountRotation({ type: "text_chunk" })).toBe(true);
+    expect(piStreamEventBlocksAccountRotation({ type: "text_chunk" })).toBe(
+      true,
+    );
     expect(piStreamEventBlocksAccountRotation({ type: "tool_use" })).toBe(true);
-    expect(piStreamEventBlocksAccountRotation({ type: "tool_result" })).toBe(true);
-    expect(piStreamEventBlocksAccountRotation({ type: "runner_notice" })).toBe(true);
+    expect(piStreamEventBlocksAccountRotation({ type: "tool_result" })).toBe(
+      true,
+    );
+    expect(piStreamEventBlocksAccountRotation({ type: "runner_notice" })).toBe(
+      true,
+    );
   });
 });
 
@@ -640,12 +704,22 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  const collect = async (model: string, extra: Record<string, unknown> = {}) => {
+  const collect = async (
+    model: string,
+    extra: Record<string, unknown> = {},
+  ) => {
     const events: Array<Record<string, unknown>> = [];
     for await (const ev of runPi(
       // No osSessionId: journal/store writes are skipped — pure wiring test.
-      { prompt: "hi", cwd: dir, mode: "ask", mcpServers: [], journal: { kind: "prompt" }, ...extra },
-      model
+      {
+        prompt: "hi",
+        cwd: dir,
+        mode: "ask",
+        mcpServers: [],
+        journal: { kind: "prompt" },
+        ...extra,
+      },
+      model,
     )) {
       events.push(ev as unknown as Record<string, unknown>);
     }
@@ -656,15 +730,21 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
     const events = await collect("pi/mistral/large");
     expect(events).toHaveLength(1);
     expect(events[0].type).toBe("error");
-    expect(String(events[0].content)).toContain('no credentials for provider "mistral"');
-    expect(String(events[0].content)).toContain("Configure that model provider first");
+    expect(String(events[0].content)).toContain(
+      'no credentials for provider "mistral"',
+    );
+    expect(String(events[0].content)).toContain(
+      "Configure that model provider first",
+    );
   });
 
   test("dry codex pool → flagged terminal so the model-fallback walk engages", async () => {
     const events = await collect("pi/openai/gpt-5.6-sol");
     const err = events.find((e) => e.type === "error")!;
     expect(err).toBeDefined();
-    expect(String(err.content)).toContain("no ChatGPT subscription or API-key accounts are configured");
+    expect(String(err.content)).toContain(
+      "no ChatGPT subscription or API-key accounts are configured",
+    );
     // The pre-init throw's text never matches the classifier — the catch must
     // honor the thrown error's usageLimitExhausted property.
     expect(err.usageLimitExhausted).toBe(true);
@@ -758,7 +838,9 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
       expect(runtimeKeys).toEqual([["openai", "test-remote-runtime-key"]]);
       const errors = events.filter((event) => event.type === "error");
       expect(errors, JSON.stringify(errors)).toHaveLength(0);
-      expect(events.find((event) => event.type === "done")).toMatchObject({ result: "ok" });
+      expect(events.find((event) => event.type === "done")).toMatchObject({
+        result: "ok",
+      });
     } finally {
       sdkState.__piSdkPromise = previousSdkPromise;
     }
@@ -768,11 +850,11 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
     const codexHome = join(dir, "codex-home");
     mkdirSync(codexHome, { recursive: true });
     const payload = Buffer.from(
-      JSON.stringify({ exp: Math.floor((Date.now() - 60_000) / 1000) })
+      JSON.stringify({ exp: Math.floor((Date.now() - 60_000) / 1000) }),
     ).toString("base64url");
     writeFileSync(
       join(codexHome, "auth.json"),
-      JSON.stringify({ tokens: { access_token: `h.${payload}.s` } })
+      JSON.stringify({ tokens: { access_token: `h.${payload}.s` } }),
     );
     writeFileSync(
       storePath,
@@ -786,7 +868,7 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
             createdAt: new Date().toISOString(),
           },
         ],
-      })
+      }),
     );
     const events = await collect("pi/openai/gpt-5.6-sol");
     const err = events.find((e) => e.type === "error")!;
@@ -804,13 +886,19 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
     const home = join(dir, `codex-home-${id}`);
     mkdirSync(home, { recursive: true });
     const payload = Buffer.from(
-      JSON.stringify({ exp: Math.floor((Date.now() + 120_000) / 1000) })
+      JSON.stringify({ exp: Math.floor((Date.now() + 120_000) / 1000) }),
     ).toString("base64url");
     writeFileSync(
       join(home, "auth.json"),
-      JSON.stringify({ tokens: { access_token: `h.${payload}.s` } })
+      JSON.stringify({ tokens: { access_token: `h.${payload}.s` } }),
     );
-    return { id, name: id, kind: "home", value: home, createdAt: new Date().toISOString() };
+    return {
+      id,
+      name: id,
+      kind: "home",
+      value: home,
+      createdAt: new Date().toISOString(),
+    };
   };
 
   test("a pre-init usage failure rotates to the next account inside the same turn", async () => {
@@ -819,15 +907,17 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
       storePath,
       JSON.stringify({
         accounts: ids.map(expiringHomeAccount),
-      })
+      }),
     );
     // Non-strict pin: attempt 1 is deterministically rot-a. Burning it adds
     // it to the walk's exclusion, which makes the picker skip its pin branch,
     // so attempt 2 falls to the pool and lands on rot-b.
     const warnings = spyOn(console, "warn").mockImplementation(() => {});
-    const events = await collect("pi/openai/gpt-5.6-sol", { accountId: "rot-a" });
+    const events = await collect("pi/openai/gpt-5.6-sol", {
+      accountId: "rot-a",
+    });
     const switches = warnings.mock.calls.filter(([message]) =>
-      String(message).includes("[pi-runner] usage limit on codex account")
+      String(message).includes("[pi-runner] usage limit on codex account"),
     );
     warnings.mockRestore();
     const errors = events.filter((e) => e.type === "error");
@@ -846,7 +936,7 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
       const home = join(dir, `codex-home-${id}`);
       mkdirSync(home, { recursive: true });
       const payload = Buffer.from(
-        JSON.stringify({ exp: Math.floor((Date.now() + 60 * 60_000) / 1000) })
+        JSON.stringify({ exp: Math.floor((Date.now() + 60 * 60_000) / 1000) }),
       ).toString("base64url");
       writeFileSync(
         join(home, "auth.json"),
@@ -855,9 +945,15 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
             access_token: `h.${payload}.s`,
             account_id: providerAccountId,
           },
-        })
+        }),
       );
-      return { id, name: id, kind: "home", value: home, createdAt: new Date().toISOString() };
+      return {
+        id,
+        name: id,
+        kind: "home",
+        value: home,
+        createdAt: new Date().toISOString(),
+      };
     };
 
     writeFileSync(
@@ -873,7 +969,7 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
             createdAt: new Date().toISOString(),
           },
         ],
-      })
+      }),
     );
 
     const usedProviderAccounts: string[] = [];
@@ -982,7 +1078,10 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
     } finally {
       warnings.mockRestore();
       sdkState.__piSdkPromise = previousSdkPromise;
-      rmSync(join(PI_STATE_DIR, "sessions", sessionKey), { recursive: true, force: true });
+      rmSync(join(PI_STATE_DIR, "sessions", sessionKey), {
+        recursive: true,
+        force: true,
+      });
     }
   });
 
@@ -991,7 +1090,7 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
       storePath,
       JSON.stringify({
         accounts: [expiringHomeAccount("pin-a"), expiringHomeAccount("pin-b")],
-      })
+      }),
     );
     const events = await collect("pi/openai/gpt-5.6-sol", {
       accountId: "pin-a",
@@ -1018,16 +1117,28 @@ describe("runPi pi/openai account wiring (fake engine, no network)", () => {
       journal: { kind: "prompt" },
       transcriptSessionId,
     };
-    const first = runPi({ ...runOpts, sessionId: firstRunKey }, "pi/openai/gpt-5.6-sol");
+    const first = runPi(
+      { ...runOpts, sessionId: firstRunKey },
+      "pi/openai/gpt-5.6-sol",
+    );
 
     const firstError = await first.next();
-    expect(firstError.value).toMatchObject({ type: "error", usageLimitExhausted: true });
+    expect(firstError.value).toMatchObject({
+      type: "error",
+      usageLimitExhausted: true,
+    });
     expect(isPiSessionBusy(firstRunKey)).toBe(true);
     expect(isPiSessionBusy(transcriptSessionId)).toBe(true);
 
-    const second = runPi({ ...runOpts, sessionId: secondRunKey }, "pi/openai/gpt-5.6-sol");
+    const second = runPi(
+      { ...runOpts, sessionId: secondRunKey },
+      "pi/openai/gpt-5.6-sol",
+    );
     const busy = await second.next();
-    expect(busy.value).toMatchObject({ type: "error", content: "Session is busy" });
+    expect(busy.value).toMatchObject({
+      type: "error",
+      content: "Session is busy",
+    });
     expect(isPiSessionBusy(secondRunKey)).toBe(false);
     expect(isPiSessionBusy(transcriptSessionId)).toBe(true);
 
@@ -1050,52 +1161,69 @@ describe("local-tool path containment", () => {
 
   test("assertContainedPiPath allows workspace paths, incl. not-yet-created ones", () => {
     expect(assertContainedPiPath(join(ws, "sub", "inside.txt"), realWs)).toBe(
-      join(realWs, "sub", "inside.txt")
+      join(realWs, "sub", "inside.txt"),
     );
     expect(assertContainedPiPath(ws, realWs)).toBe(realWs);
     // write/edit targets that don't exist yet are contained via their
     // nearest existing ancestor
     expect(assertContainedPiPath(join(ws, "newdir", "new.txt"), realWs)).toBe(
-      join(realWs, "newdir", "new.txt")
+      join(realWs, "newdir", "new.txt"),
     );
   });
 
   test("rejects absolute escapes, /proc//sys//dev, and .. traversal", () => {
-    expect(() => assertContainedPiPath("/etc/passwd", realWs)).toThrow(/outside the session workspace/);
-    expect(() => assertContainedPiPath("/proc/self/environ", realWs)).toThrow(/not accessible/);
-    expect(() => assertContainedPiPath("/sys/kernel", realWs)).toThrow(/not accessible/);
-    expect(() => assertContainedPiPath("/dev/stdin", realWs)).toThrow(/not accessible/);
+    expect(() => assertContainedPiPath("/etc/passwd", realWs)).toThrow(
+      /outside the session workspace/,
+    );
+    expect(() => assertContainedPiPath("/proc/self/environ", realWs)).toThrow(
+      /not accessible/,
+    );
+    expect(() => assertContainedPiPath("/sys/kernel", realWs)).toThrow(
+      /not accessible/,
+    );
+    expect(() => assertContainedPiPath("/dev/stdin", realWs)).toThrow(
+      /not accessible/,
+    );
     expect(() =>
-      assertContainedPiPath(join(ws, "..", "..", "..", "..", "etc", "passwd"), realWs)
+      assertContainedPiPath(
+        join(ws, "..", "..", "..", "..", "etc", "passwd"),
+        realWs,
+      ),
     ).toThrow(/outside the session workspace|not accessible/);
   });
 
   test("rejects symlink escapes, existing and dangling targets", () => {
-    expect(() => assertContainedPiPath(join(ws, "esc", "passwd"), realWs)).toThrow(
-      /outside the session workspace|not accessible/
-    );
+    expect(() =>
+      assertContainedPiPath(join(ws, "esc", "passwd"), realWs),
+    ).toThrow(/outside the session workspace|not accessible/);
     // non-existent path UNDER an escaping symlink still resolves out
     expect(() =>
-      assertContainedPiPath(join(ws, "esc", "nope", "x.txt"), realWs)
+      assertContainedPiPath(join(ws, "esc", "nope", "x.txt"), realWs),
     ).toThrow(/outside the session workspace|not accessible/);
   });
 
   test("guarded read/ls/write ops enforce containment; inside paths work", async () => {
     const ops = makeGuardedToolOps(ws);
-    expect((await ops.read.readFile(join(ws, "sub", "inside.txt"))).toString()).toContain(
-      "needle-inside"
-    );
+    expect(
+      (await ops.read.readFile(join(ws, "sub", "inside.txt"))).toString(),
+    ).toContain("needle-inside");
     await expect(ops.read.readFile("/etc/passwd")).rejects.toThrow(/outside/);
-    await expect(ops.read.access("/proc/self/environ")).rejects.toThrow(/not accessible/);
-    await expect(ops.read.readFile(join(ws, "esc", "passwd"))).rejects.toThrow(/outside/);
+    await expect(ops.read.access("/proc/self/environ")).rejects.toThrow(
+      /not accessible/,
+    );
+    await expect(ops.read.readFile(join(ws, "esc", "passwd"))).rejects.toThrow(
+      /outside/,
+    );
     expect(await ops.ls.readdir(ws)).toContain("sub");
     await expect(ops.ls.readdir("/etc")).rejects.toThrow(/outside/);
     await ops.write.mkdir(join(ws, "made"));
     await ops.write.writeFile(join(ws, "made", "ok.txt"), "ok");
-    expect((await ops.read.readFile(join(ws, "made", "ok.txt"))).toString()).toBe("ok");
-    await expect(ops.write.writeFile("/tmp/pi-guard-escape.txt", "x")).rejects.toThrow(
-      /outside/
-    );
+    expect(
+      (await ops.read.readFile(join(ws, "made", "ok.txt"))).toString(),
+    ).toBe("ok");
+    await expect(
+      ops.write.writeFile("/tmp/pi-guard-escape.txt", "x"),
+    ).rejects.toThrow(/outside/);
     await expect(ops.edit.access("/etc/hosts")).rejects.toThrow(/outside/);
   });
 
@@ -1107,31 +1235,49 @@ describe("local-tool path containment", () => {
     });
     expect(hits).toContain(join(ws, "top.ts"));
     await expect(
-      Promise.resolve(ops.find.glob("*", "/etc", { ignore: [], limit: 10 }))
+      Promise.resolve(ops.find.glob("*", "/etc", { ignore: [], limit: 10 })),
     ).rejects.toThrow(/outside/);
   });
 
   test("guarded grep rejects escapes before any rg spawn", async () => {
     const ops = makeGuardedToolOps(ws);
-    const grep = makeGuardedGrepExecute(ws, { PATH: process.env.PATH || "" }, ops.guard);
-    await expect(grep("t", { pattern: ".", path: "/proc/self/environ" })).rejects.toThrow(
-      /not accessible/
+    const grep = makeGuardedGrepExecute(
+      ws,
+      { PATH: process.env.PATH || "" },
+      ops.guard,
     );
-    await expect(grep("t", { pattern: ".", path: "/etc" })).rejects.toThrow(/outside/);
+    await expect(
+      grep("t", { pattern: ".", path: "/proc/self/environ" }),
+    ).rejects.toThrow(/not accessible/);
+    await expect(grep("t", { pattern: ".", path: "/etc" })).rejects.toThrow(
+      /outside/,
+    );
   });
 
-  test.skipIf(!Bun.which("rg"))("guarded grep finds matches via rg with the minimal env", async () => {
-    const ops = makeGuardedToolOps(ws);
-    const grep = makeGuardedGrepExecute(ws, { PATH: process.env.PATH || "" }, ops.guard);
-    const res = await grep("t", { pattern: "needle-inside", path: ws });
-    expect(res.content[0]?.text).toMatch(/inside\.txt:1:/);
-    expect(res.content[0]?.text).toContain("needle-inside");
-  });
+  test.skipIf(!Bun.which("rg"))(
+    "guarded grep finds matches via rg with the minimal env",
+    async () => {
+      const ops = makeGuardedToolOps(ws);
+      const grep = makeGuardedGrepExecute(
+        ws,
+        { PATH: process.env.PATH || "" },
+        ops.guard,
+      );
+      const res = await grep("t", { pattern: "needle-inside", path: ws });
+      expect(res.content[0]?.text).toMatch(/inside\.txt:1:/);
+      expect(res.content[0]?.text).toContain("needle-inside");
+    },
+  );
 });
 
 describe("makePiBashTool exit-gated completion", () => {
   const env = { PATH: process.env.PATH || "/usr/bin:/bin" };
-  const tool = makePiBashTool({ cwd: tmpdir(), env, gated: false, unattended: false });
+  const tool = makePiBashTool({
+    cwd: tmpdir(),
+    env,
+    gated: false,
+    unattended: false,
+  });
 
   test("a background child holding stdout does not wedge the tool", async () => {
     const started = Date.now();
@@ -1139,7 +1285,7 @@ describe("makePiBashTool exit-gated completion", () => {
       "t1",
       { command: "echo hi; sleep 15 & echo bye" },
       undefined,
-      undefined
+      undefined,
     )) as { content: Array<{ text: string }> };
     // Old drain-gated flow blocked on the orphan's inherited pipe for the
     // full 15s (forever for a daemon); exit-gated returns after exit+grace.
@@ -1151,7 +1297,12 @@ describe("makePiBashTool exit-gated completion", () => {
   test("timeout kills the process group and reports promptly", async () => {
     const started = Date.now();
     await expect(
-      (tool as any).execute("t2", { command: "sleep 60", timeout: 1 }, undefined, undefined)
+      (tool as any).execute(
+        "t2",
+        { command: "sleep 60", timeout: 1 },
+        undefined,
+        undefined,
+      ),
     ).rejects.toThrow(/timed out/);
     expect(Date.now() - started).toBeLessThan(8_000);
   });
@@ -1161,7 +1312,12 @@ describe("makePiBashTool exit-gated completion", () => {
     setTimeout(() => ac.abort(), 200);
     const started = Date.now();
     await expect(
-      (tool as any).execute("t3", { command: "sleep 60" }, ac.signal, undefined)
+      (tool as any).execute(
+        "t3",
+        { command: "sleep 60" },
+        ac.signal,
+        undefined,
+      ),
     ).rejects.toThrow(/aborted/i);
     expect(Date.now() - started).toBeLessThan(8_000);
   });
@@ -1178,7 +1334,11 @@ describe("makePiBashTool exit-gated completion", () => {
     setTimeout(() => runAbort.abort(), 200);
     const started = Date.now();
     await expect(
-      (runBoundTool as any).execute("run-cancel", { command: "sleep 60" }, undefined),
+      (runBoundTool as any).execute(
+        "run-cancel",
+        { command: "sleep 60" },
+        undefined,
+      ),
     ).rejects.toThrow(/aborted/i);
     expect(Date.now() - started).toBeLessThan(8_000);
   });
@@ -1193,7 +1353,12 @@ describe("makePiBashTool exit-gated completion", () => {
       onAudit: (event) => events.push(event),
     });
     const command = "sleep 0.01; printf 'token=top-secret'";
-    await (auditedTool as any).execute("audit-ok", { command }, undefined, undefined);
+    await (auditedTool as any).execute(
+      "audit-ok",
+      { command },
+      undefined,
+      undefined,
+    );
 
     expect(events).toHaveLength(2);
     expect(events[0]).toMatchObject({
@@ -1226,7 +1391,10 @@ describe("makePiBashTool exit-gated completion", () => {
       onAudit: (event) => timeoutEvents.push(event),
     });
     await expect(
-      (timeoutTool as any).execute("audit-timeout", { command: "sleep 60", timeout: 0.1 })
+      (timeoutTool as any).execute("audit-timeout", {
+        command: "sleep 60",
+        timeout: 0.1,
+      }),
     ).rejects.toThrow(/timed out/);
     expect(timeoutEvents.at(-1)).toMatchObject({
       phase: "finish",
@@ -1246,7 +1414,11 @@ describe("makePiBashTool exit-gated completion", () => {
     const ac = new AbortController();
     setTimeout(() => ac.abort(), 100);
     await expect(
-      (cancelTool as any).execute("audit-cancel", { command: "sleep 60" }, ac.signal)
+      (cancelTool as any).execute(
+        "audit-cancel",
+        { command: "sleep 60" },
+        ac.signal,
+      ),
     ).rejects.toThrow(/aborted/i);
     expect(cancelEvents.at(-1)).toMatchObject({
       phase: "finish",
