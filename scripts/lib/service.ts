@@ -607,6 +607,8 @@ export function renderLauncher(): string {
     `cd ${serviceWorkdir()} || exit 1\n` +
     `set -a; [ -f ${ENV_PATH} ] && . ${ENV_PATH}; set +a\n` +
     `export OPENSESSION_SESSION_KERNEL_TOKEN_FILE=${USER_SESSION_KERNEL_TOKEN_PATH}\n` +
+    `export OPENSESSION_EXECUTOR=0\n` +
+    `export OPENSESSION_PI_DETACH=0\n` +
     `exec ${exec.cmd}\n`
   );
 }

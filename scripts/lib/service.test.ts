@@ -180,6 +180,8 @@ describe.skipIf(!onServiceHost)("launchd plist", () => {
     expect(launcher).toStartWith("#!/bin/bash");
     expect(launcher).toContain(ENV_PATH);
     expect(launcher).toContain("set -a");
+    expect(launcher).toContain("export OPENSESSION_EXECUTOR=0");
+    expect(launcher).toContain("export OPENSESSION_PI_DETACH=0");
     expect(launcher).toMatch(
       /exec \S*bun run packages\/core\/opensession-server\/src\/server\/gateway-supervisor\.ts/,
     );

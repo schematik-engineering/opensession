@@ -151,9 +151,9 @@ if (precheckRuntimePeers) await waitForRuntimePeerGeneration({ timeoutMs: 5_000 
 // integration effect until its parent explicitly activates the exact nonce.
 await waitForGatewayActivationIfStandby();
 if (!precheckRuntimePeers) await waitForRuntimePeerGeneration();
-// The OS lock is the final ownership fence. A supervisor crash or stale parent
-// can leave an old child serving, but no replacement may cross into effects
-// until that process has exited and released this lease.
+// The atomic process lease is the final ownership fence. A supervisor crash or
+// stale parent can leave an old child serving, but no replacement may cross
+// into effects until that process has exited and released this lease.
 const gatewayOwnership = globalThis as typeof globalThis & {
 	__opensessionGatewayActivationLease?: Awaited<ReturnType<typeof acquireGatewayActivationLease>>;
 };

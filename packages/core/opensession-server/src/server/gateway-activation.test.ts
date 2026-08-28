@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { resolve } from "node:path";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import {
   acquireGatewayActivationLease,
   gatewayRole,
@@ -139,49 +141,46 @@ describe("gateway activation preload barrier", () => {
   });
 
   test("holds an OS lease until explicit release", async () => {
-    let ended = false;
-    let finish!: (code: number) => void;
-    const exited = new Promise<number>((resolve) => {
-      finish = resolve;
-    });
+    const root = mkdtempSync(join(tmpdir(), "gateway-lease-"));
+    const lockPath = join(root, "gateway-active.lock");
     const lease = await acquireGatewayActivationLease({
-      env: { HOME: "/tmp/test-home" },
-      spawn(command) {
-        expect(command).toContain("/tmp/test-home/.opensession/deploy/gateway-active.lock");
-        return {
-          stdin: {
-            end() {
-              ended = true;
-              finish(0);
-            },
-          },
-          stdout: new ReadableStream({
-            start(controller) {
-              controller.enqueue(new TextEncoder().encode("LO"));
-              controller.enqueue(new TextEncoder().encode("CKED\n"));
-              controller.close();
-            },
-          }),
-          stderr: new Response("").body!,
-          exited,
-        };
+      env: {
+        OPENSESSION_GATEWAY_LEASE: lockPath,
+        OPENSESSION_GATEWAY_LEASE_WAIT_SECS: "0",
       },
     });
-    expect(ended).toBe(false);
+    expect(existsSync(lockPath)).toBe(true);
+    await expect(acquireGatewayActivationLease({
+      env: {
+        OPENSESSION_GATEWAY_LEASE: lockPath,
+        OPENSESSION_GATEWAY_LEASE_WAIT_SECS: "0",
+      },
+    })).rejects.toThrow("already held");
     await lease.release();
-    expect(ended).toBe(true);
+    expect(existsSync(lockPath)).toBe(false);
+    rmSync(root, { recursive: true, force: true });
   });
 
-  test("fails closed when the active lease is held", async () => {
-    await expect(acquireGatewayActivationLease({
-      env: { HOME: "/tmp/test-home" },
-      spawn: () => ({
-        stdin: { end() {} },
-        stdout: new Response("").body!,
-        stderr: new Response("busy").body!,
-        exited: Promise.resolve(1),
-      }),
-    })).rejects.toThrow("already held");
+  test("reclaims a lease only after its recorded process is dead", async () => {
+    const root = mkdtempSync(join(tmpdir(), "gateway-stale-lease-"));
+    const lockPath = join(root, "gateway-active.lock");
+    await acquireGatewayActivationLease({
+      env: { OPENSESSION_GATEWAY_LEASE: lockPath },
+      pid: 111,
+      nonce: "dead-owner",
+    });
+    const replacement = await acquireGatewayActivationLease({
+      env: {
+        OPENSESSION_GATEWAY_LEASE: lockPath,
+        OPENSESSION_GATEWAY_LEASE_WAIT_SECS: "0",
+      },
+      pid: 222,
+      nonce: "replacement",
+      processAlive: (pid) => pid === 222,
+    });
+    expect(existsSync(lockPath)).toBe(true);
+    await replacement.release();
+    rmSync(root, { recursive: true, force: true });
   });
 
   test("fails closed on an activation nonce mismatch", async () => {

@@ -146,6 +146,8 @@ jobs:
             OPENSESSION_ALLOW_IMDS=1 \
               bash install.sh --yes --no-engine; then
             "$HOME/.opensession/bin/opensession" logs -n 160 || true
+            tail -n 160 "$HOME/.opensession/logs/server.log" \
+              "$HOME/.opensession/logs/server.err.log" 2>/dev/null || true
             if command -v systemctl >/dev/null; then
               systemctl --user status \
                 opensession.service opensession-session-kernel.service \

@@ -1,5 +1,13 @@
-import { mkdirSync, readFileSync } from "fs";
-import { dirname } from "path";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "fs";
+import { dirname, join } from "path";
 
 /**
  * Fail-closed preload barrier for a future supervised gateway handoff.
@@ -20,13 +28,6 @@ export type GatewayPreloadedMessage = {
   type: "opensession_gateway_preloaded";
   nonce: string;
   pid: number;
-};
-
-type GatewayLeaseProcess = {
-  stdin: { end(): void };
-  stdout: ReadableStream<Uint8Array>;
-  stderr: ReadableStream<Uint8Array>;
-  exited: Promise<number>;
 };
 
 type ProcessPort = {
@@ -55,31 +56,36 @@ function activationMessage(value: unknown): GatewayActivationMessage | null {
     : null;
 }
 
-async function readBoundedLine(
-  stream: ReadableStream<Uint8Array>,
-  maxBytes = 128,
-): Promise<string> {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
-  let value = "";
+type GatewayLeaseOwner = { pid: number; nonce: string };
+
+function readLeaseOwner(lockPath: string): GatewayLeaseOwner | undefined {
   try {
-    while (value.length <= maxBytes) {
-      const chunk = await reader.read();
-      if (chunk.done) return value;
-      value += decoder.decode(chunk.value, { stream: true });
-      const newline = value.indexOf("\n");
-      if (newline !== -1) return value.slice(0, newline + 1);
-    }
-    throw new Error("Gateway activation lease response exceeded its bound");
-  } finally {
-    reader.releaseLock();
+    const value = JSON.parse(readFileSync(join(lockPath, "owner.json"), "utf8")) as
+      Partial<GatewayLeaseOwner>;
+    return Number.isSafeInteger(value.pid) && Number(value.pid) > 0 &&
+        typeof value.nonce === "string" && value.nonce.length > 0
+      ? { pid: Number(value.pid), nonce: value.nonce }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
   }
 }
 
 export async function acquireGatewayActivationLease(options: {
   env?: GatewayEnvironment;
-  spawn?: (command: string[]) => GatewayLeaseProcess;
-  exit?: (code: number) => never;
+  pid?: number;
+  nonce?: string;
+  processAlive?: (pid: number) => boolean;
+  sleep?: (ms: number) => Promise<void>;
 } = {}): Promise<{ release(): Promise<void> }> {
   const env = options.env ?? process.env;
   const state = env.OPENSESSION_DEPLOY_STATE ||
@@ -90,40 +96,97 @@ export async function acquireGatewayActivationLease(options: {
   if (!/^\d+$/.test(waitSeconds)) {
     throw new Error("Invalid OPENSESSION_GATEWAY_LEASE_WAIT_SECS");
   }
-  const spawn = options.spawn ?? ((command: string[]) =>
-    Bun.spawn(command, { stdin: "pipe", stdout: "pipe", stderr: "pipe" }) as GatewayLeaseProcess);
-  const lease = spawn([
-    "flock",
-    "-w",
-    waitSeconds,
-    lockPath,
-    "/bin/sh",
-    "-c",
-    "printf 'LOCKED\\n'; cat >/dev/null",
-  ]);
-  const first = await readBoundedLine(lease.stdout);
-  if (first !== "LOCKED\n") {
-    const error = await new Response(lease.stderr).text();
-    await lease.exited;
-    throw new Error(
-      `Gateway activation lease is already held${error.trim() ? `: ${error.trim()}` : ""}`,
-    );
+  const pid = options.pid ?? process.pid;
+  const nonce = options.nonce ?? crypto.randomUUID();
+  const processAlive = options.processAlive ?? processIsAlive;
+  const sleep = options.sleep ?? Bun.sleep;
+  const reclaimPath = `${lockPath}.reclaim`;
+  const deadline = Date.now() + Number(waitSeconds) * 1_000;
+
+  // An atomic directory is the portable cross-process primitive here: Linux
+  // ships `flock`, macOS does not. The owner record lets a successor reclaim
+  // after a crash, while a second atomic reclaim directory serializes stale
+  // cleanup so it cannot rename a newly acquired lease out from under it.
+  for (;;) {
+    if (!existsSync(reclaimPath)) {
+      try {
+        mkdirSync(lockPath, { mode: 0o700 });
+        try {
+          writeFileSync(
+            join(lockPath, "owner.json"),
+            `${JSON.stringify({ pid, nonce })}\n`,
+            { mode: 0o600 },
+          );
+        } catch (error) {
+          rmSync(lockPath, { recursive: true, force: true });
+          throw error;
+        }
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+    }
+
+    const owner = readLeaseOwner(lockPath);
+    const ownerIsLive = owner ? processAlive(owner.pid) : true;
+    const lockAgeMs = (() => {
+      try {
+        return Date.now() - statSync(lockPath).mtimeMs;
+      } catch {
+        return 0;
+      }
+    })();
+    const unownedAndStale = !owner && lockAgeMs >= Number(waitSeconds) * 1_000;
+    if ((!ownerIsLive || unownedAndStale) && !existsSync(reclaimPath)) {
+      let claimedReclaim = false;
+      try {
+        mkdirSync(reclaimPath, { mode: 0o700 });
+        claimedReclaim = true;
+        const current = readLeaseOwner(lockPath);
+        const currentIsStale = current
+          ? !processAlive(current.pid)
+          : (() => {
+              try {
+                return Date.now() - statSync(lockPath).mtimeMs >= Number(waitSeconds) * 1_000;
+              } catch {
+                return false;
+              }
+            })();
+        if (currentIsStale) {
+          const stalePath = `${lockPath}.stale.${nonce}`;
+          renameSync(lockPath, stalePath);
+          rmSync(stalePath, { recursive: true, force: true });
+        }
+      } catch (error) {
+        if (!["EEXIST", "ENOENT"].includes((error as NodeJS.ErrnoException).code || ""))
+          throw error;
+      } finally {
+        if (claimedReclaim)
+          rmSync(reclaimPath, { recursive: true, force: true });
+      }
+      continue;
+    }
+
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `Gateway activation lease is already held${owner ? ` by pid ${owner.pid}` : ""}`,
+      );
+    }
+    await sleep(50);
   }
 
   let releasing = false;
-  const exit = options.exit ?? ((code: number) => process.exit(code));
-  void lease.exited.then((code) => {
-    if (!releasing) {
-      console.error(`[gateway-activation] ownership lease exited unexpectedly (${code})`);
-      exit(70);
-    }
-  });
   return {
     async release() {
       if (releasing) return;
       releasing = true;
-      lease.stdin.end();
-      await lease.exited;
+      const owner = readLeaseOwner(lockPath);
+      if (!owner || owner.pid !== pid || owner.nonce !== nonce) {
+        throw new Error("Gateway activation lease ownership changed before release");
+      }
+      const releasedPath = `${lockPath}.released.${nonce}`;
+      renameSync(lockPath, releasedPath);
+      rmSync(releasedPath, { recursive: true, force: true });
     },
   };
 }
