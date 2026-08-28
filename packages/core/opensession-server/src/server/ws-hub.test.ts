@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   allClients,
+  broadcastToSession,
   computeGlobalPresence,
   computeTypingUsers,
   joinSession,
@@ -9,6 +10,10 @@ import {
   setClientTyping,
   type WSClientData,
 } from "./ws-hub";
+import {
+  holdSessionRunning,
+  releaseSessionRunning,
+} from "./session-state-events";
 
 const sockets = new Set<any>();
 
@@ -189,6 +194,48 @@ describe("computeGlobalPresence", () => {
       sessionId,
       users: [],
     });
+  });
+});
+
+describe("session status", () => {
+  test("keeps legacy and feed clients busy while background work is live", () => {
+    const sessionId = crypto.randomUUID();
+    const legacyFrames: any[] = [];
+    const feedFrames: any[] = [];
+    const legacy = {
+      data: { watchingSessionId: sessionId, user: "Ada" },
+      send(payload: string) {
+        legacyFrames.push(JSON.parse(payload));
+      },
+    };
+    const feed = {
+      data: {
+        watchingSessionId: sessionId,
+        user: "Grace",
+        supportsFeed: true,
+      },
+      send(payload: string) {
+        feedFrames.push(JSON.parse(payload));
+      },
+    };
+    sessionWatchers.set(sessionId, new Set([legacy, feed]));
+    holdSessionRunning(sessionId, "workflow:wf-1");
+
+    broadcastToSession(sessionId, {
+      type: "session_status",
+      sessionId,
+      isRunning: false,
+    });
+
+    expect(legacyFrames.at(-1)).toMatchObject({
+      type: "session_status",
+      isRunning: true,
+    });
+    expect(feedFrames.at(-1)).toMatchObject({
+      type: "session_feed",
+      event: { type: "session_status", isRunning: true },
+    });
+    releaseSessionRunning(sessionId, "workflow:wf-1");
   });
 });
 

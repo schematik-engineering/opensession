@@ -993,9 +993,38 @@ export async function markSessionStarting(
     cancelledRunTokens.add(rejected);
     return rejected;
   }
-  const decision = await decideRunStateTransition(id, "prompt", {
+  let decision = await decideRunStateTransition(id, "prompt", {
     run_key: token,
   });
+  if (
+    !decision.accepted &&
+    ["starting", "running", "interrupted", "reattaching"].includes(
+      decision.from,
+    ) &&
+    !hasActiveRunFor(id) &&
+    !activeRecoveryRuns.has(id) &&
+    !isAgentLiveEngineBusy(id)
+  ) {
+    // A gateway can die after actor admission but before it records a journal
+    // or process owner. A later gateway used to trust its empty local
+    // projection, lose admission to that durable ghost forever, and requeue the
+    // same prompt once a minute. The rejection is authoritative evidence of
+    // the old owner; the three negative ownership checks prove it cannot still
+    // execute. Settle that exact orphan, then retry this admission once.
+    const orphanedRunId = decision.currentRunId;
+    const settled = await decideRunStateTransition(id, "boot_owner_missing", {
+      previous_state: decision.from,
+      ...(orphanedRunId ? { orphaned_run_id: orphanedRunId } : {}),
+    });
+    if (settled.accepted) {
+      console.warn(
+        `[run-state] Settled orphaned ${decision.from} preparation for ${id}${orphanedRunId ? ` (${orphanedRunId})` : ""}`,
+      );
+      decision = await decideRunStateTransition(id, "prompt", {
+        run_key: token,
+      });
+    }
+  }
   if (!decision.accepted) {
     // Return a distinct rejected token so the caller can requeue without
     // sharing/unmarking the actor winner's process reservation.

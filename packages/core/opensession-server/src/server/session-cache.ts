@@ -54,6 +54,7 @@ import {
 } from "./session-kernel";
 import { withSessionMutationLock } from "./session-mutation-lock";
 import { broadcastToAll } from "./ws-hub";
+import { hasSessionRunningHold } from "./session-state-events";
 
 export const SESSIONS_DIR = OPENSESSION_SESSIONS_DIR;
 
@@ -180,7 +181,11 @@ export function enrichSessionRuntime(
     // an earlier write. Runtime state is authoritative in both directions:
     // promote a newly active run and demote a finished one so the sidebar can
     // leave In progress on its next poll.
-    s.isRunning = engineBusy || recoveryBusy || isRunStateUnsettled(rs);
+    s.isRunning =
+      engineBusy ||
+      recoveryBusy ||
+      isRunStateUnsettled(rs) ||
+      hasSessionRunningHold(s.id);
     if (s.isRunning) {
       s.runStartedAt =
         runStarts.get(s.id) ||

@@ -23,7 +23,19 @@ export async function runGatewayIngress(): Promise<void> {
     join(process.env.HOME || "", ".opensession/deploy");
   const port = Number(process.env.PORT || 3850);
   const metrics = createGatewayTcpProxyMetrics();
-  const backendPort = () => readGatewayBackendPort(state);
+  // Routing reads sit on the per-connection dial path. Cache below the 25ms
+  // retry floor so a cut-over is still observed on the next attempt while a
+  // connection burst stops re-reading the routing file.
+  let cachedBackendPort = 0;
+  let backendPortReadAt = 0;
+  const backendPort = () => {
+    const now = Date.now();
+    if (now - backendPortReadAt >= 20) {
+      backendPortReadAt = now;
+      cachedBackendPort = readGatewayBackendPort(state);
+    }
+    return cachedBackendPort;
+  };
   const stableFrontend = createStableFrontendResponder(state, {
     liveStatus: () => ({
       backendSelected: backendPort() > 0,

@@ -156,6 +156,7 @@ import {
   acknowledgePromptDispatch,
   acknowledgeSteerDelivery,
   failPromptDispatch,
+  recoverUnownedPromptDispatch,
   isGitHubQueueItem,
   persistQueues,
   promptDispatches,
@@ -1405,16 +1406,21 @@ async function drainQueueInner(sessionId: string): Promise<void> {
     // last batch lost the start race and got re-queued) — hand off to the
     // idle-watcher instead of busy-spinning runs that immediately bounce.
     const session = findSession(sessionId);
-    if (
-      session &&
+    const ownerActive = () =>
       isAgentSessionBusy(
-        session.claudeSessionId,
-        session.codexThreadId,
-        session.id,
-      )
-    ) {
+        session?.claudeSessionId,
+        session?.codexThreadId,
+        sessionId,
+      );
+    if (ownerActive()) {
       watchExternalRunAndDrain(sessionId);
       return;
+    }
+    if (await recoverUnownedPromptDispatch(sessionId, ownerActive)) {
+      console.warn(
+        `[queue] Restored an unowned prompt dispatch before draining ${sessionId}`,
+      );
+      continue;
     }
     // Batch selection lives in the actor's pure queue reducer: a solo
     // interrupt (queue chip ▲) delivers one item, a head auto-continue

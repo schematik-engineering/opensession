@@ -99,6 +99,15 @@ describe("shutdown intake fence", () => {
     expect(runtimeStop).toBeLessThan(snapshot);
   });
 
+  test("reserves the handoff signal exclusively for graceful shutdown", async () => {
+    const source = await read("../../opensession.ts");
+    expect(source.match(/process\.on\("SIGUSR2"/g)).toHaveLength(1);
+    expect(source).toContain(
+      'process.on("SIGUSR2", () => void gracefulShutdown("SIGUSR2"))',
+    );
+    expect(source).not.toContain('scheduleFrontendRebuild("SIGUSR2"');
+  });
+
   test("acknowledges restart-window composer intake as queued", async () => {
     const source = await read("./session-control-wiring.ts");
     const delivery = source.indexOf("deliverToSession: async");

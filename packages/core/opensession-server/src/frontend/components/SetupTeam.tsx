@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { BASE_PATH } from "../lib/base";
 import { githubLoginFromInput } from "../lib/github-login";
+import { errorMessage } from "../lib/error-message";
 import { refreshPeople } from "../lib/people";
 import { copyToClipboard } from "../lib/share-link";
 import { Button } from "../ui/button";
@@ -73,22 +74,21 @@ export function TeamSection({
   );
   const [githubSyncError, setGithubSyncError] = useState<string | null>(null);
 
-  // Stable identity: only setters and module functions are captured.
   const load = useCallback(async () => {
-    await (async () => {
+    try {
       const body = await setupRequest<{ members: TeamMember[] }>(
         "/api/setup/team",
       );
       setMembers(body.members);
       setLoadFailed(false);
-    })().catch(async () => {
+    } catch {
       setLoadFailed(true);
-    });
+    }
   }, []);
 
   const syncGithubMembers = useCallback(async () => {
     setGithubSyncError(null);
-    await (async () => {
+    try {
       const body = await setupRequest<{
         organization: string | null;
         synced: boolean;
@@ -100,10 +100,10 @@ export function TeamSection({
       setLoadFailed(false);
       setGithubOrganization(body.synced ? body.organization : null);
       setGithubSyncError(body.error ?? null);
-    })().catch(async () => {
+    } catch {
       await load();
       setGithubSyncError("GitHub members weren’t added. Add them manually.");
-    });
+    }
   }, [load]);
 
   useEffect(() => {
@@ -279,7 +279,7 @@ function MemberActions({
 
   async function remove() {
     setBusy(true);
-    await (async () => {
+    try {
       await setupRequest(
         `/api/setup/team/${encodeURIComponent(member.name)}/remove`,
         {
@@ -288,10 +288,12 @@ function MemberActions({
       );
       toast(`${member.name} removed`);
       await onRemoved();
-    })().catch(async (e: any) => {
-      toast(e.message, { variant: "error" });
+    } catch (error) {
+      toast(errorMessage(error, "Could not remove member"), {
+        variant: "error",
+      });
       setBusy(false);
-    });
+    }
   }
 
   return (
@@ -385,20 +387,17 @@ export function GithubMemberDialog({
     }
     setSaving(true);
     setError(null);
-    await (async () => {
+    try {
       await setupRequest("/api/setup/team", {
         method: "POST",
         json: { name: login, github: login },
       });
       toast(`@${login} added`);
       await onSaved(login);
-    })()
-      .catch(async (cause: any) => {
-        setError(cause?.message || "Could not add member");
-      })
-      .finally(async () => {
-        setSaving(false);
-      });
+    } catch (error) {
+      setError(errorMessage(error, "Could not add member"));
+    }
+    setSaving(false);
   }
 
   return (
@@ -513,7 +512,7 @@ function MemberDialog({
     if (!trimmed || saving) return;
     setSaving(true);
     setError(null);
-    await (async () => {
+    try {
       if (!member) {
         const body: Record<string, unknown> = { name: trimmed };
         if (email.trim()) body.email = email.trim();
@@ -559,10 +558,10 @@ function MemberDialog({
       }
       setSaving(false);
       await onSaved();
-    })().catch(async (e: any) => {
-      setError(e.message);
+    } catch (error) {
+      setError(errorMessage(error, "Could not save member"));
       setSaving(false);
-    });
+    }
   }
 
   return (

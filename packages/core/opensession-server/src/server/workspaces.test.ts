@@ -18,6 +18,7 @@ beforeEach(() => {
 });
 
 const {
+  DEFAULT_WORKSPACE_MODEL_SETTINGS,
   createWorkspace,
   deleteWorkspace,
   getWorkspace,
@@ -32,6 +33,26 @@ afterAll(() => {
   if (previous === undefined) delete process.env.OPENSESSION_STATE_DIR;
   else process.env.OPENSESSION_STATE_DIR = previous;
   rmSync(scratch, { recursive: true, force: true });
+});
+
+describe("default workspace model settings", () => {
+  test("offers Fable planning with a Sol high implementation worker", () => {
+    expect(
+      DEFAULT_WORKSPACE_MODEL_SETTINGS.presets?.find(
+        (preset) => preset.id === "orchestrator-fable-sol",
+      ),
+    ).toMatchObject({
+      label: "Orchestrator · Fable + Sol",
+      lead: { model: "pi/anthropic/claude-fable-5", effort: "high" },
+      supporting: [
+        {
+          model: "pi/openai/gpt-5.6-sol",
+          effort: "high",
+          role: "Implementation worker",
+        },
+      ],
+    });
+  });
 });
 
 describe("stampWorkspaceIdentity", () => {

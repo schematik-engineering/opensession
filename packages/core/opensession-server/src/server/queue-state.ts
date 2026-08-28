@@ -849,6 +849,27 @@ export async function failPromptDispatch(
   return restored;
 }
 
+/** Restore a pre-journal dispatch that has no physical or recovery owner.
+ *
+ * Boot normally settles this slot. A gateway handoff can nevertheless lose the
+ * process between the actor's dispatch claim and runner admission, while the
+ * next gateway has already completed its one-time restore pass. The next
+ * queued message is then blocked by the old dispatch forever. Recheck live
+ * ownership after the authoritative snapshot so a racing runner cannot be
+ * mistaken for that orphan. Creation dispatches keep their separate durable
+ * creation owner and are never repaired here. */
+export async function recoverUnownedPromptDispatch(
+  sessionId: string,
+  ownerActive: () => boolean,
+): Promise<boolean> {
+  if (ownerActive()) return false;
+  const snapshot = await sessionDelivery({ op: "snapshot", sessionId });
+  const dispatch = snapshot.dispatch as PromptDispatch | undefined;
+  if (!dispatch?.promptEntryId || dispatch.kind === "create" || ownerActive())
+    return false;
+  return failPromptDispatch(sessionId, dispatch.promptEntryId);
+}
+
 /** Automated turns stay durable in the queue but are not messages a person
  * sent. Review handoffs have their own Agents surface; workflow completion
  * nudges and auto-continues are model-routing plumbing. None belongs in message

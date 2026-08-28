@@ -136,24 +136,48 @@ export function leaveSession(ws: WebSocketClient) {
   ws.data.watchingSessionId = null;
 }
 
-export function broadcastToSession(
+function fanOutToSession(
   sessionId: string,
-  msg: object,
+  payload: string,
+  feedPayload: string | null,
   except?: WebSocketClient,
-) {
+): void {
   const set = sessionWatchers.get(sessionId);
-  // Advance feed state even with no viewers, so a backgrounded client can
-  // recover an active run on reconnect.
-  const feed = isFeedEvent(msg) ? appendSessionFeed(sessionId, msg) : null;
   if (!set) return;
-  const payload = JSON.stringify(msg);
-  const feedPayload = feed ? JSON.stringify(feed) : null;
   for (const ws of set) {
     if (ws === except) continue;
     try {
       ws.send(ws.data?.supportsFeed && feedPayload ? feedPayload : payload);
     } catch {}
   }
+}
+
+export function broadcastToSession(
+  sessionId: string,
+  msg: object,
+  except?: WebSocketClient,
+) {
+  // Advance feed state even with no viewers, so a backgrounded client can
+  // recover an active run on reconnect. A status frame may be normalized by
+  // the feed when background activity still holds the session busy; legacy
+  // clients must receive that same effective event, not the raw false.
+  const feed = isFeedEvent(msg) ? appendSessionFeed(sessionId, msg) : null;
+  const payload = JSON.stringify(feed?.event ?? msg);
+  const feedPayload = feed ? JSON.stringify(feed) : null;
+  fanOutToSession(sessionId, payload, feedPayload, except);
+}
+
+/** Broadcast an already-aggregated background-activity transition without
+ * recording it as a primary model-turn boundary in the resumable feed. */
+export function broadcastSessionActivityStatus(
+  sessionId: string,
+  isRunning: boolean,
+): void {
+  fanOutToSession(
+    sessionId,
+    JSON.stringify({ type: "session_status", sessionId, isRunning }),
+    null,
+  );
 }
 
 /** A focused viewer must also have a live transport. All clients heartbeat far

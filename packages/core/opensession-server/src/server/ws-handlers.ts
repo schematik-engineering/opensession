@@ -7,6 +7,7 @@
 
 import type { WebSocketHandler } from "bun";
 import type { WSClientData } from "./ws-hub";
+import { sessionRunningWithHolds } from "./session-state-events";
 
 import {
   currentAgentRunToken,
@@ -230,12 +231,15 @@ async function sendWatchExtras(
       sessionId,
       isRunning:
         !safety &&
-        (session.isRunning ||
-          isAgentSessionBusy(
-            session.claudeSessionId,
-            session.codexThreadId,
-            session.id,
-          )),
+        sessionRunningWithHolds(
+          session.id,
+          session.isRunning ||
+            isAgentSessionBusy(
+              session.claudeSessionId,
+              session.codexThreadId,
+              session.id,
+            ),
+        ),
       ...(safety ? { safety } : {}),
     }),
   );
