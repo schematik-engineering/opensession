@@ -5,11 +5,13 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   rmSync,
+  symlinkSync,
   unlinkSync,
 } from "fs";
 import { tmpdir } from "os";
-import { dirname, join } from "path";
+import { basename, dirname, join } from "path";
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { Readable, Writable } from "stream";
 import {
@@ -47,6 +49,7 @@ import {
 import { providerFor } from "./models";
 import { AcpTerminalManager } from "./acp-terminal";
 import { filterMcpServers } from "./runner-shared";
+import { acpProviderStateDir } from "./acp-state";
 
 const DEFAULT_TURN_TIMEOUT_MS = 30 * 60_000;
 const MAX_STDERR_BYTES = 8_192;
@@ -208,7 +211,38 @@ function copyPrivate(source: string, destination: string): void {
   chmodSync(destination, 0o600);
 }
 
-function prepareAuth(provider: AcpProvider): PreparedAuth {
+function scrubCredentialArtifacts(destination: string): void {
+  const directory = dirname(destination);
+  const credentialName = basename(destination);
+  try {
+    for (const entry of readdirSync(directory)) {
+      if (entry !== credentialName && !entry.startsWith(`${credentialName}.`))
+        continue;
+      try {
+        rmSync(join(directory, entry), { recursive: true, force: true });
+      } catch {}
+    }
+  } catch {}
+}
+
+function linkProviderSessionState(
+  provider: AcpProvider,
+  home: string,
+  unifiedSessionId: string | undefined,
+): void {
+  if (!unifiedSessionId) return;
+  const providerState = acpProviderStateDir(unifiedSessionId, provider);
+  const relative =
+    provider === "grok" ? ".grok/sessions" : ".cursor/acp-sessions";
+  const destination = join(home, relative);
+  mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
+  symlinkSync(providerState, destination, "dir");
+}
+
+function prepareAuth(
+  provider: AcpProvider,
+  unifiedSessionId: string | undefined,
+): PreparedAuth {
   const definition = ACP_PROVIDER_DEFINITIONS[provider];
   const projected = projectedAcpBootstrapFiles();
   const source =
@@ -222,6 +256,7 @@ function prepareAuth(provider: AcpProvider): PreparedAuth {
 
   const home = mkdtempSync(join(tmpdir(), `opensession-${provider}-`));
   chmodSync(home, 0o700);
+  linkProviderSessionState(provider, home, unifiedSessionId);
   const authDestination = join(home, definition.authRelativePath);
   copyPrivate(source, authDestination);
   if (projected && source === projected.auth) unlinkSync(source);
@@ -241,14 +276,11 @@ function prepareAuth(provider: AcpProvider): PreparedAuth {
     }
   }
 
-  let scrubbed = false;
   const scrub = () => {
-    if (scrubbed) return;
-    scrubbed = true;
-    for (const path of [authDestination, agentIdDestination]) {
-      if (!path) continue;
+    scrubCredentialArtifacts(authDestination);
+    if (agentIdDestination) {
       try {
-        unlinkSync(path);
+        unlinkSync(agentIdDestination);
       } catch {}
     }
   };
@@ -445,9 +477,11 @@ export async function* runAcp(
   }
   const definition = ACP_PROVIDER_DEFINITIONS[provider];
   const queue = new EventQueue();
-  const auth = prepareAuth(provider);
-  const toolHome = join(auth.home, "tool-home");
-  mkdirSync(toolHome, { recursive: true, mode: 0o700 });
+  const unifiedSessionId =
+    opts.journal?.osSessionId || opts.transcriptSessionId;
+  const auth = prepareAuth(provider, unifiedSessionId);
+  const toolHome = mkdtempSync(join(tmpdir(), "opensession-acp-tools-"));
+  chmodSync(toolHome, 0o700);
   const terminal = new AcpTerminalManager(opts.cwd, toolHome);
   const env: NodeJS.ProcessEnv = {
     PATH: process.env.PATH,
@@ -478,8 +512,6 @@ export async function* runAcp(
   const assistantText = new Map<string, string>();
   const thoughtText = new Map<string, string>();
   let finalText = "";
-  const unifiedSessionId =
-    opts.journal?.osSessionId || opts.transcriptSessionId;
   const aliases = new Set(
     [
       opts.startToken,
@@ -614,12 +646,27 @@ export async function* runAcp(
         );
       await connection.authenticate({ methodId: definition.authMethod });
       const mcpServers = acpMcpServers(opts);
+      const agentCapabilities = initialized.agentCapabilities || {};
+      let resumedWithoutState = false;
       const setup = opts.sessionId
-        ? await connection.loadSession({
-            sessionId: opts.sessionId,
-            cwd: opts.cwd,
-            mcpServers,
-          })
+        ? agentCapabilities.loadSession
+          ? await connection.loadSession({
+              sessionId: opts.sessionId,
+              cwd: opts.cwd,
+              mcpServers,
+            })
+          : agentCapabilities.sessionCapabilities?.resume != null
+            ? ((resumedWithoutState = true),
+              await connection.resumeSession({
+                sessionId: opts.sessionId,
+                cwd: opts.cwd,
+                mcpServers,
+              }))
+            : (() => {
+                throw new Error(
+                  `${provider} ACP cannot load or resume an existing session`,
+                );
+              })()
         : await connection.newSession({ cwd: opts.cwd, mcpServers });
       engineSessionId = opts.sessionId || (setup as any)?.sessionId;
       if (!engineSessionId)
@@ -627,14 +674,15 @@ export async function* runAcp(
       register(engineSessionId, control);
       if (unifiedSessionId)
         recordEngineSessionOwner(engineSessionId, unifiedSessionId);
-      await applySelection(
-        provider,
-        connection,
-        engineSessionId,
-        setup,
-        model,
-        opts.mode,
-      );
+      if (!resumedWithoutState || provider === "grok")
+        await applySelection(
+          provider,
+          connection,
+          engineSessionId,
+          setup,
+          model,
+          opts.mode,
+        );
 
       // The CLI has authenticated and loaded its provider-native session. From
       // this point on, model-visible tools get neither the credential file nor
@@ -725,6 +773,9 @@ export async function* runAcp(
         child.kill("SIGTERM");
       } catch {}
       auth.destroy();
+      try {
+        rmSync(toolHome, { recursive: true, force: true });
+      } catch {}
       for (const alias of aliases)
         if (active.get(alias) === control) active.delete(alias);
       queue.end();
