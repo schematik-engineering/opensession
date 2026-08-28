@@ -112,11 +112,13 @@ therefore reproduce the host's runner checkout path; bind mode additionally
 needs matching workspace paths and uid. This preserves host-side
 diff/status/push/preview behavior and cwd-keyed engine resume.
 
-The shipped Dockerfile bakes `/home/ubuntu/projects/opensession`,
-`/home/ubuntu/.local/bin/claude`, and user `ubuntu`. If the service checkout,
-home, username, or uid differs, update every corresponding Dockerfile path and
-user and rebuild `opensession-runner:latest`. Volume mode removes the host
-worktree mount, but it does not remove the runner-entry path requirement.
+The shipped Dockerfile defaults to `/home/ubuntu/projects/opensession`,
+`/home/ubuntu/.local/bin/claude`, and user `ubuntu`.
+`deploy/sandbox/build.sh` overrides `OPENSESSION_RUNNER_ROOT` with the active
+checkout path. If the home, username, or uid differs, update the corresponding
+Dockerfile paths and user and rebuild `opensession-runner:latest`. Volume mode
+removes the host worktree mount, but it does not remove the runner-entry path
+requirement.
 
 ## Images, warm pools and snapshots
 

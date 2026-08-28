@@ -8,10 +8,11 @@
 # and the Claude Agent SDK (@anthropic-ai/claude-agent-sdk).
 #
 # PATH PARITY IS LOAD-BEARING. The runner config points at
-# /home/ubuntu/.local/bin/claude and /home/ubuntu/projects/opensession, and the
+# /home/ubuntu/.local/bin/claude and the host checkout's absolute path, and the
 # session worktree is bind-mounted at its identical host path. So this image must
 # reproduce those absolute paths exactly and run as uid 1000 (host `ubuntu`) so
-# bind-mounted files keep sane ownership.
+# bind-mounted files keep sane ownership. build.sh supplies the current checkout
+# through OPENSESSION_RUNNER_ROOT; the default preserves the original layout.
 #
 # Build context is the REPO ROOT (see build.sh); a root .dockerignore trims it.
 
@@ -21,6 +22,7 @@ FROM ubuntu:24.04
 ARG BUN_VERSION=1.4.0
 ARG CLAUDE_VERSION=2.1.218
 ARG NODE_MAJOR=24
+ARG OPENSESSION_RUNNER_ROOT=/home/ubuntu/projects/opensession
 
 # Locale parity note: the host runs a full en_US.UTF-8 locale; the image uses
 # C.UTF-8 (no `locales` package) on the assumption that nothing in the runner
@@ -29,7 +31,8 @@ ARG NODE_MAJOR=24
 # `locales` and generate en_US.UTF-8 instead of chasing it.
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8
+    LC_ALL=C.UTF-8 \
+    OPENSESSION_RUNNER_ROOT=${OPENSESSION_RUNNER_ROOT}
 
 # --- system packages ---
 # ripgrep lives in universe (enabled by default in the ubuntu image). python3 +
@@ -90,8 +93,8 @@ RUN curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local/bun bash -s "bun-
 # Prepare the exact absolute paths the runner expects, owned by ubuntu.
 RUN mkdir -p /home/ubuntu/.local/bin \
              /home/ubuntu/.claude \
-             /home/ubuntu/projects/opensession \
-    && chown -R ubuntu:ubuntu /home/ubuntu
+             "${OPENSESSION_RUNNER_ROOT}" \
+    && chown -R ubuntu:ubuntu /home/ubuntu "${OPENSESSION_RUNNER_ROOT}"
 
 # Minimal ~/.claude so settingSources:["user"] doesn't error.
 RUN echo '{}' > /home/ubuntu/.claude/settings.json \
@@ -117,18 +120,18 @@ RUN curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_VERSION}" \
 # --- Open Session runner bundle ---
 # Deps first for layer caching: only re-installs when the package manifest,
 # lockfile, or one of Bun's declared dependency patches changes.
-WORKDIR /home/ubuntu/projects/opensession
-COPY --chown=ubuntu:ubuntu package.json bun.lock ./
-COPY --chown=ubuntu:ubuntu patches ./patches
-COPY --chown=ubuntu:ubuntu packages/core/protocol/package.json ./packages/core/protocol/package.json
-COPY --chown=ubuntu:ubuntu packages/core/opensession-server/package.json ./packages/core/opensession-server/package.json
+WORKDIR ${OPENSESSION_RUNNER_ROOT}
+COPY --chown=ubuntu:ubuntu package.json bun.lock ${OPENSESSION_RUNNER_ROOT}/
+COPY --chown=ubuntu:ubuntu patches ${OPENSESSION_RUNNER_ROOT}/patches
+COPY --chown=ubuntu:ubuntu packages/core/protocol/package.json ${OPENSESSION_RUNNER_ROOT}/packages/core/protocol/package.json
+COPY --chown=ubuntu:ubuntu packages/core/opensession-server/package.json ${OPENSESSION_RUNNER_ROOT}/packages/core/opensession-server/package.json
 RUN bun install --frozen-lockfile
 
 # App source at the identical absolute path (worktrees are bind-mounted separately).
-COPY --chown=ubuntu:ubuntu tsconfig.json ./
-COPY --chown=ubuntu:ubuntu packages/core/protocol ./packages/core/protocol
-COPY --chown=ubuntu:ubuntu packages/core/opensession-server ./packages/core/opensession-server
-COPY --chown=ubuntu:ubuntu scripts/workload-identity-client.ts ./scripts/workload-identity-client.ts
+COPY --chown=ubuntu:ubuntu tsconfig.json ${OPENSESSION_RUNNER_ROOT}/
+COPY --chown=ubuntu:ubuntu packages/core/protocol ${OPENSESSION_RUNNER_ROOT}/packages/core/protocol
+COPY --chown=ubuntu:ubuntu packages/core/opensession-server ${OPENSESSION_RUNNER_ROOT}/packages/core/opensession-server
+COPY --chown=ubuntu:ubuntu scripts/workload-identity-client.ts ${OPENSESSION_RUNNER_ROOT}/scripts/workload-identity-client.ts
 
 WORKDIR /home/ubuntu
 

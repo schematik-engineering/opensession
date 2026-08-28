@@ -16,7 +16,7 @@ session's git worktree **bind-mounted at its identical host path**.
 | `python3`, `build-essential` | worktree `bun install` native deps | apt |
 | `just`, `direnv`, `lsof` | common repo dev-server bring-up chains (in-sandbox previews) | apt / pinned release |
 | Claude Code CLI | baked at the identical host CLI path for session-resume parity | `2.1.218` (host); build FAILS on version mismatch |
-| runner bundle | `/home/ubuntu/projects/opensession`: root manifests, lockfile, patches and `tsconfig.json`; copied protocol and server packages; `scripts/workload-identity-client.ts`; installed dependencies | from lockfile |
+| runner bundle | host checkout path (`/home/ubuntu/projects/opensession` by default): root manifests, lockfile, patches and `tsconfig.json`; copied protocol and server packages; `scripts/workload-identity-client.ts`; installed dependencies | from lockfile |
 | minimal `~/.claude/settings.json` | so `settingSources:["user"]` doesn't error | `{}` |
 
 Runs as uid **1000** user `ubuntu` (matches the host uid) so bind-mounted
@@ -27,13 +27,12 @@ baked ENTRYPOINT.
 ## Why path parity matters
 
 The runner config points at host absolute paths: the claude CLI at
-`/home/ubuntu/.local/bin/claude`, the runner bundle at
-`/home/ubuntu/projects/opensession`, and the session worktree
-bind-mounted at its **same** host path. The image reproduces every one of those
-absolute paths exactly. If any drifts, the in-container runner can't find the
-CLI, its dependencies, or the worktree. Do not "tidy" these paths — and if your
-host's username/home/checkout path differs, edit them in the Dockerfile and
-rebuild (see docs/self-hosting-sandboxes.md "Path parity is load-bearing").
+`/home/ubuntu/.local/bin/claude`, the runner bundle checkout, and the session
+worktree bind-mounted at its **same** host path. The image reproduces every one
+of those absolute paths exactly. `deploy/sandbox/build.sh` supplies its active
+checkout as `OPENSESSION_RUNNER_ROOT`; a direct Docker build can override that
+build arg. If any path drifts, the in-container runner can't find the CLI, its
+dependencies, or the worktree.
 
 ## Build
 
@@ -45,9 +44,10 @@ Tags `opensession-runner:latest` and `opensession-runner:<git-sha>` from the rep
 root context. Override the name with `IMAGE=... deploy/sandbox/build.sh`.
 
 Version pins are Dockerfile `ARG`s: `BUN_VERSION`, `CLAUDE_VERSION`,
-`NODE_MAJOR`, and `JUST_VERSION`. `build.sh` supports `IMAGE=...` but does not
-forward command-line options. To override a pin, invoke `docker build` directly
-with `--build-arg` or change the Dockerfile default.
+`NODE_MAJOR`, and `JUST_VERSION`. `OPENSESSION_RUNNER_ROOT` controls source-path
+parity. `build.sh` supports `IMAGE=...` but does not forward command-line
+options. To override a pin, invoke `docker build` directly with `--build-arg`
+or change the Dockerfile default.
 
 ## Runtime design (Phase 1 — DockerProvider)
 
