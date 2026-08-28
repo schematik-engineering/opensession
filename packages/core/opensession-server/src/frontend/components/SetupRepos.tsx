@@ -54,6 +54,7 @@ import {
   type SetupStatus,
 } from "./setup-shared";
 import { Badge } from "../ui/badge";
+import { errorMessage } from "../lib/error-message";
 
 // Settings → Setup → Repositories: the registered repos sessions work in,
 // plus an add flow. With a GitHub credential (a connected account or the bot
@@ -320,7 +321,7 @@ function RepoActionsMenu({
     if (!normalized || !changed || saving) return;
     setSaving("branch");
     setBranchError(null);
-    await (async () => {
+    try {
       const updated = await setupRequest<{
         id: string;
         defaultBranch: string;
@@ -333,13 +334,10 @@ function RepoActionsMenu({
       else await onChanged();
       setBranchDialogOpen(false);
       toast(`${repo.label} default branch updated`);
-    })()
-      .catch(async (e: any) => {
-        setBranchError(e.message);
-      })
-      .finally(async () => {
-        setSaving(null);
-      });
+    } catch (error) {
+      setBranchError(errorMessage(error, "Failed to update default branch"));
+    }
+    setSaving(null);
   }
 
   async function saveWorktreeMode(next: boolean) {
@@ -347,7 +345,7 @@ function RepoActionsMenu({
     const previous = isolatedWorktrees;
     setIsolatedWorktrees(next);
     setSaving("worktrees");
-    await (async () => {
+    try {
       const updated = await setupRequest<{
         id: string;
         defaultBranch: string;
@@ -360,17 +358,16 @@ function RepoActionsMenu({
       if (onRepoUpdated) onRepoUpdated(updated);
       else await onChanged();
       toast(`${repo.label} worktree setting updated`);
-    })()
-      .catch(async (e: any) => {
-        setIsolatedWorktrees(previous);
-        // No row of its own to paint an inline alert on anymore: this menu
-        // serves both the settings row and the wizard's compact rows, so
-        // failures surface app-wide instead.
-        toast(e.message, { variant: "error" });
-      })
-      .finally(async () => {
-        setSaving(null);
+    } catch (error) {
+      setIsolatedWorktrees(previous);
+      // No row of its own to paint an inline alert on anymore: this menu
+      // serves both the settings row and the wizard's compact rows, so
+      // failures surface app-wide instead.
+      toast(errorMessage(error, "Failed to update worktree setting"), {
+        variant: "error",
       });
+    }
+    setSaving(null);
   }
 
   function openBranchDialog() {
@@ -518,16 +515,13 @@ function RepoTileButton({
     if (busy) return;
     setBusy(true);
     setError(null);
-    await (async () => {
+    try {
       await work();
       await onChanged();
-    })()
-      .catch(async (e: any) => {
-        setError(e.message);
-      })
-      .finally(async () => {
-        setBusy(false);
-      });
+    } catch (error) {
+      setError(errorMessage(error, "Failed to update repository appearance"));
+    }
+    setBusy(false);
   }
 
   const apply = (patch: { color?: string | null; icon?: "github" | null }) =>
@@ -951,30 +945,33 @@ function RemoteRepoPicker({
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      await (async () => {
+    const loadGithubRepos = async () => {
+      try {
         const body = await setupRequest<BrowseResult>(
           "/api/setup/github/repos",
         );
         if (!cancelled) setBrowse(body);
-      })().catch(async () => {
+      } catch {
         if (!cancelled) setBrowseFailed(true);
-      });
-    })();
-    (async () => {
-      await (async () => {
+      }
+    };
+    const loadCodeStorageRepos = async () => {
+      try {
         const body = await setupRequest<CsBrowseResult>(
           "/api/setup/codestorage/repos",
         );
         if (!cancelled) setCsBrowse(body);
-      })().catch(async (e: any) => {
-        // A throw means configured-but-failing (the route answers 200 with
-        // source: null when unconfigured) — surface the server's error
-        // instead of silently hiding the section. GitHub is unaffected.
+      } catch (error) {
+        // Configured-but-failing errors stay visible while GitHub remains
+        // usable. An unconfigured integration returns source: null instead.
         if (!cancelled)
-          setCsError(e?.message || "Couldn’t reach code.storage right now.");
-      });
-    })();
+          setCsError(
+            errorMessage(error, "Couldn’t reach code.storage right now."),
+          );
+      }
+    };
+    void loadGithubRepos();
+    void loadCodeStorageRepos();
     return () => {
       cancelled = true;
     };

@@ -86,20 +86,29 @@ export interface ProviderAccountOption {
   kind?: string;
 }
 
+interface ProviderAccountRecord {
+  id: string;
+  name: string;
+  email?: unknown;
+  owner?: unknown;
+  usable?: unknown;
+  kind?: unknown;
+}
+
 export async function fetchProviderAccounts(): Promise<
   ProviderAccountOption[]
 > {
   const fetchPool = async (provider: "claude" | "codex", path: string) => {
     try {
-      const data = await request<{ accounts?: any[] }>(path);
-      return (data?.accounts ?? []).map((a) => ({
-        id: a.id,
-        name: a.name,
-        email: typeof a.email === "string" ? a.email : undefined,
+      const data = await request<{ accounts?: ProviderAccountRecord[] }>(path);
+      return (data?.accounts ?? []).map((account) => ({
+        id: account.id,
+        name: account.name,
+        email: typeof account.email === "string" ? account.email : undefined,
         provider,
-        owner: a.owner || undefined,
-        usable: a.usable !== false,
-        kind: typeof a.kind === "string" ? a.kind : undefined,
+        owner: typeof account.owner === "string" ? account.owner : undefined,
+        usable: account.usable !== false,
+        kind: typeof account.kind === "string" ? account.kind : undefined,
       }));
     } catch {
       return [];
@@ -112,8 +121,87 @@ export async function fetchProviderAccounts(): Promise<
   return [...claude, ...codex];
 }
 
-export async function fetchAutomations() {
-  return request<any>("/automations", {
+export interface AutomationRun {
+  at: string;
+  sessionId: string;
+  trigger: "cron" | "webhook" | "manual" | "event";
+  status: "running" | "ok" | "error";
+  error?: string;
+  durationMs?: number;
+}
+
+export interface AutomationInput {
+  id: string;
+  label?: string;
+  window?: {
+    mode?: "since_last_success" | "rolling";
+    minutes?: number;
+    overlapMinutes?: number;
+  };
+  reduce?: { model?: string; instructions?: string; maxOutputChars?: number };
+  source:
+    | {
+        type: "slack_channel";
+        channel: string;
+        includeThreads?: boolean;
+        includeBots?: boolean;
+        limit?: number;
+      }
+    | { type: "reports"; automationId: string; limit?: number };
+}
+
+export type AutomationOutput =
+  | {
+      id: string;
+      type: "report";
+      enabled?: boolean;
+      publish?: "always" | "on_findings";
+    }
+  | {
+      id: string;
+      type: "slack";
+      enabled?: boolean;
+      channel: string;
+      minUrgency?: "low" | "medium" | "high" | "critical";
+      minConfidence?: "low" | "medium" | "high";
+    };
+
+export interface Automation {
+  id: string;
+  name: string;
+  prompt: string;
+  schedule: string;
+  mode: "ask" | "code";
+  enabled: boolean;
+  createdBy: string;
+  createdAt: string;
+  webhookSecret?: string;
+  webhookEnabled?: boolean;
+  eventKey?: string;
+  mcpServers?: string[];
+  slackWatch?: { channel: string };
+  inputs?: AutomationInput[];
+  outputs?: AutomationOutput[];
+  owner?: string;
+  workspaceId?: string;
+  model?: string;
+  fallbackModel?: string;
+  accountId?: string;
+  accountStrict?: boolean;
+  usageCredits?: boolean;
+  sandbox?: boolean;
+  lastRunAt?: string;
+  lastRunSessionId?: string;
+  lastRunStatus?: "running" | "ok" | "error";
+  lastRunError?: string;
+  lastTrigger?: "cron" | "webhook" | "manual" | "event";
+  nextRunAt: string | null;
+  isRunning?: boolean;
+  runs?: AutomationRun[];
+}
+
+export async function fetchAutomations(): Promise<Automation[]> {
+  return request("/automations", {
     label: "Failed to fetch automations",
   });
 }
@@ -349,12 +437,22 @@ export async function createAutomationApi(input: {
   outputs?: unknown[];
   owner?: string;
   workspaceId?: string;
-}) {
-  return request<any>("/automations", { method: "POST", body: input });
+}): Promise<Automation> {
+  return request("/automations", { method: "POST", body: input });
 }
 
-export async function updateAutomationApi(id: string, patch: object) {
-  return request<any>(`/automations/${encodeURIComponent(id)}`, {
+export type AutomationPatch = Partial<
+  Omit<Automation, "mcpServers" | "slackWatch">
+> & {
+  mcpServers?: string[] | null;
+  slackWatch?: { channel: string } | null;
+};
+
+export async function updateAutomationApi(
+  id: string,
+  patch: AutomationPatch,
+): Promise<Automation> {
+  return request(`/automations/${encodeURIComponent(id)}`, {
     method: "PUT",
     body: patch,
   });

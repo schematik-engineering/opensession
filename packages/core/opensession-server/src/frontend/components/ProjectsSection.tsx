@@ -11,6 +11,7 @@ import { SectionHeading } from "./Connections";
 import { SettingCard, rowMenuTriggerClasses } from "../ui/settings";
 import type { FeedDescriptor, Project } from "../lib/types";
 import { fieldClasses } from "../ui/input";
+import { errorMessage } from "../lib/error-message";
 
 /**
  * Connections → Projects. A *project* is a source of work with its own sidebar
@@ -29,29 +30,39 @@ import { fieldClasses } from "../ui/input";
 
 // ── mapping suggester ────────────────────────────────────────────────────────
 
-function findItemsPath(obj: unknown): { path: string; sample: any } | null {
-  const queue: Array<{ node: any; path: string }> = [{ node: obj, path: "" }];
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function findItemsPath(
+  obj: unknown,
+): { path: string; sample: Record<string, unknown> } | null {
+  const queue: Array<{ node: unknown; path: string }> = [
+    { node: obj, path: "" },
+  ];
   let guard = 0;
   while (queue.length && guard++ < 500) {
     const { node, path } = queue.shift()!;
     if (Array.isArray(node)) {
-      if (node.length && node[0] && typeof node[0] === "object")
-        return { path, sample: node[0] };
+      if (isRecord(node[0])) return { path, sample: node[0] };
       continue;
     }
-    if (node && typeof node === "object")
-      for (const [k, v] of Object.entries(node))
-        queue.push({ node: v, path: path ? `${path}.${k}` : k });
+    if (isRecord(node))
+      for (const [key, value] of Object.entries(node))
+        queue.push({
+          node: value,
+          path: path ? `${path}.${key}` : key,
+        });
   }
   return null;
 }
 
 /** Keys of `sample` (one nesting level deep, dot-joined) whose value is a string. */
-function stringPaths(sample: Record<string, any>): string[] {
+function stringPaths(sample: Record<string, unknown>): string[] {
   const out: string[] = [];
   for (const [k, v] of Object.entries(sample)) {
     if (typeof v === "string" || typeof v === "number") out.push(k);
-    else if (v && typeof v === "object" && !Array.isArray(v))
+    else if (isRecord(v))
       for (const [k2, v2] of Object.entries(v))
         if (typeof v2 === "string") out.push(`${k}.${k2}`);
   }
@@ -66,7 +77,16 @@ function pick(paths: string[], patterns: RegExp[]): string {
   return "";
 }
 
-function suggestMap(sample: Record<string, any>) {
+function valueAtPath(sample: Record<string, unknown>, path: string): unknown {
+  let value: unknown = sample;
+  for (const segment of path.split(".")) {
+    if (!isRecord(value)) return undefined;
+    value = value[segment];
+  }
+  return value;
+}
+
+function suggestMap(sample: Record<string, unknown>) {
   const paths = stringPaths(sample);
   return {
     id: pick(paths, [/^id$/i, /Id$/, /^key$/i, /^slug$/i]),
@@ -77,10 +97,8 @@ function suggestMap(sample: Record<string, any>) {
       /^(createdAt|created_at|date|ts)$/i,
     ]),
     url:
-      paths.find((k) =>
-        /^https?:\/\//.test(
-          String(sample[k.split(".")[0]]?.[k.split(".")[1]] ?? sample[k]),
-        ),
+      paths.find((path) =>
+        /^https?:\/\//.test(String(valueAtPath(sample, path))),
       ) || "",
     thumbnail: pick(paths, [/thumb/i, /image/i, /avatar/i]),
   };
@@ -91,6 +109,17 @@ function suggestMap(sample: Record<string, any>) {
 const inputCls = fieldClasses("md");
 const labelCls = "mb-1 mt-3 block text-meta font-semibold text-faint";
 
+function parseArgs(text: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text || "{}");
+  } catch {
+    throw new Error("Args must be valid JSON");
+  }
+  if (!isRecord(parsed)) throw new Error("Args must be a JSON object");
+  return parsed;
+}
+
 export function ProjectsSection() {
   const [feeds, setFeeds] = useState<FeedDescriptor[] | null>(null);
   const [projects, setProjects] = useState<Project[] | null>(null);
@@ -98,18 +127,23 @@ export function ProjectsSection() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    await (async () => {
+    try {
       const res = await fetch(`${BASE_PATH}/api/feeds`);
       if (res.ok) setFeeds((await res.json()).feeds || []);
-    })().catch(async () => {});
-    await (async () => {
+      else setError(`Failed to load feeds: ${res.status}`);
+    } catch (error) {
+      setError(errorMessage(error, "Failed to load feeds"));
+    }
+    try {
       // The union view: repo projects come from the registry, feed
       // projects from the same descriptors above. Only feeds are
-      // editable here, but both belong in the list — a project is a
-      // project regardless of what backs it.
+      // editable here, but both belong in the list.
       const res = await fetch(`${BASE_PATH}/api/projects`);
       if (res.ok) setProjects((await res.json()).projects || []);
-    })().catch(async () => {});
+      else setError(`Failed to load projects: ${res.status}`);
+    } catch (error) {
+      setError(errorMessage(error, "Failed to load projects"));
+    }
   }, []);
   useEffect(() => {
     void load();
@@ -246,18 +280,26 @@ function NewProjectModal({
   // Connected HTTP servers for the picker.
   useEffect(() => {
     if (!open) return;
-    void (async () => {
-      await (async () => {
+    const loadServers = async () => {
+      try {
         const res = await fetch(`${BASE_PATH}/api/connections`);
-        if (!res.ok) return;
+        if (!res.ok) {
+          setError(`Failed to load MCP servers: ${res.status}`);
+          return;
+        }
         const body = await res.json();
         setServers(
           (body.mcpServers || [])
-            .filter((s: { transport: string }) => s.transport === "http")
-            .map((s: { name: string }) => s.name),
+            .filter(
+              (server: { transport: string }) => server.transport === "http",
+            )
+            .map((server: { name: string }) => server.name),
         );
-      })().catch(async () => {});
-    })();
+      } catch (error) {
+        setError(errorMessage(error, "Failed to load MCP servers"));
+      }
+    };
+    void loadServers();
   }, [open]);
 
   // Tool catalog on server change.
@@ -265,83 +307,83 @@ function NewProjectModal({
     setTools([]);
     setTool("");
     if (!server) return;
-    void (async () => {
+    const loadTools = async () => {
       setBusy("Loading tool catalog…");
-      await (async () => {
+      try {
         const res = await fetch(
           `${BASE_PATH}/api/connections/mcp/${encodeURIComponent(server)}/tools`,
         );
         const body = await res.json();
-        if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
-        const all = body.tools || [];
-        // list-ish tools first — they're what feeds are built from.
-        all.sort((a: { name: string }, b: { name: string }) => {
+        if (!res.ok) {
+          setError(body.error || `Failed to load tool catalog: ${res.status}`);
+          setBusy(null);
+          return;
+        }
+        const all: { name: string; description?: string }[] = body.tools || [];
+        // List-like tools first because feeds are built from collections.
+        all.sort((a, b) => {
           const la = /^(list|search|get_all)/.test(a.name) ? 0 : 1;
           const lb = /^(list|search|get_all)/.test(b.name) ? 0 : 1;
           return la - lb || a.name.localeCompare(b.name);
         });
         setTools(all);
-      })()
-        .catch(async (e: any) => {
-          setError(e.message);
-        })
-        .finally(async () => {
-          setBusy(null);
-        });
-    })();
+      } catch (error) {
+        setError(errorMessage(error, "Failed to load tool catalog"));
+      }
+      setBusy(null);
+    };
+    void loadTools();
   }, [server]);
 
   async function fetchSample() {
     setError(null);
     setBusy("Calling the tool…");
-    await (async () => {
-      let args: Record<string, unknown> = {};
-      await (async () => {
-        args = JSON.parse(argsText || "{}");
-      })().catch(async () => {
-        throw new Error("Args must be valid JSON");
-      });
+    try {
+      const args = parseArgs(argsText);
       const res = await fetch(`${BASE_PATH}/api/feeds/preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ server, tool, args }),
       });
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
+      if (!res.ok) {
+        setError(body.error || `Failed to fetch sample: ${res.status}`);
+        setBusy(null);
+        return;
+      }
       const raw = body.result ?? JSON.parse(body.sample || "null");
       const found = findItemsPath(raw);
-      if (!found)
-        throw new Error(
+      if (!found) {
+        setError(
           "No array of items found in the tool result. Try different args or another tool.",
         );
+        setBusy(null);
+        return;
+      }
       setPath(found.path);
       setMap(suggestMap(found.sample));
       setSampleItem(JSON.stringify(found.sample, null, 1).slice(0, 600));
-    })()
-      .catch(async (e: any) => {
-        setError(e.message);
-      })
-      .finally(async () => {
-        setBusy(null);
-      });
+    } catch (error) {
+      setError(errorMessage(error, "Failed to fetch sample"));
+    }
+    setBusy(null);
   }
 
   async function save() {
     setError(null);
     setBusy("Saving…");
-    await (async () => {
+    try {
       const id = title
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-+|-+$/g, "")
         .slice(0, 30);
-      if (!id) throw new Error("Give the project a name");
-      let args: Record<string, unknown> = {};
-      await (async () => {
-        args = JSON.parse(argsText || "{}");
-      })().catch(async () => {
-        throw new Error("Args must be valid JSON");
-      });
+      if (!id) {
+        setError("Give the project a name");
+        setBusy(null);
+        return;
+      }
+      const args = parseArgs(argsText);
       const body = {
         id,
         title: title.trim(),
@@ -377,15 +419,12 @@ function NewProjectModal({
         body: JSON.stringify(body),
       });
       const out = await res.json();
-      if (!res.ok) throw new Error(out.error || `Failed: ${res.status}`);
-      onSaved();
-    })()
-      .catch(async (e: any) => {
-        setError(e.message);
-      })
-      .finally(async () => {
-        setBusy(null);
-      });
+      if (res.ok) onSaved();
+      else setError(out.error || `Failed to save project: ${res.status}`);
+    } catch (error) {
+      setError(errorMessage(error, "Failed to save project"));
+    }
+    setBusy(null);
   }
 
   const canSave =

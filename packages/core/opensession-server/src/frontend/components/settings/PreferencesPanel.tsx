@@ -17,6 +17,7 @@ import {
   type RepoInfo,
 } from "../../lib/api";
 import { BASE_PATH } from "../../lib/base";
+import { errorMessage } from "../../lib/error-message";
 import {
   getBusySendPrefs,
   onBusySendChanged,
@@ -130,34 +131,35 @@ function DeskVoiceApiKeyRow() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = () => {
+  useEffect(() => {
     fetch(`${BASE_PATH}/api/desk/voice/status`)
-      .then((r) => r.json())
+      .then((response) => response.json())
       .then(setStatus)
-      .catch((e) => setError(e.message));
-  };
-  useEffect(load, [load]);
+      .catch((error) =>
+        setError(errorMessage(error, "Failed to load voice settings")),
+      );
+  }, []);
 
   async function put(value: string) {
     setBusy(true);
     setError(null);
-    await (async () => {
+    try {
       const res = await fetch(`${BASE_PATH}/api/desk/voice/key`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apiKey: value }),
       });
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
-      setStatus(body);
-      setApiKey("");
-    })()
-      .catch(async (e: any) => {
-        setError(e.message || "Failed to save the API key");
-      })
-      .finally(async () => {
-        setBusy(false);
-      });
+      if (res.ok) {
+        setStatus(body);
+        setApiKey("");
+      } else {
+        setError(body.error || `Failed to save the API key: ${res.status}`);
+      }
+    } catch (error) {
+      setError(errorMessage(error, "Failed to save the API key"));
+    }
+    setBusy(false);
   }
 
   return (
@@ -265,20 +267,16 @@ function PersonalOutputStyleRow() {
     setStyle(next);
     setSaving(true);
     setError(null);
-    await (async () => {
+    try {
       const saved = await savePersonalOutputStyle(user, next);
       setStyle(saved.outputStyle);
-    })()
-      .catch(async (e: any) => {
-        setStyle(previous);
-        setError(e?.message || "Failed to save output style");
-        toast(e?.message || "Failed to save output style", {
-          variant: "error",
-        });
-      })
-      .finally(async () => {
-        setSaving(false);
-      });
+    } catch (error) {
+      const message = errorMessage(error, "Failed to save output style");
+      setStyle(previous);
+      setError(message);
+      toast(message, { variant: "error" });
+    }
+    setSaving(false);
   }
 
   return (
@@ -343,16 +341,16 @@ function PersonalPromptPanel() {
     const { prompt: draft, savedPrompt: saved, user: who } = latest.current;
     if (draft === null || draft === saved) return;
     setStatus("saving");
-    await (async () => {
-      const r = await savePersonalPrompt(who, draft);
-      setSavedPrompt(r.prompt);
+    try {
+      const result = await savePersonalPrompt(who, draft);
+      setSavedPrompt(result.prompt);
       setStatus("saved");
-    })().catch(async (e: any) => {
+    } catch (error) {
       setStatus("idle");
-      toast(e?.message || "Failed to save personal prompt", {
+      toast(errorMessage(error, "Failed to save personal prompt"), {
         variant: "error",
       });
-    });
+    }
   }, []);
 
   useEffect(() => {

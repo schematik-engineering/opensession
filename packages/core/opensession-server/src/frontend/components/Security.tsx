@@ -24,6 +24,7 @@ import { Modal } from "../ui/modal";
 import { CheckStatusIcon } from "./CheckStatusIcon";
 import { IconDotsHorizontal, IconPencil, IconPlus, IconTrash } from "./icons";
 import { SOURCE_CHIP } from "../lib/source-chip-classes";
+import { errorMessage } from "../lib/error-message";
 import { Field, Input, Textarea } from "../ui/input";
 import { OptionSelect } from "../ui/select";
 import {
@@ -109,24 +110,26 @@ export function Security({ onOpenSession }: Props) {
   );
   const [error, setError] = useState<string | null>(null);
 
-  // Stable identity: only setters and module functions are captured, so the
-  // polling effect can list `load` without ever refiring from re-renders.
   const load = useCallback(async () => {
-    await (async () => {
+    try {
       const data = await fetchSecurity();
       setScans(data.scans);
       setProfiles(data.profiles);
       setRepos(data.repos);
-      setLoading(false);
-    })().catch(async () => {});
-    await (async () => {
-      const autos = await fetchAutomations();
+    } catch (error) {
+      setError(errorMessage(error, "Failed to load security scans"));
+    }
+    setLoading(false);
+    try {
+      const automations = await fetchAutomations();
       setRecurring(
-        (autos as RecurringScan[]).filter((a) =>
-          /deepsec|security scan/i.test(a.name),
+        automations.filter((automation) =>
+          /deepsec|security scan/i.test(automation.name),
         ),
       );
-    })().catch(async () => {});
+    } catch (error) {
+      setError(errorMessage(error, "Failed to load recurring scans"));
+    }
   }, []);
 
   useEffect(() => {
@@ -142,22 +145,22 @@ export function Security({ onOpenSession }: Props) {
   async function handleDeleteScan(s: SecurityScan) {
     if (!confirm("Remove this scan record? Its sessions are left as-is."))
       return;
-    await (async () => {
+    try {
       await deleteScanApi(s.id);
-      load();
-    })().catch(async (e: any) => {
-      setError(e.message);
-    });
+      void load();
+    } catch (error) {
+      setError(errorMessage(error, "Failed to remove scan"));
+    }
   }
 
   async function handleDeleteProfile(p: ScanProfile) {
     if (!confirm(`Delete profile "${p.name}"?`)) return;
-    await (async () => {
+    try {
       await deleteScanProfileApi(p.id);
-      load();
-    })().catch(async (e: any) => {
-      setError(e.message);
-    });
+      void load();
+    } catch (error) {
+      setError(errorMessage(error, "Failed to delete profile"));
+    }
   }
 
   return (
@@ -490,7 +493,7 @@ function NewScanModal({
   async function handleStart() {
     setStarting(true);
     setError(null);
-    await (async () => {
+    try {
       const res = await startScanApi({
         repos: scope === "all" ? "all" : [repo],
         profileId: profileId || undefined,
@@ -500,10 +503,10 @@ function NewScanModal({
         createdBy: getCurrentUser(),
       });
       onStarted(res.sessionId);
-    })().catch(async (e: any) => {
-      setError(e.message);
+    } catch (error) {
+      setError(errorMessage(error, "Failed to start scan"));
       setStarting(false);
-    });
+    }
   }
 
   return (
@@ -685,7 +688,7 @@ function ProfileModal({
   async function handleSave() {
     setSaving(true);
     setError(null);
-    await (async () => {
+    try {
       if (initial) await updateScanProfileApi(initial.id, { name, prompt });
       else
         await createScanProfileApi({
@@ -694,10 +697,10 @@ function ProfileModal({
           createdBy: getCurrentUser(),
         });
       onSaved();
-    })().catch(async (e: any) => {
-      setError(e.message);
+    } catch (error) {
+      setError(errorMessage(error, "Failed to save profile"));
       setSaving(false);
-    });
+    }
   }
 
   return (

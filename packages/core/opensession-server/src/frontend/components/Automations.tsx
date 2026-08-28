@@ -15,6 +15,10 @@ import {
   relativeTime,
   type ModelOption,
   type ProviderAccountOption,
+  type Automation,
+  type AutomationInput,
+  type AutomationRun,
+  type AutomationOutput,
   type AutomationTemplate,
   type AutomationDraft,
 } from "../lib/api";
@@ -75,87 +79,6 @@ const SECTION_LABEL = "mb-1.5 text-label font-semibold text-faint";
 const LINK = "cursor-pointer text-link no-underline hover:underline";
 /** .automation-cron — the cron/event chip in the Configuration grid. */
 const CHIP = "rounded-sm bg-active px-1.75 py-px text-meta";
-
-interface AutomationRun {
-  at: string;
-  sessionId: string;
-  trigger: "cron" | "webhook" | "manual" | "event";
-  status: "running" | "ok" | "error";
-  error?: string;
-  durationMs?: number;
-}
-
-type AutomationInput = {
-  id: string;
-  label?: string;
-  window?: {
-    mode?: "since_last_success" | "rolling";
-    minutes?: number;
-    overlapMinutes?: number;
-  };
-  reduce?: { model?: string; instructions?: string; maxOutputChars?: number };
-  source:
-    | {
-        type: "slack_channel";
-        channel: string;
-        includeThreads?: boolean;
-        includeBots?: boolean;
-        limit?: number;
-      }
-    | { type: "reports"; automationId: string; limit?: number };
-};
-
-type AutomationOutput =
-  | {
-      id: string;
-      type: "report";
-      enabled?: boolean;
-      publish?: "always" | "on_findings";
-    }
-  | {
-      id: string;
-      type: "slack";
-      enabled?: boolean;
-      channel: string;
-      minUrgency?: "low" | "medium" | "high" | "critical";
-      minConfidence?: "low" | "medium" | "high";
-    };
-
-interface Automation {
-  id: string;
-  name: string;
-  prompt: string;
-  schedule: string;
-  mode: "ask" | "code";
-  enabled: boolean;
-  createdBy: string;
-  createdAt: string;
-  webhookSecret?: string;
-  webhookEnabled?: boolean;
-  eventKey?: string;
-  mcpServers?: string[];
-  slackWatch?: { channel: string };
-  inputs?: AutomationInput[];
-  outputs?: AutomationOutput[];
-  /** Who is accountable for it; absent means nobody has taken it. */
-  owner?: string;
-  /** Workspace it files under. */
-  workspaceId?: string;
-  model?: string;
-  fallbackModel?: string;
-  accountId?: string;
-  accountStrict?: boolean;
-  usageCredits?: boolean;
-  sandbox?: boolean;
-  lastRunAt?: string;
-  lastRunSessionId?: string;
-  lastRunStatus?: "running" | "ok" | "error";
-  lastRunError?: string;
-  lastTrigger?: "cron" | "webhook" | "manual" | "event";
-  nextRunAt: string | null;
-  isRunning?: boolean;
-  runs?: AutomationRun[];
-}
 
 interface Props {
   onOpenSession: (sessionId: string) => void;
@@ -225,7 +148,7 @@ export function Automations({ onOpenSession, selectedId, onSelect }: Props) {
 
   const load = useCallback(async () => {
     try {
-      const next = (await fetchAutomations()) as Automation[];
+      const next = await fetchAutomations();
       setAutomations(
         next.map((automation) => {
           const pending = pendingToggles.current.get(automation.id);
