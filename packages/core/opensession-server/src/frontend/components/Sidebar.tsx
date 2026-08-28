@@ -81,8 +81,6 @@ import {
 	activeSubagentsForWorkspace,
 	isAskWorkspace,
 	isScratchWorkspace,
-	sessionSharesSelectedSidebarGroup,
-	spawnedSessionBelongsInSidebar,
 	workspaceMainSession,
 	workspaceRowOwnsSelection,
 } from "../lib/sidebar-workspaces";
@@ -136,7 +134,6 @@ import {
 } from "../lib/sidebar-density";
 import {
 	getRepoOrder,
-	mergeRepoOrder,
 	normalizeRepoOrder,
 	onRepoOrderChanged,
 	replaceVisibleRepoOrder,
@@ -154,14 +151,12 @@ import {
 	IconSliders,
 	IconCheck,
 	IconInbox,
-	IconPencil,
 	IconPlus,
 	IconRobot,
 	IconEye,
 	IconEyeOff,
 	IconStack,
 	IconPin,
-	IconLink,
 	IconMail,
 	IconTrash,
 	IconChart,
@@ -185,31 +180,22 @@ import { RepoTile, repoLabel } from "./RepoTile";
 import { useIsPhone } from "../hooks/useIsPhone";
 import { useShortcutKeys } from "../hooks/useShortcutBindings";
 import { blockingOverlayOpen } from "../lib/blocking-overlay";
-import { matchesShortcut, shortcutLabel } from "../lib/shortcuts";
+import { matchesShortcut } from "../lib/shortcuts";
 import { PrRow } from "./PrRow";
 import {
-	buildReviewQueue,
 	personKey,
 	reviewAskerFor,
 	wsPrRequestsReviewFrom,
 } from "../lib/review-queue";
-import { personNameForKey, usePeople } from "../lib/people";
-import {
-	canonicalNames,
-	ownerKey,
-	ownerKeyOf,
-	sessionOwners,
-} from "../lib/session-owner";
+import { usePeople } from "../lib/people";
+import { canonicalNames } from "../lib/session-owner";
 import {
 	PERSON_RECENT_ACTIVITY_MS,
 	sidebarPersonSessions,
 } from "../lib/sidebar-people";
 import {
-	placeSidebarRows,
-	rowAutoCreatedInLens,
 	rowOriginSource,
 	rowWasAgentStarted,
-	rowWasAutoCreated,
 	rowsAtPlacement,
 } from "../lib/sidebar-placement";
 import { ReviewAskerFace } from "./ReviewAskerFace";
@@ -249,17 +235,9 @@ import {
 	readFeedFilters,
 	setFilter,
 	useSidebarFilter,
-	sessionPrKeys,
 	sessionRepo,
 	type FeedFilterValues,
 } from "../lib/sidebar-filter";
-import {
-	AGENT_PERSON_KEY,
-	automationInPersonLens,
-	automationInRepoLens,
-	HOUSE_AUTOMATION,
-} from "../lib/automation-audience";
-import { AGENT_NAME } from "../lib/brand";
 import { useAutomationOverview } from "../lib/automation-overview";
 import {
 	isClaimed,
@@ -270,9 +248,8 @@ import {
 	stripPrTitlePrefix,
 	workspaceRunNeedingAttention,
 } from "../lib/sidebar-lanes";
-import { sessionCarriesPr, sessionHasPr } from "../lib/session-prs";
+import { sessionHasPr } from "../lib/session-prs";
 import { sessionHasWorkspace } from "../lib/session-workspace";
-import { workspaceCarriesPr } from "../lib/pr-workspace";
 import {
 	nextRenderedSidebarChat,
 	nextRenderedSidebarItem,
@@ -297,7 +274,6 @@ import {
 } from "../lib/sidebar-swipe";
 import {
 	MINE_STATUS_META,
-	type CtxEntry,
 	type Group,
 	type GroupBand,
 	type MineStatus,
@@ -323,11 +299,31 @@ import { AutomationReportRow } from "./sidebar/AutomationReportRow";
 import { ActiveSubagentRows } from "./sidebar/ActiveSubagentRows";
 import { DraftRow } from "./sidebar/DraftRow";
 import { WorkspaceDraftIndicator } from "./sidebar/WorkspaceDraftIndicator";
-import { SidebarCtxMenu } from "./sidebar/SidebarCtxMenu";
+import { WorkspaceContextMenu } from "./sidebar/WorkspaceContextMenu";
 import { SidebarToolRows, SidebarToolsMenu } from "./sidebar/SidebarToolsMenu";
 import { SidebarCustomizeDialog } from "./sidebar/SidebarCustomizeDialog";
 import { SetupWidget } from "./sidebar/SetupWidget";
 import { OrganizationSwitcher } from "./OrganizationSwitcher";
+import { buildWorkspaceRows } from "../lib/sidebar-workspace-rows";
+import {
+	automationActivityKey,
+	buildAutomationGroups,
+	completeSidebarRepoOrder,
+	deriveSidebarPrRows,
+	deriveWorkspacePlacement,
+	discoverSidebarRepos,
+	filterSidebarSessions,
+	latestSupportSessionsByThread,
+	orderedSidebarRepos,
+	personLensName as resolvePersonLensName,
+	pinnedWorkspaceRows,
+	sidebarPeople,
+	sortSidebarSessions,
+	sortSnoozedWorkspaceRows,
+	supportThreadsFromFeedItems,
+	withAgentPerson,
+	workspaceRowIsFeedOnly,
+} from "../lib/sidebar-derived";
 import { EmptyState, ListSkeleton } from "../ui/state";
 import {
 	SIDEBAR_ROW,
@@ -338,197 +334,6 @@ import {
 // Re-exported for App.tsx, which holds the sidebar ref.
 export type { SidebarHandle } from "../lib/sidebar-types";
 
-const AUTOMATION_COLOR = "#d29922";
-
-type WorkspaceMenuTarget = {
-	id: string;
-	x: number;
-	y: number;
-	source: HTMLButtonElement;
-};
-
-function WorkspaceContextMenu({
-	menu,
-	workspace,
-	row,
-	pins,
-	currentUser,
-	activeSnoozeKeys,
-	snoozes,
-	hiddenRowKeys,
-	onPinsChange,
-	onSetStatus,
-	onSnooze,
-	onStartWorkspaceRename,
-	onStartSessionRename,
-	onToast,
-	onOpenReview,
-	onHide,
-	onArchive,
-	onDeleteDraft,
-	onClose,
-}: {
-	menu: WorkspaceMenuTarget;
-	workspace?: Workspace;
-	row?: WsRow;
-	pins: string[];
-	currentUser: string;
-	activeSnoozeKeys: Set<string>;
-	snoozes: Record<string, string>;
-	hiddenRowKeys: Set<string>;
-	onPinsChange: (pins: string[]) => void;
-	onSetStatus: Props["onSetStatus"];
-	onSnooze: (row: WsRow, until: string | null) => void;
-	onStartWorkspaceRename: (workspace: Workspace) => void;
-	onStartSessionRename: (session: UnifiedSession) => void;
-	onToast?: (message: string) => void;
-	onOpenReview: (session: UnifiedSession) => void;
-	onHide: (row: WsRow, hidden: boolean) => void;
-	onArchive: (row: WsRow, source: HTMLButtonElement) => void;
-	onDeleteDraft: (workspace: Workspace) => void;
-	onClose: () => void;
-}) {
-	const sessions = row?.sessions ?? [];
-	const first = sessions[0];
-	const pinKey = workspace ? `workspace:${workspace.id}` : menu.id;
-	const pinnedKeys = [
-		pinKey,
-		...(row
-			? [
-					row.key,
-					...row.sessions.flatMap((session) => [
-						session.id,
-						...(session.aliasIds || []),
-					]),
-				]
-			: []),
-	].filter((key, index, all) => pins.includes(key) && all.indexOf(key) === index);
-	const pinned = pinnedKeys.length > 0;
-	const togglePinNow = () => {
-		if (!pinned) {
-			onPinsChange(togglePin(pinKey));
-			return;
-		}
-		let next = pins;
-		for (const key of pinnedKeys) next = togglePin(key);
-		onPinsChange(next);
-	};
-	const anyManual = sessions.some((session) => pinnedLane(session));
-	const sharedManual =
-		anyManual &&
-		sessions.every((session) => pinnedLane(session) === pinnedLane(sessions[0]))
-			? (pinnedLane(sessions[0]) ?? null)
-			: null;
-	const entries: CtxEntry[] = [];
-	const rowUnread = row?.unread ?? false;
-	if (sessions.length > 0)
-		entries.push({
-			kind: "item",
-			icon: <IconMail size={20} />,
-			label: rowUnread ? "Mark as read" : "Mark as unread",
-			onClick: () =>
-				sessions.forEach((session) =>
-					rowUnread
-						? markRead(session.id, session.lastActivity)
-						: markUnread(session.id),
-				),
-		});
-	const rowClaimed = sessions.some((session) => isClaimed(session));
-	const rowNaturallyInSidebar = sessions.some(
-		(session) =>
-			!session.spawnedBy &&
-			!session.automation &&
-			ownedBy(session, currentUser),
-	);
-	if (sessions.length > 0 && (!rowNaturallyInSidebar || rowClaimed))
-		entries.push({
-			kind: "item",
-			icon: <IconInbox size={20} />,
-			label: rowClaimed ? "Stop keeping in sidebar" : "Keep in sidebar",
-			onClick: () => onSetStatus(sessions, rowClaimed ? null : "mine"),
-		});
-	entries.push({
-		kind: "item",
-		icon: <IconPin size={20} fill={pinned ? "currentColor" : "none"} />,
-		label: pinned ? "Unpin" : "Pin",
-		onClick: togglePinNow,
-	});
-	if (sessions.length > 0)
-		entries.push({
-			kind: "status",
-			current: sharedManual,
-			onPick: (status) => onSetStatus(sessions, status),
-		});
-	if (row && sessions.length > 0)
-		entries.push({
-			kind: "snooze",
-			until: activeSnoozeKeys.has(row.key) ? (snoozes[row.key] ?? null) : null,
-			onPick: (until) => onSnooze(row, until),
-		});
-	if (workspace)
-		entries.push({
-			kind: "item",
-			icon: <IconPencil size={20} />,
-			label: "Rename",
-			onClick: () => onStartWorkspaceRename(workspace),
-		});
-	else if (first)
-		entries.push({
-			kind: "item",
-			icon: <IconPencil size={20} />,
-			label: "Rename",
-			onClick: () => onStartSessionRename(first),
-		});
-	if (first)
-		entries.push({
-			kind: "item",
-			icon: <IconLink size={20} />,
-			label: "Copy link",
-			shortcut: shortcutLabel("session-copy-link") ?? undefined,
-			onClick: () =>
-				copyToClipboard(absoluteLink(sessionPath(first)), () => onToast?.("Link copied")),
-		});
-	if (first && (first.worktreeDir || first.branch))
-		entries.push({
-			kind: "item",
-			icon: <IconEye size={20} />,
-			label: "Open review",
-			onClick: () => onOpenReview(first),
-		});
-	if (row && sessions.length > 0) {
-		entries.push({ kind: "sep" });
-		const hidden = hiddenRowKeys.has(row.key);
-		entries.push({
-			kind: "item",
-			icon: hidden ? <IconEye size={20} /> : <IconEyeOff size={20} />,
-			label: hidden ? "Restore to my sidebar" : "Hide from my sidebar",
-			onClick: () => onHide(row, hidden),
-		});
-		entries.push({
-			kind: "item",
-			icon: <IconArchive size={20} />,
-			label: "Archive",
-			onClick: () => onArchive(row, menu.source),
-		});
-	} else if (workspace) {
-		entries.push({ kind: "sep" });
-		entries.push({
-			kind: "item",
-			icon: <IconTrash size={20} />,
-			danger: true,
-			label: "Delete draft",
-			onClick: () => onDeleteDraft(workspace),
-		});
-	}
-	return (
-		<SidebarCtxMenu
-			x={menu.x}
-			y={menu.y}
-			entries={entries}
-			onClose={onClose}
-		/>
-	);
-}
 
 export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 	sessions,
@@ -1176,11 +981,9 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 	// feed's items carry the full SupportThreadSummary in meta, so all the
 	// bespoke Support UI (SupportRow, filters, Tinder hand-offs) keeps working
 	// off the same derived shape (the feeds design W5).
-	const supportThreads = (() => {
-		const items = feedItems["plain"];
-		if (!items) return null;
-		return items.map((i) => i.meta as unknown as SupportThread);
-	})();
+	const supportThreads = feedItems.plain
+		? supportThreadsFromFeedItems(feedItems.plain)
+		: null;
 
 	// Newest live session per feed item (keyed `<kind>:<id>`) — a feed row with
 	// one wears that session's status dot.
@@ -1257,50 +1060,22 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 		};
 	}, [feeds, hiddenFeeds]);
 
-	// Newest live session per Plain thread — a Support row with one opens that
-	// session instead of the session-less ticket preview.
-	const supportSessionByThread = (() => {
-		const m = new Map<string, UnifiedSession>();
-		for (const s of sessions) {
-			if (s.archived || !s.plainThreadId) continue;
-			const prev = m.get(s.plainThreadId);
-			if (!prev || s.lastActivity > prev.lastActivity)
-				m.set(s.plainThreadId, s);
-		}
-		return m;
-	})();
+	const supportSessionByThread = latestSupportSessionsByThread(sessions);
 
-	// Distinct repos across the (non-archived) sessions, most-used first, for the
-	// Repo filter dropdown. Built off every session (not the search-filtered set)
-	// so the options don't churn while you type.
-	const discoveredRepos = (() => {
-		const counts = new Map<string, number>();
-		for (const repo of registeredRepos) counts.set(repo, 0);
-		for (const s of sessions) {
-			// Repo-less sessions (scratch, repo-less Ask) would otherwise each
-			// add a vote for whatever repo sessionRepo falls back to.
-			if (s.archived || s.repoLess) continue;
-			const p = sessionRepo(s);
-			counts.set(p, (counts.get(p) || 0) + 1);
-		}
-		for (const pr of openPrs || [])
-			counts.set(pr.repo, (counts.get(pr.repo) || 0) + 1);
-		return Array.from(counts.entries())
-			.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-			.map(([name]) => name);
-	})();
-	const repos = (mergeRepoOrder(repoOrderDraft ?? savedRepoOrder, discoveredRepos));
-	const completeRepoOrder = (() => {
-		const next = normalizeRepoOrder(savedRepoOrder);
-		const seen = new Set(next);
-		for (const repo of discoveredRepos) {
-			if (!seen.has(repo)) {
-				seen.add(repo);
-				next.push(repo);
-			}
-		}
-		return next;
-	})();
+	const discoveredRepos = discoverSidebarRepos(
+		registeredRepos,
+		sessions,
+		openPrs ?? [],
+	);
+	const repos = orderedSidebarRepos(
+		repoOrderDraft,
+		savedRepoOrder,
+		discoveredRepos,
+	);
+	const completeRepoOrder = completeSidebarRepoOrder(
+		savedRepoOrder,
+		discoveredRepos,
+	);
 	useEffect(() => {
 		if (
 			savedRepoOrder.length > 0 &&
@@ -1309,79 +1084,21 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 			setRepoOrder(completeRepoOrder);
 	}, [savedRepoOrder, completeRepoOrder]);
 
-	// Workspace members who started sessions, most-active first, for the Person
-	// filter. The team directory decides who is a person and merges one
-	// person's spellings (lib/session-owner): `startedBy` also carries workers,
-	// goal names and integration senders, and the same teammate arrives as a
-	// first name from the web and a full name from chat. Built off every
-	// session so options don't churn on search.
 	const roster = usePeople();
-	const canonical = (canonicalNames(roster));
-	const people = (() => {
-		const entries = sessionOwners(
-			sessions.filter((s) => !s.archived),
-			canonical,
-		);
-		const seen = new Set(entries.map((e) => e.key));
-		// Someone whose only work here is a pull request is still someone whose
-		// lanes you can look at, so they are offered even with no session.
-		for (const pr of openPrs || []) {
-			if (!pr.person || seen.has(pr.person)) continue;
-			seen.add(pr.person);
-			entries.push({ key: pr.person, label: personNameForKey(pr.person) });
-		}
-		return entries;
-	})();
+	const canonical = canonicalNames(roster);
+	const people = sidebarPeople(sessions, canonical, openPrs ?? []);
 
 	// A borrowed sidebar: someone else's lanes, everyone's, or the unassigned
 	// pile. It looks exactly like your own, so the rail changes shape while you
 	// are in one — the tools go, and the person strip becomes the heading.
 	const borrowedLens = filter.person !== "me";
 
-	// Whose lanes these are, for the header title and its reset button. The
-	// facepile's roster is asked first, so a teammate picked on Home is named
-	// even before anything of theirs has landed in this list.
-	const personLensName =
-		filter.person === "me"
-			? "You"
-			: filter.person === "everyone"
-				? "All workspaces"
-				: filter.person === "unassigned"
-					? "Unassigned"
-					: filter.person === AGENT_PERSON_KEY
-						? AGENT_NAME
-						: team.find((m) => m.key === filter.person)?.person.name ||
-							people.find((p) => p.key === filter.person)?.label ||
-							filter.person;
+	const personLensName = resolvePersonLensName(filter.person, team, people);
 
-	// Who each automation reports to, where it files, and what its last run
-	// concluded. Re-read when automation activity moves rather than on a timer:
-	// a report is published by a run, so a run landing in the list is the only
-	// thing that can have produced a new one.
-	const automationActivityKey = (() => {
-		let newest = "";
-		let count = 0;
-		for (const s of sessions) {
-			if (!s.automation || s.archived) continue;
-			count++;
-			if (s.lastActivity > newest) newest = s.lastActivity;
-		}
-		return `${count}:${newest}`;
-	})();
-	const automationOverview = useAutomationOverview(automationActivityKey);
+	const activityKey = automationActivityKey(sessions);
+	const automationOverview = useAutomationOverview(activityKey);
 
-	// The agent is a person in the picker as well as a name on a row: it holds
-	// every automation nobody has taken, and those are still editing the
-	// codebase unattended. Offered only once there is something behind it, and
-	// merged with the agent's own sessions where it has started any.
-	const peopleWithAgent = (() => {
-		const unowned = Array.from(automationOverview.values()).some(
-			(a) => !a.owner,
-		);
-		if (!unowned || people.some((p) => p.key === AGENT_PERSON_KEY))
-			return people;
-		return [...people, { key: AGENT_PERSON_KEY, label: AGENT_NAME }];
-	})();
+	const peopleWithAgent = withAgentPerson(people, automationOverview);
 
 	// Child sessions are contextual navigation for the workspace that is open,
 	// not another person/status lane. Derive them from the complete live list so
@@ -1394,76 +1111,16 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 			(session) =>
 				session.id === selectedId || session.aliasIds?.includes(selectedId || ""),
 		) || null;
-	const isInSelectedGroup = (session: UnifiedSession) =>
-		sessionSharesSelectedSidebarGroup(
-			session,
-			selectedSession,
-			selectedWorkspaceId,
-		);
-
-	// Every non-archived session, narrowed by the repo/person filters and search.
-	// Rows are built per-workspace below; a session matching the filter surfaces its
-	// whole workspace row. The selected row survives every lens: the server sends
-	// that explicit exception, and dropping it here makes "Keep in sidebar" look
-	// ineffective while the session remains open.
-	const filtered = (() => {
-		let visible = sessions.filter((s) => !s.archived);
-		if (filter.repo !== "all") {
-			// A workspace can span repos, and a session's own repo is just the
-			// checkout it runs from — so a session also matches when its workspace
-			// is the filtered repo. Without this, narrowing to a repo hides the
-			// very workspaces that belong to it.
-			const wsRepo = new Map(workspaces.map((p) => [p.id, p.repo]));
-			visible = visible.filter(
-				(s) =>
-					isInSelectedGroup(s) ||
-					// Narrowing to a repo must not surface sessions that have none:
-					// sessionRepo's fallback would hand them the default repo.
-					(!s.repoLess &&
-						(sessionRepo(s) === filter.repo ||
-							(!!s.workspaceId && wsRepo.get(s.workspaceId) === filter.repo))),
-			);
-		}
-		// Only a specific teammate narrows the sessions themselves. "me" and
-		// "everyone" keep every session so workspace rows stay whole (your
-		// workspaces can contain teammates' sessions, and pinned rows survive) —
-		// the owner lens is applied per-row in focusWsRows instead.
-		if (
-			filter.person !== "me" &&
-			filter.person !== "everyone" &&
-			filter.person !== "unassigned"
-		)
-			visible = visible.filter(
-				(s) =>
-					isInSelectedGroup(s) ||
-					// An automation run has no teammate to compare: it belongs to
-					// whoever the automation reports to, which the Automations band
-					// answers for itself below. Excluding them here instead is what
-					// used to empty that band the moment you looked at a colleague.
-					(s.automation
-						? true
-						: !!s.startedBy && ownerKeyOf(s, canonical) === filter.person),
-			);
-		if (!search) return visible;
-		const q = search.toLowerCase();
-		return visible.filter(
-			(s) =>
-				isInSelectedGroup(s) ||
-				s.title.toLowerCase().includes(q) ||
-				(s.branch || "").toLowerCase().includes(q) ||
-				(s.startedBy || "").toLowerCase().includes(q) ||
-				(s.automation || "").toLowerCase().includes(q),
-		);
-	})();
-
-	// Sort order applied to every group's items: newest activity or newest
-	// creation first. Groups read from this pre-sorted list so ordering is uniform.
-	const sorted = (() => {
-		const key = filter.sort === "created" ? "createdAt" : "lastActivity";
-		return [...filtered].sort(
-			(a, b) => new Date(b[key]).getTime() - new Date(a[key]).getTime(),
-		);
-	})();
+	const filtered = filterSidebarSessions({
+		sessions,
+		workspaces,
+		filter,
+		search,
+		canonicalNames: canonical,
+		selectedSession,
+		selectedWorkspaceId,
+	});
+	const sorted = sortSidebarSessions(filtered, filter.sort);
 
 	// Team activity is deliberately independent of the workspace lens above it:
 	// repo/person/search filters must not make a running teammate disappear from
@@ -1488,234 +1145,22 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 		),
 	);
 
-	// PRs with an automated Open Session review in flight, keyed `repo\nbranch`
-	// — the same signal the PR rows spell out as "Review running". The review
-	// itself runs in a `bks-ghpr-*` session that lives in the Automations band, so
-	// the workspace lanes below can't see it in their own sessions.
-	const activeReviewPrKeys = (() => {
-		const keys = new Set<string>();
-		for (const pr of openPrs || [])
-			if (pr.reviewActive) keys.add(`${pr.repo}\n${pr.branch}`);
-		return keys;
-	})();
-
-	// ── Workspace rows ──────────────────────────────────────────────────────
-	// The row shape itself is WsRow in lib/sidebar-types.
-	// Most-urgent-first for the row dot: a blocked question beats everything,
-	// a live run beats a ready-to-merge PR, merged/pending are quiet states.
-	const STATUS_PRIORITY: MineStatus[] = [
-		"needsinput",
-		"inprogress",
-		"review",
-		"merged",
-		"pending",
-	];
-	const STATUS_DOT: Record<MineStatus, string> = Object.fromEntries(
-		MINE_STATUS_META.map((m) => [m.key, m.dotColor]),
-	) as Record<MineStatus, string>;
-
-	const allWsRows = (() => {
-		const rows: WsRow[] = [];
-		const byWs = new Map<string, UnifiedSession[]>();
-		const solo: UnifiedSession[] = [];
-		for (const s of filtered) {
-			// An active child linked out to its own temporary workspace is rendered
-			// under the selected parent workspace below. Do not mint a second row for
-			// the same session elsewhere in this visible hierarchy. A child already in
-			// the selected workspace stays in the aggregate so its activity still
-			// contributes to the parent row.
-			if (
-				activeWorkspaceSubagentIds.has(s.id) &&
-				s.workspaceId !== selectedWorkspaceId
-			)
-				continue;
-			// Automations render in their own band — EXCEPT runs YOU claimed
-			// (right-click → Keep in sidebar / Set status): those graduate
-			// into the workspace rows and take part in your lanes like your own
-			// work, sitting in In progress while they run and Backlog once idle.
-			// Lanes are per-user, so a claimed run moves only for the user who
-			// claimed it (legacy global overrides still count for all).
-			if (s.automation && !isClaimed(s)) continue;
-			if (s.desk) continue; // the Desk session lives in the ⌘J overlay, not the sidebar
-			// A session an agent started for its own purposes (create_session
-			// from inside a run — a throwaway fixture, a probe) belongs to that
-			// run, not to you: it gets a workspace like anything else, but not a
-			// row here. It surfaces the moment it needs a human — a blocked
-			// question — or when you explicitly add it through the viewer. Work
-			// the Desk delegates on your behalf is never marked this way (server:
-			// session-control-wiring).
-			if (
-				!spawnedSessionBelongsInSidebar(
-					s,
-					mineStatus(s) === "needsinput",
-					isClaimed(s),
-				)
-			)
-				continue;
-			if (s.workspaceId) {
-				const list = byWs.get(s.workspaceId) || [];
-				list.push(s);
-				byWs.set(s.workspaceId, list);
-			} else solo.push(s);
-		}
-		const mkRow = (
-			key: string,
-			workspace: Workspace | null,
-			name: string,
-			sessions: UnifiedSession[],
-		): WsRow => {
-			sessions.sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
-			// Spawned workers are implementation details of their parent session. A failed
-			// oracle/task must not leave the whole workspace looking blocked after the
-			// parent recovered, but live workers still make the workspace actively busy.
-			// Fall back for an unusual child-only workspace.
-			const stateSessions = sessions.filter((c) => !c.parentSessionId);
-			const statusSources = stateSessions.length > 0 ? stateSessions : sessions;
-			const workerRunning = sessions.some((c) => c.parentSessionId && c.isRunning);
-			// Automated PR reviews run in a separate bks-ghpr-* automation session,
-			// so the workspace's own sessions never carry isRunning for that work.
-			// The PR feed is the authoritative live signal for both its lane and
-			// its leading spinner.
-			const reviewRunning = sessions.some((c) =>
-				sessionPrKeys(c).some((k) => activeReviewPrKeys.has(k)),
-			);
-			let status =
-				STATUS_PRIORITY.find((st) =>
-					statusSources.some((c) => mineStatus(c) === st),
-				) ||
-				"pending";
-			// A running worker is live workspace activity even though child failures and
-			// blocked states stay isolated from the parent. Needs-input and explicit
-			// human lanes still win, matching mineStatus's priority rules.
-			if (
-				workerRunning &&
-				status !== "needsinput" &&
-				!sessions.some((c) => pinnedLane(c))
-			)
-				status = "inprogress";
-			// An idle row's lane follows its PR lifecycle (merged → Done, ready
-			// → Ready to merge). A human-pinned lane wins — deliberately
-			// parking a row in Backlog must stick.
-			if (status === "pending" && !sessions.some((c) => pinnedLane(c))) {
-				// …unless an automated review is still running. The row already
-				// wears the spinner for it (see `running` below), and a spinning
-				// row parked outside In progress reads as a contradiction. The
-				// review can still come back requesting changes, so no PR lane is
-				// trustworthy until it lands — including when the live review is
-				// on a sibling PR (a cross-repo port, say) while the fronting PR
-				// has already merged.
-				status = reviewRunning
-					? "inprogress"
-					: (prLaneForSessions(statusSources) ?? status);
-			}
-			return {
-				key,
-				workspace,
-				name,
-				sessions,
-				status,
-				lastActivity: sessions.reduce(
-					(m, c) => (c.lastActivity > m ? c.lastActivity : m),
-					"",
-				),
-				// The workspace owns the row's stable position. A later session joining
-				// old work must not make the whole row look newly created.
-				createdAt: workspace?.createdAt || sessions[0]?.createdAt || "",
-				// Workers are left out here for the same reason they are left out of
-				// `status`, plus one of their own: a worker gets no tab in the strip
-				// (App's naturalSessions keeps it behind its parent), so opening the
-				// workspace marks every tab read and never the worker. Counting one
-				// left the row bold with nothing you could open to clear it.
-				unread: !!pickUnreadWorkspaceSession(sessions, selectedId, reads),
-				// A tag on any session in the workspace marks the whole row: the
-				// person who wrote it asked for you, not for a particular tab.
-				mention: sessions
-					.filter((c) => c.id !== selectedId)
-					.map((c) => mentionFor(c.id))
-					.find(Boolean)?.by,
-				running: sessions.some((c) => c.isRunning) || reviewRunning,
-				// Canonical, so the row files under the person the Person filter
-				// names however this workspace spelled them.
-				owner: ownerKey(workspace?.createdBy || sessions[0]?.startedBy, canonical),
-			};
-		};
-		for (const [wsId, sessions] of byWs) {
-			const ws = workspaces.find((p) => p.id === wsId) || null;
-			// A row is named after its workspace, never after one of its tabs.
-			// The workspace list is its own fetch and lands seconds after the
-			// sessions on a cold load, so when it isn't here yet the name comes
-			// from the sessions themselves (the server stamps it on every row).
-			// A session title is the last resort, for a workspace this client
-			// has no name for at all.
-			const named = sessions.find((c) => c.workspaceName);
-			rows.push(
-				mkRow(
-					`workspace:${wsId}`,
-					ws,
-					ws?.name || named?.workspaceName || sessions[0].title,
-					sessions,
-				),
-			);
-		}
-		// A draft workspace (an unsent prompt, no session yet) is the one
-		// sessionless exception below: it earns a row of its own, since
-		// it IS a place to start work. The composer is sitting there prefilled,
-		// waiting to be sent. mkRow's activity/creation dates default to a
-		// session that doesn't exist here, so they're patched from the
-		// workspace + draft record instead.
-		for (const ws of workspaces) {
-			if (!ws.draft || byWs.has(ws.id)) continue;
-			rows.push({
-				...mkRow(`workspace:${ws.id}`, ws, ws.name, []),
-				lastActivity: ws.draft.updatedAt,
-				createdAt: ws.createdAt,
-			});
-		}
-		// A workspace with no sessions and no draft gets NO row. Workspaces are
-		// minted with their first session (or by the PR/ticket resolvers, which
-		// park them under Pull requests / Support until a session joins), so a
-		// sessionless one is a leftover (its sessions were archived or deleted),
-		// not a place to start work.
-		//
-		// Automation runs are the one session kind that lives outside a workspace: a
-		// workspace per run would bury every real one, so they render in the
-		// Automations band instead. A *claimed* run is pulled into this list, and
-		// groups by shared isolated worktree — the SAME rule the tab strip uses —
-		// so the sidebar and tabs agree on what belongs together. Every other session
-		// carries a workspace (server-side invariant: see session-workspace.ts), so
-		// these fallback rows stay empty in practice.
-		const byWorktree = new Map<string, UnifiedSession[]>();
-		const loose: UnifiedSession[] = [];
-		for (const s of solo) {
-			if (s.worktreeDir?.includes("/worktrees/")) {
-				const list = byWorktree.get(s.worktreeDir) || [];
-				list.push(s);
-				byWorktree.set(s.worktreeDir, list);
-			} else loose.push(s);
-		}
-		for (const [dir, sessions] of byWorktree) {
-			sessions.sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
-			// The branch is the row's stable name (session titles drift as generated
-			// titles land; the branch names the shared piece of work). A manual
-			// rename is explicit user intent though — it wins over the branch,
-			// otherwise renaming a slack/linear session looks like a no-op.
-			const renamed = sessions.find((c) => c.titleOverridden);
-			rows.push(
-				mkRow(
-					`wt:${dir}`,
-					null,
-					renamed?.title || sessions[0].branch || sessions[0].title,
-					sessions,
-				),
-			);
-		}
-		for (const s of loose) rows.push(mkRow(s.id, null, s.title, [s]));
-		const key = filter.sort === "created" ? "createdAt" : "lastActivity";
-		rows.sort((a, b) => (b[key] || "").localeCompare(a[key] || ""));
-		return rows;
-		// `lanes` feeds mineStatus/pinnedLane (read via the lib cache), and
-		// `mentionsRev` the @-mention badge (mentionFor, same cache pattern).
-	})();
+	const allWsRows = buildWorkspaceRows({
+		sessions: filtered,
+		workspaces,
+		openPrs: openPrs ?? [],
+		activeSubagentIds: activeWorkspaceSubagentIds,
+		selectedWorkspaceId,
+		selectedSessionId: selectedId,
+		reads,
+		canonicalNames: canonical,
+		sort: filter.sort,
+		isClaimed,
+		statusForSession: mineStatus,
+		pinnedLaneForSession: pinnedLane,
+		prLaneForSessions,
+		mentionForSession: mentionFor,
+	});
 	const rowOwnsSelection = (row: WsRow) =>
 		workspaceRowOwnsSelection(row, selectedSession, selectedWorkspaceId);
 	const selectionBelongsToWorkspaceRow = allWsRows.some(rowOwnsSelection);
@@ -1778,63 +1223,14 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 		clearHides(resurfacedRows.map((r) => r.key));
 	}, [resurfacedRows]);
 
-	// Automations keep their own collapsible band, one group per automation —
-	// hundreds of one-shot runs would drown the Workspaces list otherwise.
-	// The band narrows with the same person and repo lenses the rest of the
-	// sidebar uses, read off the automation rather than off its runs: a run is
-	// started by nobody, so the audience is the automation's own.
-	const groups = (() => {
-		const out: Group[] = [];
-		const byAutomation = new Map<string, UnifiedSession[]>();
-		for (const s of sorted) {
-			// Session files predate this field's string contract, and a malformed
-			// legacy/test row must not take down the whole sidebar while sorting.
-			const automation =
-				typeof s.automation === "string" ? s.automation.trim() : "";
-			if (!automation) continue;
-			if (activeWorkspaceSubagentIds.has(s.id)) continue;
-			// A run you claimed (or a legacy global override) lives in the
-			// workspace rows instead — don't render it twice.
-			if (isClaimed(s)) continue;
-			const list = byAutomation.get(automation) || [];
-			list.push(s);
-			byAutomation.set(automation, list);
-		}
-		// Case-insensitive, or ASCII order files every lowercase name after
-		// every capitalised one: "iOS parity check" and "deepsec daily scan"
-		// landed past "Weekly changelog", at the bottom of a band of thirty.
-		const byName = Array.from(byAutomation.keys()).sort((a, b) =>
-			a.localeCompare(b, undefined, { sensitivity: "base" }),
-		);
-		for (const name of byName) {
-			// An automation the overview doesn't describe is a deleted one whose
-			// runs outlived it, and there are a dozen of those here. It reads as
-			// a house routine: still in your band, out of a teammate's, which is
-			// what "show me Kent's" should mean. Before the overview lands there
-			// is nothing to narrow by, so the band stays whole.
-			const overview = automationOverview.get(name) ?? HOUSE_AUTOMATION;
-			if (
-				automationOverview.size > 0 &&
-				(!automationInPersonLens(overview, filter.person, currentUser) ||
-					!automationInRepoLens(overview, filter.repo))
-			)
-				continue;
-			const items = byAutomation.get(name)!;
-			out.push({
-				key: `auto:${name}`,
-				label: name,
-				dotColor: AUTOMATION_COLOR,
-				band: "automations",
-				items,
-				totalItems: Math.max(
-					items.length,
-					...items.map((session) => session.automationRunCount || 0),
-				),
-			});
-		}
-		return out;
-		// `lanes` feeds pinnedLane (read via the lib cache).
-	})();
+	const groups = buildAutomationGroups({
+		sessions: sorted,
+		activeSubagentIds: activeWorkspaceSubagentIds,
+		automationOverview,
+		filter,
+		currentUser,
+		isClaimed,
+	});
 
 	// The DOM is the source of truth for visual order. Section mode, project
 	// grouping, collapse state, pins, PRs and feeds can all put rendered rows in
@@ -1943,111 +1339,32 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 	// Your person key ("Kent de Bruin" → "kent") is what GitHub's reviewer
 	// lists use, unlike the display name used by the Reviewer picker.
 	const mePersonKey = personKey(currentUser);
-	// Feed workspaces only join status lanes when they demand attention. Idle
-	// rows are already represented by their feed band.
-	const feedRefKinds = (new Set(feeds.map((f) => f.refKind)));
-	const rowIsFeedOnly = (r: WsRow) =>
-		!r.workspace?.repo &&
-		!!r.workspace?.externalRefs?.length &&
-		feedRefKinds.has(r.workspace.externalRefs[0].kind);
-
-	// Every row receives exactly one primary placement. Pinned remains an
-	// orthogonal quick-access facet and is derived separately below.
-	const { placedWsRows, autoCreatedRows } = (() => {
-		const focus =
-			filter.person === "me" ? currentUser.toLowerCase() : filter.person;
-		// Whether a row belongs in the lanes at all, asked twice: once as the
-		// filter has it, and once as if machine-started work were shown, which is
-		// what the count of what is being held back is measured against.
-		//
-		// "Hide" only ever removes a row that is here BECAUSE the machine made
-		// it. The row you have open still shows, whatever the filter says: the
-		// sidebar has to keep showing where you are. A review being asked of you
-		// survives too, in classifySidebarPlacement, which reads the review
-		// bands before it reads this scope: an ask is not something you were
-		// browsing. And a run you claimed into your own lanes stays, because
-		// `getLane` below is your own explicit act.
-		const inScope = (r: WsRow, showAutoCreated: boolean) =>
-			(rowOwnsSelection(r) ||
-				(focus === "everyone" && (showAutoCreated || !rowWasAutoCreated(r))) ||
-				(showAutoCreated && rowAutoCreatedInLens(r, filter.person)) ||
-				(focus === "unassigned"
-					? r.status === "pending"
-					: (r.owner === focus &&
-							(showAutoCreated || !rowWasAutoCreated(r))) ||
-						(!!r.mention && focus === currentUser.toLowerCase()) ||
-						r.sessions.some(
-							(c) =>
-								!c.automation &&
-								(c.startedBy || "").toLowerCase() === focus,
-						) ||
-						((r.owner === "" || focus === currentUser.toLowerCase()) &&
-							r.sessions.some((c) => isClaimed(c))))) &&
-			(!rowIsFeedOnly(r) || r.running || r.status === "needsinput");
-		const showAutoCreated = filter.autoCreated !== "hide";
-		const placed = placeSidebarRows(wsRows, (r) => ({
-			currentUser,
-			personFilter: filter.person,
-			snoozed: activeSnoozeKeys.has(r.key),
-			inStatusScope: inScope(r, showAutoCreated),
-			// Only this user's lane is a Keep act. A legacy global manualStatus
-			// still chooses a status within the ordinary list, but must not pull a
-			// review out of every teammate's review section.
-			claimed: r.sessions.some((session) => !!getLane(session.id)),
-		}));
-		// How many rows the switch at the foot of the list moves: held back
-		// right now, or on the page and only there because the machine's work is
-		// shown. Only the status lanes can change. Every earlier branch of
-		// classifySidebarPlacement (snoozed, the review bands) ignores this
-		// scope, so a review being asked of you is counted by neither side.
-		// A filter that removes rows silently is one you forget you set, and on
-		// this instance the machine makes most of the work, so the number stays
-		// on the page either way.
-		const moved = placed.filter((entry) =>
-			rowWasAutoCreated(entry.row) &&
-			(showAutoCreated
-				? entry.placement === "status" && !inScope(entry.row, false)
-				: entry.placement === "outside" && inScope(entry.row, true)),
-		).length;
-		return { placedWsRows: placed, autoCreatedRows: moved };
-	})();
+	const feedRefKinds = new Set(feeds.map((feed) => feed.refKind));
+	const rowIsFeedOnly = (row: WsRow) =>
+		workspaceRowIsFeedOnly(row, feedRefKinds);
+	const { placedWsRows, autoCreatedRows } = deriveWorkspacePlacement({
+		rows: wsRows,
+		filter,
+		currentUser,
+		activeSnoozeKeys,
+		feedRefKinds,
+		ownsSelection: rowOwnsSelection,
+		isClaimed,
+		hasPersonalLane: (sessionId) => !!getLane(sessionId),
+	});
 	const needsReviewRows = rowsAtPlacement(placedWsRows, "needs-review");
 	const approvedReviewRows = rowsAtPlacement(placedWsRows, "approved-review");
 	const awaitingReviewRows = rowsAtPlacement(placedWsRows, "awaiting-review");
 	const focusWsRows = rowsAtPlacement(placedWsRows, "status");
-	const snoozedWsRows = rowsAtPlacement(placedWsRows, "snoozed").sort(
-		(a, b) => {
-			const aUntil = snoozes[a.key];
-			const bUntil = snoozes[b.key];
-			if (aUntil === SNOOZE_SOMEDAY && bUntil !== SNOOZE_SOMEDAY) return 1;
-			if (bUntil === SNOOZE_SOMEDAY && aUntil !== SNOOZE_SOMEDAY) return -1;
-			return Date.parse(aUntil || "") - Date.parse(bUntil || "");
-		},
+	const snoozedWsRows = sortSnoozedWorkspaceRows(
+		rowsAtPlacement(placedWsRows, "snoozed"),
+		snoozes,
 	);
-	const pinnedWsRows = (() => {
-		const pinSet = new Set(pins);
-		const pinIdx = new Map(pins.map((p, i) => [p, i] as const));
-		// Pinned is quick access, not a status: review rows stay visible here as
-		// well as in Needs/Awaiting review. Snooze is the deliberate exception,
-		// it temporarily removes a row from every active band.
-		// A row's slot in the band = its first matching key's position in the
-		// pins array (rows can be pinned via their workspace key or a legacy
-		// member-session pin). Pins order is user-controlled (drag-to-reorder), so
-		// it wins over wsRows' recency order.
-		const rowIdx = (r: WsRow) => {
-			const hits = [r.key, ...r.sessions.map((c) => c.id)]
-				.map((k) => pinIdx.get(k))
-				.filter((i): i is number => i !== undefined);
-			return hits.length ? Math.min(...hits) : Infinity;
-		};
-		return wsRows
-			.filter(
-				(r) =>
-					!activeSnoozeKeys.has(r.key) &&
-					(pinSet.has(r.key) || r.sessions.some((c) => pinSet.has(c.id))),
-			)
-			.sort((a, b) => rowIdx(a) - rowIdx(b));
-	})();
+	const pinnedWsRows = pinnedWorkspaceRows(
+		wsRows,
+		pins,
+		activeSnoozeKeys,
+	);
 
 	// ── Inbox rows ──────────────────────────────────────────────────────────
 	// Snoozed rows already left `focusWsRows` through placement. The remaining
@@ -2059,58 +1376,25 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 	// groups: every open PR classifies into a lane (ready → Ready to merge,
 	// attention → In progress, drafts → Backlog, the rest → In progress).
 	const githubLogin = githubLoginFor(currentUser);
-	const reviewQueueItems = (buildReviewQueue(openPrs || [], sessions, currentUser, githubLogin));
-	const workspaceRowsInView = ([
-			...activeFocusWsRows,
-			...pinnedWsRows,
-			...snoozedWsRows,
-			...needsReviewRows,
-			...awaitingReviewRows,
-			...approvedReviewRows,
-		]);
-	// A PR already represented by a workspace belongs to that workspace row.
-	// Match both the workspace's own PR identity and every PR carried by its
-	// sessions, including linked and cross-repo PRs. Dedupe is against rows in
-	// view so a teammate's hidden workspace can still surface through the PR
-	// filter.
-	const workspaceCoveredPrUrls = (() => {
-		const covered = new Set<string>();
-		for (const item of reviewQueueItems) {
-			if (
-				workspaceRowsInView.some(
-					(row) =>
-						(!!row.workspace && workspaceCarriesPr(row.workspace, item.pr)) ||
-						row.sessions.some((session) => sessionCarriesPr(session, item.pr)),
-				)
-			)
-				covered.add(item.pr.url);
-		}
-		return covered;
-	})();
-	const prRowItems = (() => {
-		if (!workspaceDataReady || filter.prs === "none") return [];
-		const q = search.trim().toLowerCase();
-		return reviewQueueItems.filter((item) => {
-			if (workspaceCoveredPrUrls.has(item.pr.url)) return false;
-			if (filter.repo !== "all" && item.pr.repo !== filter.repo)
-				return false;
-			if (
-				q &&
-				![item.pr.title, item.pr.branch, item.pr.author].some((v) =>
-					v.toLowerCase().includes(q),
-				)
-			)
-				return false;
-			// The person lens: a specific teammate shows their PRs; the
-			// aggregate Backlog lens has no authored-PR meaning. "Me" and
-			// "Everyone" fall through to the PR-source preset.
-			if (filter.person === "unassigned") return false;
-			if (filter.person !== "me" && filter.person !== "everyone")
-				return item.pr.person === filter.person;
-			if (filter.prs === "all") return true;
-			return item.source === "mine" || item.source === "requested";
+	const workspaceRowsInView = [
+		...activeFocusWsRows,
+		...pinnedWsRows,
+		...snoozedWsRows,
+		...needsReviewRows,
+		...awaitingReviewRows,
+		...approvedReviewRows,
+	];
+	const { reviewQueueItems, workspaceCoveredPrUrls, prRowItems } =
+		deriveSidebarPrRows({
+			openPrs: openPrs ?? [],
+			sessions,
+			currentUser,
+			githubLogin,
+			workspaceRows: workspaceRowsInView,
+			workspaceDataReady,
+			filter,
+			search,
 		});
-	})();
 
 	// Which lane a PR row files under: ready → Ready to merge, everything else
 	// → Backlog. In progress is reserved for live runs — a PR that needs a
@@ -2147,9 +1431,11 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 			onConfirm: () => {
 				setClosingPrUrls((current) => new Set(current).add(item.pr.url));
 				void closePrPreviewApi(item.pr.repo, item.pr.branch)
-					.catch((error: any) => {
+					.catch((error) => {
 						onToast?.(
-							error.message || `Failed to close PR #${item.pr.number}.`,
+							error instanceof Error
+								? error.message
+								: `Failed to close PR #${item.pr.number}.`,
 						);
 					})
 					.finally(() => {
@@ -3698,15 +2984,16 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 			...prev,
 			plain: (prev.plain || []).filter((x) => x.id !== threadId),
 		}));
-		await (async () => {
-await setPlainThreadStatusApi(threadId, "done", { user: currentUser });
-})().catch(async () => {
-fetchFeedItems("plain")
-				.then((items) =>
-					setFeedItems((prev) => ({ ...prev, plain: items })),
-				)
-				.catch(() => {});
-});
+		try {
+			await setPlainThreadStatusApi(threadId, "done", { user: currentUser });
+		} catch {
+			try {
+				const items = await fetchFeedItems("plain");
+				setFeedItems((prev) => ({ ...prev, plain: items }));
+			} catch {
+				// The scheduled feed refresh will reconcile the optimistic removal.
+			}
+		}
 	}
 
 	// A Support row: one TODO Plain ticket. The dot wears the linked session's
@@ -4549,8 +3836,8 @@ fetchFeedItems("plain")
 	const plainFeedDesc = visibleFeeds.find((f) => f.id === "plain");
 	const plainThreadsInView =
 		filter.repo === "all" && plainFeedDesc
-			? applyFeedFilters(plainFeedDesc, feedItems.plain || []).map(
-					(i) => i.meta as unknown as SupportThread,
+			? supportThreadsFromFeedItems(
+					applyFeedFilters(plainFeedDesc, feedItems.plain || []),
 				)
 			: [];
 

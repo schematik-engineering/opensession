@@ -120,10 +120,7 @@ import { PreviewWait, matchPreviewWaitRoute } from "./components/PreviewWait";
 import { TitleBar } from "./components/TitleBar";
 import { FirstMile } from "./components/FirstMile";
 import { useOnboarding } from "./hooks/useOnboarding";
-import {
-	settingsPaletteActions,
-	type SettingsSectionKey,
-} from "./lib/settings-sections";
+import { settingsPaletteActions } from "./lib/settings-sections";
 import {
 	settingsReturnForNavigation,
 	type SettingsReturn,
@@ -242,7 +239,6 @@ import {
 	prPath,
 	absoluteLink,
 	copyToClipboard,
-	splitSessionRef,
 	subagentSuffix,
 	workspacePanePath,
 } from "./lib/share-link";
@@ -305,65 +301,43 @@ import type { UnifiedSession } from "./lib/types";
 import "./styles/base.css";
 import "./styles/legacy.css";
 import { EmptyState, LoadingState } from "./ui/state";
+import {
+	firstMileRequested,
+	isSettingsRoute,
+	isToolView,
+	parseRoute,
+	routePath,
+	samePanel,
+	type Route,
+} from "./lib/app-route";
+import {
+	buildWorkspacePaneTabs,
+	sessionlessWorkspacePanes,
+	viewTabKind,
+	type WorkspacePaneTab,
+} from "./lib/workspace-pane-tabs";
 
-function deferred<T extends React.ComponentType<any>>(
-	load: () => Promise<{ default: T }>,
+function deferred<Props extends object>(
+	load: () => Promise<{ default: React.ComponentType<Props> }>,
 	fallback: React.ReactNode = null,
-): T {
+): React.ComponentType<Props> {
 	const Component = React.lazy(load);
-	const Deferred = (props: React.ComponentProps<T>) => (
-		<React.Suspense fallback={fallback}>
-			<Component {...(props as any)} />
-		</React.Suspense>
-	);
-	return Deferred as T;
+	return function Deferred(props: Props) {
+		return (
+			<React.Suspense fallback={fallback}>
+				<Component {...props} />
+			</React.Suspense>
+		);
+	};
 }
 
-const Settings = deferred(() =>
-	import("./components/Settings").then((module) => ({ default: module.Settings })),
-);
-
-type Route =
-	// The app's root. There is no home: `/` lands on the pull request list,
-	// which is the page that was called Home until it was named after what it
-	// had always listed. On a phone this view is the sidebar itself (the tool
-	// is desktop-only), so it doubles as "nothing pushed on top".
-	| { view: "prs" }
-	| { view: "feed" }
-	| { view: "new"; prompt?: string }
-	// A session, optionally drilled into one of its sub-agents: the breadcrumb of
-	// agent ids the sub-agent tab is showing, outermost first. Parsed from the
-	// URL; the tab state below is what writes it back (see `openSubagentPath`).
-	| { view: "session"; id: string; subagent?: string[] }
-	// The workspace container without a session selected: its view tabs (Review /
-	// Conversation) and, when it has no sessions, the first-session composer. An
-	// optional tab suffix picks the foregrounded pane on entry.
-	| { view: "workspace"; id: string; tab?: "review" | "conversation" | "video" }
-	// Session-less PR preview (a sidebar PR row with no session yet), addressed
-	// by head branch or — when only the PR number is known, as in a `#5528`
-	// mention — by number, which the resolve below turns into a workspace.
-	| { view: "pr"; repo: string; branch: string; number?: number }
-	| { view: "pr"; repo: string; branch?: undefined; number: number }
-	// Session-less support-ticket preview (a Support row with no session yet).
-	| { view: "support"; threadId: string }
-	// The Support queue as its own place: the Plain tickets in a column beside
-	// the sidebar, the open one read next to them, no session in sight.
-	| { view: "plain"; threadId?: string }
-	| { view: "reports"; automationId?: string; reportId?: string }
-	// Analytics — sessions/tokens/models/PRs over a date range.
-	| { view: "analytics" }
-	| { view: "tasks" }
-	| { view: "reviews"; id?: string }
-	// Support Tinder — one-at-a-time swipe triage of the Plain Todo queue.
-	| { view: "supporttinder" }
-	// Tool surfaces (Automations/Security/Goals) render inside the
-	// Settings chrome but keep their own routes, so old links stay deep-linkable.
-	| { view: "automations"; id?: string }
-	| { view: "security" }
-	| { view: "goals"; id?: string }
-	| { view: "settings"; section?: SettingsSectionKey }
-	| { view: "archived" }
-	| { view: "catchup" };
+type SettingsProps = React.ComponentProps<
+	typeof import("./components/Settings").Settings
+>;
+const Settings = deferred<SettingsProps>(async () => {
+	const { Settings: SettingsComponent } = await import("./components/Settings");
+	return { default: SettingsComponent };
+});
 
 // Stable empty stack, so a session with no sub-agent open hands the same array
 // identity down every render (the transcript memo compares props by identity).
@@ -393,71 +367,6 @@ function routeSubagentTabs(route: Route): Record<string, SubagentRef[]> {
 const SPLASH_MAX_MS = 8000;
 const SPLASH_EXIT_MS = 400;
 
-// Route views that render as a tool section inside the Settings surface.
-const TOOL_VIEWS = ["automations", "security", "goals"] as const;
-type ToolView = (typeof TOOL_VIEWS)[number];
-function isToolView(view: string): view is ToolView {
-	return (TOOL_VIEWS as readonly string[]).includes(view);
-}
-
-function isSettingsRoute(route: Route): boolean {
-	return route.view === "settings" || isToolView(route.view);
-}
-
-// Non-tool settings sections, addressable as <base>/settings/<section>.
-const SETTINGS_SECTIONS = new Set<SettingsSectionKey>([
-	"myAccounts",
-	"preferences",
-	"notifications",
-	"shortcuts",
-	"general",
-	"setup",
-	"repos",
-	"members",
-	"authentication",
-	"providers",
-	"sandboxes",
-	"runners",
-	"library",
-	"integrations",
-	"connections",
-	"memory",
-	"ingress",
-	"storage",
-	"prewarming",
-	"deploys",
-	"papercuts",
-	"audit",
-	"downloads",
-]);
-
-// Sections that were merged into another one — old links keep working.
-const LEGACY_SETTINGS_SECTIONS: Record<string, SettingsSectionKey> = {
-	appearance: "preferences",
-	model: "providers",
-	models: "providers",
-	modelProviders: "providers",
-	usage: "providers",
-	warmPreviews: "prewarming",
-	previewPool: "prewarming",
-	workspace: "setup",
-	personalPrompt: "preferences",
-	deskVoice: "preferences",
-	composer: "preferences",
-	keychain: "myAccounts",
-	profile: "myAccounts",
-	identity: "general",
-};
-
-// Everything a session URL carries after `/session/`: the id, plus the
-// sub-agent breadcrumb when the link points into a drill-in.
-function sessionRoute(rest: string): Route {
-	const { id, subagent } = splitSessionRef(rest);
-	return subagent.length
-		? { view: "session", id, subagent }
-		: { view: "session", id };
-}
-
 /**
  * The URL this document loaded at, captured before anything can rewrite it.
  *
@@ -469,187 +378,8 @@ function sessionRoute(rest: string): Route {
 const LANDING_PATH = stripBasePath(location.pathname);
 const LANDING_SEARCH = location.search;
 
-/**
- * Did this load ask for the first-run flow? `/welcome` (or `?firstmile=1` on
- * any route) forces it open on an instance that is already set up, so the
- * setup walkthrough can be reviewed without emptying the instance first.
- */
-function firstMileRequested(pathname: string, search: string): boolean {
-	return (
-		stripBasePath(pathname) === "/welcome" ||
-		new URLSearchParams(search).get("firstmile") === "1"
-	);
-}
-
 function landedOnFirstMile(): boolean {
 	return firstMileRequested(LANDING_PATH, LANDING_SEARCH);
-}
-
-function parseRoute(pathname: string): Route {
-	// Accept both prefixes: /opensession (primary) and /backstage (legacy alias).
-	pathname = stripBasePath(pathname);
-	// Canonical session URL: <base>/workspace/<wsId>/session/<sessionId>. The session id
-	// alone identifies the session; the workspace segment makes the hierarchy
-	// shareable/readable. Old <base>/session/<id> links keep working and get
-	// canonicalized once the session (and its workspace) is known.
-	const wsSessionMatch = pathname.match(
-		/^\/workspace\/[^/]+\/session\/(.+)$/,
-	);
-	if (wsSessionMatch) return sessionRoute(wsSessionMatch[1]);
-	// The workspace container itself (no session selected), optionally landing on
-	// a specific view tab: <base>/workspace/<wsId>[/review|/conversation].
-	const wsMatch = pathname.match(
-		/^\/workspace\/([^/]+)(?:\/(review|conversation|video))?$/,
-	);
-	if (wsMatch)
-		return {
-			view: "workspace",
-			id: decodeURIComponent(wsMatch[1]),
-			tab: wsMatch[2] as "review" | "conversation" | "video" | undefined,
-		};
-	const sessionMatch = pathname.match(/^\/session\/(.+)$/);
-	if (sessionMatch) return sessionRoute(sessionMatch[1]);
-	// PR preview: <base>/pr/<repo>/<branch> (branch is fully URI-encoded, so
-	// slashes in branch names arrive as %2F and land in one segment) — or
-	// <base>/pr/<repo>/<number>, where the PR is named the way a person (or an
-	// agent writing `#5528`) refers to it, with no branch to hand. Digits alone
-	// are never a branch we make, and a repo that did have one would still
-	// resolve to the same PR through its number.
-	const prMatch = pathname.match(/^\/pr\/([^/]+)\/(.+)$/);
-	if (prMatch) {
-		const repo = decodeURIComponent(prMatch[1]);
-		const ref = decodeURIComponent(prMatch[2]);
-		return /^\d{1,7}$/.test(ref)
-			? { view: "pr", repo, number: Number(ref) }
-			: { view: "pr", repo, branch: ref };
-	}
-	// Support-ticket preview: <base>/support/<plain thread id>.
-	const supportMatch = pathname.match(/^\/support\/(.+)$/);
-	if (supportMatch)
-		return { view: "support", threadId: decodeURIComponent(supportMatch[1]) };
-	// The Support queue: <base>/plain, with the open ticket in the path so a
-	// ticket read here can be linked to.
-	const plainMatch = pathname.match(/^\/plain(?:\/(.+))?$/);
-	if (plainMatch)
-		return {
-			view: "plain",
-			threadId: plainMatch[1] ? decodeURIComponent(plainMatch[1]) : undefined,
-		};
-	const reportsMatch = pathname.match(/^\/reports(?:\/([^/]+)(?:\/([^/]+))?)?$/);
-	if (reportsMatch)
-		return {
-			view: "reports",
-			automationId: reportsMatch[1] ? decodeURIComponent(reportsMatch[1]) : undefined,
-			reportId: reportsMatch[2] ? decodeURIComponent(reportsMatch[2]) : undefined,
-		};
-	if (pathname === "/analytics") return { view: "analytics" };
-	// /people is what the Feed page was called for half a day; keep old
-	// links and open tabs landing somewhere real.
-	if (pathname === "/feed" || pathname === "/people") return { view: "feed" };
-	if (pathname === "/tasks") return { view: "tasks" };
-	if (pathname === "/new") return { view: "new" };
-	// <base>/automations/<id-or-name>: the automations page with one selected
-	// (its detail drawer open). The segment accepts the automation id or name —
-	// the sidebar only knows names.
-	const autoMatch = pathname.match(/^\/automations(?:\/(.+))?$/);
-	if (autoMatch)
-		return {
-			view: "automations",
-			id: autoMatch[1] ? decodeURIComponent(autoMatch[1]) : undefined,
-		};
-	if (pathname === "/security") return { view: "security" };
-	// Goals mirrors /automations/:id — one selected opens its drawer.
-	const goalsMatch = pathname.match(/^\/goals(?:\/(.+))?$/);
-	if (goalsMatch)
-		return {
-			view: "goals",
-			id: goalsMatch[1] ? decodeURIComponent(goalsMatch[1]) : undefined,
-		};
-	// Back-compat: Connections moved into Settings (a Workspace section).
-	if (pathname === "/connections")
-		return { view: "settings", section: "connections" };
-	// <base>/settings/<section>: a settings section, or a legacy tool key.
-	const settingsMatch = pathname.match(/^\/settings(?:\/(.+))?$/);
-	if (settingsMatch) {
-		const key = settingsMatch[1];
-		if (key && isToolView(key)) return { view: key };
-		if (key && SETTINGS_SECTIONS.has(key as SettingsSectionKey))
-			return { view: "settings", section: key as SettingsSectionKey };
-		if (key && LEGACY_SETTINGS_SECTIONS[key])
-			return { view: "settings", section: LEGACY_SETTINGS_SECTIONS[key] };
-		return { view: "settings" };
-	}
-	if (pathname === "/archived") return { view: "archived" };
-	if (pathname === "/catchup") return { view: "catchup" };
-	if (pathname === "/support-tinder") return { view: "supporttinder" };
-	const reviewsMatch = pathname.match(/^\/reviews(?:\/(.+))?$/);
-	if (reviewsMatch)
-		return {
-			view: "reviews",
-			id: reviewsMatch[1] ? decodeURIComponent(reviewsMatch[1]) : undefined,
-		};
-	return { view: "prs" };
-}
-
-function routePath(route: Route): string {
-	switch (route.view) {
-		case "session":
-			return `${BASE_PATH}/session/${encodeURIComponent(route.id)}${subagentSuffix(route.subagent)}`;
-		case "workspace":
-			return `${BASE_PATH}/workspace/${encodeURIComponent(route.id)}${route.tab ? `/${route.tab}` : ""}`;
-		case "pr":
-			return `${BASE_PATH}/pr/${encodeURIComponent(route.repo)}/${
-				route.branch === undefined
-					? route.number
-					: encodeURIComponent(route.branch)
-			}`;
-		case "support":
-			return `${BASE_PATH}/support/${encodeURIComponent(route.threadId)}`;
-		case "plain":
-			return route.threadId
-				? `${BASE_PATH}/plain/${encodeURIComponent(route.threadId)}`
-				: `${BASE_PATH}/plain`;
-		case "reports":
-			return route.automationId
-				? `${BASE_PATH}/reports/${encodeURIComponent(route.automationId)}${route.reportId ? `/${encodeURIComponent(route.reportId)}` : ""}`
-				: `${BASE_PATH}/reports`;
-		case "analytics":
-			return `${BASE_PATH}/analytics`;
-		case "feed":
-			return `${BASE_PATH}/feed`;
-		case "tasks":
-			return `${BASE_PATH}/tasks`;
-		case "new":
-			return route.prompt
-				? `${BASE_PATH}/new?prompt=${encodeURIComponent(route.prompt)}`
-				: `${BASE_PATH}/new`;
-		case "automations":
-			return route.id
-				? `${BASE_PATH}/automations/${encodeURIComponent(route.id)}`
-				: `${BASE_PATH}/automations`;
-		case "security":
-			return `${BASE_PATH}/security`;
-		case "goals":
-			return route.id
-				? `${BASE_PATH}/goals/${encodeURIComponent(route.id)}`
-				: `${BASE_PATH}/goals`;
-		case "settings":
-			return route.section
-				? `${BASE_PATH}/settings/${route.section}`
-				: `${BASE_PATH}/settings`;
-		case "archived":
-			return `${BASE_PATH}/archived`;
-		case "catchup":
-			return `${BASE_PATH}/catchup`;
-		case "supporttinder":
-			return `${BASE_PATH}/support-tinder`;
-		case "reviews":
-			return route.id
-				? `${BASE_PATH}/reviews/${encodeURIComponent(route.id)}`
-				: `${BASE_PATH}/reviews`;
-		default:
-			return `${BASE_PATH}/`;
-	}
 }
 
 // How far the current history entry sits above the sidebar root: 0 is the root
@@ -703,16 +433,6 @@ function popOr(steps: number, fallback: () => void) {
 		window.removeEventListener("popstate", onPop);
 		if (!popped) fallback();
 	}, 150);
-}
-
-// Two routes address the same panel when they open the same thing. A tab or
-// query tweak on the page you are already looking at (the workspace's
-// Review↔Conversation tabs, say) refines it rather than opening a new page, so
-// it replaces the entry instead of stacking another one.
-function samePanel(a: Route, b: Route): boolean {
-	if (a.view !== b.view) return false;
-	const id = (r: Route) => ("id" in r ? r.id : undefined);
-	return id(a) !== undefined && id(a) === id(b);
 }
 
 class MissingWorkspaceSessionSourceError extends Error {}
@@ -2686,176 +2406,59 @@ const path = await resolveAnonymousUserPath(
 	const prBackedWorkspace =
 		!!wsRecord &&
 		(wsRecord.prNumber !== undefined || !!wsRecord.key?.startsWith("ghpr-"));
-	const reviewViewTabs: ViewTab[] =
-		reviewCapable &&
-		wsKey &&
-		(reviewOpen.has(wsKey) ||
-			(prBackedWorkspace && !reviewClosed.has(wsKey)))
-			? [
-					{
-						id: `review:${wsKey}`,
-						label: "Review",
-						active: reviewActive,
-						dotClass: currentSession?.prState
-							? currentSession.prState === "OPEN" &&
-								currentSession.prMergeable === "CONFLICTING"
-								? PR_DOT_TONE.CONFLICT
-								: (PR_DOT_TONE[currentSession.prState] ?? null)
-							: null,
-					},
-				]
-			: [];
-	// The Conversation view-tab: the Plain support-ticket thread the workspace
-	// (or the open session) is attached to — timeline, admin actions, replies.
 	const conversationThreadId =
 		routeWorkspace?.plainThreadId ?? currentSession?.plainThreadId ?? null;
-	const conversationViewTabs: ViewTab[] =
-		conversationThreadId && wsKey && !conversationClosed.has(wsKey)
-			? [
-					{
-						id: `conversation:${wsKey}`,
-						label: "Conversation",
-						active: conversationActive,
-						dotClass: null,
-					},
-				]
-			: [];
-	// Feed descriptors (panel templates, labels) into the module cache that
-	// refWebPanel reads — without this the panel has no descriptors to resolve.
 	const [, setFeedMetaTick] = useState(0);
 	useEffect(() => {
-		void ensureFeedMeta().then(() => setFeedMetaTick((t) => t + 1));
+		void ensureFeedMeta().then(() => setFeedMetaTick((tick) => tick + 1));
 	}, []);
-	// The Video view-tab: the web panel of the workspace's (or open session's)
-	// feed-item ExternalRef, e.g. a video embed (the feeds design).
-	// On a session route routeWorkspace is null, so fall back to the open session's
-	// workspace record — otherwise the tab vanishes as soon as a session exists.
 	const videoWorkspace =
 		routeWorkspace ??
 		(currentSession?.workspaceId
-			? workspaces.find((p) => p.id === currentSession.workspaceId) ?? null
+			? workspaces.find((workspace) => workspace.id === currentSession.workspaceId) ??
+				null
 			: null);
-	const videoRef =
-		(
-			videoWorkspace?.externalRefs ??
-			currentSession?.externalRefs ??
-			[]
-		).find((r) => refWebPanel(r)) ?? null;
+	const videoRef = (
+		videoWorkspace?.externalRefs ??
+		currentSession?.externalRefs ??
+		[]
+	).find((ref) => refWebPanel(ref));
 	const videoPanel = videoRef ? refWebPanel(videoRef) : null;
-	const videoViewTabs: ViewTab[] =
-		videoPanel && wsKey && !videoClosed.has(wsKey)
-			? [
-					{
-						id: `video:${wsKey}`,
-						label: videoPanel.label,
-						active: videoActive,
-						dotClass: null,
-					},
-				]
-			: [];
-	// The Preview environment view-tab (the PR's Vercel preview, full-width) —
-	// opened from the Info panel button. Present once opened for this session.
-	const stagingViewTabs: ViewTab[] =
-		currentSession && wsKey && stagingOpen.has(wsKey)
-			? [
-					{
-						id: `staging:${wsKey}`,
-						label: "Preview environment",
-						active: stagingActive,
-						dotClass: null,
-						// The Preview environment tab reads as just a globe;
-						// "Preview environment" stays as its tooltip / aria label.
-						icon: <IconGlobe size={16} />,
-					},
-				]
-			: [];
-	// The Assets view-tab (the session's scratch artifacts, full-width) — opened
-	// from the Info panel's Assets button. Present once opened for this session.
-	const assetsViewTabs: ViewTab[] =
-		currentSession && wsKey && assetsOpen.has(wsKey)
-			? [
-					{
-						id: `assets:${wsKey}`,
-						label: "Assets",
-						active: assetsActive,
-						dotClass: null,
-					},
-				]
-			: [];
-	// The Terminal view-tab: an interactive shell in the session's workspace
-	// (inside its sandbox when sandboxed) — opened from the Info panel.
-	const terminalViewTabs: ViewTab[] =
-		currentSession && wsKey && terminalOpen.has(wsKey)
-			? [
-					{
-						id: `terminal:${wsKey}`,
-						label: "Terminal",
-						active: terminalActive,
-						dotClass: null,
-					},
-				]
-			: [];
-	// The local-dev Preview view-tab (live dev server iframe) — opened from
-	// the header Preview button. Present once opened for this session.
-	const previewViewTabs: ViewTab[] =
-		currentSession && wsKey && previewTabOpen.has(wsKey)
-			? [
-					{
-						id: `preview:${wsKey}`,
-						label: "Preview",
-						active: previewLiveActive,
-						dotClass: null,
-					},
-				]
-			: [];
 	const currentPortalTarget = wsKey ? portalTargets[wsKey] ?? null : null;
-	const portalViewTabs: ViewTab[] =
-		currentSession && wsKey && currentPortalTarget
-			? [
-					{
-						id: `portal:${wsKey}`,
-						label: currentPortalTarget.name,
-						active: portalActive,
-						dotClass: "bg-green",
-						icon: <IconGlobe size={16} />,
-					},
-				]
-			: [];
-	// The sub-agent view-tab: a Task drill-in from the open session's transcript.
-	// Bound to that session rather than the workspace, so switching to a sibling
-	// session hides it — and switching back brings its breadcrumb along. Only the
-	// OPEN session's tab is ever built, so the id's session always matches the
-	// pane the split machinery resolves it to.
 	const subagentStack = currentSession
 		? (subagentTabs[currentSession.id] ?? NO_SUBAGENTS)
 		: NO_SUBAGENTS;
 	const subagentActive = subagentSelected && subagentStack.length > 0;
-	const subagentViewTabs: ViewTab[] =
-		currentSession && subagentStack.length > 0
-			? [
-					{
-						id: `subagent:${currentSession.id}`,
-						label: subagentStack[subagentStack.length - 1].label,
-						active: subagentActive,
-						dotClass: null,
-					},
-				]
-			: [];
-	// This list is only the fallback for tabs with no saved position. Once a tab
-	// opens, the mixed session-and-pane order below keeps it at the right edge.
-	// The workspace home joins these once the strip would otherwise be empty —
-	// see `homeViewTabs`, which needs the session tabs to know that.
-	const paneViewTabs: ViewTab[] = [
-		...reviewViewTabs,
-		...conversationViewTabs,
-		...videoViewTabs,
-		...stagingViewTabs,
-		...previewViewTabs,
-		...portalViewTabs,
-		...assetsViewTabs,
-		...terminalViewTabs,
-		...subagentViewTabs,
-	];
+	const reviewDotClass = currentSession?.prState
+		? currentSession.prState === "OPEN" &&
+			currentSession.prMergeable === "CONFLICTING"
+			? PR_DOT_TONE.CONFLICT
+			: (PR_DOT_TONE[currentSession.prState] ?? null)
+		: null;
+	const paneViewTabs: ViewTab[] = buildWorkspacePaneTabs({
+		workspaceKey: wsKey,
+		sessionId: currentSession?.id,
+		activeViewTab,
+		reviewCapable,
+		reviewIsDefault: prBackedWorkspace,
+		reviewOpen,
+		reviewClosed,
+		reviewDotClass,
+		conversationThreadId,
+		conversationClosed,
+		videoLabel: videoPanel?.label ?? null,
+		videoClosed,
+		stagingOpen,
+		previewOpen: previewTabOpen,
+		portalLabel: currentPortalTarget?.name ?? null,
+		assetsOpen,
+		terminalOpen,
+		subagentLabel: subagentStack.at(-1)?.label ?? null,
+	}).map(({ icon, ...tab }) => ({
+		...tab,
+		...(icon === "globe" ? { icon: <IconGlobe size={16} /> } : {}),
+	}));
+
 	/**
 	 * The panes that keep rendering once a workspace has no session left: Review,
 	 * Conversation and Video hang off the workspace record, so the session-less
@@ -2866,42 +2469,15 @@ const path = await resolveAnonymousUserPath(
 	 * workspace's last session leaves these behind instead of conjuring a
 	 * replacement session, and closing the last one of them brings a session back.
 	 */
-	type WorkspacePaneTab = "review" | "conversation" | "video";
-	function sessionlessPanes(
-		key: string | null,
-		record: Workspace | null,
-	): WorkspacePaneTab[] {
-		if (!key || !record) return [];
-		const prBacked =
-			record.prNumber !== undefined || !!record.key?.startsWith("ghpr-");
-		const panes: WorkspacePaneTab[] = [];
-		if (
-			(record.prNumber !== undefined || !!record.branch) &&
-			(reviewOpen.has(key) || (prBacked && !reviewClosed.has(key)))
-		)
-			panes.push("review");
-		if (record.plainThreadId && !conversationClosed.has(key))
-			panes.push("conversation");
-		if (
-			record.externalRefs?.some((r) => refWebPanel(r)) &&
-			!videoClosed.has(key)
-		)
-			panes.push("video");
-		return panes;
-	}
-	const openWsPanes = sessionlessPanes(wsKey, wsRecord);
-	function viewTabKind(id: string): Exclude<ActiveViewTab, null> | null {
-		if (id.startsWith("subagent:")) return "subagent";
-		if (id.startsWith("staging:")) return "staging";
-		if (id.startsWith("assets:")) return "assets";
-		if (id.startsWith("terminal:")) return "terminal";
-		if (id.startsWith("preview:")) return "preview";
-		if (id.startsWith("portal:")) return "portal";
-		if (id.startsWith("conversation:")) return "conversation";
-		if (id.startsWith("video:")) return "video";
-		if (id.startsWith("review:")) return "review";
-		return null;
-	}
+	const openWsPanes = sessionlessWorkspacePanes(wsKey, wsRecord, {
+		reviewOpen,
+		reviewClosed,
+		conversationClosed,
+		videoClosed,
+		hasWebPanel: (workspace) =>
+			!!workspace.externalRefs?.some((ref) => refWebPanel(ref)),
+	});
+
 	function selectViewTab(id: string) {
 		// The workspace home has no pane of its own: it is what the strip shows
 		// with no view tab foregrounded.
@@ -5477,9 +5053,17 @@ console.error("Rename workspace failed:", error);
 								// pane rather than resurrecting the newest archived session
 								// (pickLandingSession's history fallback).
 								const panes = session?.archived
-									? sessionlessPanes(
+									? sessionlessWorkspacePanes(
 											id,
-											workspaces.find((x) => x.id === id) ?? null,
+											workspaces.find((workspace) => workspace.id === id) ?? null,
+											{
+												reviewOpen,
+												reviewClosed,
+												conversationClosed,
+												videoClosed,
+												hasWebPanel: (workspace) =>
+													!!workspace.externalRefs?.some((ref) => refWebPanel(ref)),
+											},
 										)
 									: [];
 								const remembered = getActiveViewTab(id);

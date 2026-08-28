@@ -170,6 +170,9 @@ test("sidebar Changes shares Review's code display options", () => {
 	);
 	expect(commentableDiffSource).toContain("z-[6] bg-surface");
 	expect(commentableDiffSource).toContain("rounded-t-lg bg-bg");
+	expect(commentableDiffSource).not.toContain(
+		'"isolate min-w-0 max-w-full',
+	);
 	expect(commentableDiffSource).not.toContain("data-[stuck]:overflow-visible");
 	expect(commentableDiffSource).not.toContain("-inset-x-px");
 	expect(commentableDiffSource).toContain("overflow-clip rounded-b-lg");
@@ -197,6 +200,10 @@ test("wide Review keeps its controls stable while page navigation moves", () => 
 	expect(reviewToolbarSource).toContain("sticky top-0");
 	expect(reviewToolbarSource).toContain("desktop:mb-0");
 	expect(reviewToolbarSource).toContain("desktop:pb-2");
+	expect(reviewToolbarSource).toContain(
+		"h-2.5 shrink-0 overflow-clip",
+	);
+	expect(reviewToolbarSource).not.toContain("-mb-2.5");
 	expect(reviewToolbarSource).toContain("WS_SUMMARY_REVIEW_BAR_CLEARANCE");
 	expect(prPanelSource).toContain("WS_SUMMARY_REVIEW_CANVAS_CLEARANCE");
 	expect(prPanelSource).toContain(

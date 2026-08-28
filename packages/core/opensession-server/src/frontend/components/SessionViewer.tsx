@@ -5981,7 +5981,15 @@ export function SessionViewer({
 								{archivedActions}
 								<Menu.Separator className={VIEWER_MENU_SEP} />
 								{workspaceScopedMenu
-									? workspaceLifecycleActions
+									? (
+										// The workspace-scoped menu swaps in workspace lifecycle
+										// actions, but an archived session still needs its way back:
+										// keep Unarchive reachable here.
+										<>
+											{session.archived && archiveAction}
+											{workspaceLifecycleActions}
+										</>
+									)
 									: (
 										<>
 											{(!isPhone || session.archived) && archiveAction}
@@ -6062,14 +6070,17 @@ export function SessionViewer({
 						</>
 					)}
 					{session.archived && (
-						<Tooltip label="Archived" side="bottom">
-							<span
-								className="inline-flex shrink-0 items-center justify-center text-dim"
-								role="img"
-								aria-label="Archived"
+						<Tooltip label="Unarchive session" side="bottom">
+							<Button
+								variant="ghost"
+								size="md"
+								className="shrink-0 text-dim"
+								icon={<IconArchive size={20} aria-hidden />}
+								disabled={archiving}
+								onClick={() => void handleArchive()}
 							>
-								<IconArchive size={20} />
-							</span>
+								{archiving ? "Unarchiving…" : "Unarchive"}
+							</Button>
 						</Tooltip>
 					)}
 					{renameDraft !== null ? (

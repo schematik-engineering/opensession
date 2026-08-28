@@ -40,6 +40,7 @@ import {
 } from "@tellahq/opensession-protocol/tool-presentation";
 import { formatDuration, fullTime } from "../lib/time";
 import { Tooltip } from "../ui/tooltip";
+import { Fold } from "../ui/fold";
 import { ExtBadge, fileExt } from "./lang-marks";
 import { openGalleryFrom } from "./MediaLightbox";
 import { useOpenAsset, useOpenAssetPaths } from "../lib/open-asset";
@@ -385,9 +386,7 @@ export const ToolCallBlock = function ToolCallBlock({
     ? (filePathOf((callInput || {}) as Record<string, unknown>).split("/").pop() ?? "")
     : "";
   const fileMark = fileExt(baseName) ? baseName : "";
-  const inputNode = expanded ? toolInputNode(canonical, callInput) : null;
   const resultContent = visibleResultContent(shownResult?.content, hasMedia, failed);
-  const inputNeedsPanel = canonical === "TodoWrite";
 
   // A scratch file this call named: openable straight from the row, because
   // assets live outside every worktree and nothing else in the transcript can
@@ -603,17 +602,9 @@ export const ToolCallBlock = function ToolCallBlock({
       </button>
       </Tooltip>
 
-      {expanded && (
+      <Fold open={expanded}>
         <div className="relative z-[1] mb-1.5 ml-[30px] mt-1 space-y-1.5">
-          {inputNode && (
-            <div
-              className={cn(
-                inputNeedsPanel && "overflow-hidden rounded-lg bg-panel p-1.5"
-              )}
-            >
-              {inputNode}
-            </div>
-          )}
+          <ToolInputDetail toolName={canonical} input={callInput} />
           {shownResult &&
             (resultContent || shownResult.images?.length || shownResult.videos?.length) && (
             <>
@@ -679,7 +670,7 @@ export const ToolCallBlock = function ToolCallBlock({
             </>
           )}
         </div>
-      )}
+      </Fold>
     </div>
   );
 };
@@ -693,6 +684,26 @@ export function visibleResultContent(
   if (!content) return "";
   if (!failed && hasMedia && /^Image read successfully\.?$/.test(content.trim())) return "";
   return content;
+}
+
+function ToolInputDetail({
+  toolName,
+  input,
+}: {
+  toolName: string;
+  input: unknown;
+}) {
+  const inputNode = toolInputNode(toolName, input);
+  if (!inputNode) return null;
+  return (
+    <div
+      className={cn(
+        toolName === "TodoWrite" && "overflow-hidden rounded-lg bg-panel p-1.5"
+      )}
+    >
+      {inputNode}
+    </div>
+  );
 }
 
 /**
