@@ -293,12 +293,14 @@ export function transcriptLineAssistantText(
   text: string,
   id?: string,
   ts?: string,
-  model?: string
+  model?: string,
+  isReasoning?: boolean,
 ): JsonlLine {
   return {
     type: "assistant",
     uuid: id || crypto.randomUUID(),
     timestamp: ts || new Date().toISOString(),
+    ...(isReasoning ? { isReasoning: true } : {}),
     message: {
       role: "assistant",
       content: [{ type: "text", text }],
@@ -382,7 +384,13 @@ export function transcriptLineForEntry(e: TranscriptEntry): JsonlLine | null {
       return line;
     }
     case "assistant":
-      return transcriptLineAssistantText(e.content, e.id, e.timestamp, e.model);
+      return transcriptLineAssistantText(
+        e.content,
+        e.id,
+        e.timestamp,
+        e.model,
+        e.isReasoning,
+      );
     case "tool_use":
       return transcriptLineToolUse(
         e.toolUseId || e.id,

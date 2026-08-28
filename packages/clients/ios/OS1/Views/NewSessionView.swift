@@ -105,8 +105,10 @@ struct NewSessionView: View {
     @State private var sessionProjection = ComposerSessionProjectionState()
     @FocusState private var promptFocused: Bool
 
-    /// The universal "+" reopens on whatever repo was used last.
+    /// Remembered only for restoring Code after switching this composer to
+    /// Ask. A fresh universal composer starts from the cross-device default.
     @AppStorage("os1.newSession.repo") private var lastRepo = ""
+    @AppStorage("os1.composer.defaultRepo") private var preferredRepo = ""
     @AppStorage("os1.composer.defaultModel") private var preferredModel = ""
     @AppStorage("os1.composer.defaultEngine") private var preferredEngine = ""
 
@@ -967,28 +969,36 @@ struct NewSessionView: View {
         if autoDictate, !dictation.active, Dictation.isAuthorized {
             Task { await dictation.start(base: prompt) { prompt = $0 } }
         }
-        repo = initialRepo ?? lastRepo
-        if repo == Session.noRepoID { mode = "ask" }
+        // Show an explicit scope immediately. An unscoped composer waits for
+        // the repository list so a removed preference never flashes as real.
+        repo = initialRepo ?? ""
+        if initialRepo == Session.noRepoID { mode = "ask" }
+        let requestContext = NativePreferences.context()
         async let reposFetch = OS1API.repos()
         async let modelsFetch = OS1API.models(workspaceId: initialWorkspaceId)
+        async let prefsFetch = SettingsAPI.uiPrefs(user: requestContext.user)
         // A server without sandboxes, or one too old to answer, simply leaves
         // the chip off. It must never keep the composer from opening.
         async let sandboxFetch = OS1API.sandboxStatus()
-        repos = (try? await reposFetch) ?? []
-        if repo != Session.noRepoID,
-           !repos.isEmpty,
-           !repos.contains(where: { $0.id == repo }) {
-            repo = repos.first(where: { $0.isDefault == true })?.id ?? repos[0].id
-        }
+        let fetchedRepos = (try? await reposFetch) ?? []
+        let fetchedPrefs = try? await prefsFetch
+        let livePrefs = NativePreferences.context() == requestContext ? fetchedPrefs : nil
+        let livePreferredRepo = livePrefs.map {
+            NativePreferences.normalizedDefaultRepository($0["default-repo"]) ?? ""
+        } ?? preferredRepo
+        preferredRepo = livePreferredRepo
+        repos = fetchedRepos
+        repo = Self.startingRepository(
+            in: fetchedRepos,
+            preferred: livePreferredRepo,
+            explicit: initialRepo
+        )
         // The picker's rows can only show an icon the cache already holds, so
         // fetch them here rather than when the menu opens.
         for repoInfo in repos { RepoTile.prefetchIcon(for: repoInfo.id) }
         sandboxStatus = try? await sandboxFetch
         if let fetched = try? await modelsFetch {
             catalog = fetched
-            let livePrefs = try? await SettingsAPI.uiPrefs(
-                user: ServerConfig.shared.userName
-            )
             let livePreferred = livePrefs?["default-model"] ?? preferredModel
             let liveEngine = livePrefs?["default-engine"] ?? preferredEngine
             preferredModel = livePreferred
@@ -1056,6 +1066,24 @@ struct NewSessionView: View {
         } else {
             lastRepo = selected
         }
+    }
+
+    /// Resolve only real repository ids. Explicit scopes win, including the
+    /// no-repo Ask/Scratch sentinel. A fresh composer then uses the account's
+    /// preference before the workspace/default repository. Retired `auto` and
+    /// removed ids fall through safely.
+    static func startingRepository(
+        in repos: [OS1API.RepoInfo],
+        preferred: String,
+        explicit: String?
+    ) -> String {
+        if explicit == Session.noRepoID { return Session.noRepoID }
+        if let explicit, repos.contains(where: { $0.id == explicit }) { return explicit }
+        let preferred = NativePreferences.normalizedDefaultRepository(preferred) ?? ""
+        if repos.contains(where: { $0.id == preferred }) { return preferred }
+        return repos.first(where: { $0.isDefault == true })?.id
+            ?? repos.first?.id
+            ?? Session.noRepoID
     }
 
     private var fallbackRepo: String {

@@ -3,6 +3,13 @@ import XCTest
 
 @MainActor
 final class PreferenceHydrationTests: XCTestCase {
+    func testDefaultRepositoryPreferenceNormalizesRetiredAuto() {
+        XCTAssertNil(NativePreferences.normalizedDefaultRepository(nil))
+        XCTAssertEqual(NativePreferences.normalizedDefaultRepository(""), "")
+        XCTAssertEqual(NativePreferences.normalizedDefaultRepository("auto"), "")
+        XCTAssertEqual(NativePreferences.normalizedDefaultRepository("repo-docs"), "repo-docs")
+    }
+
     func testReplySuggestionsPreferenceUsesWebValues() {
         XCTAssertEqual(NativePreferences.replySuggestionsEnabled("on"), true)
         XCTAssertEqual(NativePreferences.replySuggestionsEnabled("off"), false)

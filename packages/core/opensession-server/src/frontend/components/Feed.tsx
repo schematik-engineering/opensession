@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { UnifiedSession } from "../lib/types";
 import {
@@ -30,24 +30,16 @@ import { EmptyState, ListSkeleton } from "../ui/state";
 import { Button } from "../ui/button";
 import { Menu } from "../ui/menu";
 import { cn } from "../ui/cn";
-import { IconFeed, IconPeople, IconRepo, IconRobot } from "./icons";
-import {
-	PEOPLE_CHIP,
-	PEOPLE_CHIP_GLYPH,
-	PEOPLE_CHIP_GLYPH_SELECTED,
-	PEOPLE_CHIP_ROW,
-	PEOPLE_CHIP_SELECTED,
-	PEOPLE_SECTION_LABEL,
-} from "../lib/people-classes";
+import { IconFeed, IconRepo, IconRobot } from "./icons";
+import { PEOPLE_SECTION_LABEL } from "../lib/people-classes";
 
 /**
  * What the team has been shipping.
  *
- * The page is the feed. The team is the row at its top, because who shipped it
- * is how you narrow the feed, not a destination of its own. There is no
- * per-person page to open, since everything you would put on one already
- * exists as their sidebar. Once the row scrolls away, its compact face picker
- * moves into the app bar so the scope stays available.
+ * The page is the feed. Its two filters stay together at the top: repo first,
+ * then the team. Who shipped something is how you narrow the feed, not a
+ * destination of its own. There is no per-person page to open, since
+ * everything you would put on one already exists as their sidebar.
  *
  * So picking a teammate does two things at once, which is the point: it
  * narrows the feed to their merges, and it hands you their sidebar.
@@ -85,29 +77,6 @@ const RENDER_CEILING = 1500;
 /** Everyone, or one person. */
 type Scope = { kind: "everyone" } | { kind: "person"; key: string };
 
-function ScopeChip({
-	selected,
-	onClick,
-	mark,
-	label,
-}: {
-	selected: boolean;
-	onClick: () => void;
-	mark: React.ReactNode;
-	label: string;
-}) {
-	return (
-		<button
-			className={cn(PEOPLE_CHIP, selected && PEOPLE_CHIP_SELECTED)}
-			onClick={onClick}
-			aria-pressed={selected}
-		>
-			{mark}
-			<span className="min-w-0 truncate">{label}</span>
-		</button>
-	);
-}
-
 /**
  * The owner of a row, in the same 24px slot whoever they are. A teammate wears
  * their face; an automation wears a glyph in the avatar's own shape, so the
@@ -136,8 +105,7 @@ export function Feed({ sessions, teamViewing, headerActionsEl, onSelect }: Props
 	const team = useTeamPresence({ sessions, teamViewing, currentUser });
 	const people = usePeople();
 	const [scope, setScope] = useState<Scope>({ kind: "everyone" });
-	const [membersPinned, setMembersPinned] = useState(false);
-	const memberRowRef = useRef<HTMLDivElement>(null);
+	const [showAllMembers, setShowAllMembers] = useState(false);
 	// The other axis: which repo shipped it. Unlike the person scope this is
 	// the page's own filter and touches nothing else, because a repo is not
 	// something the sidebar can be turned to.
@@ -146,26 +114,6 @@ export function Feed({ sessions, teamViewing, headerActionsEl, onSelect }: Props
 	// You first, then the team in the order `useTeamPresence` already sorted
 	// them: working, then online, then whoever moved most recently.
 	const chips = [...team].sort((a, b) => Number(b.isYou) - Number(a.isYou));
-
-	useEffect(() => {
-		const row = memberRowRef.current;
-		const scroller = row?.closest("[data-page-scroll]");
-		if (!row || !(scroller instanceof HTMLElement)) {
-			setMembersPinned(false);
-			return;
-		}
-		const observer = new IntersectionObserver(
-			([entry]) => {
-				const rootTop = entry.rootBounds?.top ?? 0;
-				setMembersPinned(
-					!entry.isIntersecting && entry.boundingClientRect.bottom <= rootTop,
-				);
-			},
-			{ root: scroller, threshold: 0 },
-		);
-		observer.observe(row);
-		return () => observer.disconnect();
-	}, [team.length]);
 
 	const [recentPrs, setRecentPrs] = useState<RecentPr[]>([]);
 	const [recentPrsLoading, setRecentPrsLoading] = useState(true);
@@ -288,23 +236,20 @@ export function Feed({ sessions, teamViewing, headerActionsEl, onSelect }: Props
 	const canWiden = !!nextStep && (hasOlder || scoped.length > shipped.length);
 
 	const scopeName = scope.kind === "person" ? personLabel(scope.key) : null;
-	const compactMembers =
-		scope.kind === "person"
-			? [...chips].sort((a, b) => Number(b.key === scope.key) - Number(a.key === scope.key))
-			: chips;
-	const visibleCompactMembers = compactMembers.slice(0, 5);
-	const hiddenCompactMembers = compactMembers.length - visibleCompactMembers.length;
-	const compactPicker = (
-		<div className="flex items-center gap-px" aria-label="Filter feed by person">
-			{visibleCompactMembers.map((member) => {
+	const visibleMembers = showAllMembers ? chips : chips.slice(0, 5);
+	const hiddenMemberCount = chips.length - visibleMembers.length;
+	const renderMemberPicker = () => (
+		<div className="flex shrink-0 items-center gap-px" aria-label="Filter feed by person">
+			{visibleMembers.map((member) => {
 				const selected = scope.kind === "person" && scope.key === member.key;
 				return (
 					<button
 						key={member.key}
 						type="button"
 						className={cn(
-							"focus-ring flex min-h-8 items-center gap-1 rounded-md p-1 text-supporting font-medium text-fg hover:bg-hover",
-							selected && "bg-accent-soft pr-1.5 text-accent",
+							"focus-ring flex min-h-8 shrink-0 items-center gap-1 rounded-md p-1 text-supporting font-medium text-fg transition-colors hover:bg-hover phone:min-h-11",
+							selected &&
+								"bg-accent pr-1.5 font-semibold text-on-accent hover:bg-accent-hover",
 						)}
 						onClick={() =>
 							pick(
@@ -316,7 +261,14 @@ export function Feed({ sessions, teamViewing, headerActionsEl, onSelect }: Props
 						aria-pressed={selected}
 						aria-label={selected ? "Show everyone" : `Show ${member.person.name}`}
 					>
-						<UserAvatar name={member.person.name} size={24} edge={false} />
+						<span className="relative flex">
+							<UserAvatar name={member.person.name} size={24} edge={false} />
+							<StatusDot
+								state={presenceState(member)}
+								ring={selected ? "var(--accent)" : "var(--bg-surface)"}
+								size={7}
+							/>
+						</span>
 						{selected && (
 							<span className="max-w-24 truncate">
 								{member.isYou ? "You" : personLabel(member.key)}
@@ -325,17 +277,60 @@ export function Feed({ sessions, teamViewing, headerActionsEl, onSelect }: Props
 					</button>
 				);
 			})}
-			{hiddenCompactMembers > 0 && (
+			{hiddenMemberCount > 0 && (
 				<button
 					type="button"
-					className="focus-ring flex size-8 min-h-8 items-center justify-center rounded-md bg-active text-supporting font-semibold text-dim hover:bg-hover"
-					onClick={() => memberRowRef.current?.scrollIntoView({ block: "start" })}
-					aria-label={`Show ${hiddenCompactMembers} more people`}
+					className="focus-ring flex min-h-8 shrink-0 items-center justify-center rounded-md p-1 hover:bg-hover phone:min-h-11"
+					onClick={() => setShowAllMembers(true)}
+					aria-label={`Show ${hiddenMemberCount} more people`}
 				>
-					+{hiddenCompactMembers}
+					<span className="flex size-6 items-center justify-center rounded-md bg-active text-supporting font-semibold text-dim">
+						+{hiddenMemberCount}
+					</span>
 				</button>
 			)}
 		</div>
+	);
+	const renderRepoPicker = (align: "start" | "end") => (
+		<Menu.Root>
+			<Menu.Trigger
+				render={
+					<Button
+						variant="ghost"
+						size="sm"
+						icon={<IconRepo size={18} />}
+						caret
+						className="shrink-0 phone:min-h-11"
+					>
+						<span className="max-w-[150px] truncate">
+							{repo === "all" ? "In all repos" : `In ${repoLabel(repo)}`}
+						</span>
+					</Button>
+				}
+			/>
+			<Menu.Popup align={align} className="min-w-[200px]">
+				<Menu.RadioGroup
+					value={repo}
+					onValueChange={(value) => setRepo(String(value))}
+				>
+					<Menu.RadioItem value="all" closeOnClick>
+						{/* Sized to the tiles below so every label shares one edge. */}
+						<span className="size-[18px] shrink-0" />
+						<span className="min-w-0 flex-1 truncate">All repos</span>
+						<Menu.Check on={repo === "all"} />
+					</Menu.RadioItem>
+					{repoOptions.map((name) => (
+						<Menu.RadioItem key={name} value={name} closeOnClick>
+							<RepoTile name={name} size={18} />
+							<span className="min-w-0 flex-1 truncate">
+								{repoLabel(name)}
+							</span>
+							<Menu.Check on={repo === name} />
+						</Menu.RadioItem>
+					))}
+				</Menu.RadioGroup>
+			</Menu.Popup>
+		</Menu.Root>
 	);
 	const feedLoading =
 		recentPrs.length === 0 &&
@@ -346,50 +341,21 @@ export function Feed({ sessions, teamViewing, headerActionsEl, onSelect }: Props
 
 	return (
 		<div className="flex min-h-0 w-full flex-1 flex-col bg-surface">
-			{membersPinned &&
-				headerActionsEl &&
-				createPortal(<div className="phone:hidden">{compactPicker}</div>, headerActionsEl)}
+			{headerActionsEl &&
+				(repoOptions.length > 1 || team.length > 0) &&
+				createPortal(
+					<div className="flex min-w-0 items-center gap-1 phone:hidden">
+						{repoOptions.length > 1 && renderRepoPicker("end")}
+						{team.length > 0 && renderMemberPicker()}
+					</div>,
+					headerActionsEl,
+				)}
 			<div data-page-scroll className="min-h-0 flex-1 overflow-y-auto">
 				<div className="mx-auto w-full max-w-[920px] px-6 pb-15 pt-6 phone:px-4 phone:pb-12 phone:pt-[calc(var(--header-h)+18px)]">
-					{team.length > 0 && (
-						<div ref={memberRowRef} className={PEOPLE_CHIP_ROW}>
-							<ScopeChip
-								selected={scope.kind === "everyone"}
-								onClick={() => pick({ kind: "everyone" })}
-								mark={
-									<span
-										className={cn(
-											PEOPLE_CHIP_GLYPH,
-											scope.kind === "everyone" && PEOPLE_CHIP_GLYPH_SELECTED,
-										)}
-									>
-										<IconPeople size={17} />
-									</span>
-								}
-								label="Everyone"
-							/>
-							{chips.map((member) => (
-								<ScopeChip
-									key={member.key}
-									selected={scope.kind === "person" && scope.key === member.key}
-									onClick={() => pick({ kind: "person", key: member.key })}
-									mark={
-										<span className="relative flex">
-											<UserAvatar name={member.person.name} size={26} />
-											<StatusDot
-												state={presenceState(member)}
-												ring={
-													scope.kind === "person" && scope.key === member.key
-														? "var(--accent)"
-														: "var(--bg-panel)"
-												}
-												size={8}
-											/>
-										</span>
-									}
-									label={member.isYou ? "You" : member.person.name}
-								/>
-							))}
+					{(repoOptions.length > 1 || team.length > 0) && (
+						<div className="mb-5 hidden min-w-0 items-center gap-1 overflow-x-auto phone:flex">
+							{repoOptions.length > 1 && renderRepoPicker("start")}
+							{team.length > 0 && renderMemberPicker()}
 						</div>
 					)}
 					{feedLoading ? (
@@ -411,51 +377,10 @@ export function Feed({ sessions, teamViewing, headerActionsEl, onSelect }: Props
 					</EmptyState>
 				) : (
 					<>
-						{/* The list's own header: what it is on the left, the second
-						    axis on the right. The repo filter belongs here rather than
-						    among the faces because it narrows the list rather than
-						    changing whose sidebar you are in, and it has to stay on
-						    screen when a pick empties the list, or the only way back
-						    is gone. */}
-						<div className="mb-2 flex min-h-[30px] items-center justify-between gap-3">
+						<div className="mb-2 flex min-h-[30px] items-center">
 							<h3 className={cn(PEOPLE_SECTION_LABEL, "mb-0")}>
 								{scopeName ? `${scopeName} shipped` : "Shipped"}
 							</h3>
-							{repoOptions.length > 1 && (
-								<Menu.Root>
-									<Menu.Trigger
-										render={
-											<Button variant="ghost" size="sm" icon={<IconRepo size={18} />} caret>
-												<span className="max-w-[150px] truncate">
-													{repo === "all" ? "In all repos" : `In ${repoLabel(repo)}`}
-												</span>
-											</Button>
-										}
-									/>
-									<Menu.Popup align="end" className="min-w-[200px]">
-										<Menu.RadioGroup
-											value={repo}
-											onValueChange={(value) => setRepo(String(value))}
-										>
-											<Menu.RadioItem value="all" closeOnClick>
-												{/* Sized to the tiles below so every label shares one edge. */}
-												<span className="size-[18px] shrink-0" />
-												<span className="min-w-0 flex-1 truncate">All repos</span>
-												<Menu.Check on={repo === "all"} />
-											</Menu.RadioItem>
-											{repoOptions.map((name) => (
-												<Menu.RadioItem key={name} value={name} closeOnClick>
-													<RepoTile name={name} size={18} />
-													<span className="min-w-0 flex-1 truncate">
-														{repoLabel(name)}
-													</span>
-													<Menu.Check on={repo === name} />
-												</Menu.RadioItem>
-											))}
-										</Menu.RadioGroup>
-									</Menu.Popup>
-								</Menu.Root>
-							)}
 						</div>
 						{filteredFeedLoading ? (
 							<ListSkeleton

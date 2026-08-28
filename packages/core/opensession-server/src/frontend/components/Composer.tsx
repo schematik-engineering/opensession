@@ -11,6 +11,13 @@ import {
 } from "../hooks/useShortcutBindings";
 import type { ModelOption, FileMention, ProviderAccountOption } from "../lib/api";
 import { splitAttachments, imageFilesFromPaste, type FileAttachment } from "../lib/images";
+import {
+  appendImageAttachmentComment,
+  deleteImageAttachmentComment,
+  parseImageAttachmentComments,
+  rebaseImageAttachmentReferences,
+  updateImageAttachmentComment,
+} from "../lib/image-attachment-comment";
 import { clearDraft, loadDraft, onDraftsChanged, saveDraft } from "../lib/drafts";
 import { appendDictation } from "../lib/dictation";
 import {
@@ -34,6 +41,7 @@ import {
 import { useSessionNameProjection } from "../hooks/useSessionNameProjection";
 import { usePeople } from "../lib/people";
 import { ImageThumbs } from "./ImageThumbs";
+import type { ImageRegionAnnotation } from "./MediaLightbox";
 import { FileChips } from "./FileChips";
 import { QuoteContext } from "./QuoteContext";
 import { PastedTextContext } from "./PastedTextContext";
@@ -590,6 +598,13 @@ export function Composer({
   const isControlled = value !== undefined;
   const text = isControlled ? value : innerValue;
   const setText = isControlled ? onChange ?? (() => {}) : setInnerValue;
+  // The lightbox is hosted above the composer and keeps the callback from the
+  // moment it opened. Keep its draft source current across several Shift+Enter
+  // comments without making the global viewer own composer state.
+  const textRef = useRef(text);
+  useLayoutEffect(() => {
+    textRef.current = text;
+  }, [text]);
   // A session reference in the draft is stored as its id and shown as that
   // session's name (hooks/useSessionNameProjection.ts): the field renders
   // `displayText`, while the draft, the send and the clipboard keep the id.
@@ -698,6 +713,9 @@ export function Composer({
   const isSendDisabled = sendBlockedFor(text);
   const imgs = images || [];
   const fls = files || [];
+  // The draft is the source of truth for annotation dots. Editing or deleting
+  // their plain-text references directly therefore updates the next preview.
+  const imageComments = parseImageAttachmentComments(text);
   // Notes accept images but not arbitrary files: images remain team-visible,
   // while files are agent-readable workspace context and belong to prompts.
   const canAttachImages = !!onImagesChange;
@@ -984,6 +1002,51 @@ export function Composer({
 
   function removeImage(i: number) {
     onImagesChange?.(imgs.filter((_, idx) => idx !== i));
+    const next = rebaseImageAttachmentReferences(textRef.current, i);
+    textRef.current = next;
+    setText(next);
+  }
+
+  function writeAnnotationDraft(next: string) {
+    textRef.current = next;
+    if (!isControlled && draftKey) saveDraft(draftKey, { text: next });
+    setText(next);
+  }
+
+  function commentOnImage(
+    i: number,
+    region: { x: number; y: number; width: number; height: number },
+    comment: string,
+    keepOpen: boolean,
+    existing?: ImageRegionAnnotation,
+  ) {
+    const next = existing
+      ? updateImageAttachmentComment(
+          textRef.current,
+          { ...existing, imageIndex: i },
+          region,
+          comment,
+        )
+      : appendImageAttachmentComment(textRef.current, i, region, comment);
+    writeAnnotationDraft(next);
+    if (!keepOpen) {
+      // The lightbox restores focus to its thumbnail first. Run after that
+      // cleanup so the newly added reference is ready to edit or send.
+      setTimeout(() => {
+        const field = textareaRef.current;
+        field?.focus({ preventScroll: true });
+        if (field) field.selectionStart = field.selectionEnd = field.value.length;
+      }, 0);
+    }
+  }
+
+  function deleteCommentOnImage(i: number, annotation: ImageRegionAnnotation) {
+    writeAnnotationDraft(
+      deleteImageAttachmentComment(textRef.current, {
+        ...annotation,
+        imageIndex: i,
+      }),
+    );
   }
 
   function removeFile(i: number) {
@@ -1606,6 +1669,9 @@ export function Composer({
           images={imgs}
           pending={activeStaging.images}
           onRemove={removeImage}
+          comments={imageComments}
+          onComment={canAttachImages ? commentOnImage : undefined}
+          onDeleteComment={canAttachImages ? deleteCommentOnImage : undefined}
           onRemovePending={staging ? onRemovePendingImage : localUploads.cancelPendingImage}
           disabled={disabled}
         />

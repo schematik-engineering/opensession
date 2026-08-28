@@ -207,6 +207,8 @@ export interface UnifiedSession {
   model?: string;
   /** Workspace model-preset instructions captured when this session was created. */
   presetNote?: string;
+  /** Sticky pstack engineering mode, enabled with /pstack <task>. */
+  pstackMode?: boolean;
   /** Pi reasoning variant for runs in this session; unset = model default. */
   effort?: string;
   /** Use OpenAI's priority service tier for ChatGPT OAuth Codex runs. */
@@ -569,6 +571,7 @@ export interface NativeSessionFile {
   autoFallbackModel?: string | null;
 	/** Workspace model-preset instructions captured when this session was created. */
 	presetNote?: string;
+  pstackMode?: boolean; // sticky pstack engineering mode, toggled with /pstack
   effort?: string; // Pi reasoning variant for this session's runs; unset = model default
   fastMode?: boolean; // OpenAI priority service tier for ChatGPT OAuth Codex runs
   accountId?: string; // pinned Claude/Codex provider account; unset = auto pool

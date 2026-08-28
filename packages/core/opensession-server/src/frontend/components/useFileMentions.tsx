@@ -27,6 +27,7 @@ import {
 import { emojiContextAt, emojiMentionSuggestions } from "../lib/emoji";
 import { caretPoint } from "../lib/caret-coords";
 import { PHONE_QUERY } from "../lib/breakpoints";
+import { selectedSkillCommand } from "../lib/skill-command";
 
 /**
  * Find the active "@"-mention being typed at the caret. Returns the index of
@@ -399,7 +400,9 @@ export function useFileMentions({ value, onChange, textareaRef, mentionFetch, pa
     // decode. No trailing space: emoji usually end a sentence.
     const insert = mention.kind === "emoji"
       ? item.insert
-      : `${mention.kind === "skill" ? "/" : "@"}${item.insert} `;
+      : mention.kind === "skill"
+        ? `${selectedSkillCommand(item.insert)} `
+        : `@${item.insert} `;
     const next = before + insert + after;
     const nextCaret = before.length + insert.length;
     setMention(null);

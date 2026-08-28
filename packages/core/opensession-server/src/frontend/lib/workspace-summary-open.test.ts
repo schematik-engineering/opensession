@@ -8,6 +8,7 @@ import {
 	workspaceSummaryCanStand,
 	workspaceSummaryOpen,
 	workspaceSummaryShift,
+	workspaceSummaryShouldDismissAfterRouting,
 	workspaceSummarySideOffset,
 } from "./workspace-summary-open";
 
@@ -103,6 +104,11 @@ describe("workspace summary in Review", () => {
 	test("stands wherever there is room, Review included", () => {
 		expect(workspaceSummaryCanStand(true)).toBe(true);
 		expect(workspaceSummaryCanStand(false)).toBe(false);
+	});
+
+	test("keeps a standing card open when a row routes to Review", () => {
+		expect(workspaceSummaryShouldDismissAfterRouting(true)).toBe(false);
+		expect(workspaceSummaryShouldDismissAfterRouting(false)).toBe(true);
 	});
 
 	test("places every summary below the workspace tabs", () => {

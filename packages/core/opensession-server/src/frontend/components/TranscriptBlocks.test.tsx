@@ -535,19 +535,18 @@ describe("TranscriptBlocks turn work and tool call preferences", () => {
 		setTurnPrefs(null);
 	});
 
-	test("folds the notes away too when the work is always folded", () => {
+	test("keeps every model message visible when work is folded", () => {
 		setTurnPrefs("folded", "open");
 		const html = renderToStaticMarkup(<TranscriptBlocks entries={narratedTurn} />);
 
 		expect(html).toContain("Worked");
-		expect(html).not.toContain("The repository is clean.");
+		expect(html).toContain("The repository is clean.");
 		expect(html).not.toContain("git status");
-		// The answer is never work, so it stays whatever the turn does.
 		expect(html).toContain("All good.");
 		setTurnPrefs(null);
 	});
 
-	test("opens the outer steps only while a turn runs", () => {
+	test("never folds model output before or between tool runs", () => {
 		setTurnPrefs("running", "folded");
 		const running = renderToStaticMarkup(
 			<TranscriptBlocks live entries={liveNarratedTurn} />,
@@ -558,8 +557,32 @@ describe("TranscriptBlocks turn work and tool call preferences", () => {
 		const settled = renderToStaticMarkup(
 			<TranscriptBlocks entries={narratedTurn} />,
 		);
-		expect(settled).not.toContain("The repository is clean.");
+		expect(settled).toContain("The repository is clean.");
+		expect(settled).toContain("All good.");
 		expect(settled).not.toContain("git status");
+		setTurnPrefs(null);
+	});
+
+	test("renders reasoning headings as quiet regular text", () => {
+		setTurnPrefs("folded", "folded");
+		const html = renderToStaticMarkup(
+			<TranscriptBlocks
+				entries={[
+					{ id: "prompt", type: "user", content: "Check it", timestamp: "2026-08-28T06:00:00Z" },
+					{ id: "reasoning", type: "assistant", content: "**Checking deployment status**", isReasoning: true, timestamp: "2026-08-28T06:00:01Z" },
+					{ id: "tool", type: "tool_use", toolUseId: "tool-call", toolName: "bash", toolInput: { command: "git status" }, content: "Using bash", timestamp: "2026-08-28T06:00:02Z" },
+					{ id: "legacy-reasoning", type: "assistant", content: "**Verifying the release**", timestamp: "2026-08-28T06:00:03Z" },
+					{ id: "tool-2", type: "tool_use", toolUseId: "tool-call-2", toolName: "bash", toolInput: { command: "git diff" }, content: "Using bash", timestamp: "2026-08-28T06:00:04Z" },
+					{ id: "answer", type: "assistant", content: "Done.", timestamp: "2026-08-28T06:00:05Z" },
+				]}
+			/>,
+		);
+
+		expect(html.match(/data-reasoning=""/g)).toHaveLength(2);
+		expect(html).toContain("Checking deployment status");
+		expect(html).toContain("Verifying the release");
+		expect(html).not.toContain("<strong>Checking deployment status</strong>");
+		expect(html).not.toContain("<strong>Verifying the release</strong>");
 		setTurnPrefs(null);
 	});
 });
@@ -659,7 +682,7 @@ describe("TranscriptBlocks featured media outlives the fold", () => {
 });
 
 describe("TranscriptBlocks review loops", () => {
-	test("folds review work but leaves a following user request in the conversation", () => {
+	test("folds review tools but leaves model output and a following user request visible", () => {
 		const html = renderToStaticMarkup(
 			<TranscriptBlocks
 				entries={[
@@ -672,7 +695,7 @@ describe("TranscriptBlocks review loops", () => {
 		);
 		expect(html).toContain("Review loop");
 		expect(html).toContain("PR #42");
-		expect(html).not.toContain("Fixed the review finding.");
+		expect(html).toContain("Fixed the review finding.");
 		expect(html).toContain("Please also update the empty state.");
 		expect(html).not.toContain("Review outcome");
 		expect(html).not.toContain("Ready to merge");

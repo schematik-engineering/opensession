@@ -57,7 +57,9 @@ import {
 	IconCopy,
 	IconLink,
 	IconMessage,
+	IconPencil,
 	IconShare,
+	IconTrash,
 	IconX,
 } from "./icons";
 
@@ -81,6 +83,12 @@ import {
  * via dangerouslySetInnerHTML and can't carry React handlers.
  */
 
+export interface ImageRegionAnnotation {
+	id: string;
+	region: ImageRegion;
+	text: string;
+}
+
 export interface LightboxItem {
 	kind: "image" | "video" | "diagram";
 	src: string;
@@ -96,6 +104,17 @@ export interface LightboxItem {
 	/** Session that owns this transcript image. Only these images can send a
 	 *  selected region back into chat. */
 	commentSessionId?: string;
+	/** Existing composer annotations, parsed from the draft that owns this image. */
+	regionAnnotations?: ImageRegionAnnotation[];
+	/** Composer attachments add or edit the comment in the draft instead of
+	 * sending a new turn immediately. `keepOpen` is Shift+Enter's add-another path. */
+	onRegionComment?: (request: {
+		region: ImageRegion;
+		text: string;
+		keepOpen: boolean;
+		existing?: ImageRegionAnnotation;
+	}) => void | Promise<void>;
+	onDeleteRegionComment?: (annotation: ImageRegionAnnotation) => void | Promise<void>;
 }
 
 interface LightboxState {
@@ -642,6 +661,9 @@ function ZoomableMedia({
 	selection,
 	onSelection,
 	onSelectionRect,
+	annotations = [],
+	onEditAnnotation,
+	onDeleteAnnotation,
 }: {
 	src: string;
 	/** Present for a diagram: draw this markup instead of loading `src`. */
@@ -669,6 +691,9 @@ function ZoomableMedia({
 	/** Where the committed selection sits on screen, so the comment card can be
 	 *  placed against it. Viewport coordinates. */
 	onSelectionRect?: (rect: ScreenRect | null) => void;
+	annotations?: ImageRegionAnnotation[];
+	onEditAnnotation?: (annotation: ImageRegionAnnotation) => void;
+	onDeleteAnnotation?: (annotation: ImageRegionAnnotation) => void;
 }) {
 	const isPhone = useIsPhone();
 	const wrapRef = useRef<HTMLDivElement>(null);
@@ -706,6 +731,7 @@ function ZoomableMedia({
 	const singleTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const [zoomed, setZoomed] = useState(false);
 	const zoomedRef = useRef(false);
+	const [openAnnotation, setOpenAnnotation] = useState<string | null>(null);
 	const regionGesture = useRef<
 		| {
 				kind: "create";
@@ -879,7 +905,7 @@ function ZoomableMedia({
 	// the lightbox wrapper. Keep that projection current when a phone keyboard,
 	// a rotation, or a decoded image changes the fitted box.
 	useLayoutEffect(() => {
-		if (!commentMode || diagram) {
+		if ((!commentMode && annotations.length === 0) || diagram) {
 			setImageBox(null);
 			return;
 		}
@@ -933,7 +959,7 @@ function ZoomableMedia({
 			window.removeEventListener("resize", measure);
 			window.visualViewport?.removeEventListener("resize", measure);
 		};
-	}, [commentMode, diagram, src]);
+	}, [commentMode, diagram, src, annotations.length]);
 
 	// Selection needs the fitted, untransformed image. Entering comment mode
 	// returns a zoomed or panned image to fit before the first drag.
@@ -1192,6 +1218,19 @@ function ZoomableMedia({
 		onPointerEnd(e);
 	}
 
+	/** Commit both the normalized region and its viewport box in the same event.
+	 * Waiting for the post-render imageBox effect made the first drag race image
+	 * decode/hero layout, so the field sometimes appeared only after a redraw. */
+	function commitRegion(region: ImageRegion, imageRect: DOMRect) {
+		onSelection?.(region);
+		onSelectionRect?.({
+			left: imageRect.left + region.x * imageRect.width,
+			top: imageRect.top + region.y * imageRect.height,
+			width: region.width * imageRect.width,
+			height: region.height * imageRect.height,
+		});
+	}
+
 	const onPointerEnd = (e: React.PointerEvent) => {
 		const selecting = regionGesture.current;
 		if (selecting?.pointerId === e.pointerId) {
@@ -1204,7 +1243,7 @@ function ZoomableMedia({
 				(region.width * selecting.imageRect.width >= 12 &&
 					region.height * selecting.imageRect.height >= 12)
 			) {
-				onSelection?.(region);
+				commitRegion(region, selecting.imageRect);
 			}
 			return;
 		}
@@ -1368,7 +1407,6 @@ function ZoomableMedia({
 			onPointerMove={onPointerMove}
 			onPointerUp={onPointerEnd}
 			onPointerCancel={onPointerCancel}
-			onLostPointerCapture={(event) => clearRegionGesture(event.pointerId)}
 		>
 			{diagram ? (
 				<div
@@ -1436,6 +1474,67 @@ function ZoomableMedia({
 							/>
 						</div>
 					)}
+					{imageBox && !zoomed && annotations.map((annotation) => {
+						const centerX = annotation.region.x + annotation.region.width / 2;
+						const centerY = annotation.region.y + annotation.region.height / 2;
+						const open = openAnnotation === annotation.id;
+						const opensLeft = centerX > 0.62;
+						return (
+							<div
+								key={annotation.id}
+								className="group/annotation absolute z-[3] flex items-center"
+								style={{
+									left: imageBox.left + centerX * imageBox.width,
+									top: imageBox.top + centerY * imageBox.height,
+									transform: "translate(-50%, -50%)",
+								}}
+								onPointerDown={(event) => event.stopPropagation()}
+							>
+								<button
+									type="button"
+									className="focus-ring grid size-10 shrink-0 place-items-center rounded-full border-0 bg-transparent p-0 phone:size-11"
+									onClick={() => setOpenAnnotation(open ? null : annotation.id)}
+									aria-label={`Show annotation: ${annotation.text}`}
+									aria-expanded={open}
+								>
+									<span className="size-2.5 rounded-full bg-accent shadow-[0_1px_4px_rgb(0_0_0/0.28),0_0_0_1px_rgb(255_255_255/0.18)] transition-transform duration-[var(--dur-micro)] ease-[var(--ease)] group-hover/annotation:scale-[1.22] group-focus-within/annotation:scale-[1.22] motion-reduce:transition-none" />
+								</button>
+								<div
+									className={cn(
+										"absolute top-1/2 flex w-[min(260px,56vw)] -translate-y-1/2 items-center gap-1 rounded-popup bg-black/70 p-1.5 pl-3 text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.1),0_10px_30px_rgb(0_0_0/0.38)] backdrop-blur-xl transition-[opacity,scale] duration-[var(--dur-micro)] ease-[var(--ease)] motion-reduce:transition-none",
+										opensLeft ? "right-full mr-1 origin-right" : "left-full ml-1 origin-left",
+										open
+											? "pointer-events-auto scale-100 opacity-100"
+											: "pointer-events-none scale-[0.96] opacity-0 group-hover/annotation:pointer-events-auto group-hover/annotation:scale-100 group-hover/annotation:opacity-100 group-focus-within/annotation:pointer-events-auto group-focus-within/annotation:scale-100 group-focus-within/annotation:opacity-100",
+									)}
+								>
+									<span className="min-w-0 flex-1 truncate text-label font-medium">
+										{annotation.text}
+									</span>
+									{onEditAnnotation && (
+										<button
+											type="button"
+											className="grid size-10 shrink-0 place-items-center rounded-full border-0 bg-transparent p-0 text-white/70 hover:bg-white/10 hover:text-white active:scale-[0.96] phone:size-11"
+											onClick={() => onEditAnnotation(annotation)}
+											aria-label="Edit annotation"
+										>
+											<IconPencil size={17} />
+										</button>
+									)}
+									{onDeleteAnnotation && (
+										<button
+											type="button"
+											className="grid size-10 shrink-0 place-items-center rounded-full border-0 bg-transparent p-0 text-white/70 hover:bg-white/10 hover:text-white active:scale-[0.96] phone:size-11"
+											onClick={() => onDeleteAnnotation(annotation)}
+											aria-label="Delete annotation"
+										>
+											<IconTrash size={17} />
+										</button>
+									)}
+								</div>
+							</div>
+						);
+					})}
 					{commentMode && shownRegionBox && (
 						<div
 							// The region is a thing you can take hold of, not a mark:
@@ -1570,6 +1669,12 @@ function MediaLightbox({
 		height: typeof window === "undefined" ? 0 : window.innerHeight,
 	}));
 	const [commentText, setCommentText] = useState("");
+	const [editingAnnotation, setEditingAnnotation] =
+		useState<ImageRegionAnnotation | null>(null);
+	const [annotationsByIndex, setAnnotationsByIndex] = useState(() =>
+		items.map((entry) => entry.regionAnnotations ?? []),
+	);
+	const annotations = annotationsByIndex[index] ?? [];
 	const [commentError, setCommentError] = useState<string | null>(null);
 	const [sendingComment, setSendingComment] = useState(false);
 	const sendingCommentRef = useRef(false);
@@ -1597,6 +1702,7 @@ function MediaLightbox({
 		setSelectionRect(null);
 		setCommentCardSize(null);
 		setCommentText("");
+		setEditingAnnotation(null);
 		setCommentError(null);
 	};
 	const prev = () => {
@@ -1665,23 +1771,62 @@ if (!nativeShareWasCancelled(error)) toast("Could not share that link");
 	};
 	const commentable =
 		item.kind === "image" &&
-		canCommentOnImageRegion(item.commentSessionId);
-	const sendRegionComment = async () => {
+		(Boolean(item.onRegionComment) ||
+			canCommentOnImageRegion(item.commentSessionId));
+	const sendRegionComment = async (keepOpen = false) => {
 		const text = commentText.trim();
-		const { commentSessionId, src } = item;
-		if (!commentSessionId || !selection || !text || sendingCommentRef.current)
+		const { commentSessionId, onRegionComment, src } = item;
+		if (
+			(!commentSessionId && !onRegionComment) ||
+			!selection ||
+			!text ||
+			sendingCommentRef.current
+		)
 			return;
 		sendingCommentRef.current = true;
 		setSendingComment(true);
 		setCommentError(null);
 		await (async () => {
-await submitImageRegionComment({
-				sessionId: commentSessionId,
-				src,
-				region: selection,
-				text,
-			});
-			onClose(false);
+			if (onRegionComment) {
+				await onRegionComment({
+					region: selection,
+					text,
+					keepOpen,
+					...(editingAnnotation ? { existing: editingAnnotation } : {}),
+				});
+				const saved: ImageRegionAnnotation = {
+					id: editingAnnotation?.id ?? `local-${Date.now()}`,
+					region: selection,
+					text,
+				};
+				setAnnotationsByIndex((all) =>
+					all.map((entry, itemIndex) =>
+						itemIndex !== index
+							? entry
+							: editingAnnotation
+								? entry.map((annotation) =>
+										annotation.id === editingAnnotation.id ? saved : annotation,
+									)
+								: [...entry, saved],
+					),
+				);
+			} else if (commentSessionId) {
+				await submitImageRegionComment({
+					sessionId: commentSessionId,
+					src,
+					region: selection,
+					text,
+				});
+			}
+			if (keepOpen) {
+				setSelection(null);
+				setSelectionRect(null);
+				setCommentCardSize(null);
+				setCommentText("");
+				setEditingAnnotation(null);
+			} else {
+				onClose(false);
+			}
 })().catch(async (error) => {
 setCommentError(
 				error instanceof Error ? error.message : "Could not send this comment",
@@ -1690,6 +1835,41 @@ setCommentError(
 sendingCommentRef.current = false;
 			setSendingComment(false);
 });
+	};
+
+	const editAnnotation = (annotation: ImageRegionAnnotation) => {
+		setChromeVisible(true);
+		setCommenting(true);
+		setEditingAnnotation(annotation);
+		setSelection(annotation.region);
+		setCommentText(annotation.text);
+		setCommentError(null);
+	};
+
+	const deleteAnnotation = async (annotation: ImageRegionAnnotation) => {
+		if (!item.onDeleteRegionComment || sendingCommentRef.current) return;
+		sendingCommentRef.current = true;
+		setSendingComment(true);
+		setCommentError(null);
+		await (async () => {
+			await item.onDeleteRegionComment?.(annotation);
+			setAnnotationsByIndex((all) =>
+				all.map((entry, itemIndex) =>
+					itemIndex === index
+						? entry.filter((comment) => comment.id !== annotation.id)
+						: entry,
+				),
+			);
+			if (editingAnnotation?.id === annotation.id) resetComment();
+		})().catch(async (error) => {
+			toast(
+				error instanceof Error ? error.message : "Could not delete this comment",
+				{ variant: "error" },
+			);
+		}).finally(async () => {
+			sendingCommentRef.current = false;
+			setSendingComment(false);
+		});
 	};
 
 	useEffect(() => {
@@ -2148,6 +2328,13 @@ sendingCommentRef.current = false;
 								setCommentError(null);
 							}}
 							onSelectionRect={setSelectionRect}
+							annotations={annotations}
+							onEditAnnotation={
+								item.onRegionComment ? editAnnotation : undefined
+							}
+							onDeleteAnnotation={
+								item.onDeleteRegionComment ? deleteAnnotation : undefined
+							}
 						/>
 					) : (
 						// The video never fills the stage, so the space beside it has to
@@ -2395,12 +2582,14 @@ sendingCommentRef.current = false;
 							onKeyDown={(event) => {
 								if (
 									event.key === "Enter" &&
-									!event.shiftKey &&
+									(!event.shiftKey || Boolean(item.onRegionComment)) &&
 									!event.nativeEvent.isComposing &&
 									window.matchMedia("(hover: hover) and (pointer: fine)").matches
 								) {
 									event.preventDefault();
-									void sendRegionComment();
+									void sendRegionComment(
+										event.shiftKey && Boolean(item.onRegionComment),
+									);
 								}
 							}}
 							rows={1}
@@ -2428,7 +2617,7 @@ sendingCommentRef.current = false;
 							type="submit"
 							// The filled circle a message is sent with, in the app's own
 							// accent rather than a plain white chip.
-							className="grid size-9 shrink-0 place-items-center rounded-full border-0 bg-accent p-0 text-white transition-transform active:scale-[0.94] disabled:bg-white/15 disabled:text-white/40 phone:size-11"
+							className="grid size-9 shrink-0 place-items-center rounded-full border-0 bg-accent p-0 text-white transition-transform active:scale-[0.96] disabled:bg-white/15 disabled:text-white/40 phone:size-11"
 							disabled={!commentText.trim() || sendingComment}
 							aria-label={sendingComment ? "Sending comment" : "Send comment"}
 						>

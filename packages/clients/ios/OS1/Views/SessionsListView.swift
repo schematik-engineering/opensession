@@ -13,6 +13,27 @@ private let sidebarMargin: CGFloat = 20
 private let sidebarMargin: CGFloat = 16
 #endif
 
+private struct WorkspaceDeletionConfirmation: ViewModifier {
+    @Binding var workspace: SidebarWorkspace?
+    let onDelete: (SidebarWorkspace) -> Void
+
+    func body(content: Content) -> some View {
+        content.alert(
+            "Delete workspace?",
+            isPresented: Binding(
+                get: { workspace != nil },
+                set: { if !$0 { workspace = nil } }
+            ),
+            presenting: workspace
+        ) { workspace in
+            Button("Delete workspace", role: .destructive) { onDelete(workspace) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Every session in this workspace will be permanently deleted. This cannot be undone.")
+        }
+    }
+}
+
 /// Sessions list, organized the way the web sidebar is.
 ///
 /// Inbox keeps work in stable Active and Snoozed sections. Activity restores
@@ -93,6 +114,10 @@ struct SessionsListView: View {
     /// Surfaced when a file handoff or background session create fails.
     @State private var createError: String?
     @State private var createErrorTitle = "Couldn't start session"
+    /// Established workspace awaiting permanent deletion confirmation.
+    @State private var pendingWorkspaceDeletion: SidebarWorkspace?
+    /// Configured automation name → directory owner, for Team activity.
+    @State private var automationOwners: [String: String] = [:]
     @State private var showArchived = false
     /// The view controls (`SessionsFilterPanel`): a sheet on the phone, a
     /// popover on the Mac.
@@ -308,6 +333,23 @@ struct SessionsListView: View {
     @Environment(\.openSettings) private var openSettings
     #endif
 
+    #if DEBUG && os(iOS)
+    private var presentsScreenshotSession: Bool {
+        ProcessInfo.processInfo.environment["OS1_PRESENT_SCREENSHOT_SESSION"] == "1"
+    }
+
+    private var screenshotSession: Session {
+        var session = Session(id: "screenshot-session")
+        session.title = "Safety protocol parity"
+        session.source = "opensession"
+        session.repo = "opensession"
+        session.ran = true
+        session.createdAt = ISO8601DateFormatter().string(from: .now)
+        session.lastActivity = session.createdAt
+        return session
+    }
+    #endif
+
     var body: some View {
         navigationContainer
             // Session-id links in agent output (SessionLinks) are ordinary
@@ -346,8 +388,28 @@ struct SessionsListView: View {
                 return openSessionLink(id: id)
             })
             .task {
+                #if DEBUG
+                if showsTeamActivityFixture {
+                    viewModel.prepareTeamActivityFixture()
+                } else {
+                    viewModel.startPolling()
+                }
+                #else
                 viewModel.startPolling()
+                #endif
+                await TeamDirectory.shared.ensureLoaded()
+                await loadAutomationOwners()
             }
+            #if DEBUG && os(iOS)
+            .fullScreenCover(isPresented: .constant(presentsScreenshotSession)) {
+                NavigationStack {
+                    SessionView(
+                        session: screenshotSession,
+                        onArchiveWorkspace: {}
+                    )
+                }
+            }
+            #endif
             .task(id: searchText) {
                 await updateTranscriptSearch()
             }
@@ -381,10 +443,6 @@ struct SessionsListView: View {
             // Same shape, same reason: one read, and only so the Tasks row can
             // say how much is on the list before you open it.
             .task { await refreshOpenTaskCount() }
-            // The presence strip draws only once the roster names somebody, so
-            // the list has to be what loads it: gating the band on a roster its
-            // own child would have fetched is a strip that never appears.
-            .task { await TeamDirectory.shared.ensureLoaded() }
             #endif
             .onDisappear {
                 viewModel.stopPolling()
@@ -420,6 +478,7 @@ struct SessionsListView: View {
             .onChange(of: viewModel.hasLoaded) {
                 autoOpenFromEnvironment()
                 openRequestedSession()
+                openDeleteConfirmationFromEnvironment()
             }
             // "Start an Agent" (StartAgentIntent — Action Button, widget,
             // Siri). It can run before this view exists (cold launch) or while
@@ -427,6 +486,7 @@ struct SessionsListView: View {
             .onAppear {
                 openQuickCapture()
                 openRequestedSession()
+                openDeleteConfirmationFromEnvironment()
                 #if DEBUG
                 // Screenshot and simulator probe hook for the result-only UI.
                 // Showing everyone makes the fixture independent of the
@@ -453,6 +513,12 @@ struct SessionsListView: View {
             } message: {
                 Text(createError ?? "")
             }
+            .modifier(WorkspaceDeletionConfirmation(
+                workspace: $pendingWorkspaceDeletion,
+                onDelete: { workspace in
+                    Task { await deleteEstablishedWorkspace(workspace) }
+                }
+            ))
             .sheet(item: $commitReference) { reference in
                 CommitDetailView(reference: reference)
             }
@@ -1182,12 +1248,17 @@ struct SessionsListView: View {
 
     @ViewBuilder
     private var loadingOrList: some View {
+        // Screenshot fixtures exercise the finished Team surface without
+        // waiting for a production-sized sessions payload to cross into the
+        // simulator. This path exists only in DEBUG builds.
+        if showsTeamActivityFixture {
+            list
         // An empty live list isn't yet an empty account: the archived index
         // is a second request, and a list whose sessions are all archived
         // would otherwise flash "nothing here yet" before it arrives. Only
         // ever waits when the live list came back empty, so the common case
         // renders the moment it lands.
-        if !viewModel.hasLoaded || (hasNoRows && !viewModel.archivedHasLoaded) {
+        } else if !viewModel.hasLoaded || (hasNoRows && !viewModel.archivedHasLoaded) {
             loadingState
         } else if hasNoRows {
             if let failure = viewModel.loadFailure {
@@ -1198,6 +1269,14 @@ struct SessionsListView: View {
         } else {
             list
         }
+    }
+
+    private var showsTeamActivityFixture: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.environment["OS1_TEAM_ACTIVITY_FIXTURE"] != nil
+        #else
+        false
+        #endif
     }
 
     private var hasNoRows: Bool {
@@ -1337,6 +1416,66 @@ struct SessionsListView: View {
         _ = openSessionLink(id: request.sessionId)
     }
 
+    private func loadAutomationOwners() async {
+        guard let automations = try? await SettingsAPI.automations() else { return }
+        var owners: [String: String] = [:]
+        for automation in automations {
+            guard let name = automation.name?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !name.isEmpty,
+                  let owner = automation.owner?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !owner.isEmpty
+            else { continue }
+            owners[name] = owner
+        }
+        automationOwners = owners
+    }
+
+    /// Screenshot/probe hook for the destructive confirmation. It chooses an
+    /// established workspace only, so draft deletion keeps its direct action.
+    private func openDeleteConfirmationFromEnvironment() {
+        #if DEBUG
+        guard ProcessInfo.processInfo.environment["OS1_CONFIRM_DELETE_WORKSPACE"] != nil,
+              pendingWorkspaceDeletion == nil
+        else { return }
+        if let workspace = allSidebarWorkspaces.first(where: {
+            !$0.isDraftWorkspace && $0.workspaceId?.isEmpty == false
+        }) {
+            pendingWorkspaceDeletion = workspace
+        } else {
+            var session = Session(id: "delete-confirmation-fixture")
+            session.title = "Workspace deletion"
+            session.workspaceId = "workspace-deletion-fixture"
+            pendingWorkspaceDeletion = SidebarWorkspace(
+                id: "workspace:workspace-deletion-fixture",
+                title: "Workspace deletion",
+                sessions: [session],
+                mainSession: session
+            )
+        }
+        #endif
+    }
+
+    private func deleteEstablishedWorkspace(_ workspace: SidebarWorkspace) async {
+        guard await viewModel.deleteWorkspace(workspace) else { return }
+        workspace.sessions.forEach { sessionPageCache.remove(sessionId: $0.id) }
+        PinStore.shared.unpin(workspace)
+        #if os(macOS)
+        selectedSessionID = nil
+        openedArchivedSession = nil
+        #else
+        path.removeAll()
+        lastOpenedSessionID = nil
+        #endif
+    }
+
+    private func requestWorkspaceDeletion(_ workspace: SidebarWorkspace) {
+        guard !workspace.isDraftWorkspace,
+              !workspace.isOptimistic,
+              workspace.workspaceId?.isEmpty == false
+        else { return }
+        pendingWorkspaceDeletion = workspace
+    }
+
     private func resumeDraft(_ workspace: SidebarWorkspace) {
         guard let workspaceId = workspace.workspaceId,
               let draft = workspace.workspace?.draft else { return }
@@ -1465,6 +1604,7 @@ struct SessionsListView: View {
     /// — except when the list is scoped to one project, where the band is what
     /// was asked for rather than clutter.
     private var repoBandRepos: [String] {
+        if showsTeamActivityFixture { return [] }
         let occupied = Set(filteredWorkspaces.map(\.effectiveRepo))
         let keepsEmptyBands = repoFilter != "all" || !hideEmptyProjects
         return availableRepos.filter { repo in
@@ -2041,6 +2181,10 @@ struct SessionsListView: View {
                     guard let workspace = workspace(containing: session) else { return }
                     archive(workspace)
                 },
+                onDeleteWorkspace: {
+                    guard let workspace = workspace(containing: session) else { return }
+                    requestWorkspaceDeletion(workspace)
+                },
                 onCloseTab: { closed in
                     sessionPageCache.remove(sessionId: closed.id)
                     viewModel.archive(closed)
@@ -2117,6 +2261,7 @@ struct SessionsListView: View {
                 pinButton(workspace)
                 snoozeButton(workspace)
                 archiveButton(workspace)
+                deleteWorkspaceButton(workspace)
             }
         }
         #else
@@ -2388,6 +2533,7 @@ struct SessionsListView: View {
             } label: {
                 Label("Archive", systemImage: "archivebox")
             }
+            deleteWorkspaceButton(workspace)
         }
     }
 
@@ -2598,6 +2744,20 @@ struct SessionsListView: View {
     }
 
     @ViewBuilder
+    private func deleteWorkspaceButton(_ workspace: SidebarWorkspace) -> some View {
+        if !workspace.isDraftWorkspace,
+           !workspace.isOptimistic,
+           workspace.workspaceId?.isEmpty == false {
+            Button(role: .destructive) {
+                requestWorkspaceDeletion(workspace)
+            } label: {
+                Label("Delete workspace", systemImage: "trash")
+            }
+            .disabled(viewModel.workspaceDeletion.deletingWorkspaceId != nil)
+        }
+    }
+
+    @ViewBuilder
     private func deleteDraftButton(
         _ workspace: SidebarWorkspace,
         viaSwipe: Bool = false
@@ -2662,6 +2822,104 @@ struct SessionsListView: View {
             .map(\.0)
     }
     #endif
+
+    /// Recent teammate and automation-owner activity from the complete live
+    /// payload. It deliberately ignores repo, person, search, hide and snooze
+    /// lenses, matching the independent Team surface on the web.
+    private var teamActivityGroups: [TeamActivityGroup] {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["OS1_TEAM_ACTIVITY_FIXTURE"] != nil {
+            var teammate = Session(id: "team-fixture-person")
+            teammate.title = "Review onboarding polish"
+            teammate.repo = "opensession"
+            teammate.isRunning = true
+            teammate.lastActivity = ISO8601DateFormatter().string(from: .now)
+            var agent = Session(id: "team-fixture-agent")
+            agent.title = "Daily support report"
+            agent.repo = "opensession"
+            agent.isRunning = true
+            agent.lastActivity = teammate.lastActivity
+            let current = ServerConfig.shared.userName
+            let name = TeamDirectory.shared.names.first {
+                !SidebarPersonLens.nameMatches($0, key: current)
+            } ?? "Teammate"
+            return [
+                TeamActivityGroup(
+                    key: name.lowercased(), label: name,
+                    activeSessions: [teammate], allSessions: [teammate]
+                ),
+                TeamActivityGroup(
+                    key: TeamActivity.agentKey, label: TeamActivity.agentLabel,
+                    activeSessions: [agent], allSessions: [agent]
+                )
+            ]
+        }
+        #endif
+        return TeamActivity.groups(
+            sessions: viewModel.sessions,
+            members: TeamDirectory.shared.activityMembers,
+            currentUser: ServerConfig.shared.userName,
+            automationOwners: automationOwners
+        )
+    }
+
+    @ViewBuilder
+    private func teamActivityRow(_ session: Session) -> some View {
+        #if os(macOS)
+        SessionRow(session: session)
+            .tag(session.id)
+        #else
+        Button { path.append(session) } label: {
+            SessionRow(session: session)
+        }
+        .buttonStyle(.plain)
+        .listRowInsets(EdgeInsets(
+            top: 2, leading: sidebarMargin, bottom: 2, trailing: sidebarMargin
+        ))
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+        #endif
+    }
+
+    private func teamPersonHeader(_ group: TeamActivityGroup) -> some View {
+        HStack(spacing: 9) {
+            if group.key == TeamActivity.agentKey {
+                WebIcon(kind: .robot, size: 20, color: OS1VisualStyle.textDim)
+            } else {
+                UserAvatar(person: group.label, size: 20)
+            }
+            Text(group.label)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(OS1VisualStyle.textDim)
+            Text("\(group.activeSessions.count)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(OS1VisualStyle.textFaint)
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 4)
+        #if os(iOS)
+        .listRowInsets(EdgeInsets(
+            top: 0, leading: sidebarMargin, bottom: 0, trailing: sidebarMargin
+        ))
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+        #endif
+    }
+
+    private var teamActivitySection: some View {
+        let groups = teamActivityGroups
+        let count = groups.reduce(0) { $0 + $1.activeSessions.count }
+        return Section {
+            ForEach(groups) { group in
+                teamPersonHeader(group)
+                ForEach(group.activeSessions) { session in
+                    teamActivityRow(session)
+                }
+            }
+        } header: {
+            groupHeader(title: "Team", count: count, collapseKey: "team")
+        }
+    }
 
     private var listSections: some View {
         Group {
@@ -2734,6 +2992,21 @@ struct SessionsListView: View {
                             )
                         }
                     }
+                }
+            }
+
+            let teamGroups = teamActivityGroups
+            if !teamGroups.isEmpty && !isCollapsed("team") {
+                teamActivitySection
+            } else if !teamGroups.isEmpty {
+                Section {
+                    EmptyView()
+                } header: {
+                    groupHeader(
+                        title: "Team",
+                        count: teamGroups.reduce(0) { $0 + $1.activeSessions.count },
+                        collapseKey: "team"
+                    )
                 }
             }
 
@@ -2877,7 +3150,8 @@ struct SessionsListView: View {
 
     @ViewBuilder
     private var emptyFilterOverlay: some View {
-        if !hasVisibleWorkspaces
+        if !showsTeamActivityFixture
+            && !hasVisibleWorkspaces
             && repoBandRepos.isEmpty
             && viewModel.archivedSessions.isEmpty {
             if !searchText.isEmpty {
@@ -4015,7 +4289,12 @@ struct SessionRow: View {
                     .foregroundStyle(.primary)
                     #endif
                     .lineLimit(1)
-                if let searchSnippet, !searchSnippet.isEmpty {
+                if safety != nil {
+                    Text("Paused for safety")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(OS1VisualStyle.yellow)
+                        .lineLimit(1)
+                } else if let searchSnippet, !searchSnippet.isEmpty {
                     Text(searchSnippet)
                         .font(.caption)
                         .foregroundStyle(OS1VisualStyle.textFaint)
@@ -4231,6 +4510,10 @@ struct SessionRow: View {
             Image(systemName: "pencil")
                 .font(.system(size: markSize * 0.62, weight: .semibold))
                 .foregroundStyle(OS1VisualStyle.textFaint)
+        } else if safety != nil {
+            Image(systemName: "exclamationmark.shield.fill")
+                .font(.system(size: markSize * 0.72, weight: .semibold))
+                .foregroundStyle(OS1VisualStyle.yellow)
         } else if session.lane == .needsInput {
             PulsingDot(color: OS1VisualStyle.blue, active: animatesStatus)
         } else if reviewWaitsOnMe {
@@ -4267,6 +4550,10 @@ struct SessionRow: View {
         sessions.isEmpty ? [session] : sessions
     }
 
+    private var safety: SessionSafetyState? {
+        rowSessions.compactMap(\.safety).first
+    }
+
     private var reviewWaitsOnMe: Bool {
         ReviewRequests.waitsOnViewer(
             rowSessions,
@@ -4292,7 +4579,10 @@ struct SessionRow: View {
         if isWorkspaceDraft {
             return "Draft, \(RepoTile.label(for: session.effectiveRepo))"
         }
-        var parts = [session.lane.label, RepoTile.label(for: session.effectiveRepo)]
+        var parts = [
+            safety == nil ? session.lane.label : "Paused for safety",
+            RepoTile.label(for: session.effectiveRepo)
+        ]
         // The robot is the only sighted cue that a machine owns this row.
         if session.isAutomation { parts.append("automation") }
         // The bold title is the only sighted cue for unread; say it out loud.

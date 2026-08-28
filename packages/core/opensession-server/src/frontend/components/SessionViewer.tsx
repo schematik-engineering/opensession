@@ -4647,6 +4647,9 @@ export function SessionViewer({
 					type: "user",
 					content: pending.content,
 					timestamp: new Date(pending.sentAt).toISOString(),
+					// Preserve attribution across the optimistic-to-durable handoff.
+					// Without this, MessageBubble falls back to the session owner first.
+					sender: pending.user,
 					...(pending.images?.length ? { images: pending.images } : {}),
 				}));
 	const pendingTranscriptDeliveryIds = [

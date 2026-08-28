@@ -62,6 +62,7 @@ import {
 	WS_SUMMARY_OPEN_KEY,
 	workspaceSummaryCanStand,
 	workspaceSummaryOpen,
+	workspaceSummaryShouldDismissAfterRouting,
 	workspaceSummarySideOffset,
 } from "../lib/workspace-summary-open";
 import {
@@ -386,7 +387,7 @@ export function WorkspaceSummary({
 	function changeOpen(nextOpen: boolean) {
 		openedByPerson.current = nextOpen;
 		if (!canStand) {
-			// On screen now, and nowhere else: a narrow or Review pane opens the card without
+			// On screen now, and nowhere else: a narrow pane opens the card without
 			// writing the preference every other window reads.
 			setTransient(nextOpen);
 			return;
@@ -395,6 +396,9 @@ export function WorkspaceSummary({
 		setPinned(nextOpen);
 		localStorage.setItem(WS_SUMMARY_OPEN_KEY, String(nextOpen));
 		window.dispatchEvent(new Event(WS_SUMMARY_OPEN_EVENT));
+	}
+	function dismissAfterRouting() {
+		if (workspaceSummaryShouldDismissAfterRouting(canStand)) changeOpen(false);
 	}
 	return (
 		<Popover.Root
@@ -471,7 +475,7 @@ export function WorkspaceSummary({
 					session={session}
 					{...body}
 					reviewMode={reviewMode}
-					close={() => changeOpen(false)}
+					close={dismissAfterRouting}
 				/>
 			</Popover.Popup>
 		</Popover.Root>
@@ -823,8 +827,17 @@ setFixBusy(false);
 					<IconGitCommit size={20} className={WS_SUMMARY_ICON} />
 				</span>
 				<span className={WS_SUMMARY_LABEL}>{commit.title}</span>
-				<span className={cn(WS_SUMMARY_STATE, "text-dim tabular-nums")}>
-					{commit.filesChanged} file{commit.filesChanged === 1 ? "" : "s"}
+				<span
+					className={cn(
+						WS_SUMMARY_STATE,
+						"flex items-baseline gap-2 text-dim tabular-nums",
+					)}
+				>
+					<span>
+						{commit.filesChanged} file{commit.filesChanged === 1 ? "" : "s"}
+					</span>
+					<span className="text-green">+{commit.additions}</span>
+					<span className="text-red">−{commit.deletions}</span>
 				</span>
 			</>
 		);
@@ -852,11 +865,18 @@ setFixBusy(false);
 	}
 
 	/** A long session commits dozens of times, and the card would spend its whole
-	 *  height listing them. Closed, the count IS the fact — "16 commits" — and
-	 *  the row opens the list like the heading's chevron does. */
+	 *  height listing them. Closed, its commit, file, and line totals summarize
+	 *  the completed work; the row opens the individual commits. */
 	function committedSummaryRow() {
 		if (commits.length === 0) return null;
-		const files = commits.reduce((sum, c) => sum + c.filesChanged, 0);
+		const stats = commits.reduce(
+			(sum, commit) => ({
+				files: sum.files + commit.filesChanged,
+				additions: sum.additions + commit.additions,
+				deletions: sum.deletions + commit.deletions,
+			}),
+			{ files: 0, additions: 0, deletions: 0 },
+		);
 		return (
 			<button
 				className={WS_SUMMARY_ROW}
@@ -869,8 +889,17 @@ setFixBusy(false);
 				<span className={WS_SUMMARY_LABEL}>
 					{commits.length} commit{commits.length === 1 ? "" : "s"}
 				</span>
-				<span className={cn(WS_SUMMARY_STATE, "text-dim tabular-nums")}>
-					{files} file{files === 1 ? "" : "s"}
+				<span
+					className={cn(
+						WS_SUMMARY_STATE,
+						"flex items-baseline gap-2 text-dim tabular-nums",
+					)}
+				>
+					<span>
+						{stats.files} file{stats.files === 1 ? "" : "s"}
+					</span>
+					<span className="text-green">+{stats.additions}</span>
+					<span className="text-red">−{stats.deletions}</span>
 				</span>
 			</button>
 		);

@@ -67,6 +67,9 @@ interface RawJsonlEntry {
   uuid?: string;
   timestamp?: string;
   requestId?: string;
+  // Open Session's Pi normalizer marks provider thinking blocks so they keep
+  // their quiet activity presentation after the JSONL normalization round-trip.
+  isReasoning?: boolean;
   // Structured companion to an <ask-record> text block. Older parsers ignore
   // the extra line field and keep the markdown fallback in the message.
   ask?: unknown;
@@ -492,6 +495,7 @@ function parseEntry(raw: RawJsonlEntry): TranscriptEntry[] {
             timestamp: ts,
             requestId: raw.requestId,
             ...(model ? { model } : {}),
+            ...(raw.isReasoning ? { isReasoning: true } : {}),
             ...(assistant.videos.length > 0 ? { videos: assistant.videos } : {}),
             ...(assistant.images.length > 0 ? { images: assistant.images } : {}),
           });
@@ -521,6 +525,7 @@ function parseEntry(raw: RawJsonlEntry): TranscriptEntry[] {
           timestamp: ts,
           requestId: raw.requestId,
           ...(model ? { model } : {}),
+          ...(raw.isReasoning ? { isReasoning: true } : {}),
           ...(assistant.videos.length > 0 ? { videos: assistant.videos } : {}),
           ...(assistant.images.length > 0 ? { images: assistant.images } : {}),
         });

@@ -11,9 +11,8 @@
  *
  * The native format is pi's v3 session log: `message` lines carrying
  * { role, content[] } where blocks are text | thinking | toolCall, plus
- * role "toolResult" messages with toolCallId/toolName. Thinking blocks are
- * dropped — like every other transcript surface, the drill-in renders the
- * conversation, not the model's scratchpad.
+ * role "toolResult" messages with toolCallId/toolName. Thinking and ordinary
+ * model text are both transcript output and remain visible in provider order.
  */
 
 import { existsSync, readFileSync, readdirSync } from "fs";
@@ -29,6 +28,7 @@ function piSessionsRoot(): string {
 interface PiNativeBlock {
 	type?: string;
 	text?: string;
+	thinking?: string;
 	id?: string;
 	name?: string;
 	arguments?: unknown;
@@ -143,14 +143,25 @@ export function readPiNativeTranscript(
 			continue;
 		}
 
+		const messageId = id || crypto.randomUUID();
+		let proseIndex = 0;
 		for (const block of blocks(row.message)) {
-			if (block.type === "text" && block.text?.trim()) {
+			const isReasoning = role === "assistant" && block.type === "thinking";
+			const prose =
+				block.type === "text"
+					? block.text
+					: isReasoning
+						? block.thinking
+						: undefined;
+			if (prose?.trim()) {
 				entries.push({
-					id: id || crypto.randomUUID(),
+					id: proseIndex === 0 ? messageId : `${messageId}-b${proseIndex}`,
 					type: role === "assistant" ? "assistant" : "user",
-					content: block.text,
+					content: prose,
 					timestamp: ts,
+					...(isReasoning ? { isReasoning: true } : {}),
 				});
+				proseIndex++;
 			} else if (block.type === "toolCall" && block.name) {
 				entries.push({
 					id: block.id || id || crypto.randomUUID(),
@@ -162,7 +173,6 @@ export function readPiNativeTranscript(
 					...(block.id ? { toolUseId: block.id } : {}),
 				});
 			}
-			// thinking blocks are deliberately dropped — see module comment.
 		}
 	}
 	return entries.length > cap ? entries.slice(-cap) : entries;

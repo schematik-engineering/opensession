@@ -30,6 +30,7 @@ import {
   makeGuardedToolOps,
   makePiBashTool,
   parsePiModel,
+  piAssistantTranscriptEntries,
   PI_STATE_DIR,
   PI_STEER_TOOL_SKIP,
   piDialOracleAgent,
@@ -133,24 +134,63 @@ describe("retractPendingSteer", () => {
   });
 });
 
-describe("assistantRenderableBlockCount (empty-completion guard)", () => {
-  test("counts text and tool-call blocks, ignoring thinking-only content", () => {
+describe("assistant transcript output", () => {
+  test("counts thinking, text, and tool-call blocks as visible output", () => {
     expect(
       assistantRenderableBlockCount([
         { type: "thinking", thinking: "hmm" },
         { type: "text", text: "Done." },
         { type: "toolCall", id: "t1", name: "bash" },
       ]),
-    ).toBe(2);
+    ).toBe(3);
+  });
+
+  test("persists thinking and text in provider order around tools", () => {
+    expect(
+      piAssistantTranscriptEntries(
+        [
+          { type: "thinking", thinking: "I should inspect the repository." },
+          { type: "toolCall", id: "t1", name: "read", arguments: { path: "README.md" } },
+          { type: "text", text: "The repository is ready." },
+        ],
+        "2026-08-24T12:00:00.000Z",
+        "gpt-5.6-terra",
+        "message-1",
+      ),
+    ).toEqual([
+      {
+        id: "message-1",
+        type: "assistant",
+        content: "I should inspect the repository.",
+        timestamp: "2026-08-24T12:00:00.000Z",
+        model: "gpt-5.6-terra",
+        isReasoning: true,
+      },
+      {
+        id: "t1",
+        type: "tool_use",
+        content: "",
+        timestamp: "2026-08-24T12:00:00.000Z",
+        toolName: "read",
+        toolInput: { path: "README.md" },
+        toolUseId: "t1",
+      },
+      {
+        id: "message-1-b1",
+        type: "assistant",
+        content: "The repository is ready.",
+        timestamp: "2026-08-24T12:00:00.000Z",
+        model: "gpt-5.6-terra",
+      },
+    ]);
   });
 
   test("zero for the empty-completion shapes providers emit", () => {
     // The exact os-01a02486 shape: content: [] with stopReason "stop".
     expect(assistantRenderableBlockCount([])).toBe(0);
     expect(assistantRenderableBlockCount(undefined)).toBe(0);
-    // Whitespace-only text and thinking-only replies are equally invisible.
     expect(assistantRenderableBlockCount([{ type: "text", text: "  \n" }])).toBe(0);
-    expect(assistantRenderableBlockCount([{ type: "thinking", thinking: "..." }])).toBe(0);
+    expect(assistantRenderableBlockCount([{ type: "thinking", thinking: "  \n" }])).toBe(0);
     expect(assistantRenderableBlockCount([null, 42, {}])).toBe(0);
   });
 });

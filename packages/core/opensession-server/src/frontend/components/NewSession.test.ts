@@ -74,6 +74,19 @@ test("the new session payload persists fast mode", async () => {
   expect(createPayload).toContain("...(fastMode ? { fastMode: true } : {})");
 });
 
+test("a pull request start checks out its existing branch and adopts its workspace", async () => {
+  const source = await Bun.file(new URL("./NewSession.tsx", import.meta.url)).text();
+  const createStart = source.indexOf("function handleCreate()");
+  const createEnd = source.indexOf("const canCreate =", createStart);
+  const createHandler = source.slice(createStart, createEnd);
+
+  expect(source).toContain("<NewSessionPrPicker");
+  expect(createHandler).toContain("findPrWorkspaceId(workspaces, sessions");
+  expect(createHandler).toContain("startPoint.pullRequest.branch");
+  expect(createHandler).toContain("selectedPullRequest ? { fromPr: true } : {}");
+  expect(createHandler).toContain("PR #${selectedPullRequest.number}");
+});
+
 test("the default create exposes its deterministic session id immediately", async () => {
   const source = await Bun.file(new URL("./NewSession.tsx", import.meta.url)).text();
   const createStart = source.indexOf("function handleCreate()");

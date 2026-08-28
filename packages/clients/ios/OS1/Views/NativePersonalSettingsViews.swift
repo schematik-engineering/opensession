@@ -102,6 +102,7 @@ struct NotificationsSettingsView: View {
 /// Nearly all of it is server-side per-user prefs, so it matches the web
 /// (Settings → Preferences). Haptics is the device-local exception.
 struct PreferencesSettingsView: View {
+    @AppStorage("os1.composer.defaultRepo") private var nativeDefaultRepo = ""
     @AppStorage("os1.composer.defaultModel") private var nativeDefaultModel = ""
     @AppStorage("os1.composer.defaultEngine") private var nativeDefaultEngine = ""
     @AppStorage("os1.composer.sendKey") private var nativeSendKey = "enter"
@@ -118,8 +119,10 @@ struct PreferencesSettingsView: View {
     /// are the server round-trip, and this value never makes that trip.
     @AppStorage(Haptics.preferenceKey) private var haptics = true
 
+    @State private var repos: [OS1API.RepoInfo]
     @State private var models: [SettingsModelOption]
     @State private var engines: [ModelEngineOption]
+    @State private var defaultRepo: String
     @State private var defaultModel: String
     @State private var defaultEngine: String
     @State private var sendKey: String
@@ -154,6 +157,9 @@ struct PreferencesSettingsView: View {
             tools: defaults.string(forKey: "os1.appearance.toolCalls")
         )
         let seeded: [String: String] = [
+            "default-repo": NativePreferences.normalizedDefaultRepository(
+                defaults.string(forKey: "os1.composer.defaultRepo")
+            ) ?? "",
             "default-model": defaults.string(forKey: "os1.composer.defaultModel") ?? "",
             "default-engine": defaults.string(forKey: "os1.composer.defaultEngine") ?? "",
             "send-key": defaults.string(forKey: "os1.composer.sendKey") ?? "enter",
@@ -166,6 +172,7 @@ struct PreferencesSettingsView: View {
             "live-typing": (defaults.object(forKey: "os1.transcript.liveTyping") as? Bool ?? false) ? "on" : "off",
         ]
         _seededPrefs = State(initialValue: seeded)
+        _defaultRepo = State(initialValue: seeded["default-repo"] ?? "")
         _defaultModel = State(initialValue: seeded["default-model"] ?? "")
         _defaultEngine = State(initialValue: seeded["default-engine"] ?? "")
         _sendKey = State(initialValue: seeded["send-key"] ?? "enter")
@@ -177,6 +184,7 @@ struct PreferencesSettingsView: View {
         _nextChatButton = State(initialValue: seeded["next-chat-button"] != "off")
         _liveTyping = State(initialValue: seeded["live-typing"] == "on")
         let cachedCatalog = SettingsCache.value("model-catalog", as: ModelCatalogSettings.self)
+        _repos = State(initialValue: SettingsCache.value("repos") ?? [])
         _models = State(initialValue: cachedCatalog?.models ?? [])
         _engines = State(initialValue: cachedCatalog?.engines ?? [])
     }
@@ -202,9 +210,22 @@ struct PreferencesSettingsView: View {
             }
 
             Section {
-                // The catalog is the one thing here with no local mirror to
-                // open on, so on a first visit this row waits and the rest of
-                // the screen does not.
+                if repos.isEmpty, loading {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text("Loading repositories…").foregroundStyle(.secondary)
+                    }
+                } else {
+                    Picker("Default repository", selection: $defaultRepo) {
+                        Text("No preference").tag("")
+                        ForEach(repos) { repo in
+                            Text(repo.label ?? repo.id).tag(repo.id)
+                        }
+                    }
+                }
+                // The catalogs are the only things here with no complete local
+                // mirror to open on, so a first visit waits for these rows and
+                // the rest of the screen does not.
                 if selectableModels.isEmpty, loading {
                     HStack(spacing: 8) {
                         ProgressView()
@@ -231,8 +252,8 @@ struct PreferencesSettingsView: View {
             } footer: {
                 Text(
                     selectableEngines.count > 1
-                        ? "New sessions use this model and engine when available. No preference uses the workspace default."
-                        : "New sessions use this model when available. No preference uses the workspace default."
+                        ? "New sessions use this repository, model, and engine when available. No preference uses the workspace defaults."
+                        : "New sessions use this repository and model when available. No preference uses the workspace defaults."
                 )
             }
 
@@ -332,6 +353,7 @@ struct PreferencesSettingsView: View {
         }
         #endif
         .task { await load() }
+        .onChange(of: defaultRepo) { _, _ in commit() }
         .onChange(of: defaultModel) { _, _ in commit() }
         .onChange(of: defaultEngine) { _, _ in commit() }
         .onChange(of: sendKey) { _, _ in commit() }
@@ -380,6 +402,9 @@ struct PreferencesSettingsView: View {
                 local: TurnActivity(work: nativeTurnWork, tools: nativeToolCalls)
             )
             let server: [String: String] = [
+                "default-repo": NativePreferences.normalizedDefaultRepository(
+                    prefs["default-repo"]
+                ) ?? "",
                 "default-model": prefs["default-model"] ?? nativeDefaultModel,
                 "default-engine": prefs["default-engine"] ?? nativeDefaultEngine,
                 "send-key": prefs["send-key"] == "mod-enter" ? "mod-enter" : "enter",
@@ -406,6 +431,7 @@ struct PreferencesSettingsView: View {
             // control the reader moved in the meantime keeps their choice —
             // only the ones still sitting on their seed adopt the server's.
             // The `commit()` below then pushes whatever they changed.
+            if defaultRepo == seededPrefs["default-repo"] { defaultRepo = server["default-repo"] ?? defaultRepo }
             if defaultModel == seededPrefs["default-model"] { defaultModel = server["default-model"] ?? defaultModel }
             if defaultEngine == seededPrefs["default-engine"] { defaultEngine = server["default-engine"] ?? defaultEngine }
             if sendKey == seededPrefs["send-key"] { sendKey = server["send-key"] ?? sendKey }
@@ -423,6 +449,7 @@ struct PreferencesSettingsView: View {
                 liveTyping = server["live-typing"] == "on"
             }
             seededPrefs = server
+            nativeDefaultRepo = defaultRepo
             #if os(macOS)
             nativeSendKey = sendKey
             #endif
@@ -470,6 +497,18 @@ struct PreferencesSettingsView: View {
             self.error = error.localizedDescription
         }
         do {
+            let fetched = try await OS1API.repos()
+            repos = fetched
+            SettingsCache.save("repos", fetched)
+            // A removed repository id is no longer a usable preference. Show
+            // and persist the same safe no-preference value as the web client.
+            if !defaultRepo.isEmpty, !fetched.contains(where: { $0.id == defaultRepo }) {
+                defaultRepo = ""
+            }
+        } catch {
+            if repos.isEmpty, self.error == nil { self.error = error.localizedDescription }
+        }
+        do {
             let catalog = try await SettingsAPI.modelCatalog()
             models = catalog.models ?? []
             engines = catalog.engines ?? []
@@ -501,6 +540,12 @@ struct PreferencesSettingsView: View {
                 saving = false
                 return
             }
+            defaultRepo = NativePreferences.normalizedDefaultRepository(
+                confirmed["default-repo"]
+            ) ?? defaultRepo
+            if !defaultRepo.isEmpty, !repos.contains(where: { $0.id == defaultRepo }) {
+                defaultRepo = ""
+            }
             defaultModel = confirmed["default-model"] ?? defaultModel
             defaultEngine = confirmed["default-engine"] ?? defaultEngine
             sendKey = confirmed["send-key"] == "mod-enter" ? "mod-enter" : "enter"
@@ -517,6 +562,7 @@ struct PreferencesSettingsView: View {
             liveTyping = NativePreferences.liveTypingEnabled(
                 confirmed["live-typing"]
             ) ?? liveTyping
+            nativeDefaultRepo = defaultRepo
             nativeDefaultModel = defaultModel
             nativeDefaultEngine = defaultEngine
             #if os(macOS)
@@ -542,6 +588,7 @@ struct PreferencesSettingsView: View {
 
     private var currentPrefs: [String: String] {
         [
+            "default-repo": defaultRepo,
             "default-model": defaultModel,
             "default-engine": defaultEngine,
             "send-key": sendKey,

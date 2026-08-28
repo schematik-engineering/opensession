@@ -70,6 +70,10 @@ export interface TranscriptEntry {
   // mid-session switches and usage-limit fallbacks make the session-level
   // model unreliable history.
   model?: string;
+  /** This assistant entry is a provider reasoning summary rather than model
+   * output. It remains visible in the timeline, but clients present it as
+   * quiet activity instead of answer markdown. */
+  isReasoning?: boolean;
   // Set on a Task/Agent tool_result: the spawned sub-agent's id, linking a
   // tool call to that sub-agent's own transcript.
   agentId?: string;

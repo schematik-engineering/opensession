@@ -1,11 +1,12 @@
 /**
- * Open Session-native slash commands (/goal /loop /model /account /compact /help) —
+ * Open Session-native slash commands (/pstack /goal /loop /model /account /compact /help) —
  * consumed by the WS prompt path, the opensession-sessions send_to_session tool,
  * and interactive resumes. Returns a notice string when the message was handled
  * as a command, or null to send it to the engine as a normal prompt.
  */
 
 import { productName } from "./config";
+import { isPstackCommand, pstackCommandInput } from "./pstack-mode";
 import {
 	listAccountsPublic,
 } from "./claude-accounts";
@@ -41,6 +42,7 @@ export function handleSlashCommand(
 		text === "/sub" ||
 		text.startsWith("/sub ");
 	if (
+		!isPstackCommand(text) &&
 		!text.startsWith("/goal") &&
 		!text.startsWith("/loop") &&
 		!text.startsWith("/model") &&
@@ -65,6 +67,8 @@ export function handleSlashCommand(
 	if (text === "/help") {
 		return [
 			`${productName()} commands:`,
+			"/pstack <task> — enable rigorous pstack mode and start the task",
+			"/pstack off — disable pstack mode",
 			"/goal <text> — pin a goal, appended to every prompt until cleared",
 			"/goal clear — remove the goal",
 			"/loop <interval> <prompt> — re-run a prompt on an interval (e.g. /loop 30m check CI and fix failures)",
@@ -76,6 +80,28 @@ export function handleSlashCommand(
 			"/account auto — back to automatic (personal-first, shared-pool fallback)",
 			"/compact — summarize the conversation so far to shrink context and cost (Claude sessions only)",
 		].join("\n");
+	}
+
+	if (isPstackCommand(text)) {
+		const input = pstackCommandInput(text);
+		if (!input || ["show", "status"].includes(input.toLowerCase())) {
+			return session.pstackMode
+				? "Pstack mode is on. Use /pstack off to disable it."
+				: "Pstack mode is off. Use /pstack <task> to enable it.";
+		}
+		if (["off", "disable", "stop"].includes(input.toLowerCase())) {
+			touchNativeSession(session.id, { pstackMode: undefined });
+			return "Pstack mode disabled.";
+		}
+		if (["on", "enable", "start"].includes(input.toLowerCase())) {
+			touchNativeSession(session.id, { pstackMode: true });
+			return "Pstack mode enabled. It will apply to future turns until /pstack off.";
+		}
+		// A task-bearing invocation is both the sticky mode switch and a regular
+		// skill prompt. Returning null lets Pi expand the bundled pstack skill for
+		// this first turn; later turns receive the compact standing mode note.
+		touchNativeSession(session.id, { pstackMode: true });
+		return null;
 	}
 
 	if (text === "/model" || text === "/model show" || text === "/model list") {

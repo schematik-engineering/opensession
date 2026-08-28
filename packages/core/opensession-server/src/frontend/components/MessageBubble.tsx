@@ -35,6 +35,8 @@ import {
 	msgLabelHuman,
 	msgMedia,
 	msgOwnTurn,
+	msgReasoningBody,
+	msgReasoningTitle,
 	msgRow,
 	msgSystemInline,
 	msgSystemRow,
@@ -44,6 +46,7 @@ import {
 	msgTime,
 } from "../lib/msg-classes";
 import { cn } from "../ui/cn";
+import { reasoningDisplay } from "../lib/reasoning-display";
 
 // Only this much of a message is markdown-parsed eagerly. marked is
 // superlinear on input size (~25ms at 10KB, ~400ms at 80KB, seconds past
@@ -416,6 +419,9 @@ function BubbleMeta({ ts, onEdit }: { ts?: string; onEdit?: () => void }) {
 
 interface Props {
 	entry: TranscriptEntry;
+	/** Provider reasoning summary, including legacy rows inferred by the turn
+	 * grouper before the durable `isReasoning` field existed. */
+	reasoning?: boolean;
 	/** Sent to the conversation, but the running engine has not read it yet. */
 	pendingDelivery?: boolean;
 	/**
@@ -569,6 +575,7 @@ function EntryFiles({
 // markdown/highlighting.
 export const MessageBubble = function MessageBubble({
 	entry,
+	reasoning = false,
 	pendingDelivery = false,
 	owner,
 	sessionId,
@@ -701,6 +708,23 @@ export const MessageBubble = function MessageBubble({
 					<EntryVideos videos={e.videos} right />
 					<EntryFiles files={e.files} right />
 				</div>
+			</div>
+		);
+	}
+
+	if (reasoning || e.isReasoning) {
+		const { title, body } = reasoningDisplay(displayContent);
+		return (
+			<div className={cn(msgRow, "mb-2")} data-eid={e.id} data-reasoning="">
+				{title && <div className={msgReasoningTitle}>{title}</div>}
+				{body && (
+					<ClampedBody
+						className={cn(msgReasoningBody, "markdown")}
+						content={body}
+						entry={e}
+						sessionId={sessionId}
+					/>
+				)}
 			</div>
 		);
 	}

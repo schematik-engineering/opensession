@@ -29,22 +29,23 @@ import { transcriptDisclosureLedger } from "../lib/transcript-disclosures";
 import { turnScrollAnchor } from "../lib/transcript-block-identity";
 
 interface Props {
-  /** The folded part of one assistant turn: tool_use + intermediate assistant
-   * text entries, in order (the turn's final answer renders outside, as a
-   * normal bubble). */
+  /** One consecutive run of tool calls. Assistant entries are accepted only
+   * defensively and always render outside the fold. */
   items: TranscriptEntry[];
   toolResults: Map<string, TranscriptEntry>;
   live: boolean; // this is the active block of a running stream
+  /** A model message exists in this turn, so "Expand while running" has
+   * distinct output and tool rows to reveal instead of repeating one count. */
+  expandWhileRunning?: boolean;
   onOpenSubagent?: (agentId: string, label: string) => void;
   /** Lets wire-clamped intermediate notes fetch their full content. */
   sessionId?: string;
 }
 
 /**
- * One assistant turn's work, folded into a single calm line — "Worked · 12m 4s
+ * One run of tool calls, folded into a single calm line — "Worked · 12m 4s
  * · 51 steps" — closed by default so the session reads as question → answer.
- * Expanding shows the full flat run: intermediate assistant notes interleaved
- * with the tool calls and a compact change summary.
+ * Expanding shows the complete tool run. Model output never enters this fold.
  *
  * The collapsed line carries what a folded turn can't otherwise say: duration,
  * step count, and the ±lines it moved when the turn wrote files. Line changes
@@ -67,6 +68,7 @@ export const TurnBlock = function TurnBlock({
   items,
   toolResults,
   live,
+  expandWhileRunning = false,
   onOpenSubagent,
   sessionId,
 }: Props) {
@@ -78,10 +80,8 @@ export const TurnBlock = function TurnBlock({
   // Default fold state follows the two preferences (Settings → Preferences),
   // except that routine tool-only work stays one calm summary row. Opening a
   // tool-only turn by default produced the same count twice: "Working 57
-  // steps" followed by "57 steps". Once the agent writes a real update there
-  // are distinct rows worth showing, so "Expand while running" opens them as
-  // before. "Always open" and a person's manual choice still win in either
-  // state. Failures stay one click away, and explicitly surfaced media
+  // steps" followed by "57 steps". "Always open" and a person's manual choice
+  // still win. Failures stay one click away, and explicitly surfaced media
   // outlives the fold on its own (featuredTurnMedia).
   const [pref, setPref] = useState(getTurnActivityPrefs);
   useEffect(
@@ -89,7 +89,8 @@ export const TurnBlock = function TurnBlock({
     []
   );
   const defaultExpanded =
-    pref.work === "open" || (pref.work === "running" && live && hasNarration);
+    pref.work === "open" ||
+    (pref.work === "running" && live && expandWhileRunning);
   const [rememberedExpanded] = useState(() =>
     transcriptDisclosureLedger.read(
       "turn",
@@ -265,13 +266,7 @@ export const TurnBlock = function TurnBlock({
             className="absolute inset-y-0 -left-2 w-4 cursor-pointer border-0 bg-transparent p-0 after:absolute after:inset-y-0 after:left-1/2 after:border-l after:border-transparent after:transition-colors hover:after:border-line-strong focus-visible:after:border-line-strong"
           />
           {sections.map((sec) =>
-            sec.kind === "msg" ? (
-              <TurnMessage
-                key={sec.entry.id}
-                entry={sec.entry}
-                sessionId={sessionId}
-              />
-            ) : (
+            sec.kind === "msg" ? null : (
               // Tool icons align with the fold chevron on desktop. Phones use
               // the 1px optical correction for the icon's inset glyph.
               <div
@@ -286,7 +281,7 @@ export const TurnBlock = function TurnBlock({
                   items={sec.items}
                   toolResults={toolResults}
                   live={live}
-                  expandAll={!hasNarration || pref.tools === "open"}
+                  expandAll={pref.tools === "open"}
                   sessionId={sessionId}
                   onOpenSubagent={onOpenSubagent}
                 />
@@ -295,6 +290,13 @@ export const TurnBlock = function TurnBlock({
           )}
         </div>
       </Fold>
+
+      {/* Defensive only: TranscriptBlocks splits every assistant entry out
+          before constructing a TurnBlock. If another caller ever passes one,
+          it still remains visible rather than inheriting this disclosure. */}
+      {messages.map((entry) => (
+        <TurnMessage key={entry.id} entry={entry} sessionId={sessionId} />
+      ))}
 
       {/* Aligned with the fold's own rows (see TurnMessage on the 7px). */}
       {(featured.images.length > 0 || featured.videos.length > 0) && (
@@ -712,6 +714,7 @@ function featuredTurnMedia(
 
 function turnBlockPropsEqual(prev: Props, next: Props): boolean {
   if (prev.live !== next.live) return false;
+  if (prev.expandWhileRunning !== next.expandWhileRunning) return false;
   if (prev.onOpenSubagent !== next.onOpenSubagent) return false;
   if (prev.sessionId !== next.sessionId) return false;
   if (prev.items.length !== next.items.length) return false;

@@ -38,10 +38,11 @@ import {
 } from "./ShippedChangeComposer";
 import { SessionContextMessage } from "./SessionContextMessage";
 import { visibleTranscriptHydrationDemand } from "./session-viewer/transcript-hydration";
+import { isLegacyReasoningHeading } from "../lib/reasoning-display";
 
 type RenderBlock =
-	| { kind: "entry"; entry: TranscriptEntry }
-	| { kind: "turn"; items: TranscriptEntry[] }
+	| { kind: "entry"; entry: TranscriptEntry; reasoning?: boolean }
+	| { kind: "turn"; items: TranscriptEntry[]; expandWhileRunning: boolean }
 	| {
 			kind: "footer";
 			entry: TranscriptEntry;
@@ -122,9 +123,9 @@ function reviewBlockRole(block: RenderBlock): ReviewBlockRole {
 		: { kind: "other" };
 }
 
-/** A review handoff and the agent work it triggers form one quiet phase. A
- * real user message always ends it, so people never lose their own request in
- * a collapsed automation trail. */
+/** A review handoff and the tool work it triggers form one quiet phase. Human
+ * requests and model output both stay outside the phase, so a disclosure can
+ * never hide either side of the conversation. */
 function groupReviewLoops(blocks: RenderBlock[]): RenderBlock[] {
 	const grouped: RenderBlock[] = [];
 	for (let i = 0; i < blocks.length; i++) {
@@ -140,9 +141,14 @@ function groupReviewLoops(blocks: RenderBlock[]): RenderBlock[] {
 		while (i + 1 < blocks.length) {
 			const next = blocks[i + 1];
 			const nextRole = reviewBlockRole(next);
-			// Notes and walkthroughs have their own placement and must never vanish
-			// inside an automation disclosure.
-			if (next.kind === "note" || next.kind === "walkthrough") break;
+			// Notes, walkthroughs, and model output have their own placement and must
+			// never vanish inside an automation disclosure.
+			if (
+				next.kind === "note" ||
+				next.kind === "walkthrough" ||
+				(next.kind === "entry" && next.entry.type === "assistant")
+			)
+				break;
 			// A normal user message is a new conversation phase. A second review
 			// handoff belongs to this loop and starts its next round.
 			if (nextRole.kind === "user-message") break;
@@ -239,10 +245,10 @@ function renderBlockEstimate(block: RenderBlock): number {
 }
 
 /**
- * Groups a flat transcript into per-turn fold blocks and message bubbles, then
- * renders them. A turn's working (tool calls + intermediate assistant notes)
- * folds into one collapsed TurnBlock; only the turn's final answer stays out
- * as a normal bubble — so the session reads question → answer, calm by default.
+ * Groups a flat transcript into tool-work folds and message bubbles, then
+ * renders them. Only consecutive tool calls may enter a TurnBlock. Every model
+ * message stays in the transcript itself, including intermediate reasoning and
+ * narration before or between tools.
  * Shared by the main session view and the sub-agent sidebar so both render
  * identically.
  */
@@ -329,23 +335,41 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
 
 	const blocks: RenderBlock[] = [];
 	// The current assistant turn: consecutive assistant/tool_use entries between
-	// user/system boundaries, accumulated then flushed as one fold.
+	// user/system boundaries. Messages and tools accumulate together so the
+	// footer can still summarize the whole turn, but only consecutive tool calls
+	// are emitted into folds.
 	let turn: TranscriptEntry[] = [];
 
 	const flushTurn = (trailing = false) => {
 		if (turn.length === 0) return;
 		const last = turn[turn.length - 1];
 		const final = last.type === "assistant" ? last : null;
-		if (!turn.some((e) => e.type === "tool_use")) {
-			// Plain answer(s), nothing to fold.
-			for (const e of turn) blocks.push({ kind: "entry", entry: e });
-		} else {
-			// The turn's final answer (when it ended with one) stays visible;
-			// everything before it folds. A turn still mid-tools folds entirely.
-			const folded = final ? turn.slice(0, -1) : turn;
-			if (folded.length > 0) blocks.push({ kind: "turn", items: folded });
-			if (final) blocks.push({ kind: "entry", entry: final });
+		let tools: TranscriptEntry[] = [];
+		const expandWhileRunning = turn.some((entry) => entry.type === "assistant");
+		const flushTools = () => {
+			if (tools.length === 0) return;
+			blocks.push({ kind: "turn", items: tools, expandWhileRunning });
+			tools = [];
+		};
+		for (const entry of turn) {
+			if (entry.type === "tool_use") {
+				tools.push(entry);
+				continue;
+			}
+			flushTools();
+			// Model output is conversation, not work chrome. Keeping every message
+			// as its own block makes it impossible for a tool disclosure to hide it.
+			// Bold-only intermediate rows are the reasoning-summary shape persisted
+			// before `isReasoning` existed; keep their presentation quiet too.
+			blocks.push({
+				kind: "entry",
+				entry,
+				reasoning:
+					entry.isReasoning ||
+					(entry !== final && isLegacyReasoningHeading(entry.content)),
+			});
 		}
+		flushTools();
 		// Quiet actions under the settled answer, the files the turn wrote, and
 		// scratch files that have no other direct route from the transcript.
 		if (final && !(live && trailing)) {
@@ -406,6 +430,11 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
 		}
 	}
 	const groupedBlocks = groupReviewLoops(blocks);
+	const liveTurnBoundary = groupedBlocks.findLastIndex(
+		(block) =>
+			block.kind === "entry" &&
+			(block.entry.type === "user" || block.entry.type === "system"),
+	);
 	const lastReviewLoop = groupedBlocks.findLastIndex(
 		(block) => block.kind === "review-loop",
 	);
@@ -423,8 +452,14 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
 		const key = renderBlockKey(block, i);
 		const entriesInBlock = renderBlockEntries(block);
 		if (block.kind === "review-loop") {
-			const isLast = i === groupedBlocks.length - 1;
-			const isLive = Boolean(live && isLast);
+			// Assistant output deliberately sits outside the review disclosure. It
+			// does not make the review loop historical while that same turn is live.
+			const isLive = Boolean(
+				live &&
+					!groupedBlocks
+						.slice(i + 1)
+						.some((candidate) => reviewBlockRole(candidate).kind === "user-message"),
+			);
 			return {
 				key,
 				anchorId: renderBlockAnchor(block, key),
@@ -452,9 +487,7 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
 											items={inner.items}
 											toolResults={toolResults}
 											live={Boolean(
-												live &&
-												isLast &&
-												innerIndex === block.blocks.length - 1,
+												isLive && innerIndex === block.blocks.length - 1,
 											)}
 											owner={owner}
 											sessionId={sessionId}
@@ -473,6 +506,7 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
 										reviewBlockRole(inner).kind !== "handoff" ? (
 										<MessageBubble
 											entry={inner.entry}
+											reasoning={inner.reasoning}
 											pendingDelivery={pendingDeliveryEntryIds.has(inner.entry.id)}
 											owner={owner}
 											sessionId={sessionId}
@@ -491,18 +525,20 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
 			};
 		}
 
-		// While streaming, flushTurn splits trailing assistant text out as its
-		// own block after the fold. A turn directly before that tail is live too.
+		// A live turn may contain several tool folds now that every model message
+		// splits them. Every tool run after the latest conversation boundary is
+		// part of that same active turn, not only the final fold.
 		const isLiveTail =
 			Boolean(live) &&
 			(i === groupedBlocks.length - 1 ||
-				(block.kind === "turn" && i === groupedBlocks.length - 2));
+				(block.kind === "turn" && i > liveTurnBoundary));
 		const content =
 			block.kind === "turn" ? (
 				<TurnBlock
 					items={block.items}
 					toolResults={toolResults}
 					live={isLiveTail}
+					expandWhileRunning={block.expandWhileRunning}
 					onOpenSubagent={onOpenSubagent}
 					sessionId={sessionId}
 				/>
@@ -521,6 +557,7 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
 			) : (
 				<MessageBubble
 					entry={block.entry}
+					reasoning={block.reasoning}
 					pendingDelivery={pendingDeliveryEntryIds.has(block.entry.id)}
 					owner={owner}
 					sessionId={sessionId}

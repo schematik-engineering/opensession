@@ -49,6 +49,7 @@ import { accountProviderForModel, interactiveFallbackModel, modelLabel, provider
 import { configuredInteractiveDefaultModel } from "./model-catalog";
 import { notifyMentions } from "./mentions";
 import { newSessionId } from "./paths";
+import { enablesPstackMode, PSTACK_MODE_NOTE } from "./pstack-mode";
 import { wrapContext } from "./prompt-context";
 import {
 	acknowledgePromptDispatch,
@@ -970,6 +971,7 @@ export async function openCreatedSession(
 	openingRun?: { runId: string; generation: number },
 ): Promise<void> {
 	const bksId = spec.id;
+	const pstackMode = enablesPstackMode(spec.displayPrompt);
 	// Replace the raw first-line title with a short summary in the background;
 	// the next sessions poll (≤5s) picks it up. A workspace minted by THIS
 	// create is named ONCE from the same generated summary (it provisionally
@@ -1075,6 +1077,7 @@ export async function openCreatedSession(
 					: {}),
 				...(spec.effort ? { effort: spec.effort } : {}),
 				...(spec.presetNote ? { presetNote: spec.presetNote } : {}),
+				...(pstackMode ? { pstackMode: true } : {}),
 				...(spec.fastMode ? { fastMode: true } : {}),
 				...(spec.accountId ? { accountId: spec.accountId } : {}),
 				...(spec.plainThreadId ? { plainThreadId: spec.plainThreadId } : {}),
@@ -1325,6 +1328,7 @@ export async function openCreatedSession(
 						mcpServers: spec.runMcpServers ?? [],
 						user: spec.user,
 						reposNote: [
+							pstackMode ? PSTACK_MODE_NOTE : "",
 							buildBranchNote({ mode: spec.mode, branch: spec.branch, worktreeDir: spec.wtPath, }),
 							await memoryNoteFor(spec.user, spec.memoryRepoIds),
 						].filter(Boolean).join("\n\n") || undefined,
@@ -1407,6 +1411,7 @@ export async function openCreatedSession(
 				reposNote:
 					[
 						spec.presetNote || "",
+						pstackMode ? PSTACK_MODE_NOTE : "",
 						// A session that spans repos is handed the map of them
 						// (which repo is where, on which branch) in place of the
 						// branch note — buildReposNote carries that note inside it.

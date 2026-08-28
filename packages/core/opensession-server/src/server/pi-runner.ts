@@ -152,18 +152,84 @@ export async function githubCodeRunEnv(cwd: string): Promise<Record<string, stri
 export const PI_STATE_DIR = stateDir("pi");
 
 /** How many content blocks of an assistant message a reader could actually
- *  see: non-empty text blocks and tool calls. Thinking-only or empty content
+ *  see: non-empty text or thinking blocks and tool calls. Truly empty content
  *  counts zero — that is the empty-completion shape the pump loop retries. */
 export function assistantRenderableBlockCount(content: unknown): number {
   if (!Array.isArray(content)) return 0;
   let n = 0;
   for (const b of content) {
     if (!b || typeof b !== "object") continue;
-    const block = b as { type?: string; text?: unknown; id?: unknown };
+    const block = b as {
+      type?: string;
+      text?: unknown;
+      thinking?: unknown;
+      id?: unknown;
+    };
     if (block.type === "text" && typeof block.text === "string" && block.text.trim()) n++;
+    else if (
+      block.type === "thinking" &&
+      typeof block.thinking === "string" &&
+      block.thinking.trim()
+    ) n++;
     else if (block.type === "toolCall" && block.id) n++;
   }
   return n;
+}
+
+/** Preserve every model-authored prose block in provider order. Pi exposes
+ * reasoning as `thinking` blocks and ordinary output as `text`; both become
+ * visible assistant transcript entries, while tool calls keep their own rows. */
+export function piAssistantTranscriptEntries(
+  content: unknown,
+  timestamp: string,
+  model: string,
+  messageId: string = crypto.randomUUID(),
+): TranscriptEntry[] {
+  if (!Array.isArray(content)) return [];
+  const entries: TranscriptEntry[] = [];
+  let proseIndex = 0;
+  for (const raw of content) {
+    if (!raw || typeof raw !== "object") continue;
+    const block = raw as {
+      type?: string;
+      text?: unknown;
+      thinking?: unknown;
+      id?: unknown;
+      name?: unknown;
+      arguments?: unknown;
+    };
+    const reasoning =
+      block.type === "thinking" && typeof block.thinking === "string"
+        ? block.thinking
+        : "";
+    const isReasoning = reasoning.length > 0;
+    const prose =
+      block.type === "text" && typeof block.text === "string"
+        ? block.text
+        : reasoning;
+    if (prose.trim()) {
+      entries.push({
+        id: proseIndex === 0 ? messageId : `${messageId}-b${proseIndex}`,
+        type: "assistant",
+        content: prose,
+        timestamp,
+        model,
+        ...(isReasoning ? { isReasoning: true } : {}),
+      });
+      proseIndex++;
+    } else if (block.type === "toolCall" && block.id) {
+      entries.push({
+        id: String(block.id),
+        type: "tool_use",
+        content: "",
+        timestamp,
+        toolName: String(block.name || "tool"),
+        toolInput: block.arguments ?? {},
+        toolUseId: String(block.id),
+      });
+    }
+  }
+  return entries;
 }
 
 /** Split `pi/<provider>/<model>` (model may itself contain slashes). */
@@ -2352,7 +2418,13 @@ async function* runPiAttempt(
         switch (ev.type) {
           case "message_update": {
             const ame = (ev as any).assistantMessageEvent;
-            if (ame?.type === "text_delta" && typeof ame.delta === "string") {
+            if (
+              (ame?.type === "text_delta" || ame?.type === "thinking_delta") &&
+              typeof ame.delta === "string"
+            ) {
+              // The live transcript has one prose stream. Thinking and ordinary
+              // model output both ride it rather than leaving reasoning blank
+              // until message_end persists the provider's separate blocks.
               push({ type: "text_chunk", text: ame.delta });
             }
             break;
@@ -2405,40 +2477,16 @@ async function* runPiAttempt(
                   (u.input || 0) + (u.cacheRead || 0) + (u.cacheWrite || 0);
                 push({ type: "usage_snapshot", usage: { ...usageTotal } });
               }
-              // Persist text + tool calls now (messages have no SDK id —
-              // mint one per message; block ids are the model's, stable).
+              // Persist thinking, text, and tool calls now (messages have no
+              // SDK id, while block ids are the model's and stay stable).
               // Error-stopped attempts are skipped: auto-retry replays them
               // and the terminal error carries the failure text — persisting
               // each attempt would stack duplicate partial bubbles. Aborted
               // partials DO persist (parity with pi's own jsonl).
               if (msg.stopReason !== "error") {
-                const out: TranscriptEntry[] = [];
-                const msgId = crypto.randomUUID();
-                let textIdx = 0;
-                for (const b of msg.content || []) {
-                  if (!b || typeof b !== "object") continue;
-                  if (b.type === "text" && b.text) {
-                    out.push({
-                      id: textIdx === 0 ? msgId : `${msgId}-b${textIdx}`,
-                      type: "assistant",
-                      content: b.text,
-                      timestamp: ts,
-                      model: parsed.modelID,
-                    });
-                    textIdx++;
-                  } else if (b.type === "toolCall" && b.id) {
-                    out.push({
-                      id: String(b.id),
-                      type: "tool_use",
-                      content: "",
-                      timestamp: ts,
-                      toolName: String(b.name || "tool"),
-                      toolInput: b.arguments ?? {},
-                      toolUseId: String(b.id),
-                    });
-                  }
-                }
-                persistRunEntries(out);
+                persistRunEntries(
+                  piAssistantTranscriptEntries(msg.content, ts, parsed.modelID),
+                );
               }
             } else if (msg.role === "toolResult" && msg.toolCallId) {
               const { text, images } = contentToTextAndImages(msg.content);

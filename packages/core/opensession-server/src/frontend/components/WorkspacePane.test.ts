@@ -68,11 +68,12 @@ test("reviews with and without a PR share the floating toolbar", () => {
 		prPanelSource.indexOf("const reviewBar") + 500,
 	);
 
-	expect(
-		prPanelSource.match(/<ReviewToolbar compact=\{compactToolbar\}>/g)?.length,
-	).toBe(2);
+	expect(prPanelSource.match(/<ReviewToolbar/g)?.length).toBe(2);
 	expect(prPanelSource).toContain(
-		"<ReviewToolbar compact={compactToolbar}>\n          <div className={PR_NO_PR_BAR}>",
+		"<ReviewToolbar\n          compact={compactToolbar}\n          maskStickyFileHeaders={false}\n        >\n          <div className={PR_NO_PR_BAR}>",
+	);
+	expect(reviewToolbarSource).toContain(
+		"compact && maskStickyFileHeaders",
 	);
 	expect(reviewToolbarSource).toContain("desktop:pt-2.5");
 	expect(reviewToolbarSource).not.toContain("desktop:mt-2.5");

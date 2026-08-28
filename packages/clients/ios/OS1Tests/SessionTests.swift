@@ -25,6 +25,19 @@ final class SessionTests: XCTestCase {
         XCTAssertEqual(session.effectiveRepo, "backstage")
     }
 
+    func testSafetyProjectionDecodesTolerantlyAndOverridesRunningLane() throws {
+        let paused = try session(#"{"id":"os-paused","isRunning":true,"safety":{"status":"paused_for_safety","explanation":"This session was paused safely.","automaticReconciliationRunning":false,"pausedAt":"2026-08-26T12:00:00Z","operation":"finishing the current turn","repairAvailable":false}}"#)
+
+        XCTAssertEqual(paused.safety?.status, "paused_for_safety")
+        XCTAssertEqual(paused.safety?.explanation, "This session was paused safely.")
+        XCTAssertEqual(paused.status, .needsInput)
+        XCTAssertEqual(paused.lane, .needsInput)
+
+        let partial = try session(#"{"id":"os-partial","safety":{"status":"paused_for_safety"}}"#)
+        XCTAssertEqual(partial.safety?.status, "paused_for_safety")
+        XCTAssertNil(partial.safety?.explanation)
+    }
+
     func testSessionAliasesAreDecodedForTranscriptLinks() throws {
         let session = try self.session(
             #"{"id":"os-current","aliasIds":["bks-original"]}"#

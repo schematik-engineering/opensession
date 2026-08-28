@@ -6018,6 +6018,8 @@ console.error("Archive failed:", e);
 											send={send}
 											addHandler={addHandler}
 											connected={connected}
+											workspaces={workspaces}
+											sessions={sessions}
 											onCreateStarted={startNewSessionCreate}
 										/>
 									)}
@@ -6164,6 +6166,8 @@ console.error("Archive failed:", e);
 						forceBranch={palette.branch}
 						forceMode={palette.mode}
 						initialMcpServers={palette.mcpServers}
+						workspaces={workspaces}
+						sessions={sessions}
 						onCreateStarted={startNewSessionCreate}
 					/>
 				)}

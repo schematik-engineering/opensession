@@ -91,6 +91,8 @@ deploy/sandbox/microvm/.cache-busybox-source.tar.bz2
 !.agents/skills/simplify/**
 !.agents/skills/pr-autofix/
 !.agents/skills/pr-autofix/**
+!.agents/skills/pstack/
+!.agents/skills/pstack/**
 !.agents/skills/audit-codebase/
 !.agents/skills/audit-codebase/**
 !.agents/skills/bro/

@@ -1,6 +1,35 @@
 import Foundation
 import Observation
 
+/// Pure mutation state for established-workspace deletion. Kept separate from
+/// draft deletion, whose immediate one-row behavior remains unchanged.
+struct WorkspaceDeletionState: Equatable {
+    struct Failure: Equatable {
+        let workspaceId: String
+        let message: String
+    }
+
+    private(set) var deletingWorkspaceId: String?
+    private(set) var failure: Failure?
+
+    mutating func begin(_ workspaceId: String) {
+        deletingWorkspaceId = workspaceId
+        failure = nil
+    }
+
+    mutating func succeed(_ workspaceId: String) {
+        guard deletingWorkspaceId == workspaceId else { return }
+        deletingWorkspaceId = nil
+        failure = nil
+    }
+
+    mutating func fail(_ workspaceId: String, message: String) {
+        guard deletingWorkspaceId == workspaceId else { return }
+        deletingWorkspaceId = nil
+        failure = Failure(workspaceId: workspaceId, message: message)
+    }
+}
+
 /// Sessions overview. The server has no push channel for list changes, so this
 /// polls `GET /api/sessions` (server caches for 2s; the web UI polls at 5s too).
 @Observable
@@ -28,6 +57,7 @@ final class SessionsListViewModel {
     /// Kept separate from the live-list failure, whose banner describes a
     /// different request.
     private(set) var archivedLoadFailure: String?
+    private(set) var workspaceDeletion = WorkspaceDeletionState()
 
     private var pollTask: Task<Void, Never>?
 
@@ -775,6 +805,37 @@ final class SessionsListViewModel {
         }
     }
 
+    /// Permanently delete an established workspace and every session in it.
+    /// Confirmation belongs to the view; this method owns in-flight/error
+    /// state, calls the API, removes stale local rows, and refreshes metadata.
+    func deleteWorkspace(_ workspace: SidebarWorkspace) async -> Bool {
+        guard !workspace.isDraftWorkspace,
+              let workspaceId = workspace.workspaceId,
+              !workspaceId.isEmpty,
+              workspaceDeletion.deletingWorkspaceId == nil
+        else { return false }
+
+        workspaceDeletion.begin(workspaceId)
+        do {
+            try await OS1API.deleteWorkspace(workspaceId: workspaceId)
+            let deletedIds = Set(workspace.sessions.map(\.id))
+            setSessions(sessions.filter { !deletedIds.contains($0.id) })
+            workspaces.removeAll { $0.id == workspaceId }
+            workspaceNames[workspaceId] = nil
+            workspaceDeletion.succeed(workspaceId)
+            // Selection can clear as soon as DELETE succeeds; refresh follows
+            // independently so a large sessions payload cannot hold the dead
+            // workspace open on screen.
+            Task { await self.refresh() }
+            return true
+        } catch {
+            let message = "Couldn't delete workspace: \(error.localizedDescription)"
+            workspaceDeletion.fail(workspaceId, message: message)
+            self.error = message
+            return false
+        }
+    }
+
     private func isLocallyArchived(_ id: String) -> Bool {
         guard let entry = locallyArchived[id] else { return false }
         if Date().timeIntervalSince(entry.added) > 30 {
@@ -808,6 +869,13 @@ final class SessionsListViewModel {
         }
         return extras.isEmpty ? list : extras + list
     }
+
+    #if DEBUG
+    func prepareTeamActivityFixture() {
+        hasLoaded = true
+        archivedHasLoaded = true
+    }
+    #endif
 
     func startPolling() {
         stopPolling()
@@ -1170,7 +1238,9 @@ struct SidebarWorkspace: Identifiable, Equatable, Sendable {
     }
     /// Any session of the row is mid-turn — the row counts as live even when a
     /// blocked sibling owns its lane.
-    var isRunning: Bool { sessions.contains { $0.isRunning == true } }
+    var isRunning: Bool {
+        sessions.contains { $0.safety == nil && $0.isRunning == true }
+    }
     var lastActivityDate: Date {
         if let draft = workspace?.draft,
            let date = Session.parseISO(draft.updatedAt) { return date }

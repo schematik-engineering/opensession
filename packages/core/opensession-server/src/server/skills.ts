@@ -33,6 +33,12 @@ export interface SkillEntry {
  */
 const BUILTIN_COMMANDS: SkillEntry[] = [
   {
+    name: "pstack",
+    description:
+      "Enable rigorous pstack mode for this session (/pstack <task>, /pstack off)",
+    source: "builtin",
+  },
+  {
     name: "compact",
     description:
       "Summarize the conversation so far to shrink context and cost (Claude sessions only)",

@@ -58,6 +58,7 @@ struct SessionView: View {
     /// that follows — nil simply leaves those entries out of the menu.
     private let onRenameWorkspace: ((String) -> Void)?
     private let onArchiveWorkspace: (() -> Void)?
+    private let onDeleteWorkspace: (() -> Void)?
     /// macOS has no sibling strip: its sidebar is the live-session switcher.
     /// The selected session's toolbar still offers the workspace's closed
     /// siblings, and hands restoration back to that sidebar's owner.
@@ -268,6 +269,7 @@ struct SessionView: View {
         onNextChat: (() -> Void)? = nil,
         onRenameWorkspace: ((String) -> Void)? = nil,
         onArchiveWorkspace: (() -> Void)? = nil,
+        onDeleteWorkspace: (() -> Void)? = nil,
         onRestoreArchivedSession: ((Session) async -> Void)? = nil,
         workspaceHistory: WorkspaceSessionHistory? = nil
     ) {
@@ -284,6 +286,7 @@ struct SessionView: View {
         self.onNextChat = onNextChat
         self.onRenameWorkspace = onRenameWorkspace
         self.onArchiveWorkspace = onArchiveWorkspace
+        self.onDeleteWorkspace = onDeleteWorkspace
         self.onRestoreArchivedSession = onRestoreArchivedSession
         self.workspaceHistory = workspaceHistory
     }
@@ -297,6 +300,7 @@ struct SessionView: View {
         onNextChat: (() -> Void)? = nil,
         onRenameWorkspace: ((String) -> Void)? = nil,
         onArchiveWorkspace: (() -> Void)? = nil,
+        onDeleteWorkspace: (() -> Void)? = nil,
         onRestoreArchivedSession: ((Session) async -> Void)? = nil,
         workspaceHistory: WorkspaceSessionHistory? = nil
     ) {
@@ -309,6 +313,7 @@ struct SessionView: View {
         self.onNextChat = onNextChat
         self.onRenameWorkspace = onRenameWorkspace
         self.onArchiveWorkspace = onArchiveWorkspace
+        self.onDeleteWorkspace = onDeleteWorkspace
         self.onRestoreArchivedSession = onRestoreArchivedSession
         self.workspaceHistory = workspaceHistory
     }
@@ -834,6 +839,16 @@ struct SessionView: View {
             // watchdog window. The zero-sized leaf owns only the side effects.
             .background { SessionSceneLifecycle(viewModel: viewModel) }
             .task {
+                #if DEBUG && os(iOS)
+                // Install screenshot fixtures before network requests so a
+                // slow catalog cannot leave the capture in the ordinary state.
+                if ProcessInfo.processInfo.environment["OS1_SHOW_SAFETY_PAUSE"] == "1" {
+                    viewModel.showSafetyPauseForScreenshot()
+                }
+                if ProcessInfo.processInfo.environment["OS1_SHOW_STEERED_MESSAGE"] == "1" {
+                    viewModel.showSteeredMessageForScreenshot()
+                }
+                #endif
                 catalog = try? await OS1API.models(workspaceId: viewModel.session.workspaceId)
                 #if DEBUG && os(iOS)
                 if ProcessInfo.processInfo.environment["OS1_OPEN_WORKTREE_INFO"] == "1" {
@@ -927,6 +942,7 @@ struct SessionView: View {
                 onNewSession: onNewSession,
                 onRenameWorkspace: onRenameWorkspace,
                 onArchiveWorkspace: onArchiveWorkspace,
+                onDeleteWorkspace: onDeleteWorkspace,
                 showWorktreeInfo: $showWorktreeInfo,
                 showPrPanel: $showPrPanel,
                 renaming: $renamingWorkspace,
@@ -1012,16 +1028,62 @@ struct SessionView: View {
 
     @ViewBuilder
     private var statusBanner: some View {
-        switch viewModel.connectionState {
-        case .connected:
-            EmptyView()
-        case .connecting:
-            bannerText("Connecting…", color: .secondary)
-        case .reconnecting(let reason):
-            bannerText(reason.map { "\($0) — reconnecting…" } ?? "Reconnecting…", color: .orange)
-        case .failed(let reason):
-            bannerText(reason, color: .red)
+        VStack(spacing: 6) {
+            if let safety = viewModel.safety {
+                safetyNotice(safety)
+            }
+            switch viewModel.connectionState {
+            case .connected:
+                EmptyView()
+            case .connecting:
+                bannerText("Connecting…", color: .secondary)
+            case .reconnecting(let reason):
+                bannerText(reason.map { "\($0) · reconnecting…" } ?? "Reconnecting…", color: .orange)
+            case .failed(let reason):
+                bannerText(reason, color: .red)
+            }
         }
+    }
+
+    private func safetyNotice(_ safety: SessionSafetyState) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.shield.fill")
+                .font(.title3)
+                .foregroundStyle(OS1VisualStyle.yellow)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Paused for safety")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(OS1VisualStyle.text)
+                Text(safety.explanation?.nilIfBlank ?? "\(AppBrand.productName) paused this work to avoid repeating an uncertain action.")
+                    .font(.footnote)
+                    .foregroundStyle(OS1VisualStyle.textDim)
+                Text(safetyHelp(safety))
+                    .font(.caption)
+                    .foregroundStyle(OS1VisualStyle.textDim)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: contentMaxWidth, alignment: .leading)
+        .background(OS1VisualStyle.yellow.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(OS1VisualStyle.yellow.opacity(0.28), lineWidth: 1)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func safetyHelp(_ safety: SessionSafetyState) -> String {
+        if safety.automaticReconciliationRunning == true {
+            return "\(AppBrand.productName) is checking it automatically. Repair is not available in the native app; you can still archive this session."
+        }
+        if safety.repairAvailable == true {
+            return "Repair is not available in the native app. Open this session on the web to repair it, or archive it here."
+        }
+        return "Repair is not available for this pause. You can still archive this session."
     }
 
     /// Floating glass capsule under the nav bar, instead of a full-width bar.
@@ -1596,6 +1658,7 @@ private struct SessionActionsMenu: View {
     let onNewSession: (() -> Void)?
     let onRenameWorkspace: ((String) -> Void)?
     let onArchiveWorkspace: (() -> Void)?
+    let onDeleteWorkspace: (() -> Void)?
     @Binding var showWorktreeInfo: Bool
     @Binding var showPrPanel: Bool
     @Binding var renaming: Bool
@@ -1801,6 +1864,11 @@ private struct SessionActionsMenu: View {
                             Label("Archive", systemImage: "archivebox")
                         }
                     }
+                    if workspace.workspaceId?.isEmpty == false, let onDeleteWorkspace {
+                        Button(role: .destructive, action: onDeleteWorkspace) {
+                            Label("Delete workspace", systemImage: "trash")
+                        }
+                    }
                 }
             }
         } label: {
@@ -1990,6 +2058,8 @@ struct SessionTabsView: View {
     let onRenameWorkspace: (String) -> Void
     /// Archive every session of the worktree, from the session's overflow menu.
     let onArchiveWorkspace: () -> Void
+    /// Permanently delete the established workspace after the list confirms it.
+    let onDeleteWorkspace: () -> Void
     /// Close (archive) a session closed from the tab strip.
     let onCloseTab: (Session) -> Void
     /// Hydrate and restore a closed sibling. The returned whole session becomes
@@ -2042,6 +2112,7 @@ struct SessionTabsView: View {
         onNextChat: (() -> Void)?,
         onRenameWorkspace: @escaping (String) -> Void,
         onArchiveWorkspace: @escaping () -> Void,
+        onDeleteWorkspace: @escaping () -> Void,
         onCloseTab: @escaping (Session) -> Void,
         onRestoreTab: @escaping (Session) async -> Session?
     ) {
@@ -2054,6 +2125,7 @@ struct SessionTabsView: View {
         self.onNextChat = onNextChat
         self.onRenameWorkspace = onRenameWorkspace
         self.onArchiveWorkspace = onArchiveWorkspace
+        self.onDeleteWorkspace = onDeleteWorkspace
         self.onCloseTab = onCloseTab
         self.onRestoreTab = onRestoreTab
         _activeId = State(initialValue: session.id)
@@ -2145,6 +2217,7 @@ struct SessionTabsView: View {
                             onArchiveWorkspace()
                             dismiss()
                         },
+                        onDeleteWorkspace: onDeleteWorkspace,
                         workspaceHistory: overflowMenuHistory
                     )
                     // What the transcript's asset chips and the overflow menu
@@ -2406,7 +2479,7 @@ struct TabPill: Identifiable, Equatable {
     init(_ session: Session) {
         id = session.id
         title = session.displayTitle
-        activity = session.waitingForInput == true
+        activity = session.safety != nil || session.waitingForInput == true
             ? .waiting
             : (session.isRunning == true ? .running : .idle)
         // An optimistic session doesn't exist server-side yet, so there is
@@ -3424,6 +3497,7 @@ private struct SessionInputBar: View {
                     Text(noteMode ? "Team note" : "Message")
                 }
                 .textFieldStyle(.plain)
+                .disabled(viewModel.safety != nil)
                 .lineLimit(1...10)
                 .foregroundStyle(OS1VisualStyle.text)
                 // Measured on the field itself, BEFORE the frame and padding
@@ -3648,6 +3722,7 @@ private struct SessionInputBar: View {
 
     private var composerPlaceholder: String {
         if noteMode { return "Only your team will see this" }
+        if viewModel.safety != nil { return "Paused for safety" }
         if viewModel.quoteSelection.text != nil { return "Chat with selected text" }
         if viewModel.workspacePreparing {
             return "Setting up your workspace · messages queue until it's ready"
@@ -3952,7 +4027,7 @@ private struct SessionInputBar: View {
         private var label: String? {
             switch phase {
             case .queued: nil
-            case .steering: "Steering · delivers when this step ends"
+            case .steering: "Sent · pending delivery"
             case .delivering: "Delivering…"
             }
         }

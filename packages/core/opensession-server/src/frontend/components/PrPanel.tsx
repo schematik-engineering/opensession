@@ -1541,7 +1541,10 @@ toast(e.message || "Couldn't unlink the PR");
         className={`selectable relative flex h-full min-h-0 flex-col bg-surface ${compactToolbar ? "overflow-x-hidden overflow-y-auto" : "overflow-hidden"}`}
         data-review-canvas="true"
       >
-        <ReviewToolbar compact={compactToolbar}>
+        <ReviewToolbar
+          compact={compactToolbar}
+          maskStickyFileHeaders={false}
+        >
           <div className={PR_NO_PR_BAR}>
             {targetPicker}
             {/* Opening the PR is what this state is for, so its action leads

@@ -1750,6 +1750,18 @@ html:is(.wco, .desktop-shell)
 .composer-hl .cmp-mention[data-hover]::before {
 	background: color-mix(in srgb, var(--accent) 22%, transparent);
 }
+/* A selected image area stays plain text in the message sent to the model,
+   while the composer groups its coordinates into one quiet inline reference. */
+.composer-hl .cmp-image-attachment {
+	padding: 2px 0;
+	border-radius: 999px; corner-shape: var(--cs);
+	background: color-mix(in srgb, var(--accent) 12%, transparent);
+	box-shadow:
+		4px 0 0 color-mix(in srgb, var(--accent) 12%, transparent),
+		-4px 0 0 color-mix(in srgb, var(--accent) 12%, transparent);
+	color: var(--accent-ink);
+	box-decoration-break: clone;
+}
 /* The face. It is painted rather than laid out, for the same reason: there is
    nowhere to put a picture, so the `@` goes transparent and lends the face
    its slot. The face hangs off THAT span rather than off the pill, so it

@@ -41,6 +41,7 @@ import { DESK_NOTE } from "./desk";
 import { deskBriefingFor } from "./desk-state";
 import { personalOutputStyleNoteFor } from "./personal-output-style";
 import { personalPromptNoteFor } from "./personal-prompts";
+import { PSTACK_MODE_NOTE } from "./pstack-mode";
 import {
 	findSession,
 	getCachedSessions,
@@ -139,7 +140,7 @@ export function buildBranchNote(session: {
 		`Stay on \`${session.branch}\`: never create or switch branches, and never rebase away, reset, or cherry-pick around sibling commits. Commit your changes on this branch and push with \`git push origin ${session.branch}\`.`,
 		repo.host === "codestorage"
 			? `Commit and push your branch with \`git push -u origin ${session.branch}\` — this repo is hosted on Code Storage; there is no gh CLI and no pull requests; a pushed branch IS the change request. Never merge it into the default branch yourself.`
-			: `This workspace keeps ONE pull request: if an open PR for \`${session.branch}\` already exists, pushing updates it — do not open another. Only run \`gh pr create\` when the branch has no open PR. Never merge.`,
+			: `This workspace keeps ONE pull request: if an open PR for \`${session.branch}\` already exists, pushing updates it — do not open another. Only run \`gh pr create\` when the branch has no open PR. For an ordinary (non-stacked) PR, you may merge it yourself once the latest Open Session review covers the current head, reports no blocking findings, marks it safe to merge, and all required checks have passed. Do not merge while the review is stale, pending, or unsatisfied, or while required checks are pending or failing.`,
 		repo.host === "codestorage"
 			? "Only deviate from this (a separate branch) when the user explicitly asks for it."
 			: "Only deviate from this (separate branch or separate PR) when the user explicitly asks for it.",
@@ -234,6 +235,7 @@ export async function buildSessionNote(
 	return (
 		[
 			session.presetNote || "",
+			session.pstackMode ? PSTACK_MODE_NOTE : "",
 			// The standing Desk session gets its concierge charter first — role
 			// discipline for the summonable overlay (see desk.ts) — then the
 			// user's live state, rebuilt per turn (desk-state.ts) so it can

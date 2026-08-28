@@ -75,6 +75,18 @@ export function workspaceSummaryCanStand(hasRoom: boolean): boolean {
 	return hasRoom;
 }
 
+/**
+ * Whether navigation from a summary row should dismiss the card.
+ *
+ * A narrow overlay must leave after routing because it covers the destination.
+ * A standing card stays pinned, including when its Review row opens Review.
+ */
+export function workspaceSummaryShouldDismissAfterRouting(
+	canStand: boolean,
+): boolean {
+	return !canStand;
+}
+
 /** Place the card directly below the workspace tab strip. Review gives the
  *  card its own column, so its inner PR bars need no extra clearance. */
 export function workspaceSummarySideOffset(tabStripVisible: boolean): number {

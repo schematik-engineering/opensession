@@ -7,7 +7,7 @@ import React, {
   useState,
 } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { fetchWorktrees, fetchModels, fetchToolAccounts, fetchSandboxStatus, requestSandboxPrewarm, suggestBranch, configuredNewSessionRepo, fetchProviderAccounts, fetchRepos, cachedRepos, type RepoInfo, createWorkspaceApi, updateWorkspaceApi, deleteWorkspaceApi, ApiError, type ProviderAccountOption, type ModelOption, type SandboxStatusInfo } from "../lib/api";
+import { fetchWorktrees, fetchModels, fetchToolAccounts, fetchSandboxStatus, requestSandboxPrewarm, suggestBranch, configuredNewSessionRepo, fetchProviderAccounts, fetchRepos, cachedRepos, type OpenPr, type RepoInfo, createWorkspaceApi, updateWorkspaceApi, deleteWorkspaceApi, ApiError, type ProviderAccountOption, type ModelOption, type SandboxStatusInfo } from "../lib/api";
 import { getCurrentUser } from "./UserPicker";
 import { type FileAttachment } from "../lib/images";
 import {
@@ -59,7 +59,8 @@ import {
   IconNewBranch,
   IconX,
 } from "./icons";
-import type { WSClientMessage, WSServerMessage } from "../lib/types";
+import type { UnifiedSession, Workspace, WSClientMessage, WSServerMessage } from "../lib/types";
+import { findPrWorkspaceId } from "../lib/pr-workspace";
 import { newClientSessionId } from "../lib/session-id";
 import { errorMatchesPendingCreate } from "../lib/new-session-navigation";
 import {
@@ -92,6 +93,7 @@ import {
   hasDraggedFiles,
 } from "../lib/file-drag";
 import { FullPageFileDropOverlay } from "./FullPageFileDropOverlay";
+import { NewSessionPrPicker } from "./NewSessionPrPicker";
 import { askSurface } from "../lib/tinted-surface";
 import { toast } from "../ui/toast";
 import { cn } from "../ui/cn";
@@ -131,6 +133,10 @@ interface Props {
   /** …and defaults to the workspace's shared repo + worktree (a sibling's branch). */
   forceRepo?: string;
   forceBranch?: string;
+  /** Known workspaces and sessions let a PR create adopt the PR's existing
+      workspace instead of opening a duplicate lane for the same branch. */
+  workspaces: Workspace[];
+  sessions: UnifiedSession[];
   /** Lets App render the pending session shell before the created session appears
       in the polled session list. */
   onCreateStarted?: (draft: NewSessionCreateDraft) => void;
@@ -157,6 +163,11 @@ interface Worktree {
   branch: string;
   path: string;
 }
+
+type SessionStartPoint =
+  | { kind: "new" }
+  | { kind: "worktree"; branch: string }
+  | { kind: "pull-request"; pullRequest: OpenPr };
 
 interface RepoOption {
   id: string;
@@ -474,7 +485,7 @@ function draftParkInFlight(text: string, workspaceId?: string): boolean {
   );
 }
 
-export function NewSession({ onBack, inline, focusSeq, send, addHandler, connected, prefillPrompt, initialMcpServers, forceMode, workspaceId, modelWorkspaceId, forceRepo, forceBranch, onCreateStarted }: Props) {
+export function NewSession({ onBack, inline, focusSeq, send, addHandler, connected, prefillPrompt, initialMcpServers, forceMode, workspaceId, modelWorkspaceId, forceRepo, forceBranch, workspaces, sessions, onCreateStarted }: Props) {
   const [prefill] = useState(readPrefill);
   // What the session may do, and nothing else — the footer's Ask toggle. The
   // repo is a separate axis, so Scratch is not a third value here: it is what
@@ -490,6 +501,14 @@ export function NewSession({ onBack, inline, focusSeq, send, addHandler, connect
   const [repo, setRepo] = useState(
     forceMode === "scratch" ? NO_REPO : forceRepo || prefill.repo,
   );
+  // Exactly one start point owns the branch semantics. A PR is not merely an
+  // existing worktree: it must send `fromPr` so the server checks out the
+  // existing head branch rather than trying to create it again.
+  const defaultStartPoint = (): SessionStartPoint =>
+    forceBranch ? { kind: "worktree", branch: forceBranch } : { kind: "new" };
+  const [startPoint, setStartPoint] = useState<SessionStartPoint>(defaultStartPoint);
+  const selectedPullRequest =
+    startPoint.kind === "pull-request" ? startPoint.pullRequest : null;
   /**
    * Repos the session works in BESIDES `repo`, in the order they were added
    * (the picker's ⌘-click). Each becomes an attached worktree on the session's
@@ -513,7 +532,7 @@ export function NewSession({ onBack, inline, focusSeq, send, addHandler, connect
     // nowhere to put a second repo. Drop them on the way in rather than
     // carrying a selection the create would have to refuse.
     if (next === "ask") setExtraRepos([]);
-    if (forceRepo) return;
+    if (forceRepo || startPoint.kind === "pull-request") return;
     if (next === "ask") setRepo(NO_REPO);
     else if (repo === NO_REPO)
       setRepo(migratedRepoPref() || configuredDefaultRepo || NO_REPO);
@@ -527,7 +546,7 @@ export function NewSession({ onBack, inline, focusSeq, send, addHandler, connect
   // A second repo is an isolated worktree on this session's branch, which only
   // a Code session with a repo has. Ask reads one pinned checkout and Scratch
   // has no checkout at all, so neither can carry one.
-  const canAddRepos = mode === "code";
+  const canAddRepos = mode === "code" && startPoint.kind !== "pull-request";
   const repoOptions = (items: RepoInfo[]): RepoOption[] =>
     items.map((item) => ({
       id: item.id,
@@ -582,9 +601,6 @@ export function NewSession({ onBack, inline, focusSeq, send, addHandler, connect
   const repoOptionLabel = (id: string) =>
     repos.find((item) => item.id === id)?.label || id;
   const [worktrees, setWorktrees] = useState<Worktree[]>([]);
-  // In a workspace, default to a sibling's branch so the new session reuses its
-  // worktree; the user can still switch to "New branch" to fork a fresh one.
-  const [selectedWorktree, setSelectedWorktree] = useState(forceBranch || "__new__");
   const [newBranch, setNewBranch] = useState(prefill.branch);
   // An explicit prefill (Home hand-off, deep link) wins; otherwise restore the
   // stored draft so closing the palette / navigating away doesn't lose a
@@ -899,7 +915,13 @@ export function NewSession({ onBack, inline, focusSeq, send, addHandler, connect
   // repo the session was no longer pointed at.
   useEffect(() => {
     let live = true;
-    setSelectedWorktree(forceBranch || "__new__");
+    setStartPoint((current) =>
+      current.kind === "pull-request" && current.pullRequest.repo === repo
+        ? current
+        : forceBranch
+          ? { kind: "worktree", branch: forceBranch }
+          : { kind: "new" },
+    );
     if (!repo || repo === NO_REPO) {
       setWorktrees([]);
       return;
@@ -930,7 +952,7 @@ export function NewSession({ onBack, inline, focusSeq, send, addHandler, connect
   }, [branchEdited]);
   const suggestSeqRef = useRef(0);
   useEffect(() => {
-    if (mode !== "code" || selectedWorktree !== "__new__" || branchEdited) return;
+    if (mode !== "code" || startPoint.kind !== "new" || branchEdited) return;
     if (settledPrompt.trim().length < 10) return;
     suggestSeqRef.current += 1;
     const seq = suggestSeqRef.current;
@@ -940,7 +962,7 @@ export function NewSession({ onBack, inline, focusSeq, send, addHandler, connect
       if (seq !== suggestSeqRef.current || branchEditedRef.current) return;
       if (branch) setNewBranch(branch);
     })();
-  }, [settledPrompt, mode, selectedWorktree, branchEdited]);
+  }, [settledPrompt, mode, startPoint.kind, branchEdited]);
 
   // Registered from mount and gated on a ref set synchronously in handleCreate:
   // session_created is announced before the worktree even boots, so it can
@@ -1126,9 +1148,11 @@ pendingDraftParks.delete(operation);
     const prompt = promptText.current.trim();
     const createRepo = repo;
     const branch =
-      selectedWorktree === "__new__"
-        ? newBranch.trim() || fallbackBranchName(prompt)
-        : selectedWorktree;
+      startPoint.kind === "pull-request"
+        ? startPoint.pullRequest.branch
+        : startPoint.kind === "new"
+          ? newBranch.trim() || fallbackBranchName(prompt)
+          : startPoint.branch;
     const attachRepos = extraRepos.filter((id) => id !== createRepo);
     const createMode = mode;
 
@@ -1140,12 +1164,23 @@ pendingDraftParks.delete(operation);
     // the session joins it. An unscoped composer that was closed already made
     // a draft workspace, so reopening and creating adopts that same workspace
     // instead of leaving the draft beside a second, live workspace.
+    const prWorkspaceId = selectedPullRequest
+      ? findPrWorkspaceId(workspaces, sessions, {
+          repo: selectedPullRequest.repo,
+          branch: selectedPullRequest.branch,
+          number: selectedPullRequest.number,
+        }) || undefined
+      : undefined;
+    // A PR source owns its workspace identity too. Prefer its known lane over a
+    // parked generic draft; without one, ask the server to mint a PR-named lane.
     const createWorkspaceId =
-      workspaceId || getParkedNewSessionWorkspaceId() || undefined;
+      workspaceId ||
+      prWorkspaceId ||
+      (!selectedPullRequest ? getParkedNewSessionWorkspaceId() || undefined : undefined);
     const worktreeMode =
       createMode === "ask"
         ? "ask"
-        : createMode === "code" && selectedWorktree === "__new__"
+        : startPoint.kind === "new"
           ? "stack"
           : "share";
     const clientSessionId = newClientSessionId();
@@ -1159,7 +1194,7 @@ pendingDraftParks.delete(operation);
       mode: createMode,
       // The optimistic shell is replaced once the persisted record lands.
       repo: createRepo,
-      branch: createMode === "code" ? branch : null,
+      branch: createMode === "code" || selectedPullRequest ? branch : null,
       ...(createWorkspaceId ? { workspaceId: createWorkspaceId } : {}),
       ...(optimisticModel ? { model: optimisticModel } : {}),
       ...(images.length ? { images } : {}),
@@ -1180,9 +1215,18 @@ pendingDraftParks.delete(operation);
       ...(attachRepos.length && canAddRepos ? { attachRepos } : {}),
       ...(createWorkspaceId
         ? { workspaceId: createWorkspaceId, worktreeMode }
-        : { createWorkspace: {} }),
+        : {
+            createWorkspace: selectedPullRequest
+              ? {
+                  name: `PR #${selectedPullRequest.number}: ${selectedPullRequest.title}`
+                    .trim()
+                    .slice(0, 80),
+                }
+              : {},
+          }),
       ...(modelWorkspaceId ? { modelWorkspaceId } : {}),
-      branch: createMode === "code" ? branch : "",
+      branch: createMode === "code" || selectedPullRequest ? branch : "",
+      ...(selectedPullRequest ? { fromPr: true } : {}),
       prompt,
       titlePrompt: projectComposerSessions(prompt).displayText,
       user: getCurrentUser(),
@@ -1205,7 +1249,11 @@ pendingDraftParks.delete(operation);
     } as WSClientMessage;
     createSessionIdRef.current = clientSessionId;
     createMessageRef.current = createMessage;
-    createWorkspaceIdRef.current = createWorkspaceId ?? null;
+    // A globally selected PR adopts its workspace, but its composer draft did
+    // not come from that workspace and must not clear a teammate's parked text.
+    createWorkspaceIdRef.current = selectedPullRequest
+      ? null
+      : createWorkspaceId ?? null;
     try {
       send(createMessage);
       consumePendingDraftParks(prompt, workspaceId, createWorkspaceId);
@@ -1246,8 +1294,7 @@ pendingDraftParks.delete(operation);
     // create with the same message (resolveRequestedSandbox). Block here
     // so the wall is discovered before submit, not after.
     !sandboxModelWarning &&
-    (hasPromptText || images.length > 0 || files.length > 0) &&
-    (mode === "ask" || mode === "scratch" || selectedWorktree !== "");
+    (hasPromptText || images.length > 0 || files.length > 0);
 
   /** The latest `handleCreate`, for a caller that has to wait a render before
    *  it can create. The dictation bar's ↑ is the one: it writes the transcript
@@ -1265,25 +1312,35 @@ pendingDraftParks.delete(operation);
   // one thing you do choose. Only a Code session with a repo has a branch at
   // all — Ask cuts no worktree, and Code with no repo has nothing to cut one
   // from.
-  const createFromLabel = selectedWorktree === "__new__" ? "New branch" : selectedWorktree;
-  const createFromOptions = [
+  const createFromLabel =
+    startPoint.kind === "pull-request"
+      ? `PR #${startPoint.pullRequest.number}`
+      : startPoint.kind === "worktree"
+        ? startPoint.branch
+        : "New branch";
+  const createFromOptions: Array<{ label: string; point: SessionStartPoint }> = [
     {
-      value: "__new__",
+      point: { kind: "new" },
       label: workspaceId && forceBranch
         ? `New stacked branch (off ${forceBranch})`
         : "New branch",
     },
-    ...worktrees.map((wt) => ({ value: wt.branch, label: wt.branch })),
+    ...worktrees.map((wt) => ({
+      point: { kind: "worktree" as const, branch: wt.branch },
+      label: wt.branch,
+    })),
   ];
   // The branch this palette starts on: a sibling's inside a workspace, a fresh
   // one everywhere else. Anything else is a deliberate pick, and one level
   // behind a button it has to light that button up to be visible at all.
-  const defaultWorktree = forceBranch || "__new__";
-  const branchPicked = mode === "code" && selectedWorktree !== defaultWorktree;
+  const branchPicked =
+    mode === "code" &&
+    (startPoint.kind === "pull-request" ||
+      (startPoint.kind === "worktree" && startPoint.branch !== forceBranch));
   // A row worth opening needs a second thing to pick. With no sibling
   // worktrees there is only "New branch", which is what a create does anyway.
   const showBranchPicker =
-    mode === "code" && (worktrees.length > 0 || selectedWorktree !== "__new__");
+    mode === "code" && (worktrees.length > 0 || startPoint.kind !== "new");
 
   // Which edges of the prompt earn a hairline. The field measures its own
   // scroller and reports; holding the previous object when nothing moved is
@@ -1437,6 +1494,10 @@ pendingDraftParks.delete(operation);
             ]}
             onChange={(nextRepo) => {
               setRepo(nextRepo);
+              // Picking a project is a fresh source choice, even when it is the
+              // same repo as the selected PR. Otherwise the title says Project
+              // while create_session still checks out the PR's existing branch.
+              setStartPoint(defaultStartPoint());
               // A plain pick is "work here", not "and here too": it replaces
               // the whole selection, which is what it did before any of this.
               // It does NOT become your default either — that is a setting
@@ -1630,6 +1691,18 @@ pendingDraftParks.delete(operation);
                 itself and wears the green the card and the composer's Ask pill
                 also wear, because read-only running silently is the one state
                 worth being loud about. */}
+            {!workspaceId && forceMode !== "scratch" && (
+              <NewSessionPrPicker
+                selected={selectedPullRequest}
+                disabled={busy}
+                onSelect={(pullRequest) => {
+                  setRepo(pullRequest.repo);
+                  setExtraRepos([]);
+                  setStartPoint({ kind: "pull-request", pullRequest });
+                }}
+                onClear={() => setStartPoint(defaultStartPoint())}
+              />
+            )}
             {!forceMode && (
               <Tooltip
                 label={
@@ -1687,18 +1760,26 @@ pendingDraftParks.delete(operation);
                       </span>
                     </Menu.SubmenuTrigger>
                     <Menu.Popup className="max-w-[min(340px,calc(100vw-1rem))]">
-                      {createFromOptions.map((opt) => (
-                        <Menu.Item
-                          key={opt.value}
-                          onClick={() => setSelectedWorktree(opt.value)}
-                        >
-                          <Menu.Check
-                            on={selectedWorktree === opt.value}
-                            className="text-dim"
-                          />
-                          <span className="min-w-0 truncate">{opt.label}</span>
-                        </Menu.Item>
-                      ))}
+                      {createFromOptions.map((opt) => {
+                        const selected =
+                          opt.point.kind === startPoint.kind &&
+                          (opt.point.kind !== "worktree" ||
+                            (startPoint.kind === "worktree" &&
+                              opt.point.branch === startPoint.branch));
+                        return (
+                          <Menu.Item
+                            key={
+                              opt.point.kind === "worktree"
+                                ? opt.point.branch
+                                : opt.point.kind
+                            }
+                            onClick={() => setStartPoint(opt.point)}
+                          >
+                            <Menu.Check on={selected} className="text-dim" />
+                            <span className="min-w-0 truncate">{opt.label}</span>
+                          </Menu.Item>
+                        );
+                      })}
                     </Menu.Popup>
                   </Menu.SubmenuRoot>
                 )}

@@ -86,6 +86,22 @@ export const msgStreamingRow = "msg-streaming [overflow-anchor:none]";
 export const msgBodyStreaming =
 	"msg-body msg-body-assistant block text-body leading-6 break-words text-fg";
 
+/** Provider reasoning summaries are activity, not answer hierarchy. Codex
+ * Desktop treats the generated `**title**` as chrome and keeps the body quiet;
+ * these do the same while leaving every summary visible in the timeline. */
+export const msgReasoningTitle =
+	"text-body font-normal leading-6 break-words text-dim";
+export const msgReasoningBody = `${msgBody} text-dim`;
+
+/** The current reasoning heading doubles as its loading indicator. This is the
+ * same restrained text shimmer as Queueing/Sending: a faint resting word with
+ * one dim crest, and base.css freezes it for reduced motion. */
+export const msgReasoningShimmer =
+	"bg-clip-text text-transparent [-webkit-background-clip:text] " +
+	"[background-image:linear-gradient(100deg,var(--text-faint)_38%,var(--text-dim)_50%,var(--text-faint)_62%)] " +
+	"[background-size:200%_100%] [background-repeat:no-repeat] " +
+	"animate-[text-shimmer_1.8s_linear_infinite]";
+
 /**
  * Type and measure shared by every notice line, pill or not. The
  * `.msg-system-text` name stays on both variants: base.css's selection policy

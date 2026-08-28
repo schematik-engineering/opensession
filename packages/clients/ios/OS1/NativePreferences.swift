@@ -92,6 +92,13 @@ enum NativePreferences {
         let changedIdentity = previousIdentity != identity || previousBucket != bucket
 
         set(
+            normalizedDefaultRepository(prefs["default-repo"]),
+            default: "",
+            key: "os1.composer.defaultRepo",
+            resetMissing: true,
+            in: defaults
+        )
+        set(
             prefs["default-model"],
             default: "",
             key: "os1.composer.defaultModel",
@@ -222,6 +229,14 @@ enum NativePreferences {
 
     private static func bucket(for context: Context) -> String {
         "\(context.server)|\(context.user.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
+    }
+
+    /// Older web clients briefly stored `auto` as a picker sentinel. It was
+    /// never a repository id, so it reads exactly like an explicit reset.
+    /// Missing remains nil so `set` can apply the account-level empty default.
+    static func normalizedDefaultRepository(_ value: String?) -> String? {
+        guard let value else { return nil }
+        return value == "auto" ? "" : value
     }
 
     private static func validated(_ value: String?, allowed: Set<String>) -> String? {

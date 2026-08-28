@@ -24,20 +24,14 @@ type DeferredMergeEntry = {
 const entries = new Map<string, DeferredMergeEntry>();
 const listeners = new Set<() => void>();
 let nextToken = 1;
-let version = 0;
 
 function emit() {
-	version++;
 	for (const listener of listeners) listener();
 }
 
 export function subscribeDeferredMerges(listener: () => void) {
 	listeners.add(listener);
 	return () => listeners.delete(listener);
-}
-
-export function deferredMergesVersion() {
-	return version;
 }
 
 /** The PR URL is shared by the session strip, review panel and preview routes. */

@@ -1,9 +1,16 @@
 import React, { useLayoutEffect, useSyncExternalStore } from "react";
 import { renderMarkdown } from "../lib/markdown";
 import type { LiveTurnStore } from "../lib/live-turn-store";
-import { msgBodyStreaming, msgRow, msgStreamingRow } from "../lib/msg-classes";
+import {
+	msgBodyStreaming,
+	msgReasoningShimmer,
+	msgReasoningTitle,
+	msgRow,
+	msgStreamingRow,
+} from "../lib/msg-classes";
 import { useOpenAssetPaths } from "../lib/open-asset";
 import { cn } from "../ui/cn";
+import { liveReasoningHeading } from "../lib/reasoning-display";
 import { MarkdownBody, useMarkdownRepo } from "./MarkdownBody";
 import { TranscriptBlocks } from "./TranscriptBlocks";
 
@@ -58,11 +65,19 @@ function StreamingMessage({
 	useLayoutEffect(() => {
 		onLayout?.();
 	}, [snapshot.revision, onLayout]);
-	const html = (snapshot.text
-				? renderMarkdown(snapshot.text, { repo, sessionId, assetPaths })
-				: "");
 	if (!snapshot.text) return null;
+	const reasoningHeading = liveReasoningHeading(snapshot.text);
+	if (reasoningHeading) {
+		return (
+			<div className={cn(msgRow, msgStreamingRow, "mb-2")} role="status">
+				<span className={cn(msgReasoningTitle, msgReasoningShimmer)}>
+					{reasoningHeading}
+				</span>
+			</div>
+		);
+	}
 
+	const html = renderMarkdown(snapshot.text, { repo, sessionId, assetPaths });
 	// Always rendered, never raw source: the server cuts frames at block
 	// boundaries, so what arrives here is markdown that stands on its own.
 	return (

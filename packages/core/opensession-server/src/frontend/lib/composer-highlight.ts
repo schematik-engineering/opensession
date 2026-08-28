@@ -26,6 +26,36 @@ export interface MentionRange {
 	github?: string;
 }
 
+/** One model-readable selected-area reference added from an attachment preview. */
+export interface ImageAttachmentRange {
+	start: number;
+	end: number;
+	attachmentIndex: number;
+}
+
+const IMAGE_ATTACHMENT_RE =
+	/\[Image (\d+) · \d+–\d+% × \d+–\d+%\]/g;
+
+export function composerImageAttachmentRanges(
+	text: string,
+): ImageAttachmentRange[] {
+	if (!text.includes("[Image ")) return [];
+	const ranges: ImageAttachmentRange[] = [];
+	IMAGE_ATTACHMENT_RE.lastIndex = 0;
+	for (
+		let match = IMAGE_ATTACHMENT_RE.exec(text);
+		match;
+		match = IMAGE_ATTACHMENT_RE.exec(text)
+	) {
+		ranges.push({
+			start: match.index,
+			end: match.index + match[0].length,
+			attachmentIndex: Number(match[1]) - 1,
+		});
+	}
+	return ranges;
+}
+
 /** An `@` that starts a word, and the name after it. */
 const MENTION_RE = /(^|[\s(\[])@([A-Za-z][\w.-]*)/g;
 /** What may follow a name for it to count as finished. */
@@ -146,7 +176,7 @@ export function composerSessionRanges(text: string): SessionRange[] {
 }
 
 /** Both kinds of pill, in the order they appear in the draft. */
-type DraftRange = MentionRange | SessionRange;
+type DraftRange = MentionRange | SessionRange | ImageAttachmentRange;
 
 function draftRanges(
 	text: string,
@@ -156,6 +186,7 @@ function draftRanges(
 	const ranges: DraftRange[] = [
 		...composerMentionRanges(text, people),
 		...sessions,
+		...composerImageAttachmentRanges(text),
 	];
 	// A person mention and a stable reference cannot overlap. Sorting by start
 	// is enough to walk them as one list.
@@ -205,6 +236,13 @@ function mentionHtml(text: string, range: MentionRange): string {
  * unknown session keeps its id and lends its prefix to the chat glyph. An
  * unknown workspace keeps its explicit token intact.
  */
+function imageAttachmentHtml(
+	text: string,
+	range: ImageAttachmentRange,
+): string {
+	return `<span class="cmp-image-attachment">${esc(text.slice(range.start, range.end))}</span>`;
+}
+
 function sessionHtml(text: string, range: SessionRange): string {
 	const shown = text.slice(range.start, range.end);
 	const leadingMargin = shown.startsWith(SESSION_PILL_MARGIN)
@@ -261,7 +299,12 @@ function chips(
 	for (const range of ranges) {
 		if (range.start < last || range.end > to) continue;
 		out += esc(text.slice(last, range.start));
-		out += "id" in range ? sessionHtml(text, range) : mentionHtml(text, range);
+		out +=
+			"attachmentIndex" in range
+				? imageAttachmentHtml(text, range)
+				: "id" in range
+					? sessionHtml(text, range)
+					: mentionHtml(text, range);
 		last = range.end;
 	}
 	return out + esc(text.slice(last, to));
@@ -443,6 +486,7 @@ export function needsComposerHighlight(
 	return (
 		text.includes("`") ||
 		composerMentionRanges(text, people).length > 0 ||
+		composerImageAttachmentRanges(text).length > 0 ||
 		sessions.length > 0
 	);
 }

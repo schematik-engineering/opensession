@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
+	buildBranchNote,
 	planCreateAttachRepos,
 	resolvePrTarget,
 	resolveSessionRepoContext,
@@ -21,6 +22,7 @@ beforeAll(() => {
 	writeFileSync(
 		configPath,
 		JSON.stringify({
+			paths: { worktreesDir: join(configDir, "worktrees") },
 			repos: {
 				opensession: { repo: process.cwd(), sharedCheckout: true, default: true },
 				"tella-fusion": { repo: join(configDir, "attached") },
@@ -53,6 +55,25 @@ const session = {
 		},
 	],
 };
+
+describe("buildBranchNote", () => {
+	test("allows an ordinary PR to merge only after the current review and checks pass", () => {
+		const note = buildBranchNote({
+			mode: "code",
+			branch: "ready-after-review",
+			worktreeDir: join(
+				configDir,
+				"worktrees/tella-fusion-ready-after-review",
+			),
+		});
+
+		expect(note).toContain("you may merge it yourself");
+		expect(note).toContain("latest Open Session review covers the current head");
+		expect(note).toContain("reports no blocking findings");
+		expect(note).toContain("all required checks have passed");
+		expect(note).toContain("Do not merge while the review is stale");
+	});
+});
 
 describe("resolveSessionRepoContext", () => {
 	test("defaults to the primary repo", () => {
