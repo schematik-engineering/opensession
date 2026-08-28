@@ -130,7 +130,7 @@ export function getTranscriptPath(
 export function getEngineTranscriptPath(
   worktreeDir: string,
   engineSessionId: string,
-  provider: "claude" | "codex" | "pi",
+  provider: "claude" | "codex" | "pi" | "grok" | "cursor",
 ): string | null {
   if (provider === "codex") {
     return findCodexRollout(engineSessionId)?.path || null;
@@ -138,7 +138,8 @@ export function getEngineTranscriptPath(
   // Pi has no per-session file at all: the pi runner persists every turn
   // straight into the owned transcript store (viewers stream over the store
   // bus, readers go through readEngineTranscript's pi branch below).
-  if (provider === "pi") return null;
+  if (provider === "pi" || provider === "grok" || provider === "cursor")
+    return null;
   return getTranscriptPath(worktreeDir, engineSessionId);
 }
 
@@ -152,9 +153,10 @@ export function getEngineTranscriptPath(
 export function readEngineTranscript(
   worktreeDir: string,
   engineSessionId: string,
-  provider: "claude" | "codex" | "pi",
+  provider: "claude" | "codex" | "pi" | "grok" | "cursor",
 ): TranscriptEntry[] {
-  if (provider === "pi") return engineStoreTranscript(engineSessionId);
+  if (provider === "pi" || provider === "grok" || provider === "cursor")
+    return engineStoreTranscript(engineSessionId);
   const path = getEngineTranscriptPath(worktreeDir, engineSessionId, provider);
   if (!path || !existsSync(path)) return engineStoreTranscript(engineSessionId);
   return parseTranscript(path);
@@ -166,9 +168,10 @@ export function readEngineTranscript(
 export async function readEngineTranscriptAsync(
   worktreeDir: string,
   engineSessionId: string,
-  provider: "claude" | "codex" | "pi",
+  provider: "claude" | "codex" | "pi" | "grok" | "cursor",
 ): Promise<TranscriptEntry[]> {
-  if (provider === "pi") return engineStoreTranscriptAsync(engineSessionId);
+  if (provider === "pi" || provider === "grok" || provider === "cursor")
+    return engineStoreTranscriptAsync(engineSessionId);
   const path = getEngineTranscriptPath(worktreeDir, engineSessionId, provider);
   if (!path || !existsSync(path))
     return engineStoreTranscriptAsync(engineSessionId);
@@ -183,9 +186,9 @@ export async function readEngineTranscriptAsync(
 export async function readEngineHandoffTranscriptAsync(
   worktreeDir: string,
   engineSessionId: string,
-  provider: "claude" | "codex" | "pi",
+  provider: "claude" | "codex" | "pi" | "grok" | "cursor",
 ): Promise<TranscriptEntry[]> {
-  if (provider === "pi")
+  if (provider === "pi" || provider === "grok" || provider === "cursor")
     return engineStoreHandoffTranscriptAsync(engineSessionId);
   const path = getEngineTranscriptPath(worktreeDir, engineSessionId, provider);
   if (!path || !existsSync(path))
@@ -248,6 +251,8 @@ function engineStoreOwner(engineSessionId: string): UnifiedSession | undefined {
         (s) =>
           s.piSessionId === engineSessionId ||
           s.codexThreadId === engineSessionId ||
+          s.grokSessionId === engineSessionId ||
+          s.cursorSessionId === engineSessionId ||
           s.claudeSessionId === engineSessionId,
       )
     );
@@ -508,12 +513,16 @@ export async function trailingUserTexts(session: {
 }
 
 export function engineSessionPatch(
-  provider: "claude" | "codex" | "pi",
+  provider: "claude" | "codex" | "pi" | "grok" | "cursor",
   engineSessionId: string,
 ): Partial<NativeSessionFile> {
   if (provider === "codex")
     return { codexThreadId: engineSessionId || undefined };
   if (provider === "pi") return { piSessionId: engineSessionId || undefined };
+  if (provider === "grok")
+    return { grokSessionId: engineSessionId || undefined };
+  if (provider === "cursor")
+    return { cursorSessionId: engineSessionId || undefined };
   return { claudeSessionId: engineSessionId || undefined };
 }
 
@@ -522,12 +531,16 @@ export function engineSessionIdFor(
     claudeSessionId?: string | null;
     codexThreadId?: string | null;
     piSessionId?: string | null;
+    grokSessionId?: string | null;
+    cursorSessionId?: string | null;
   },
-  provider: "claude" | "codex" | "pi",
+  provider: "claude" | "codex" | "pi" | "grok" | "cursor",
 ): string | undefined {
   if (provider === "codex") return session.codexThreadId || undefined;
   if (provider === "pi")
     return session.piSessionId || session.claudeSessionId || undefined;
+  if (provider === "grok") return session.grokSessionId || undefined;
+  if (provider === "cursor") return session.cursorSessionId || undefined;
   return session.claudeSessionId || undefined;
 }
 
@@ -536,6 +549,8 @@ function sessionEngineKeys(session: UnifiedSession): string[] {
     session.claudeSessionId ? `claude:${session.claudeSessionId}` : null,
     session.codexThreadId ? `codex:${session.codexThreadId}` : null,
     session.piSessionId ? `pi:${session.piSessionId}` : null,
+    session.grokSessionId ? `grok:${session.grokSessionId}` : null,
+    session.cursorSessionId ? `cursor:${session.cursorSessionId}` : null,
   ].filter((key): key is string => !!key);
 }
 
@@ -942,6 +957,8 @@ function nativeSessionRow(data: NativeSessionFile): UnifiedSession {
     accountId: data.accountId,
     codexThreadId: data.codexThreadId,
     piSessionId: data.piSessionId,
+    grokSessionId: data.grokSessionId,
+    cursorSessionId: data.cursorSessionId,
     lastEngineProvider: data.lastEngineProvider,
     lastEngineModel: data.lastEngineModel,
     modelHistory: data.modelHistory,

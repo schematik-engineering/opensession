@@ -179,6 +179,55 @@ export const INTEGRATIONS: IntegrationSpec[] = [
     },
   },
   {
+    id: "discord",
+    label: "Discord",
+    doc: "docs/setup/discord.md",
+    enableFlag: "ENABLE_DISCORD_AGENT",
+    env: [
+      {
+        name: "DISCORD_APPLICATION_ID",
+        required: true,
+        description: "Discord application and bot user id",
+      },
+      {
+        name: "DISCORD_BOT_TOKEN_FILE",
+        requiredWhen: (present) => !present("DISCORD_BOT_TOKEN"),
+        description: "mode-0600 file containing the bot token",
+      },
+      {
+        name: "DISCORD_BOT_TOKEN",
+        description: "bot token fallback when a projected file is unavailable",
+      },
+      {
+        name: "DISCORD_GUILD_IDS",
+        required: true,
+        description: "comma-separated allowlist of Discord guild ids",
+      },
+      {
+        name: "DISCORD_CHANNEL_IDS",
+        description: "optional channel and parent-channel allowlist",
+      },
+      {
+        name: "DISCORD_USER_IDS",
+        description: "optional user allowlist; required for direct messages",
+      },
+      {
+        name: "DISCORD_DEFAULT_MODEL",
+        description: "model id for new Discord sessions",
+      },
+    ],
+    links: [
+      {
+        label: "Discord Developer Portal",
+        url: "https://discord.com/developers/applications",
+      },
+    ],
+    load: async () => {
+      const { DiscordAgent } = await import("../../agents/discord/index");
+      return new DiscordAgent();
+    },
+  },
+  {
     id: "stripe",
     label: "Stripe",
     doc: "docs/setup/integrations-misc.md#stripe",

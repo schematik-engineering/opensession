@@ -1,6 +1,6 @@
 import { LiveTextBuffer } from "@tellahq/opensession-protocol/live-text";
 import type { SessionLiveEvent } from "@tellahq/opensession-protocol/session";
-import { emitSessionStateChange } from "./session-state-events";
+import { setPrimarySessionRunning } from "./session-state-events";
 
 /**
  * Ordered, bounded feed for the live half of a session.
@@ -115,6 +115,20 @@ export function appendSessionFeed(
 ): SessionFeedFrame {
   const state = stateFor(sessionId);
   const type = event.type;
+  // A workflow can outlive the model turn that launched it. Record the raw
+  // primary boundary, but put the aggregate state on the wire so stream_done
+  // cannot make the session look idle while background work is still live.
+  let feedEvent = event;
+  if (event.type === "stream_start") {
+    setPrimarySessionRunning(sessionId, true);
+  } else if (event.type === "stream_done") {
+    setPrimarySessionRunning(sessionId, false);
+  } else if (event.type === "session_status") {
+    feedEvent = {
+      ...event,
+      isRunning: setPrimarySessionRunning(sessionId, event.isRunning),
+    };
+  }
 
   if (event.type === "stream_start") {
     const runId = crypto.randomUUID();
@@ -154,7 +168,7 @@ export function appendSessionFeed(
         }
       : {}),
     phase: phaseFor(type),
-    event,
+    event: feedEvent,
   };
   state.frames.push(frame);
   state.bytes += JSON.stringify(frame).length;
@@ -168,21 +182,6 @@ export function appendSessionFeed(
   if (type === "stream_done") {
     state.active = null;
     state.live.reset();
-  }
-  const running =
-    event.type === "stream_start"
-      ? true
-      : event.type === "stream_done"
-        ? false
-        : event.type === "session_status"
-          ? event.isRunning
-          : undefined;
-  if (typeof running === "boolean") {
-    emitSessionStateChange({
-      sessionId,
-      isRunning: running,
-      at: Date.now(),
-    });
   }
   return frame;
 }

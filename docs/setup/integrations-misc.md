@@ -9,7 +9,7 @@ push, transcription, AWS credentials, and account health do not use this
 registry.
 
 - Every registry integration is **off by default**.
-- Flags: `ENABLE_PLAIN_AGENT`, `ENABLE_LINEAR_AGENT`, `ENABLE_SLACK_AGENT`,
+- Flags: `ENABLE_PLAIN_AGENT`, `ENABLE_LINEAR_AGENT`, `ENABLE_SLACK_AGENT`, `ENABLE_DISCORD_AGENT`,
   `ENABLE_STRIPE_AGENT`, `ENABLE_GRAFANA_POLLER`, `ENABLE_GITHUB_AGENT`, and
   `ENABLE_CODESTORAGE`.
 - **Only the literal string `true` enables via env.** For example,

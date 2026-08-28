@@ -197,6 +197,26 @@ describe("session kernel service deployment", () => {
     expect(stopGateway).toBeGreaterThan(stopCanary);
   });
 
+  test("rollback to a pre-ingress release restores direct gateway binding", async () => {
+    const rootDeploy = await Bun.file(
+      resolve(repoRoot, "deploy/deploy.sh"),
+    ).text();
+    const legacyStart = rootDeploy.indexOf(
+      'if [ ! -f "$CURRENT_LINK/packages/core/opensession-server/src/server/gateway-ingress.ts" ]',
+    );
+    const legacyEnd = rootDeploy.indexOf("elif ! grep -q", legacyStart);
+    const legacyRollback = rootDeploy.slice(legacyStart, legacyEnd);
+    expect(legacyStart).toBeGreaterThan(0);
+    expect(legacyEnd).toBeGreaterThan(legacyStart);
+    expect(legacyRollback).toContain(
+      "systemctl disable --now opensession.socket",
+    );
+    expect(legacyRollback).not.toContain('"$CURRENT_LINK/opensession.socket"');
+    expect(legacyRollback).not.toContain(
+      "systemctl enable --now opensession.socket",
+    );
+  });
+
   test("dedicated ingress survives ordinary gateway and peer replacement", async () => {
     const rootDeploy = await Bun.file(
       resolve(repoRoot, "deploy/deploy.sh"),

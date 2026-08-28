@@ -5,6 +5,8 @@ import { modelVendor } from "./model-engine";
 const VENDOR_BRANDS: Record<string, string> = {
   anthropic: "claude",
   openai: "codex",
+  grok: "xai",
+  cursor: "cursor",
 };
 
 /** Resolve one concrete model id to its product-facing brand mark. */

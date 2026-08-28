@@ -1279,9 +1279,7 @@ if (!g.__opensessionBooted) {
   // A prebuilt bundle (compiled binary's embedded assets, or a release
   // tarball's .frontend-dist) has no src/frontend tree to watch.
   if (!IS_DEV && frontend && isPrebuiltFrontend()) {
-    console.log(
-      "[frontend] Prebuilt bundle: source watch and SIGUSR2 rebuilds are off",
-    );
+    console.log("[frontend] Prebuilt bundle: source rebuilds are off");
   } else if (!IS_DEV && frontend) {
     try {
       const watcher = watch(FRONTEND_SRC, { recursive: true }, (_evt, file) => {
@@ -1293,11 +1291,10 @@ if (!g.__opensessionBooted) {
       console.log(`[frontend] Watching ${FRONTEND_SRC} for live rebuilds`);
     } catch (e) {
       console.error(
-        "[frontend] Could not start file-watch (use SIGUSR2/endpoint to rebuild):",
+        "[frontend] Could not start file-watch (use /api/rebuild-frontend):",
         e,
       );
     }
-    process.on("SIGUSR2", () => scheduleFrontendRebuild("SIGUSR2", 0));
   }
 
   // One-time (marker-guarded): when GitHub web sign-in is active, backfill

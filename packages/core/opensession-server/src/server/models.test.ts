@@ -11,8 +11,10 @@ import {
   modelEfforts,
   modelEngineKey,
   modelLabel,
+  modelSupportsSteer,
   nextFallbackModel,
   piModelLabel,
+  providerFor,
   resolveModel,
   routeModel,
   toPiModel,
@@ -44,6 +46,23 @@ afterEach(() => {
 });
 
 describe("Pi-only model routing", () => {
+  test("keeps official subscription ACP models on their own engines", () => {
+    expect(resolveModel("grok/grok-4.6")?.id).toBe("grok/grok-4.6");
+    expect(resolveModel("cursor/auto")?.id).toBe("cursor/auto");
+    expect(routeModel("grok/grok-4.6")).toEqual({
+      engine: "grok",
+      model: "grok/grok-4.6",
+    });
+    expect(routeModel("cursor/auto")).toEqual({
+      engine: "cursor",
+      model: "cursor/auto",
+    });
+    expect(providerFor("grok/grok-4.6")).toBe("grok");
+    expect(providerFor("cursor/auto")).toBe("cursor");
+    expect(modelSupportsSteer("grok/grok-4.6")).toBe(false);
+    expect(modelSupportsSteer("cursor/auto")).toBe(false);
+  });
+
   test("maps native model ids to Pi", () => {
     expect(toPiModel("claude-opus-5")).toBe("pi/anthropic/claude-opus-5");
     expect(toPiModel("gpt-5.6-sol")).toBe("pi/openai/gpt-5.6-sol");

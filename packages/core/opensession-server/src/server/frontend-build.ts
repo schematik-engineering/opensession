@@ -1013,10 +1013,12 @@ export function sharedCheckoutEditors(
 }
 
 // Debounced in-process rebuild + client nudge. Triggered by the frontend
-// file-watch, a SIGUSR2 signal, or POST /api/rebuild-frontend — all of
-// which replace the "systemctl restart to see my CSS change" habit that was
-// interrupting every live Claude run. Clients get a non-intrusive refresh toast;
-// the bundle is served from the mutated `frontend` object with no restart.
+// file watcher or POST /api/rebuild-frontend, replacing the "systemctl restart
+// to see my CSS change" habit that interrupted every live Claude run. Lifecycle
+// signals stay exclusively owned by graceful shutdown so a gateway handoff can
+// never start build work in the process it is trying to drain. Clients get a
+// non-intrusive refresh toast; the bundle is served from the mutated `frontend`
+// object with no restart.
 let rebuildTimer: ReturnType<typeof setTimeout> | null = null;
 let rebuildInFlight = false;
 // The shared checkout means agents save half-finished edits constantly; every

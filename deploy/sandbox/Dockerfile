@@ -20,6 +20,8 @@ FROM ubuntu:24.04
 # --- version pins (bump these when the host bumps; see README) ---
 ARG BUN_VERSION=1.4.0
 ARG CLAUDE_VERSION=2.1.218
+ARG GROK_VERSION=1.0.5
+ARG CURSOR_AGENT_BUILD=2026.08.25-3e8eec8
 ARG NODE_MAJOR=24
 
 # Locale parity note: the host runs a full en_US.UTF-8 locale; the image uses
@@ -114,6 +116,32 @@ RUN curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_VERSION}" \
          "${CLAUDE_VERSION}"|"${CLAUDE_VERSION} "*) echo "claude ${installed} OK" ;; \
          *) echo "claude version mismatch: got '$installed', want ${CLAUDE_VERSION}"; exit 1 ;; \
        esac
+
+# --- subscription-backed ACP agents (official installers/artifacts, pinned) ---
+# Grok's official installer accepts an exact semantic version. Keep its binary
+# in ~/.local/bin so the runner's fixed PATH finds it without mounting a host
+# install or provider state.
+RUN curl -fsSL https://x.ai/cli/install.sh \
+        | GROK_BIN_DIR=/home/ubuntu/.local/bin bash -s "${GROK_VERSION}" \
+    && installed="$(/home/ubuntu/.local/bin/grok --version)" \
+    && case "$installed" in \
+         "grok ${GROK_VERSION} "*) echo "${installed} OK" ;; \
+         *) echo "grok version mismatch: got '$installed', want ${GROK_VERSION}"; exit 1 ;; \
+       esac
+
+# Cursor's official installer publishes immutable build-addressed packages.
+# Download that package directly rather than executing the moving installer;
+# the build id is both the URL pin and the CLI's asserted version output.
+RUN tmp="$(mktemp -d)" \
+    && curl -fsSL "https://downloads.cursor.com/lab/${CURSOR_AGENT_BUILD}/linux/x64/agent-cli-package.tar.gz" \
+       | tar --strip-components=1 -xzf - -C "$tmp" \
+    && mkdir -p "/home/ubuntu/.local/share/cursor-agent/versions/${CURSOR_AGENT_BUILD}" \
+    && cp -a "$tmp/." "/home/ubuntu/.local/share/cursor-agent/versions/${CURSOR_AGENT_BUILD}/" \
+    && rm -rf "$tmp" \
+    && ln -sf "/home/ubuntu/.local/share/cursor-agent/versions/${CURSOR_AGENT_BUILD}/cursor-agent" /home/ubuntu/.local/bin/cursor-agent \
+    && ln -sf "/home/ubuntu/.local/share/cursor-agent/versions/${CURSOR_AGENT_BUILD}/cursor-agent" /home/ubuntu/.local/bin/agent \
+    && installed="$(/home/ubuntu/.local/bin/cursor-agent --version)" \
+    && test "$installed" = "${CURSOR_AGENT_BUILD}"
 
 # --- Open Session runner bundle ---
 # Deps first for layer caching: only re-installs when the package manifest,

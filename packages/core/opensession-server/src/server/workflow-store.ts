@@ -25,7 +25,11 @@ import {
 } from "fs";
 import { stateDir } from "./paths";
 import { writeFileAtomic, writeJsonAtomic } from "./shared/atomic-write";
-import { broadcastToSession } from "./ws-hub";
+import { broadcastSessionActivityStatus, broadcastToSession } from "./ws-hub";
+import {
+  holdSessionRunning,
+  releaseSessionRunning,
+} from "./session-state-events";
 import {
   WORKFLOW_LIMITS,
   type WorkflowJournalRecord,
@@ -35,6 +39,10 @@ import {
 const g = globalThis as any;
 
 type LiveWorkflow = { snapshot: WorkflowRunSnapshot; cancel: () => void };
+
+function workflowRunningKey(runId: string): string {
+  return `workflow:${runId}`;
+}
 
 /** runId → live snapshot + cancel hook (hot-reload survivable). */
 const liveWorkflows: Map<string, LiveWorkflow> = (g.__opensessionWorkflows ??=
@@ -167,7 +175,9 @@ export function createWorkflowRun(init: {
     snapshot,
     cancel: existing?.cancel ?? (() => {}),
   });
+  holdSessionRunning(init.sessionId, workflowRunningKey(init.runId));
   broadcastSnapshot(snapshot);
+  broadcastSessionActivityStatus(init.sessionId, true);
   return snapshot;
 }
 
@@ -249,7 +259,12 @@ export function registerLiveWorkflow(runId: string, cancel: () => void): void {
 }
 
 export function unregisterLiveWorkflow(runId: string): void {
+  const live = liveWorkflows.get(runId);
   liveWorkflows.delete(runId);
+  if (!live) return;
+  const sessionId = live.snapshot.sessionId;
+  const isRunning = releaseSessionRunning(sessionId, workflowRunningKey(runId));
+  broadcastSessionActivityStatus(sessionId, isRunning);
 }
 
 /** Invoke a live run's cancel hook. False when the run isn't live here. */

@@ -699,7 +699,9 @@ registerSessionControl({
     if (
       completedCreate?.claudeSessionId ||
       completedCreate?.codexThreadId ||
-      completedCreate?.piSessionId
+      completedCreate?.piSessionId ||
+      completedCreate?.grokSessionId ||
+      completedCreate?.cursorSessionId
     ) {
       clearCreatePlan(bksId);
       return {

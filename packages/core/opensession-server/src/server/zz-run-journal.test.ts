@@ -527,10 +527,36 @@ describe("run journal", () => {
     }
   });
 
-  it("does not let a stale gateway projection replace the actor's start owner", async () => {
-    const sessionId = `actor-preparation-winner-${crypto.randomUUID()}`;
-    const firstToken = await agent.markSessionStarting(sessionId);
-    agent.unmarkSessionStarting(sessionId, firstToken);
+  it("replaces an actor start owner only after every physical owner is gone", async () => {
+    const sessionId = `actor-preparation-orphan-${crypto.randomUUID()}`;
+    const orphanedToken = await agent.markSessionStarting(sessionId);
+    agent.unmarkSessionStarting(sessionId, orphanedToken);
+    const replacementToken = await agent.markSessionStarting(sessionId);
+    try {
+      expect(agent.isAgentSessionCancelled(sessionId, replacementToken)).toBe(
+        false,
+      );
+      expect(agent.currentAgentRunToken(sessionId)).toBe(replacementToken);
+      expect(__sessionKernelStoreForTest().runState(sessionId)).toMatchObject({
+        state: "starting",
+        currentRunId: replacementToken,
+      });
+    } finally {
+      agent.unmarkSessionStarting(sessionId, replacementToken);
+      await clearRunState(sessionId);
+    }
+  });
+
+  it("keeps an orphan-looking actor owner when its journal is still live", async () => {
+    const sessionId = `actor-preparation-journal-${crypto.randomUUID()}`;
+    const ownerToken = await agent.markSessionStarting(sessionId);
+    agent.unmarkSessionStarting(sessionId, ownerToken);
+    await mod.journalSet({
+      runKey: ownerToken,
+      osSessionId: sessionId,
+      cwd: "/tmp",
+      startedAt: new Date().toISOString(),
+    });
     const rejectedToken = await agent.markSessionStarting(sessionId);
     try {
       expect(agent.isAgentSessionCancelled(sessionId, rejectedToken)).toBe(
@@ -538,11 +564,12 @@ describe("run journal", () => {
       );
       expect(agent.currentAgentRunToken(sessionId)).toBeUndefined();
       expect(__sessionKernelStoreForTest().runState(sessionId)).toMatchObject({
-        state: "starting",
-        currentRunId: firstToken,
+        state: "running",
+        currentRunId: ownerToken,
       });
     } finally {
       agent.unmarkSessionStarting(sessionId, rejectedToken);
+      mod.journalClear(ownerToken);
       await clearRunState(sessionId);
     }
   });

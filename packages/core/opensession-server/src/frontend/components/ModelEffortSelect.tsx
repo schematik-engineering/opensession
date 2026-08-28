@@ -89,6 +89,8 @@ export const ENGINE_LABELS: Record<string, string> = {
   claude: "Claude",
   codex: "Codex",
   pi: "Pi",
+  grok: "SuperGrok",
+  cursor: "Cursor",
 };
 
 /** De-emphasized group name for the native Claude-SDK/Codex entries that stick
@@ -276,7 +278,7 @@ const MODEL_TAIL_ORDER = [
 ];
 
 /** The engine providers whose entries form the first-class model list. */
-const ENGINE_PROVIDERS = new Set(["pi"]);
+const ENGINE_PROVIDERS = new Set(["pi", "grok", "cursor"]);
 
 /**
  * Split the registry into the first-class Pi entries and current canonical
@@ -570,7 +572,7 @@ export function ModelEffortSelect({
       otherOptions.length;
     // No-engine fallback only: "Other models" grouped by engine. With
     // engine present the submenu is the flat legacy list instead.
-    const engineOrder = ["pi", "claude", "codex"];
+    const engineOrder = ["pi", "grok", "cursor", "claude", "codex"];
     const engines = [
       ...engineOrder,
       ...otherOptions
@@ -587,8 +589,8 @@ export function ModelEffortSelect({
     // Main-list sections by upstream provider (Anthropic / OpenAI / xAI / …) —
     // a flat list stops scanning well once third-party providers join the
     // picker. Falls back to flat when everything is one provider.
-    const providerOf = (id: string) =>
-      routedModelParts(id)?.provider || "other";
+    const providerOf = (option: ModelMenuOption) =>
+      routedModelParts(option.id)?.provider || option.engine || "other";
     const providerGroups: Array<{
       provider: string;
       label: string;
@@ -596,7 +598,7 @@ export function ModelEffortSelect({
     }> = [];
     for (const option of primaryOptions) {
       // A registry group ("dial") overrides provider-segment grouping.
-      const provider = option.group || providerOf(option.id);
+      const provider = option.group || providerOf(option);
       let group = providerGroups.find((g) => g.provider === provider);
       if (!group) {
         group = {

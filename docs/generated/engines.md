@@ -50,6 +50,15 @@ engine and dispatch id `routeModel()` returns for it.
 | `gpt-5.4` | GPT-5.4 (Codex) | pi | `pi/openai/gpt-5.6-sol` |
 | `gpt-5.4-mini` | GPT-5.4 mini (Codex) | pi | `pi/openai/gpt-5.6-luna` |
 | `gpt-5.3-codex-spark` | GPT-5.3 Codex Spark | pi | `pi/openai/gpt-5.6-luna` |
+| `grok/grok-4.6` | Grok 4.6 · SuperGrok | grok | `grok/grok-4.6` |
+| `grok/grok-4.5` | Grok 4.5 · SuperGrok | grok | `grok/grok-4.5` |
+| `cursor/auto` | Auto · Cursor | cursor | `cursor/auto` |
+| `cursor/grok-4.6` | Grok 4.6 · Cursor | cursor | `cursor/grok-4.6` |
+| `cursor/composer-2.5` | Composer 2.5 · Cursor | cursor | `cursor/composer-2.5` |
+| `cursor/claude-opus-5` | Opus 5 · Cursor | cursor | `cursor/claude-opus-5` |
+| `cursor/gpt-5.6-sol` | GPT-5.6-sol · Cursor | cursor | `cursor/gpt-5.6-sol` |
+| `cursor/claude-sonnet-5` | Sonnet 5 · Cursor | cursor | `cursor/claude-sonnet-5` |
+| `cursor/gemini-3.7-flash` | Gemini 3.7-flash · Cursor | cursor | `cursor/gemini-3.7-flash` |
 | `dial/ultra` | Dial · Ultra | pi | `pi/anthropic/claude-fable-5` |
 | `dial/high` | Dial · High | pi | `pi/openai/gpt-5.6-sol` |
 | `dial/medium` | Dial · Medium | pi | `pi/openai/gpt-5.6-sol` |

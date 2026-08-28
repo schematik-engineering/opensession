@@ -62,7 +62,11 @@ export function sessionHasJournaledRun(
   sessionId: string,
   data?: Pick<
     NativeSessionFile,
-    "claudeSessionId" | "codexThreadId" | "piSessionId"
+    | "claudeSessionId"
+    | "codexThreadId"
+    | "piSessionId"
+    | "grokSessionId"
+    | "cursorSessionId"
   >,
 ): boolean {
   const engineIds = new Set(
@@ -71,6 +75,8 @@ export function sessionHasJournaledRun(
       data?.claudeSessionId,
       data?.codexThreadId,
       data?.piSessionId,
+      data?.grokSessionId,
+      data?.cursorSessionId,
     ].filter(Boolean) as string[],
   );
   return journaledRuns().some(

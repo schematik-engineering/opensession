@@ -5,7 +5,11 @@ import {
   resumeSessionFeed,
   sessionFeedSnapshot,
 } from "./session-feed";
-import { onSessionStateChange } from "./session-state-events";
+import {
+  holdSessionRunning,
+  onSessionStateChange,
+  releaseSessionRunning,
+} from "./session-state-events";
 import { publishTranscript, subscribeTranscript } from "./transcript-bus";
 
 type FeedAppend = Extract<
@@ -293,5 +297,25 @@ describe("session feed", () => {
       unsubscribe();
     }
     expect(states).toEqual([true, false]);
+  });
+
+  test("a background activity keeps the session running after its turn ends", () => {
+    const sessionId = `feed-${crypto.randomUUID()}`;
+    const key = "workflow:wf-1";
+    appendSessionFeed(sessionId, { type: "stream_start", sessionId });
+    holdSessionRunning(sessionId, key);
+
+    appendSessionFeed(sessionId, { type: "stream_done", sessionId });
+    const status = appendSessionFeed(sessionId, {
+      type: "session_status",
+      sessionId,
+      isRunning: false,
+    });
+    expect(status.event).toMatchObject({
+      type: "session_status",
+      isRunning: true,
+    });
+
+    expect(releaseSessionRunning(sessionId, key)).toBe(false);
   });
 });

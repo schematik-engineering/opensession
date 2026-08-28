@@ -155,7 +155,7 @@ export interface StreamEvent {
    */
   featuredMedia?: string[];
   /** Which backend emitted this event (set on init/done). */
-  provider?: "claude" | "codex" | "pi";
+  provider?: "claude" | "codex" | "pi" | "grok" | "cursor";
   /** Effective model for the run (set on init/done). */
   model?: string;
   /**

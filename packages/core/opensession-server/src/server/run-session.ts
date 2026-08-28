@@ -156,6 +156,7 @@ import {
   acknowledgePromptDispatch,
   acknowledgeSteerDelivery,
   failPromptDispatch,
+  recoverUnownedPromptDispatch,
   isGitHubQueueItem,
   persistQueues,
   promptDispatches,
@@ -1322,7 +1323,7 @@ export function attachSessionWatchersToEngineTranscript(
   // "pi" and "pi" resolve to no transcript path (both keep their turns
   // in the owned store); those sessions stream through run events only, so
   // this attaches nothing for them.
-  provider: "claude" | "codex" | "pi",
+  provider: "claude" | "codex" | "pi" | "grok" | "cursor",
   cwd: string,
   engineSessionId: string,
   attempt = 0,
@@ -1405,16 +1406,21 @@ async function drainQueueInner(sessionId: string): Promise<void> {
     // last batch lost the start race and got re-queued) — hand off to the
     // idle-watcher instead of busy-spinning runs that immediately bounce.
     const session = findSession(sessionId);
-    if (
-      session &&
+    const ownerActive = () =>
       isAgentSessionBusy(
-        session.claudeSessionId,
-        session.codexThreadId,
-        session.id,
-      )
-    ) {
+        session?.claudeSessionId,
+        session?.codexThreadId,
+        sessionId,
+      );
+    if (ownerActive()) {
       watchExternalRunAndDrain(sessionId);
       return;
+    }
+    if (await recoverUnownedPromptDispatch(sessionId, ownerActive)) {
+      console.warn(
+        `[queue] Restored an unowned prompt dispatch before draining ${sessionId}`,
+      );
+      continue;
     }
     // Batch selection lives in the actor's pure queue reducer: a solo
     // interrupt (queue chip ▲) delivers one item, a head auto-continue

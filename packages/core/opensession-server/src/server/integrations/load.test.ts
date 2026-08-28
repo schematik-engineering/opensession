@@ -32,6 +32,7 @@ describe("integration registry", () => {
       "plain",
       "linear",
       "slack",
+      "discord",
       "stripe",
       "grafana",
       "github",

@@ -7,6 +7,7 @@ import {
   maintainSessionKernel,
   sessionIsQuarantined,
   sessionRunStateProjections,
+  sessionTombstoneState,
   sessionTimer,
   sessionTimerSnapshot,
 } from "./kernel";
@@ -426,9 +427,32 @@ export function stopSessionKernelRuntime(): void {
 }
 
 /** Settle durable ownership left behind without a recoverable journal. */
+type OwnershipReconciliationDependencies = {
+  runStateProjections: typeof sessionRunStateProjections;
+  isTombstoned: typeof sessionTombstoneState;
+  isQuarantined: typeof sessionIsQuarantined;
+  settleMissingOwner: (
+    sessionId: string,
+    previousState: string,
+  ) => Promise<void>;
+};
+
 export async function reconcileSessionKernelOwnership(
   ownedSessionIds: ReadonlySet<string>,
+  dependencies: Partial<OwnershipReconciliationDependencies> = {},
 ): Promise<string[]> {
+  const runStateProjections =
+    dependencies.runStateProjections ?? sessionRunStateProjections;
+  const isTombstoned = dependencies.isTombstoned ?? sessionTombstoneState;
+  const isQuarantined = dependencies.isQuarantined ?? sessionIsQuarantined;
+  const settleMissingOwner =
+    dependencies.settleMissingOwner ??
+    (async (sessionId: string, previousState: string) => {
+      await sessionKernel(sessionId).applyRunEvent({
+        event: "boot_owner_missing",
+        detail: { previousState },
+      });
+    });
   const unsettled = new Set([
     "preparing",
     "starting",
@@ -438,17 +462,16 @@ export async function reconcileSessionKernelOwnership(
     "reattaching",
   ]);
   const settled: string[] = [];
-  for (const state of sessionRunStateProjections()) {
-    if (
-      !unsettled.has(state.state) ||
-      ownedSessionIds.has(state.sessionId) ||
-      (await sessionIsQuarantined(state.sessionId))
-    )
+  for (const state of runStateProjections()) {
+    if (!unsettled.has(state.state) || ownedSessionIds.has(state.sessionId))
       continue;
-    await sessionKernel(state.sessionId).applyRunEvent({
-      event: "boot_owner_missing",
-      detail: { previousState: state.state },
-    });
+    // Deletion is permanent and already settled. A catalog projection can
+    // briefly outlive its session-lane tombstone across a restart; querying
+    // quarantine or applying another run event would correctly fail that
+    // closed mailbox and wedge gateway readiness forever.
+    if (await isTombstoned(state.sessionId)) continue;
+    if (await isQuarantined(state.sessionId)) continue;
+    await settleMissingOwner(state.sessionId, state.state);
     settled.push(state.sessionId);
   }
   return settled;

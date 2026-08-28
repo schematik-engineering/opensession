@@ -452,17 +452,14 @@ rollback_release() {
   systemctl stop opensession-session-kernel.service || true
   run_release switch "$PREVIOUS_HEAD"
   if [ ! -f "$CURRENT_LINK/packages/core/opensession-server/src/server/gateway-ingress.ts" ]; then
-    echo "[deploy] previous release predates dedicated ingress; restoring supervisor socket ownership"
+    echo "[deploy] previous release predates dedicated ingress; restoring direct gateway binding"
     systemctl disable --now opensession-ingress.service || true
-    systemctl stop opensession.socket || true
+    systemctl disable --now opensession.socket || true
     awk -v workdir="$CURRENT_LINK" '
       /^WorkingDirectory=/ { print "WorkingDirectory=" workdir; next }
       { print }
     ' "$CURRENT_LINK/opensession.service" > /etc/systemd/system/opensession.service
-    install -o root -g root -m 0644 \
-      "$CURRENT_LINK/opensession.socket" /etc/systemd/system/opensession.socket
     systemctl daemon-reload
-    systemctl enable --now opensession.socket
   elif ! grep -q "inheritedGatewaySocketFd" \
     "$CURRENT_LINK/packages/core/opensession-server/src/server/gateway-supervisor.ts" 2>/dev/null; then
     echo "[deploy] previous supervisor predates socket activation; restoring its direct-bind unit"

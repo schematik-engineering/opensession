@@ -62,6 +62,7 @@ export const BRANDS: Record<string, { bg: string; fg?: string }> = {
   claude: { bg: "#d97757" },
   codex: { bg: "#000000" },
   pi: { bg: "#000000" },
+  cursor: { bg: "#111111" },
 };
 
 /** Pretty display names for the handful that don't title-case cleanly. */

@@ -11,6 +11,7 @@ paths = ['''^test/memory-bench/secrets-exclusion\.json$''']
 description = "Known public identifiers and synthetic test values misclassified as generic API keys"
 regexTarget = "secret"
 regexes = [
+  '''^123456789012345678$''',
   '''^ED25519_PKCS8_BYTES$''',
   '''^C0BE8KVFBEX\-1786887720\.562319$''',
   '''^os1\.liveActivities\.enabled$''',

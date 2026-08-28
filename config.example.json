@@ -115,6 +115,15 @@
     "slack": {
       "enabled": false
     },
+    "discord": {
+      "enabled": false,
+      "applicationId": "123456789012345678",
+      "botTokenFile": "/srv/opensession/secrets/discord-bot-token",
+      "guildIds": ["123456789012345678"],
+      "channelIds": [],
+      "userIds": [],
+      "defaultModel": "grok/grok-4.6"
+    },
     "linear": {
       "enabled": false,
       "oauthRedirectUrl": "https://sessions.example.com/oauth/callback"

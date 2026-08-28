@@ -15,6 +15,7 @@ import {
   promptQueues,
   promoteQueuedPrompt,
   queueDisplayState,
+  recoverUnownedPromptDispatch,
   steeredReceipts,
   settlePromptInterrupt,
   takeQueuedPrompt,
@@ -26,6 +27,78 @@ import { agentActor, workerActor } from "./session-actors";
 
 const SESSION = "os-queue-state-update-test";
 const PNG = "data:image/png;base64,iVBORw0KGgo=";
+
+describe("unowned prompt dispatch recovery", () => {
+  test("restores an ordinary dispatch ahead of a later queued message", async () => {
+    const sessionId = `unowned-dispatch-${crypto.randomUUID()}`;
+    const first = { id: "first", content: "retry me" };
+    try {
+      await promptQueues.set(sessionId, [first]);
+      await beginPromptDispatch(
+        sessionId,
+        [first],
+        "first-entry",
+        false,
+        undefined,
+        true,
+      );
+      await promptQueues.set(sessionId, [{ id: "later", content: "later" }]);
+
+      expect(await recoverUnownedPromptDispatch(sessionId, () => false)).toBe(
+        true,
+      );
+      expect(promptQueues.get(sessionId)?.map((item) => item.id)).toEqual([
+        "first",
+        "later",
+      ]);
+      expect(promptDispatches.has(sessionId)).toBe(false);
+    } finally {
+      await promptQueues.delete(sessionId);
+      await promptDispatches.delete(sessionId);
+    }
+  });
+
+  test("preserves dispatches with a live owner", async () => {
+    const sessionId = `owned-dispatch-${crypto.randomUUID()}`;
+    try {
+      await beginPromptDispatch(
+        sessionId,
+        [{ id: "owned", content: "in flight" }],
+        "owned-entry",
+        false,
+      );
+
+      expect(await recoverUnownedPromptDispatch(sessionId, () => true)).toBe(
+        false,
+      );
+      expect(promptDispatches.get(sessionId)?.promptEntryId).toBe(
+        "owned-entry",
+      );
+    } finally {
+      await promptDispatches.delete(sessionId);
+    }
+  });
+
+  test("leaves creation dispatches to their durable creation owner", async () => {
+    const sessionId = `create-dispatch-${crypto.randomUUID()}`;
+    try {
+      await beginPromptDispatch(
+        sessionId,
+        [{ id: "opening", content: "open" }],
+        "opening-entry",
+        false,
+        "create",
+      );
+
+      expect(await recoverUnownedPromptDispatch(sessionId, () => false)).toBe(
+        false,
+      );
+      expect(promptDispatches.get(sessionId)?.kind).toBe("create");
+    } finally {
+      await promptDispatches.delete(sessionId);
+    }
+  });
+});
 
 test("sent queue fallbacks stay in chat and pending until exact engine acknowledgement", async () => {
   const item = {

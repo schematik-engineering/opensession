@@ -720,7 +720,7 @@ export interface SandboxModelFamily {
   id: string;
   /** Human name for warnings. */
   label: string;
-  match: { provider: "claude" | "codex" | "pi" };
+  match: { provider: "claude" | "codex" | "pi" | "grok" | "cursor" };
   sandboxable: boolean;
   hint?: string;
 }
@@ -730,6 +730,18 @@ export const SANDBOX_MODEL_FAMILIES: SandboxModelFamily[] = [
     id: "pi",
     label: "Pi",
     match: { provider: "pi" },
+    sandboxable: true,
+  },
+  {
+    id: "grok",
+    label: "Grok (SuperGrok)",
+    match: { provider: "grok" },
+    sandboxable: true,
+  },
+  {
+    id: "cursor",
+    label: "Cursor",
+    match: { provider: "cursor" },
     sandboxable: true,
   },
   {

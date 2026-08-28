@@ -1,4 +1,11 @@
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import {
   appendFileSync,
   existsSync,
@@ -21,15 +28,21 @@ import {
   updateWorkflowRun,
 } from "./workflow-store";
 import { WORKFLOW_LIMITS, type WorkflowJournalEntry } from "./workflow-types";
+import { hasSessionRunningHold } from "./session-state-events";
 
 const savedEnv = process.env.OPENSESSION_WORKFLOWS_DIR;
 const dirs: string[] = [];
 let runCounter = 0;
+const createdRunIds: string[] = [];
 
 beforeEach(() => {
   const dir = mkdtempSync(join(tmpdir(), "wf-store-test-"));
   dirs.push(dir);
   process.env.OPENSESSION_WORKFLOWS_DIR = dir;
+});
+
+afterEach(() => {
+  for (const runId of createdRunIds.splice(0)) unregisterLiveWorkflow(runId);
 });
 
 afterAll(() => {
@@ -41,6 +54,7 @@ afterAll(() => {
 
 function makeRun(overrides?: Partial<Parameters<typeof createWorkflowRun>[0]>) {
   const runId = `wf-test-${++runCounter}-${Math.random().toString(36).slice(2)}`;
+  createdRunIds.push(runId);
   return createWorkflowRun({
     runId,
     sessionId: "bks-session-1",
@@ -87,6 +101,19 @@ describe("workflow store", () => {
     // Still readable from disk once no longer live.
     unregisterLiveWorkflow(snapshot.runId);
     expect(getWorkflowRun(snapshot.runId)?.name).toBe("test-workflow");
+  });
+
+  test("overlapping workflows hold their session busy until the last one finishes", () => {
+    const sessionId = `session-${crypto.randomUUID()}`;
+    const first = makeRun({ sessionId });
+    const second = makeRun({ sessionId });
+    expect(hasSessionRunningHold(sessionId)).toBe(true);
+
+    unregisterLiveWorkflow(first.runId);
+    expect(hasSessionRunningHold(sessionId)).toBe(true);
+
+    unregisterLiveWorkflow(second.runId);
+    expect(hasSessionRunningHold(sessionId)).toBe(false);
   });
 
   test("updateWorkflowRun mutates, persists, and returns the snapshot", () => {
