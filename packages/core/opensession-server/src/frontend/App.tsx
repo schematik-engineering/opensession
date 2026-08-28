@@ -127,11 +127,8 @@ import { PreviewWait, matchPreviewWaitRoute } from "./components/PreviewWait";
 import { TitleBar } from "./components/TitleBar";
 import { FirstMile } from "./components/FirstMile";
 import { useOnboarding } from "./hooks/useOnboarding";
+import { useAppRoute } from "./hooks/useAppRoute";
 import { settingsPaletteActions } from "./lib/settings-sections";
-import {
-  settingsReturnForNavigation,
-  type SettingsReturn,
-} from "./lib/settings-navigation";
 import {
   SessionTabs,
   type NewTabMorphOrigin,
@@ -189,7 +186,7 @@ import { useInputAlerts } from "./hooks/useInputAlerts";
 import { useScrollEdge } from "./hooks/useScrollEdge";
 import { useLargeTitleHandoff } from "./hooks/useLargeTitle";
 import { initAlerts } from "./lib/notify";
-import { onPushNavigate, registerServiceWorker } from "./lib/push";
+import { registerServiceWorker } from "./lib/push";
 import {
   archiveSessionApi,
   deleteSessionApi,
@@ -233,7 +230,6 @@ import type {
 import { refWebPanel } from "./components/FeedWebPane";
 import { ensureFeedMeta } from "./lib/feeds-meta";
 import type { ReviewQueueItem } from "./lib/review-queue";
-import { pushRecent } from "./lib/recents";
 import { setLane, type Lane } from "./lib/lanes";
 import { markRead } from "./lib/reads";
 import { resolveAnonymousUserPath } from "./lib/auth-ready";
@@ -309,12 +305,10 @@ import "./styles/base.css";
 import "./styles/legacy.css";
 import { EmptyState, LoadingState } from "./ui/state";
 import {
-  firstMileRequested,
   isSettingsRoute,
   isToolView,
   parseRoute,
   routePath,
-  samePanel,
   type Route,
 } from "./lib/app-route";
 import {
@@ -371,74 +365,6 @@ function routeSubagentTabs(route: Route): Record<string, SubagentRef[]> {
 const SPLASH_MAX_MS = 8000;
 const SPLASH_EXIT_MS = 400;
 
-/**
- * The URL this document loaded at, captured before anything can rewrite it.
- *
- * The route initializer below pushes the last open session over a cold load
- * that lands on home, so by the time the component body runs, `location` may
- * already describe a session rather than the link the person followed. Any
- * question of the form "how did we get here" has to read this instead.
- */
-const LANDING_PATH = stripBasePath(location.pathname);
-const LANDING_SEARCH = location.search;
-
-function landedOnFirstMile(): boolean {
-  return firstMileRequested(LANDING_PATH, LANDING_SEARCH);
-}
-
-// How far the current history entry sits above the sidebar root: 0 is the root
-// itself, N a panel with N entries between it and that root. It lives in
-// `history.state` rather than a ref because the browser hands state back on
-// popstate — so after a Back/Forward we still know where the root is. `null`
-// means no root beneath us at all (cold-loaded straight into a panel), where
-// Back synthesizes home instead of popping.
-type NavState = {
-  d: number | null;
-  settingsReturn?: SettingsReturn;
-  /** A PWA cold-launch restore, so an archived remembered session can yield
-   * back to home without breaking explicit deep links to archived work. */
-  restoredSession?: string;
-} | null;
-function currentNavState(): NavState {
-  const state = history.state as NavState;
-  return state && (typeof state.d === "number" || state.d === null)
-    ? state
-    : null;
-}
-function entryDepth(): number | null {
-  return currentNavState()?.d ?? null;
-}
-function navState(
-  depth: number | null,
-  settingsReturn?: SettingsReturn,
-): NavState {
-  return depth === null && !settingsReturn
-    ? null
-    : { d: depth, ...(settingsReturn ? { settingsReturn } : {}) };
-}
-
-// Pop `steps` entries, or synthesize the destination when the browser can't.
-// Depth counts every panel we ever pushed, but the session history it indexes
-// into is capped — Chrome keeps 50 entries and drops the oldest — so a tab
-// that has opened enough panels no longer has the root beneath it. `history.go`
-// past the end of the stack is a silent no-op (no popstate, no navigation, no
-// error), which left Back stranded on the very page it was asked to leave.
-// Pruning only ever takes the root *below* us, never entries between it and
-// here, so the out-of-range no-op is the whole failure: nothing lands us on the
-// wrong panel. Wait a frame or two for the pop, then fall back if none came.
-function popOr(steps: number, fallback: () => void) {
-  let popped = false;
-  const onPop = () => {
-    popped = true;
-  };
-  window.addEventListener("popstate", onPop);
-  history.go(-steps);
-  setTimeout(() => {
-    window.removeEventListener("popstate", onPop);
-    if (!popped) fallback();
-  }, 150);
-}
-
 class MissingWorkspaceSessionSourceError extends Error {}
 
 export function App({
@@ -448,44 +374,26 @@ export function App({
   serviceWorker?: boolean;
   initialTeamViewing?: Array<{ user: string; sessionId: string }>;
 } = {}) {
-  // iOS evicts standalone PWAs from memory and relaunches them at the manifest
-  // start_url — losing the session you had open. On a cold load
-  // that lands on home, restore the last session so it isn't dropped. This only
-  // runs on a fresh document load (never on in-app navigation, which uses
-  // pushState), so tapping the logo to go home still works.
-  const [route, setRoute] = useState<Route>(() => {
-    const parsed = parseRoute(location.pathname);
-    // `/welcome` and `?firstmile=1` parse as home (they name no view of their
-    // own), so without this guard the restore below pushes the last session
-    // over them and the first-run flow never renders for anyone who has one.
-    if (parsed.view === "prs" && !landedOnFirstMile()) {
-      // Landing on the root: stamp it as the base of the page stack so panels
-      // pushed over it can count their way back down.
-      history.replaceState(navState(0), "", location.pathname);
-      const rememberedUser = localStorage.getItem(
-        "opensession-last-session-user",
-      );
-      const currentUser = getCurrentUser();
-      const lastId =
-        rememberedUser === currentUser
-          ? localStorage.getItem("opensession-last-session")
-          : null;
-      if (lastId) {
-        const restored: Route = { view: "session", id: lastId };
-        // Push rather than replace: the home entry we actually landed on stays
-        // beneath as the root, so Back returns to it instead of out of the app.
-        // Mark this as an automatic restore. Explicit deep links intentionally
-        // keep opening archived sessions, but a stale PWA memory should not.
-        history.pushState(
-          { d: 1, restoredSession: lastId } satisfies NonNullable<NavState>,
-          "",
-          routePath(restored),
-        );
-        return restored;
-      }
-    }
-    return parsed;
-  });
+  // The worker-parent bridge has to exist before routing initializes. Session
+  // hydration happens later, and every Back entry point reads its latest value.
+  const currentSessionRef = useRef<UnifiedSession | null>(null);
+  const {
+    route,
+    getCurrentRoute,
+    navigate,
+    goBack: goBackRoute,
+    leaveDeck,
+    leaveSettings,
+    forceFirstMile,
+    requireFirstMile,
+    openFirstMile,
+    finishFirstMileNavigation,
+    restoredSessionId,
+    forgetLastSession,
+    canonicalizePath,
+  } = useAppRoute({ serviceWorker, currentUser: getCurrentUser });
+  const goBack = () =>
+    goBackRoute(currentSessionRef.current?.parentSessionId ?? undefined);
   const currentUser = useCurrentUser();
   const sidebarFilter = useSidebarFilter();
   const liveSessionsQuery = sidebarSessionsQuery({
@@ -518,7 +426,6 @@ export function App({
   // a transcript renders `opensession#128` as plain text and relinks a beat later.
   const [registeredRepoInfo, setRegisteredRepoInfo] = useState(cachedRepos);
   const onboarding = useOnboarding();
-  const [forceFirstMile, setForceFirstMile] = useState(landedOnFirstMile);
   const auth = useAuthStatus();
   const githubConnectionState = useGithubConnectionState(route.view);
   const mainSocket = useWebSocket();
@@ -873,23 +780,8 @@ export function App({
   }, [refreshWorkspaces]);
   useEffect(() => {
     if (onboarding.state !== "required" || forceFirstMile) return;
-    // The onboarding gate owns the first incomplete load, including deep links.
-    // Replace rather than push so Back cannot escape a required walkthrough.
-    history.replaceState(
-      history.state ?? navState(0),
-      "",
-      `${BASE_PATH}/welcome`,
-    );
-    setForceFirstMile(true);
-  }, [onboarding.state, forceFirstMile]);
-
-  function openFirstMile() {
-    // Keep the settings entry below the walkthrough so browser Back returns to
-    // the button that opened it. The walkthrough is app state, not a document
-    // reload, which also works inside the phone settings sheet.
-    history.pushState(history.state, "", `${BASE_PATH}/welcome`);
-    setForceFirstMile(true);
-  }
+    requireFirstMile();
+  }, [onboarding.state, forceFirstMile, requireFirstMile]);
 
   async function finishFirstMile() {
     try {
@@ -903,21 +795,7 @@ export function App({
       );
       return;
     }
-    if (forceFirstMile) {
-      const url = new URL(location.href);
-      url.searchParams.delete("firstmile");
-      const leavingWelcome = stripBasePath(url.pathname) === "/welcome";
-      const path = leavingWelcome ? routePath({ view: "prs" }) : url.pathname;
-      // A `/welcome` load skips the home entry's navState stamp above, so give
-      // this entry a root depth on the way out or Back has nothing to count from.
-      history.replaceState(
-        history.state ?? navState(0),
-        "",
-        `${path}${url.search}${url.hash}`,
-      );
-      setForceFirstMile(false);
-      if (leavingWelcome) setRoute({ view: "prs" });
-    }
+    finishFirstMileNavigation();
   }
 
   // Subscribe to the per-user pin/color stores. Both hydrate async at module
@@ -1022,59 +900,9 @@ export function App({
   // pushed page — the bar keeps the brand and the sidebar stays underneath.
   const mobileDetail = route.view !== "prs" && !(isPhone && settingsActive);
 
-  // Keep the latest route readable from stable callbacks — `navigate` is
-  // recreated each render, but effects/handlers can capture an older copy.
-  const routeRef = useRef(route);
   const sidebarRef = useRef<SidebarHandle>(null);
   const nextChatRef = useRef<() => void>(() => {});
   const [nextChatAvailable, setNextChatAvailable] = useState(false);
-  useLayoutEffect(() => {
-    routeRef.current = route;
-  });
-  // The mobile layout is an iOS-style navigation stack: the sidebar is the root
-  // (depth 0) and each panel is pushed over it. Every entry carries its own
-  // depth (see `entryDepth`), so opening one panel from another stacks a real
-  // history entry — that is what makes the titlebar's Back/Forward carets (and
-  // the browser/OS buttons) walk between the sessions you visited — while
-  // `goBack` still returns to the sidebar in a single hop rather than reversing
-  // panel by panel.
-
-  // Navigate the detail panel. Opening a different panel pushes an entry;
-  // re-navigating to the panel you are already on (or an explicit
-  // `replace`) rewrites the current entry instead of duplicating it.
-  function navigate(next: Route, opts?: { replace?: boolean }) {
-    const path = routePath(next);
-    const cur = routeRef.current;
-    const toRoot = next.view === "prs";
-    // Compare on the route, not `location.pathname`: an open session's URL gets
-    // canonicalized to /workspace/<id>/session/<id> below, so the raw path no
-    // longer matches the /session/<id> we would build for the same session.
-    const samePath =
-      path === location.pathname ||
-      routePath(cur) === path ||
-      samePanel(cur, next);
-    const replace = opts?.replace ?? samePath;
-    const depth = entryDepth();
-    const settingsReturn = settingsReturnForNavigation({
-      currentIsSettings: isSettingsRoute(cur),
-      nextIsSettings: isSettingsRoute(next),
-      currentReturn: currentNavState()?.settingsReturn,
-      currentPath: `${location.pathname}${location.search}${location.hash}`,
-      currentDepth: depth,
-      replace,
-    });
-    const nextState = (nextDepth: number | null) =>
-      navState(nextDepth, settingsReturn);
-    if (replace) history.replaceState(nextState(toRoot ? 0 : depth), "", path);
-    else if (toRoot) history.pushState(nextState(0), "", path);
-    else
-      history.pushState(nextState(depth === null ? null : depth + 1), "", path);
-    setRoute(next);
-  }
-  const navigateRef = useRef(navigate);
-  useLayoutEffect(() => {
-    navigateRef.current = navigate;
-  });
   // Set below, once the review-focus callback it needs exists.
   const openPrRef = useRef<(repo: string, number: number) => void>(() => {});
 
@@ -1141,6 +969,7 @@ export function App({
 
   // Automation-id chips carry a real href for browser gestures. Plain clicks
   // stay inside the SPA and open that automation's settings drawer directly.
+  const navigateFromDocument = useEffectEvent(navigate);
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
       if (
@@ -1158,7 +987,7 @@ export function App({
       const id = el?.dataset.automationId;
       if (!id) return;
       e.preventDefault();
-      navigateRef.current({ view: "automations", id });
+      navigateFromDocument({ view: "automations", id });
     };
     document.addEventListener("click", onClick);
     return () => document.removeEventListener("click", onClick);
@@ -1204,70 +1033,6 @@ export function App({
     };
   }, []);
 
-  // The current session is declared before the navigation callbacks that read
-  // it. A layout effect below keeps it synchronized once session data resolves.
-  const currentSessionRef = useRef<UnifiedSession | null>(null);
-
-  // Pop back to the sidebar root. With the root beneath us, one `history.go`
-  // lands on it directly — keeping the browser/OS back button in lockstep
-  // without walking back through every panel we pushed on the way. Cold-loaded
-  // into a panel there is no root to pop to, so replace to home instead and the
-  // stack never grows.
-  const goBack = () => {
-    // A worker session sits a level below the session that spawned it, and it
-    // has no tab to leave by. Back therefore goes UP one level rather than out
-    // to the sidebar: it is the phone's spelling of the header breadcrumb, and
-    // the edge swipe gets it for free.
-    // Reads through the ref: this closure initializes before `currentSession`
-    // does, and the compiler rejects a direct read of a later binding.
-    const live = currentSessionRef.current;
-    const parentId =
-      route.view === "session" ? live?.parentSessionId : undefined;
-    if (parentId) {
-      navigate({ view: "session", id: parentId });
-      return;
-    }
-    const depth = entryDepth();
-    if (depth !== null && depth > 0)
-      popOr(depth, () => navigate({ view: "prs" }, { replace: true }));
-    else navigate({ view: "prs" }, { replace: true });
-  };
-
-  // Leave a full-page deck (catch-up, PR, support) for wherever you came from,
-  // rather than popping to the root the way `goBack` does. The root is the
-  // useful destination on a phone — it's the sidebar you can't otherwise see —
-  // but on desktop the sidebar never went away, so popping there reveals
-  // nothing and costs you the session you were reading before the detour.
-  function leaveDeck() {
-    const depth = entryDepth();
-    if (depth !== null && depth > 0)
-      popOr(1, () => navigate({ view: "prs" }, { replace: true }));
-    else navigate({ view: "prs" }, { replace: true });
-  }
-
-  // Settings is a temporary surface over whatever the person was doing. Its
-  // sections may add history entries of their own, so closing skips the whole
-  // Settings run and restores the exact route that opened it. This also works
-  // after a cold deep link, where there is no sidebar-root depth to count from.
-  function leaveSettings() {
-    const settingsReturn = currentNavState()?.settingsReturn;
-    if (!settingsReturn) {
-      goBack();
-      return;
-    }
-    const restore = () => {
-      const url = new URL(settingsReturn.path, location.origin);
-      history.replaceState(
-        navState(settingsReturn.depth),
-        "",
-        `${url.pathname}${url.search}${url.hash}`,
-      );
-      setRoute(parseRoute(url.pathname));
-    };
-    if (settingsReturn.steps > 0) popOr(settingsReturn.steps, restore);
-    else restore();
-  }
-
   // Edge-swipe-from-left pops the pushed page back to the sidebar on phones.
   useBackSwipe({
     active: mobileDetail,
@@ -1292,20 +1057,6 @@ export function App({
     onOpen: (id) => navigate({ view: "session", id }),
     connected,
   });
-
-  // Tapping a push notification opens what it is about. The service worker
-  // hands the URL to this page instead of reloading the document, so the tap
-  // lands on that session rather than on whatever page the app was left on.
-  useEffect(() => {
-    if (!serviceWorker) return;
-    return onPushNavigate((url) => {
-      try {
-        navigateRef.current(parseRoute(new URL(url, location.origin).pathname));
-      } catch {
-        // A malformed URL is not worth throwing away the focus for.
-      }
-    });
-  }, [serviceWorker]);
 
   // The "new session" ⌘K palette. It's an overlay driven by its own state (not a
   // route), so it can open over any view; the <base>/new route still opens it
@@ -1521,7 +1272,7 @@ export function App({
       pr: { repo: string; branch?: string; number?: number },
     ) => {
       focusReviewPr({ ...pr, workspaceId });
-      navigateRef.current({
+      navigate({
         view: "workspace",
         id: workspaceId,
         tab: "review",
@@ -1546,7 +1297,7 @@ export function App({
         });
       })
       .catch(() => {
-        navigateRef.current({ view: "pr", repo, number });
+        navigate({ view: "pr", repo, number });
       });
   };
   useLayoutEffect(() => {
@@ -1626,7 +1377,7 @@ export function App({
       ...started,
       startedAt,
       user,
-      originPath: routePath(routeRef.current),
+      originPath: routePath(getCurrentRoute()),
     };
     pendingCreateDraftRef.current = draft;
 
@@ -1696,17 +1447,6 @@ export function App({
     }, 120_000);
     navigate({ view: "session", id: started.id });
   };
-
-  useEffect(() => {
-    const onPop = () => {
-      // Depth travels with the entry (history.state), so there is nothing to
-      // recompute here. Follow the URL we landed on.
-      setForceFirstMile(firstMileRequested(location.pathname, location.search));
-      setRoute(parseRoute(location.pathname));
-    };
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
-  }, []);
 
   // The link ⌘⇧C copies: the open session/workspace, or the open PR preview.
   // Assigned during render (below, once currentSession is known); null when
@@ -1785,20 +1525,6 @@ export function App({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Remember the last session so a cold relaunch can restore it (see above);
-  // clear it when the user deliberately goes home so we don't force them back in.
-  // Also feed the sidebar's "Recently opened" list.
-  useEffect(() => {
-    if (route.view === "session") {
-      localStorage.setItem("opensession-last-session", route.id);
-      localStorage.setItem("opensession-last-session-user", getCurrentUser());
-      pushRecent(route.id);
-    } else if (route.view === "prs") {
-      localStorage.removeItem("opensession-last-session");
-      localStorage.removeItem("opensession-last-session-user");
-    }
-  }, [route]);
-
   // The list is the live slice, and archived sessions arrive as summaries, so
   // the row it finds may be missing or partial. Hydrate the route directly,
   // before the list finishes, so a deep link can hand off from the launch
@@ -1815,22 +1541,24 @@ export function App({
     route.view === "session" ? route.id : null,
     listedSession,
   );
-  // iOS can kill a standalone PWA before the archive navigation commits. Its
-  // next cold launch then restores the stale last-session id from localStorage.
-  // Once hydration proves that an automatic restore is archived, return to the
-  // home entry beneath it. A real URL/deep link has no restoredSession marker
-  // and remains openable, which is the Archived screen's contract.
+  // A stale PWA memory yields to home once hydration proves it is archived.
+  // Explicit archived deep links have no automatic-restore marker and stay open.
   useEffect(() => {
     if (
       route.view !== "session" ||
       !currentSession?.archived ||
-      currentNavState()?.restoredSession !== route.id
+      restoredSessionId !== route.id
     )
       return;
-    localStorage.removeItem("opensession-last-session");
-    localStorage.removeItem("opensession-last-session-user");
+    forgetLastSession();
     navigate({ view: "prs" }, { replace: true });
-  }, [currentSession?.archived, route]);
+  }, [
+    currentSession?.archived,
+    route,
+    restoredSessionId,
+    forgetLastSession,
+    navigate,
+  ]);
   const shellLoading = loading && !currentSession;
 
   // Tear down the launch splash (rendered in index.html) once there is
@@ -1878,6 +1606,7 @@ export function App({
   // subscription doesn't re-arm just because their closures moved.
   const socketInject = useEffectEvent(inject);
   const socketNavigate = useEffectEvent(navigate);
+  const socketGetCurrentRoute = useEffectEvent(getCurrentRoute);
   useEffect(() => {
     return addHandler((msg) => {
       if (msg.type === "sessions_invalidated") {
@@ -1913,11 +1642,9 @@ export function App({
               images: draft.images ?? [],
               files: draft.files ?? [],
             });
-            if (
-              routeRef.current.view === "session" &&
-              routeRef.current.id === draft.id
-            )
-              navigate(parseRoute(draft.originPath));
+            const currentRoute = socketGetCurrentRoute();
+            if (currentRoute.view === "session" && currentRoute.id === draft.id)
+              socketNavigate(parseRoute(draft.originPath));
             primeSoftKeyboard();
             setPaletteState((current) => ({ ...current, open: true }));
             toast(msg.message || "Couldn't create the session.");
@@ -1985,7 +1712,7 @@ export function App({
         }
         const stillOwnsForeground = shouldOpenCreatedSession(
           draft,
-          routePath(routeRef.current),
+          routePath(socketGetCurrentRoute()),
           paletteOpenRef.current,
           roomScoped,
         );
@@ -2317,6 +2044,7 @@ export function App({
     workspacesLoaded,
     loading,
     setActiveViewTab,
+    navigate,
   ]);
   // A PR reference (`/pr/<repo>/<number>`) that GitHub doesn't know: the
   // number came out of prose, so it can be a typo or an invention.
@@ -2418,7 +2146,7 @@ export function App({
     return () => {
       stale = true;
     };
-  }, [route, loading]);
+  }, [route, loading, navigate]);
   // The current code session's Review pane, surfaced as a leftmost view-tab in
   // the top strip (siblings share the worktree/PR, so one Review tab suffices).
   const currentHasWorkspace =
@@ -2963,16 +2691,14 @@ export function App({
         ? `${BASE_PATH}/workspace/${encodeURIComponent(activeWorkspaceId)}/session/${encodeURIComponent(route.id)}`
         : `${BASE_PATH}/session/${encodeURIComponent(route.id)}`) +
         openSubagentPath;
-    if (location.pathname !== canonical)
-      // Carry the entry's state across: dropping it would erase this panel's
-      // depth and strand `goBack` (and the Back caret) on the way home.
-      history.replaceState(history.state, "", canonical);
+    if (location.pathname !== canonical) canonicalizePath(canonical);
   }, [
     route,
     currentSession,
     activeWorkspaceId,
     activeWorkspacePane,
     openSubagentPath,
+    canonicalizePath,
   ]);
   const byCreated = (a: UnifiedSession, b: UnifiedSession) =>
     (a.createdAt || "").localeCompare(b.createdAt || "");
@@ -3529,7 +3255,8 @@ export function App({
       setOptimisticSession((pending) => (pending?.id === id ? null : pending));
       unstick(id);
       remove(id);
-      if (routeRef.current.view === "session" && routeRef.current.id === id) {
+      const currentRoute = getCurrentRoute();
+      if (currentRoute.view === "session" && currentRoute.id === id) {
         if (src.id.startsWith("workspace:") && src.workspaceId) {
           navigate({ view: "workspace", id: src.workspaceId, tab: "review" });
         } else {
@@ -3704,10 +3431,7 @@ export function App({
     // Do not let a successful archive remain the PWA's cold-launch target if
     // iOS suspends it before the route change paints. A navigation to another
     // session writes that newer id back through the route effect above.
-    if (ids.includes(localStorage.getItem("opensession-last-session") || "")) {
-      localStorage.removeItem("opensession-last-session");
-      localStorage.removeItem("opensession-last-session-user");
-    }
+    forgetLastSession(ids);
     setArchiveUndo((prev) =>
       [
         // An id lives in one entry only: archiving a session again moves it to
