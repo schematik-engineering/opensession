@@ -105,20 +105,19 @@ copy, not the checkout's copy.
 
 ### Path parity is load-bearing for Docker bind mode
 
-The source runner passes its absolute `runner-host/host.ts` path into the
-container. Docker bind mode also mounts the worktree and common Git directory
-at their host paths, and uid 1000 keeps ownership aligned. The image must
-therefore reproduce the host's runner checkout path; bind mode additionally
-needs matching workspace paths and uid. This preserves host-side
+The runner bundle is baked at the stable container-owned path
+`/home/ubuntu/.opensession-runner`. DockerProvider always launches that path,
+so an immutable host promotion from one SHA-named release worktree to another
+does not invalidate the image. Docker bind mode separately mounts the worktree
+and common Git directory at their host paths, and uid 1000 keeps ownership
+aligned. Matching workspace paths and uid preserve host-side
 diff/status/push/preview behavior and cwd-keyed engine resume.
 
-The shipped Dockerfile defaults to `/home/ubuntu/projects/opensession`,
-`/home/ubuntu/.local/bin/claude`, and user `ubuntu`.
-`deploy/sandbox/build.sh` overrides `OPENSESSION_RUNNER_ROOT` with the active
-checkout path. If the home, username, or uid differs, update the corresponding
-Dockerfile paths and user and rebuild `opensession-runner:latest`. Volume mode
-removes the host worktree mount, but it does not remove the runner-entry path
-requirement.
+The shipped Dockerfile also uses `/home/ubuntu/.local/bin/claude` and user
+`ubuntu`. If the home, username, or uid differs, update the corresponding
+Dockerfile and provider path contracts together, then rebuild
+`opensession-runner:latest`. Volume mode removes the host worktree mount, but
+it does not remove the stable runner-entry requirement.
 
 ## Images, warm pools and snapshots
 

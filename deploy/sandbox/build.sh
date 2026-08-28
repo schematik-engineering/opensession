@@ -18,11 +18,10 @@ SHA="$(git -C "${REPO_ROOT}" rev-parse --short HEAD)"
 echo "Building ${IMAGE}:latest and ${IMAGE}:${SHA}"
 echo "  context:    ${REPO_ROOT}"
 echo "  dockerfile: ${SCRIPT_DIR}/Dockerfile"
-echo "  runner root: ${REPO_ROOT}"
+echo "  runner root: /home/ubuntu/.opensession-runner"
 
 docker build \
   -f "${SCRIPT_DIR}/Dockerfile" \
-  --build-arg "OPENSESSION_RUNNER_ROOT=${REPO_ROOT}" \
   -t "${IMAGE}:latest" \
   -t "${IMAGE}:${SHA}" \
   "${REPO_ROOT}"

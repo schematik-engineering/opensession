@@ -7,12 +7,11 @@
 # bundle with node_modules — which vendors the codex binary (@openai/codex-linux-x64)
 # and the Claude Agent SDK (@anthropic-ai/claude-agent-sdk).
 #
-# PATH PARITY IS LOAD-BEARING. The runner config points at
-# /home/ubuntu/.local/bin/claude and the host checkout's absolute path, and the
-# session worktree is bind-mounted at its identical host path. So this image must
-# reproduce those absolute paths exactly and run as uid 1000 (host `ubuntu`) so
-# bind-mounted files keep sane ownership. build.sh supplies the current checkout
-# through OPENSESSION_RUNNER_ROOT; the default preserves the original layout.
+# PATH PARITY IS LOAD-BEARING for the CLI and session workspace. The runner
+# bundle itself lives at a stable container-owned path so immutable host release
+# worktrees can change without invalidating an existing image. The session
+# worktree is still bind-mounted at its identical host path, and the image runs
+# as uid 1000 (host `ubuntu`) so bind-mounted files keep sane ownership.
 #
 # Build context is the REPO ROOT (see build.sh); a root .dockerignore trims it.
 
@@ -22,7 +21,6 @@ FROM ubuntu:24.04
 ARG BUN_VERSION=1.4.0
 ARG CLAUDE_VERSION=2.1.218
 ARG NODE_MAJOR=24
-ARG OPENSESSION_RUNNER_ROOT=/home/ubuntu/projects/opensession
 
 # Locale parity note: the host runs a full en_US.UTF-8 locale; the image uses
 # C.UTF-8 (no `locales` package) on the assumption that nothing in the runner
@@ -32,7 +30,7 @@ ARG OPENSESSION_RUNNER_ROOT=/home/ubuntu/projects/opensession
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
-    OPENSESSION_RUNNER_ROOT=${OPENSESSION_RUNNER_ROOT}
+    OPENSESSION_RUNNER_ROOT=/home/ubuntu/.opensession-runner
 
 # --- system packages ---
 # ripgrep lives in universe (enabled by default in the ubuntu image). python3 +
@@ -127,7 +125,8 @@ COPY --chown=ubuntu:ubuntu packages/core/protocol/package.json ${OPENSESSION_RUN
 COPY --chown=ubuntu:ubuntu packages/core/opensession-server/package.json ${OPENSESSION_RUNNER_ROOT}/packages/core/opensession-server/package.json
 RUN bun install --frozen-lockfile
 
-# App source at the identical absolute path (worktrees are bind-mounted separately).
+# App source at the stable path used by DockerProvider. Worktrees are mounted
+# separately at their host-identical paths.
 COPY --chown=ubuntu:ubuntu tsconfig.json ${OPENSESSION_RUNNER_ROOT}/
 COPY --chown=ubuntu:ubuntu packages/core/protocol ${OPENSESSION_RUNNER_ROOT}/packages/core/protocol
 COPY --chown=ubuntu:ubuntu packages/core/opensession-server ${OPENSESSION_RUNNER_ROOT}/packages/core/opensession-server

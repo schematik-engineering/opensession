@@ -153,7 +153,6 @@ import {
   HOST_META_NAME,
   HOST_JOURNAL_NAME,
   HOST_LOG_NAME,
-  HOST_ENTRY,
   rpcSocketPath,
   type RunHostSpec,
   type RunHostMeta,
@@ -173,6 +172,14 @@ import type {
 const HOME = homeDir();
 const CONTAINER_PREFIX = "bks-sbx-";
 const DEFAULT_IMAGE = "opensession-runner:latest";
+/**
+ * Runner source is baked at one container-owned path. It must not mirror
+ * REPO_ROOT: immutable host releases move between SHA-named worktrees, while a
+ * long-lived sandbox image and container have to survive those promotions.
+ */
+export const DOCKER_RUNNER_ROOT = "/home/ubuntu/.opensession-runner";
+export const DOCKER_HOST_ENTRY =
+  `${DOCKER_RUNNER_ROOT}/packages/core/opensession-server/src/runner-host/host.ts`;
 const DEFAULT_CPUS = 4;
 const DEFAULT_MEMORY = "8g";
 const DEFAULT_IDLE_STOP_MINUTES = 30;
@@ -991,7 +998,7 @@ function makeDockerLauncher(container: string, sessionId: string): HostLauncher 
         ...wsEnv,
         container,
         "sh", "-c",
-        `exec bun run ${assertSafePath(HOST_ENTRY)} ${specPath} >> ${logPath} 2>&1`,
+        `exec bun run ${assertSafePath(DOCKER_HOST_ENTRY)} ${specPath} >> ${logPath} 2>&1`,
       ];
       onDispatching?.();
       const r = await docker(args);
