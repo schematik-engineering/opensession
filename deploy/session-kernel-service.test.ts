@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { resolve } from "node:path";
 import {
+  renderIngressUnit,
   renderLauncher,
   renderSessionKernelLauncher,
   renderSessionKernelPlist,
@@ -14,13 +15,17 @@ const repoRoot = resolve(import.meta.dir, "..");
 describe("session kernel service deployment", () => {
   test("orders the authenticated actor before the gateway without coupling their stop lifecycle", async () => {
     const gateway = await renderUnit("system");
+    const ingress = await renderIngressUnit("system");
     const socket = await renderSocketUnit("system");
     const actor = await Bun.file(
       resolve(repoRoot, "opensession-session-kernel.service"),
     ).text();
-    expect(gateway).toContain("Requires=opensession.socket");
-    expect(gateway).toContain("Sockets=opensession.socket");
+    expect(gateway).toContain("Wants=opensession.socket opensession-ingress.service");
+    expect(gateway).not.toContain("Sockets=opensession.socket");
+    expect(ingress).toContain("Requires=opensession.socket");
+    expect(ingress).toContain("Sockets=opensession.socket");
     expect(socket).toContain("ListenStream=127.0.0.1:3850");
+    expect(socket).toContain("Service=opensession-ingress.service");
     expect(gateway).not.toContain("Wants=opensession-session-kernel.service");
     expect(gateway).not.toContain("Requires=opensession-session-kernel.service");
     expect(gateway).toContain("LoadCredential=session-kernel-token:");
@@ -159,6 +164,17 @@ describe("session kernel service deployment", () => {
     expect(compatibility).toBeGreaterThan(0);
     expect(stopCanary).toBeGreaterThan(compatibility);
     expect(stopGateway).toBeGreaterThan(stopCanary);
+  });
+
+  test("dedicated ingress survives ordinary gateway and peer replacement", async () => {
+    const rootDeploy = await Bun.file(resolve(repoRoot, "deploy/deploy.sh")).text();
+    const ingressUnit = await Bun.file(resolve(repoRoot, "opensession-ingress.service")).text();
+    const gatewayUnit = await Bun.file(resolve(repoRoot, "opensession.service")).text();
+    expect(rootDeploy).toContain("promoting dedicated stable ingress");
+    expect(rootDeploy).toContain("systemctl enable --now opensession-ingress.service");
+    expect(ingressUnit).toContain("gateway-ingress.ts");
+    expect(gatewayUnit).toContain('Environment="OPENSESSION_EXTERNAL_INGRESS=1"');
+    expect(gatewayUnit).not.toContain("Sockets=opensession.socket");
   });
 
   test("root rollouts reuse the coordinated supervisor transaction when units are stable", async () => {

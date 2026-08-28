@@ -8,8 +8,8 @@ Description=Open Session - agent session dashboard
 # Protocol peers are enabled independently. Do not Wants=/Requires= them here:
 # socket activation during a rollout must not restart a peer that the deploy
 # controller intentionally stopped. The child generation barrier fails closed.
-Requires=opensession.socket
-After=network.target opensession.socket opensession-session-kernel.service opensession-executor.service
+Wants=opensession.socket opensession-ingress.service
+After=network.target opensession-ingress.service opensession-session-kernel.service opensession-executor.service
 
 [Service]
 # Keep latency-sensitive HTTP, WebSocket, and orchestration work ahead of
@@ -21,7 +21,6 @@ Slice=opensession-control.slice
 # it explicitly.
 Environment="PATH=/home/ubuntu/.cargo/bin:/home/ubuntu/.bun/bin:/home/ubuntu/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Type=simple
-Sockets=opensession.socket
 User=ubuntu
 RuntimeDirectory=opensession-gateway
 RuntimeDirectoryMode=0700
@@ -32,6 +31,7 @@ EnvironmentFile=/home/ubuntu/.opensession.env
 # release without failing before it knows how to install the credential.
 # SESSION_KERNEL_CREDENTIAL
 Environment="NODE_ENV=production"
+Environment="OPENSESSION_EXTERNAL_INGRESS=1"
 # Do not use `bun --hot` here. A failed reload on Bun 1.3.14 can permanently
 # stop every timer while HTTP keeps serving, leaving all sessions apparently
 # running but unable to progress. Backend changes use a deliberate graceful

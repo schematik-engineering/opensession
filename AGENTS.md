@@ -82,7 +82,7 @@ Uncommitted checkout edits never become live, including frontend edits.
   restart train.
 - Use the full root deploy, `sudo deploy/deploy.sh <sha>`, instead when a change
   affects live deployment machinery or an artifact that script installs:
-  `deploy/{deploy,self-deploy,release-checkout}.sh`, the three
+  `deploy/{deploy,self-deploy,release-checkout}.sh`, the four
   `opensession*.service` templates, credential installers, the fixed run-host
   helper/installer, or root-deploy-managed systemd units and drop-ins. The full
   deploy refreshes those privileged artifacts before switching the same

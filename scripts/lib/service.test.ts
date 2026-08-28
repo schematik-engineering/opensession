@@ -19,6 +19,7 @@ import {
   LAUNCHD_LAUNCHER,
   metadataInstallBlockGuidance,
   renderExecutorUnit,
+  renderIngressUnit,
   renderLauncher,
   renderPlist,
   renderUnit,
@@ -104,8 +105,9 @@ describe.skipIf(!onServiceHost)("systemd unit", () => {
     expect(unit).toContain("[Install]");
     expect(unit).not.toContain("Wants=opensession-session-kernel.service");
     expect(unit).not.toContain("Wants=opensession-executor.service");
-    expect(unit).toContain("Requires=opensession.socket");
-    expect(unit).toContain("Sockets=opensession.socket");
+    expect(unit).toContain("Wants=opensession.socket opensession-ingress.service");
+    expect(unit).not.toContain("Sockets=opensession.socket");
+    expect(unit).toContain('Environment="OPENSESSION_EXTERNAL_INGRESS=1"');
     expect(unit).not.toContain("Requires=opensession-executor.service");
     expect(unit).toContain(
       "LoadCredential=executor-token:/etc/opensession/executor-token",
@@ -118,6 +120,18 @@ describe.skipIf(!onServiceHost)("systemd unit", () => {
       "";
     expect(path).toContain("/usr/bin");
     expect(path.split(":").every((p) => p.startsWith("/"))).toBe(true);
+  });
+});
+
+describe.skipIf(!onServiceHost)("ingress systemd unit", () => {
+  test("owns the socket independently from gateway lifecycle", async () => {
+    const unit = await renderIngressUnit("system");
+    expect(unit).toContain(`WorkingDirectory=${serviceWorkdir()}`);
+    expect(unit).toContain("Sockets=opensession.socket");
+    expect(unit).toContain("Requires=opensession.socket");
+    expect(unit).toContain("src/server/gateway-ingress.ts");
+    expect(unit).not.toContain("EnvironmentFile=");
+    expect(unit).toContain("Restart=always");
   });
 });
 

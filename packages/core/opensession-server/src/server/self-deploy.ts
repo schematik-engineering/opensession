@@ -198,8 +198,13 @@ const ROOT_DEPLOY_PATHS = new Set([
 	"deploy/opensession-run-host",
 	"opensession.service",
 	"opensession.socket",
+	"opensession-ingress.service",
 	"opensession-executor.service",
 	"opensession-session-kernel.service",
+	"packages/core/opensession-server/src/server/gateway-ingress.ts",
+	"packages/core/opensession-server/src/server/gateway-routing.ts",
+	"packages/core/opensession-server/src/server/gateway-tcp-proxy.ts",
+	"packages/core/opensession-server/src/server/stable-frontend.ts",
 ]);
 
 /** Files the unprivileged self-deploy path cannot install. Letting one of these
