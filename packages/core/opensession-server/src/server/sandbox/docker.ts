@@ -123,6 +123,7 @@ import {
 import { dirname, resolve as resolvePath } from "path";
 import { homeDir, OPENSESSION_SESSIONS_DIR } from "../paths";
 import { stateDir } from "../paths";
+import { acpSessionStateDir } from "../acp-state";
 import {
   journalSet,
   journalClear,
@@ -701,6 +702,9 @@ async function createContainer(
 
   const runsDir = sessionRunsDir(sessionId);
   mkdirSync(runsDir, { recursive: true });
+  const acpStateDir = acpSessionStateDir(sessionId);
+  mkdirSync(acpStateDir, { recursive: true, mode: 0o700 });
+  chmodSync(acpStateDir, 0o700);
   // Engine transcript dir for this cwd, host-side (see mount design above).
   // Volume mode keeps it too: transcripts are engine state, not workspace —
   // mounting them host-side keeps the session viewer's tail working.
@@ -717,6 +721,10 @@ async function createContainer(
     ...vol(transcriptDir, transcriptDir),
     // Per-session run dirs: spec/meta/journal/host.sock/log for every run.
     ...vol(runsDir, runsDir),
+    // Provider-native ACP session metadata. Credentials are staged in each
+    // private run dir and scrubbed before prompt; only resumable session state
+    // persists here across container recreation.
+    ...vol(acpStateDir, acpStateDir),
     // Audit log parity (append-only jsonl stream). Deliberately rw where the
     // other trust mounts are ro: in-container runs must land in the SAME audit
     // stream as host runs (append-only writes via O_APPEND), and host runs can

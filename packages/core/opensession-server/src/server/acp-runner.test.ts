@@ -16,6 +16,11 @@ import {
   cancelAcpRun,
   runAcp,
 } from "./acp-runner";
+import {
+  acpProviderStateDir,
+  acpSessionStateDir,
+  removeAcpSessionState,
+} from "./acp-state";
 import { __setAcpProviderCommandForTest } from "./acp-config";
 import type { RunAgentOpts } from "./agent-runner";
 
@@ -25,6 +30,7 @@ const fakeAgent = fileURLToPath(
 let scratch: string;
 let previousJournal: string | undefined;
 let previousTimeout: string | undefined;
+let previousSessionsDir: string | undefined;
 
 function stageAuth(value = "test-subscription-auth"): string {
   const runDir = join(scratch, "run");
@@ -36,7 +42,11 @@ function stageAuth(value = "test-subscription-auth"): string {
   return auth;
 }
 
-function opts(prompt: string, sessionId?: string): RunAgentOpts {
+function opts(
+  prompt: string,
+  sessionId?: string,
+  osSessionId = `os-${crypto.randomUUID()}`,
+): RunAgentOpts {
   return {
     prompt,
     sessionId,
@@ -45,7 +55,7 @@ function opts(prompt: string, sessionId?: string): RunAgentOpts {
     model: "grok/grok-4.6",
     mcpServers: [],
     startToken: `run-${crypto.randomUUID()}`,
-    journal: { osSessionId: `os-${crypto.randomUUID()}`, kind: "prompt" },
+    journal: { osSessionId, kind: "prompt" },
   };
 }
 
@@ -59,6 +69,8 @@ beforeEach(() => {
   scratch = mkdtempSync(join(tmpdir(), "opensession-acp-test-"));
   previousJournal = process.env.OPENSESSION_RUN_JOURNAL;
   previousTimeout = process.env.OPENSESSION_ACP_TURN_TIMEOUT_MS;
+  previousSessionsDir = process.env.OPENSESSION_SESSIONS_DIR;
+  process.env.OPENSESSION_SESSIONS_DIR = join(scratch, "sessions");
   __setAcpProviderCommandForTest("grok", [process.execPath, fakeAgent, "grok"]);
   __setAcpProviderCommandForTest("cursor", [
     process.execPath,
@@ -75,6 +87,9 @@ afterEach(() => {
   if (previousTimeout === undefined)
     delete process.env.OPENSESSION_ACP_TURN_TIMEOUT_MS;
   else process.env.OPENSESSION_ACP_TURN_TIMEOUT_MS = previousTimeout;
+  if (previousSessionsDir === undefined)
+    delete process.env.OPENSESSION_SESSIONS_DIR;
+  else process.env.OPENSESSION_SESSIONS_DIR = previousSessionsDir;
   rmSync(scratch, { recursive: true, force: true });
 });
 
@@ -137,10 +152,17 @@ describe("ACP runner", () => {
     expect(activeAcpRunCount()).toBe(0);
   });
 
-  test("loads a native session without replaying provider history", async () => {
+  test("persists native state and loads a later turn without replaying history", async () => {
+    const osSessionId = "os-grok-resume";
+    stageAuth();
+    const first = await collect(
+      runAcp(opts("normal", undefined, osSessionId), "grok/grok-4.6"),
+    );
+    const engineSessionId = first[0]?.sessionId;
+    expect(engineSessionId).toBe("grok-session-new");
     stageAuth();
     const events = await collect(
-      runAcp(opts("normal", "grok-session-existing"), "grok/grok-4.6"),
+      runAcp(opts("normal", engineSessionId, osSessionId), "grok/grok-4.6"),
     );
     expect(
       events
@@ -149,8 +171,21 @@ describe("ACP runner", () => {
     ).toEqual(["hello ", "from ACP"]);
     expect(events[0]).toMatchObject({
       type: "init",
-      sessionId: "grok-session-existing",
+      sessionId: engineSessionId,
     });
+    expect(
+      existsSync(
+        join(
+          acpProviderStateDir(osSessionId, "grok"),
+          `${engineSessionId}.state`,
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      Array.from(
+        new Bun.Glob("**/auth.json*").scanSync(acpSessionStateDir(osSessionId)),
+      ),
+    ).toEqual([]);
   });
 
   test("maps Cursor's curated model name to its dynamic configuration value", async () => {
@@ -158,6 +193,41 @@ describe("ACP runner", () => {
     const runOpts = { ...opts("normal"), model: "cursor/grok-4.6" };
     const events = await collect(runAcp(runOpts, "cursor/grok-4.6"));
     expect(events.at(-1)).toMatchObject({ type: "done", provider: "cursor" });
+  });
+
+  test("loads Cursor's provider-native ACP state on a later turn", async () => {
+    const osSessionId = "os-cursor-resume";
+    stageAuth();
+    const firstOpts = {
+      ...opts("normal", undefined, osSessionId),
+      model: "cursor/grok-4.6",
+    };
+    const first = await collect(runAcp(firstOpts, "cursor/grok-4.6"));
+    const engineSessionId = first[0]?.sessionId;
+    expect(engineSessionId).toBe("cursor-session-new");
+    stageAuth();
+    const secondOpts = {
+      ...opts("normal", engineSessionId, osSessionId),
+      model: "cursor/grok-4.6",
+    };
+    const second = await collect(runAcp(secondOpts, "cursor/grok-4.6"));
+    expect(second.at(-1)).toMatchObject({
+      type: "done",
+      provider: "cursor",
+      sessionId: engineSessionId,
+    });
+  });
+
+  test("isolates and removes hashed per-session provider state", () => {
+    const first = acpProviderStateDir("../../session-a", "grok");
+    const second = acpProviderStateDir("session-b", "grok");
+    expect(first).not.toBe(second);
+    expect(first).toStartWith(join(scratch, "sessions", "acp-state"));
+    expect(first).not.toContain("../");
+    writeFileSync(join(first, "state"), "durable", { mode: 0o600 });
+    removeAcpSessionState("../../session-a");
+    expect(existsSync(first)).toBe(false);
+    expect(existsSync(second)).toBe(true);
   });
 
   test("cancels an in-flight prompt by immutable run token", async () => {

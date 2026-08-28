@@ -121,8 +121,12 @@ describe("removeTombstonedSessionArtifacts", () => {
   it("removes a ghost session without re-entering its mailbox", async () => {
     const id = `bks-tombstoned-ghost-${crypto.randomUUID()}`;
     const path = join(home, ".opensession-sessions", `${id}.json`);
+    const { acpProviderStateDir } = await import("./acp-state");
+    const acpState = acpProviderStateDir(id, "grok");
+    writeFileSync(join(acpState, "native-session"), "state");
     writeSession(id, { title: "Deleted ghost" });
     expect(existsSync(path)).toBe(true);
+    expect(existsSync(acpState)).toBe(true);
 
     const { removeTombstonedSessionArtifacts } = await import(
       `./sessions.ts?tombstoned=${crypto.randomUUID()}`
@@ -133,6 +137,7 @@ describe("removeTombstonedSessionArtifacts", () => {
     } as UnifiedSession);
 
     expect(existsSync(path)).toBe(false);
+    expect(existsSync(acpState)).toBe(false);
   });
 });
 

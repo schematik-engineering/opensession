@@ -1,10 +1,53 @@
 /** Deterministic stdio ACP peer for acp-runner integration tests. */
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "fs";
+import { dirname, join } from "path";
 import { createInterface } from "readline";
 
 const provider = process.argv[2] || "grok";
 let nextRequestId = 10_000;
 const pending = new Map<number, (value: any) => void>();
 const promptRequests = new Map<string, number>();
+
+function authPath(): string {
+  return join(
+    process.env.HOME || "",
+    provider === "grok" ? ".grok/auth.json" : ".config/cursor/auth.json",
+  );
+}
+
+function sessionStatePath(sessionId: string): string {
+  const root = join(
+    process.env.HOME || "",
+    provider === "grok" ? ".grok/sessions" : ".cursor/acp-sessions",
+  );
+  return join(root, `${sessionId}.state`);
+}
+
+function persistSession(sessionId: string): void {
+  const destination = sessionStatePath(sessionId);
+  mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
+  writeFileSync(destination, "provider-native-session-state", {
+    mode: 0o600,
+  });
+}
+
+function hasCredentialArtifacts(): boolean {
+  const auth = authPath();
+  try {
+    const name = auth.slice(auth.lastIndexOf("/") + 1);
+    return readdirSync(dirname(auth)).some(
+      (entry) => entry === name || entry.startsWith(`${name}.`),
+    );
+  } catch {
+    return false;
+  }
+}
 
 function send(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value)}\n`);
@@ -85,6 +128,14 @@ async function runPrompt(id: number, params: any): Promise<void> {
       jsonrpc: "2.0",
       id,
       error: { code: -32000, message: "subscription usage limit exhausted" },
+    });
+    return;
+  }
+  if (hasCredentialArtifacts()) {
+    send({
+      jsonrpc: "2.0",
+      id,
+      error: { code: -32000, message: "credential artifacts not scrubbed" },
     });
     return;
   }
@@ -196,22 +247,60 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       });
       break;
     case "authenticate":
+      if (!existsSync(authPath())) {
+        send({
+          jsonrpc: "2.0",
+          id,
+          error: { code: -32000, message: "subscription auth missing" },
+        });
+        break;
+      }
+      writeFileSync(
+        `${authPath()}.fake.tmp`,
+        readFileSync(authPath(), "utf8"),
+        { mode: 0o600 },
+      );
       result(id, {});
       break;
-    case "session/new":
+    case "session/new": {
+      const sessionId = `${provider}-session-new`;
+      persistSession(sessionId);
       result(id, {
-        sessionId: `${provider}-session-new`,
+        sessionId,
         models,
         ...(provider === "cursor" ? cursorSetup : {}),
       });
       break;
+    }
     case "session/load":
+      if (!existsSync(sessionStatePath(String(params.sessionId)))) {
+        send({
+          jsonrpc: "2.0",
+          id,
+          error: {
+            code: -32602,
+            message: provider === "grok" ? "Path not found" : "Invalid params",
+          },
+        });
+        break;
+      }
       update(params.sessionId, {
         sessionUpdate: "agent_message_chunk",
         messageId: "replayed-old-message",
         content: { type: "text", text: "old history" },
       });
       result(id, { models, ...(provider === "cursor" ? cursorSetup : {}) });
+      break;
+    case "session/resume":
+      if (!existsSync(sessionStatePath(String(params.sessionId)))) {
+        send({
+          jsonrpc: "2.0",
+          id,
+          error: { code: -32602, message: "Path not found" },
+        });
+        break;
+      }
+      result(id, {});
       break;
     case "session/set_model":
     case "session/set_config_option":

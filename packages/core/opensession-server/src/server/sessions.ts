@@ -55,6 +55,7 @@ import type {
   TranscriptEntry,
 } from "./types";
 import { removeIndexedSession } from "./session-list-store";
+import { removeAcpSessionState } from "./acp-state";
 
 // The GitHub PR bulk cache lives in pr-cache.ts (extracted from this module);
 // re-export its public surface so existing consumers keep importing from here.
@@ -1470,6 +1471,7 @@ function removeSessionArtifacts(session: UnifiedSession): void {
     }
   }
   removeIndexedSession(session.id);
+  removeAcpSessionState(session.id);
   // Nobody's unsent draft should outlive the session it was typed into.
   purgeDraftsForSessions([session.id, ...(session.aliasIds || [])]);
   // Neither should its scratch dir (session-scratch.ts). Best-effort and
