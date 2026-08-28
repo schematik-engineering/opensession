@@ -16,7 +16,7 @@ session's git worktree **bind-mounted at its identical host path**.
 | `python3`, `build-essential` | worktree `bun install` native deps | apt |
 | `just`, `direnv`, `lsof` | common repo dev-server bring-up chains (in-sandbox previews) | apt / pinned release |
 | Claude Code CLI | baked at the identical host CLI path for session-resume parity | `2.1.218` (host); build FAILS on version mismatch |
-| runner bundle | stable container path (`/home/ubuntu/.opensession-runner`): root manifests, lockfile, patches and `tsconfig.json`; copied protocol and server packages; `scripts/workload-identity-client.ts`; installed dependencies | from lockfile |
+| runner bundle | stable container path (`/home/ubuntu/.opensession-runner`): root manifests, lockfile, patches and `tsconfig.json`; copied protocol, server, and root runtime scripts; installed dependencies | from lockfile |
 | minimal `~/.claude/settings.json` | so `settingSources:["user"]` doesn't error | `{}` |
 
 Runs as uid **1000** user `ubuntu` (matches the host uid) so bind-mounted
@@ -47,7 +47,9 @@ Version pins are Dockerfile `ARG`s: `BUN_VERSION`, `CLAUDE_VERSION`,
 `NODE_MAJOR`, and `JUST_VERSION`. `build.sh` supports `IMAGE=...` but does not
 forward command-line options. To override a pin, invoke `docker build` directly
 with `--build-arg` or change the Dockerfile default. The runner root is a code
-contract, not a deployment-specific build argument.
+contract, not a deployment-specific build argument. The image build also
+bundles the runner-host entry as a throwaway module-graph smoke check; a missing
+root runtime import fails the build before the image can be promoted.
 
 ## Runtime design (Phase 1 — DockerProvider)
 
