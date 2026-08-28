@@ -40,6 +40,18 @@ function updateSandboxConfig(patch: Record<string, unknown>): void {
   chmodSync(sandboxConfigPath(), 0o600);
 }
 
+/**
+ * Docker enablement must work with Open Session's loopback-only server
+ * default. The socket transport shares only the per-run Unix socket with the
+ * container; WS remains an explicit opt-in once callbackBaseUrl is reachable
+ * from the sandbox.
+ */
+export const DOCKER_ENABLE_CONFIG = {
+  workspace: "volume" as const,
+  transport: "socket" as const,
+  snapshots: { enabled: true, onIdle: true, maxPerSession: 2, quickSyncOnRestore: true },
+};
+
 async function qualifyRemoteThroughServer(provider: "daytona" | "box" | "modal"): Promise<number> {
   const token = localAutomationToken();
   if (!token) {
@@ -199,11 +211,7 @@ async function enableDocker(): Promise<number> {
   if (!image) return 1;
   if (!(await installPersistentHostFirewall())) return 1;
 
-  updateSandboxConfig({
-    workspace: "volume",
-    transport: "ws",
-    snapshots: { enabled: true, onIdle: true, maxPerSession: 2, quickSyncOnRestore: true },
-  });
+  updateSandboxConfig(DOCKER_ENABLE_CONFIG);
   connectSandboxProvider("docker", { settings: { image, cpu: 4, memoryMb: 8192 } });
   heading("Qualification");
   try {
