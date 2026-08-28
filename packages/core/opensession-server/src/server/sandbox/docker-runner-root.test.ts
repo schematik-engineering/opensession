@@ -26,6 +26,7 @@ describe("Docker runner root", () => {
     );
     expect(dockerfile).toContain("/runner-host/host.ts \\");
     expect(dockerfile).toContain("--outfile=/tmp/opensession-runner-host-smoke.js");
+    expect(dockerfile).toContain("/home/ubuntu/.opensession \\");
     expect(buildScript).not.toContain("--build-arg \"OPENSESSION_RUNNER_ROOT=");
   });
 });
