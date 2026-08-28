@@ -82,9 +82,13 @@ jobs:
           fixture_pid=$!
           trap 'kill "$fixture_pid" "$chrome_pid" 2>/dev/null || true' EXIT
           for attempt in {1..120}; do
-            curl -fsS http://127.0.0.1:4899/__fixtures/transcript-motion >/dev/null && break
+            if curl -fsS http://127.0.0.1:4899/__fixtures/transcript-motion >/dev/null \
+              && curl -fsS http://127.0.0.1:9222/json/version >/dev/null; then
+              break
+            fi
             if [ "$attempt" -eq 120 ]; then
               cat "$RUNNER_TEMP/transcript-motion-fixture.log"
+              cat "$RUNNER_TEMP/transcript-motion-chrome.log"
               exit 1
             fi
             sleep 1
