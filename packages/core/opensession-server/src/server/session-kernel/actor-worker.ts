@@ -101,10 +101,14 @@ export function startSessionKernelActorWorker(): void {
             command.kind === "transcript" ? false : !isReadReducer(command),
             reducerMutatesSparseProjection(command),
           );
+        // Delete records one final reset wake. A crash can commit the permanent
+        // tombstone before the gateway acknowledges it; that acknowledgement is
+        // idempotent cleanup, while every content mutation remains fenced.
         if (
           command.kind === "transcript" &&
           !isReadReducer(command) &&
           command.request.op !== "delete" &&
+          command.request.op !== "ack_wake" &&
           store.isTombstoned(command.request.sessionId)
         )
           throw new Error(`Session ${command.request.sessionId} is tombstoned`);
