@@ -90,7 +90,7 @@ describe("single session ownership", () => {
     const host = read("session-kernel/store-host.ts");
     expect(service).toContain('request.t === "runtime_work"');
     expect(service).toContain("runtimeWorkRequest(request");
-    expect(service).toContain("enqueueSession(sessionId");
+    expect(service).toMatch(/enqueueSession\(\s*sessionId/);
     expect(worker).toContain('request.t === "runtime_session_work"');
     expect(host).toContain("runtimeCatalogWork(");
     expect(host).toContain("runtimeSessionWork(");
@@ -254,7 +254,7 @@ describe("single session ownership", () => {
     const beginEffect = run.indexOf("beginPromptInterruptEffect(");
     const cancel = run.indexOf("cancelAgentRunToken(dispatchId)", beginEffect);
     const settle = run.indexOf("settlePromptInterrupt(", cancel);
-    expect(run).toContain("preparePromptInterrupt(sessionId");
+    expect(run).toMatch(/preparePromptInterrupt\(\s*sessionId/);
     expect(beginEffect).toBeGreaterThan(-1);
     expect(beginEffect).toBeLessThan(cancel);
     expect(cancel).toBeLessThan(settle);
@@ -518,8 +518,8 @@ describe("single session ownership", () => {
     expect(wiring).toContain('op: "fail_submit_command"');
     const tools = read("../agents/slack/sessions-tools.ts");
     expect(tools).toContain("durableToolRequestId");
-    expect(tools).toContain(
-      'durableToolRequestId(ctx, "create_session", extra',
+    expect(tools).toMatch(
+      /durableToolRequestId\(\s*ctx,\s*"create_session",\s*extra/,
     );
     const native = readFileSync(
       resolve(
@@ -680,8 +680,8 @@ describe("single session ownership", () => {
     const boot = read("../../opensession.ts");
     expect(boot).toContain("runId: recoveredRun.runKey");
     expect(boot).toContain("projectionId: `outcome:${recoveredRun.runKey}`");
-    expect(boot).toContain(
-      "runGeneration: sessionKernel(bksSessionId).runStateProjection().generation",
+    expect(boot).toMatch(
+      /runGeneration:\s*sessionKernel\(bksSessionId\)\.runStateProjection\(\)\s*\.generation/,
     );
     const cache = read("session-cache.ts");
     expect(cache).toContain('op: "prepare_outcome_projection"');
