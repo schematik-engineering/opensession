@@ -59,10 +59,13 @@ a published golden, tar with Zstandard support, at least 30 GB free,
 reflink-capable XFS or Btrfs store under `/opt/firecracker` (or
 `OPENSESSION_MICROVM_STORE_DIR`).
 
-`opensession sandbox enable docker` currently requests volume workspaces, WS
-transport, and Docker snapshots enabled. Ask sessions and sessions with an
-existing host worktree still bind-mount that worktree. These choices differ
-from the low-level schema defaults documented below.
+`opensession sandbox enable docker` currently requests volume workspaces,
+per-run Unix-socket transport, and Docker snapshots enabled. Ask sessions and
+sessions with an existing host worktree still bind-mount that worktree. WS
+transport is an explicit opt-in: set `transport` to `ws` only with a
+`callbackBaseUrl` that is reachable from the sandbox (`127.0.0.1` is the
+container itself). These choices differ from the low-level schema defaults
+documented below.
 
 Remote providers use the workspace's canonical Public ingress origin. Configure
 it once under **Settings → Domains and ingress → Public callbacks** with
