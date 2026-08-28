@@ -117,6 +117,7 @@ async function runPrompt(id: number, params: any): Promise<void> {
   const text = String(
     params.prompt?.find((part: any) => part.type === "text")?.text || "",
   );
+  const omitMessageId = text.includes("without message ids");
   if (text === "malformed") {
     process.stdout.write("this is not json\n");
     setTimeout(() => process.exit(2), 10);
@@ -195,12 +196,12 @@ async function runPrompt(id: number, params: any): Promise<void> {
   });
   update(sessionId, {
     sessionUpdate: "agent_message_chunk",
-    messageId: "message-1",
+    ...(omitMessageId ? {} : { messageId: "message-1" }),
     content: { type: "text", text: "hello " },
   });
   update(sessionId, {
     sessionUpdate: "agent_message_chunk",
-    messageId: "message-1",
+    ...(omitMessageId ? {} : { messageId: "message-1" }),
     content: { type: "text", text: "from ACP" },
   });
   promptRequests.delete(sessionId);
