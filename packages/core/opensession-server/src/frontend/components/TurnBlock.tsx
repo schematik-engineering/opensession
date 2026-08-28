@@ -14,6 +14,7 @@ import { ClampedBody, EntryImages, EntryVideos } from "./MessageBubble";
 import { IconChevronDown, IconStack } from "./icons";
 import { cn } from "../ui/cn";
 import { Fold } from "../ui/fold";
+import { TextShimmer } from "../ui/text-shimmer";
 import {
   msgBody,
   msgReasoningBody,
@@ -724,15 +725,19 @@ function ReasoningMessage({
   return (
     <div className="my-2 px-1" data-eid={last.id} data-reasoning="">
       {title ? (
-        <div className={cn(msgReasoningTitle, active && msgReasoningShimmer)}>
-          {title}
-        </div>
+        active ? (
+          <TextShimmer className={cn(msgReasoningTitle, msgReasoningShimmer)}>
+            {title}
+          </TextShimmer>
+        ) : (
+          <div className={msgReasoningTitle}>{title}</div>
+        )
       ) : active ? (
         // Some providers expose prose thinking rather than a short status
         // heading. Keep that prose readable and shimmer a stable activity label.
-        <div className={cn(msgReasoningTitle, msgReasoningShimmer)}>
+        <TextShimmer className={cn(msgReasoningTitle, msgReasoningShimmer)}>
           Thinking
-        </div>
+        </TextShimmer>
       ) : null}
       {entries.map((entry, index) => {
         const body = displays[index].body;

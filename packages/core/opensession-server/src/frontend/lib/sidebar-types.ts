@@ -1,13 +1,5 @@
 import React from "react";
-import type { ReviewQueueItem } from "./review-queue";
-import type { SettingsSectionKey } from "./settings-sections";
-import type {
-  FeedDescriptor,
-  FeedItem,
-  SupportThread,
-  UnifiedSession,
-  Workspace,
-} from "./types";
+import type { UnifiedSession, Workspace } from "./types";
 
 export type OpenNextSidebarItem = () => boolean;
 
@@ -29,66 +21,28 @@ export interface Props {
   selectedId: string | null;
   /** True while the pull request list is open: highlights its entry. */
   prsActive: boolean;
-  /** Open the pull request list. */
-  onOpenPrs: () => void;
   /**
    * True while the Feed page is open: highlights its entry. Note this is the
    * Feed *tool*, not the sidebar's `feeds` (the Slack/Linear/GitHub sources,
    * which the UI calls Sources).
    */
   feedActive: boolean;
-  /** Open the Feed page. */
-  onOpenFeed: () => void;
   /** Whether the active server socket is connected. */
   connected: boolean;
-  /** Open Settings from the organization menu. */
-  onOpenSettings: (section?: SettingsSectionKey) => void;
   /** True while the Tasks tool is open. */
   tasksActive: boolean;
-  /** Open the current user's task list. */
-  onOpenTasks: () => void;
   /** Current open-task count. */
   taskCount?: number;
-  /** Open one automation's settings (list + detail). Called with the
-	    automation's NAME — session rows only carry the name, not the id. */
-  onOpenAutomation: (name: string) => void;
-  /**
-   * Open a sessionless PR row's workspace (resolve-or-create), on that PR's
-   * Review tab. Once the PR belongs to a visible workspace, that workspace is
-   * its only sidebar row.
-   */
-  onOpenPrItem: (item: ReviewQueueItem) => void;
   /** The open workspace id (route or the open session's), for row selection. */
   selectedWorkspaceId?: string | null;
   /** True while the Support queue (the Plain tool) is open. */
   plainActive: boolean;
-  /** Open the Support queue: the Plain tickets in a column of their own. */
-  onOpenPlain: () => void;
   /** True while the Support Tinder deck is open — highlights its entry. */
   supportTinderActive: boolean;
-  /** Open Support Tinder (swipe triage of the Plain Todo queue). */
-  onOpenSupportTinder: () => void;
   /** True while the recurring Reports surface is open. */
   reportsActive: boolean;
-  /**
-   * Open automation-produced recurring reports. With a target, open that one
-   * report — what an automation's latest-report row in the sidebar hands over.
-   */
-  onOpenReports: (target?: { automationId: string; reportId: string }) => void;
   /** True while the Analytics surface is open. */
   analyticsActive: boolean;
-  /** Open the Analytics view (sessions/tokens/models/PRs over time). */
-  onOpenAnalytics: () => void;
-  onSelect: (session: UnifiedSession) => void;
-  /** Foreground a session's Review view-tab (from a session row's context menu). */
-  onOpenReview: (session: UnifiedSession) => void;
-  /** Open a Support ticket's workspace (resolve-or-create, Conversation tab). */
-  onOpenTicket: (t: SupportThread) => void;
-  /** Open a feed item's workspace (resolve-or-create — the feeds design). */
-  onOpenFeedItem: (feed: FeedDescriptor, item: FeedItem) => void;
-  onNewSession: () => void;
-  /** Start a new session with a repo pre-selected (the repo-band "+" action). */
-  onNewSessionInRepo: (repo: string) => void;
   /**
    * Show the row for the session that hasn't started yet: with nothing in the
    * list, the sidebar still has one entry, and the main panel is its input.
@@ -98,21 +52,14 @@ export interface Props {
   showDraftRow?: boolean;
   /** True while the main panel is showing that input. */
   draftRowActive?: boolean;
-  /** Put the caret back in it. */
-  onOpenDraft?: () => void;
-  /** Open a project. A preferred session targets the tab carrying unread activity. */
-  onOpenWorkspace: (id: string, preferredSessionId?: string) => void;
   /** Rename a project folder. */
   onRenameWorkspace: (id: string, name: string) => void;
   /** Delete a project folder and all of its sessions. A sessionless draft is
    *  simply removed. May reject; callers that need to react to failure (a swipe
    *  or long-press commit) await it. */
   onDeleteWorkspace: (id: string) => void | Promise<void>;
-  onOpenArchived: () => void;
   /** True while the archived view is open — highlights the Archived row. */
   archivedActive: boolean;
-  /** Open the catch-up swipe deck (walk through your unread workspaces). */
-  onOpenCatchUp: () => void;
   /** True while the catch-up deck is open — highlights its entry. */
   catchUpActive: boolean;
   /** Report whether Next can open attention work or another rendered chat. */

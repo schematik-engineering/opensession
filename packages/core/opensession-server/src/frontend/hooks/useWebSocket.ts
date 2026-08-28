@@ -19,6 +19,7 @@ import {
   wsCommandOutboxForScope,
 } from "../lib/ws-command-outbox";
 import { webSocketReconnectDelay } from "../lib/ws-reconnect";
+import { IGNORE_WS_MESSAGES, type SessionSocket } from "./useSessionSocket";
 
 // Liveness probe cadence. iOS/Safari kills backgrounded sockets without firing
 // onclose, leaving a half-open socket that reads as OPEN but delivers nothing —
@@ -707,6 +708,18 @@ export function useWebSocket(presenceActive = true) {
       handlersRef.current = handlersRef.current.filter((h) => h !== handler);
     };
   }, []);
+  const [sessionSocket] = useState<SessionSocket>(() => ({ send, addHandler }));
+  const [sessionSocketIgnoringMessages] = useState<SessionSocket>(() => ({
+    send,
+    addHandler: IGNORE_WS_MESSAGES,
+  }));
 
-  return { connected, send, setTyping, addHandler };
+  return {
+    connected,
+    send,
+    setTyping,
+    addHandler,
+    sessionSocket,
+    sessionSocketIgnoringMessages,
+  };
 }

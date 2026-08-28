@@ -6,6 +6,7 @@ import { PageLoader } from "../../ui/page-loader";
 import { Spinner } from "../../ui/spinner";
 import { PulseDot } from "../../ui/status";
 import { cn } from "../../ui/cn";
+import { TextShimmer } from "../../ui/text-shimmer";
 import { busyActivityStatus } from "../../lib/busy-activity";
 import { msgActivityShimmer, msgRow } from "../../lib/msg-classes";
 import type { LiveTurnStore } from "../../lib/live-turn-store";
@@ -92,12 +93,12 @@ function BusyWorking({ since }: { since: number | null }) {
   const status = busyActivityStatus(since == null ? 0 : now - since);
   return (
     <>
-      <span
-        role="status"
-        aria-live="polite"
-        className={cn("text-meta font-medium", msgActivityShimmer)}
-      >
-        {status.label}
+      <span role="status" aria-live="polite">
+        <TextShimmer
+          className={cn("text-meta font-medium", msgActivityShimmer)}
+        >
+          {status.label}
+        </TextShimmer>
       </span>
       {status.elapsed && (
         <span aria-hidden="true" className="text-meta text-faint tabular-nums">

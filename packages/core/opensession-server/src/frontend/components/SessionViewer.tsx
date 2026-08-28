@@ -42,8 +42,6 @@ import type {
   SessionNote,
   SessionSlackShare,
   TranscriptEntry,
-  WSServerMessage,
-  WSClientMessage,
   AskQuestion,
 } from "../lib/types";
 import {
@@ -55,7 +53,6 @@ import {
   shouldContinueHistoryReveal,
 } from "../lib/transcript-history";
 import { SessionTranscript } from "./SessionTranscript";
-import type { NewTabMorphOrigin } from "./SessionTabs";
 import { MessageRail } from "./MessageRail";
 import { collectSentMessages } from "../lib/sent-messages";
 import {
@@ -144,6 +141,8 @@ import {
 } from "../lib/slack-share-dismiss";
 import { latestFeaturedScreenshot } from "../../shared/shipped-change-media";
 import { useBackSwipe } from "../hooks/useBackSwipe";
+import { useNavigation } from "../hooks/useNavigation";
+import { useSessionSocket } from "../hooks/useSessionSocket";
 import {
   dedupeViewers,
   facepileAvatarStyle,
@@ -239,7 +238,6 @@ import { WorkflowPanel } from "./WorkflowPanel";
 import { AssetsPanel, useSessionAssets } from "./AssetsPanel";
 import { AssetOverlay } from "./AssetView";
 import { SessionReportsPanel, useSessionReports } from "./SessionReportsPanel";
-import type { NewSessionPrefill } from "../lib/new-session-link";
 import type { WorkflowRunSnapshot } from "../../server/workflow-types";
 import { ArchivedSessionItems } from "./ArchivedSessionItems";
 import { PreviewPane } from "./PreviewPane";
@@ -311,7 +309,6 @@ import { onTranscriptDisclosure } from "../lib/transcript-disclosures";
 import { takePendingSessionFork } from "../lib/pending-session-fork";
 import { isPinned, togglePin, onPinsChanged } from "../lib/pins";
 import { getLane, onLanesChanged, type Lane } from "../lib/lanes";
-import { ownedBy } from "../lib/sidebar-lanes";
 import { useSessionScroll } from "../hooks/useSessionScroll";
 import {
   useShortcutKeys,
@@ -401,17 +398,14 @@ interface Props {
   /** The unfocused half of a split keeps its conversation chrome-free. */
   hideHeader?: boolean;
   hideRightPanel?: boolean;
-  onBack: () => void;
   /** Open the next chat needing attention, or continue through the sidebar. */
-  onNextChat?: () => void;
+  canOpenNextChat?: boolean;
   /** Archive through the sidebar so the nearest visible row becomes active. */
   onArchive?: () => void;
   /** Called after a successful archive (not unarchive), with whether archiving
 	    gracefully stopped an in-flight owned turn — so the parent can toast. */
   onArchived?: (stoppedRun: boolean) => void;
-  send: (msg: WSClientMessage) => void;
   setTyping: (sessionId: string, active: boolean) => void;
-  addHandler: (handler: (msg: WSServerMessage) => void) => () => void;
   connected: boolean;
   /** A client-minted session whose server record is still being persisted. */
   pendingCreation?: boolean;
@@ -477,14 +471,9 @@ interface Props {
 	    draw their sibling sessions from. */
   allSessions?: UnifiedSession[];
   /** Start a new session in this workspace. Phone surfaces it in More. */
-  onNewSession?: (
-    mode: "share" | "stack" | "ask",
-    origin?: NewTabMorphOrigin,
-  ) => void;
+  canStartNewSession?: boolean;
   /** Start a session in a new workspace. Phone surfaces it as +. */
-  onNewWorkspace?: () => void;
-  /** Open a sibling session with selected transcript text in its composer. */
-  onStartNewChat: (prompt: string) => void;
+  canOpenNewWorkspace?: boolean;
   /** True when the tab strip is on screen (2+ sessions, an open view tab, or a
 	    split). The strip carries its own "+", so the header one stands down
 	    rather than showing a second plus a few pixels above it. */
@@ -499,11 +488,8 @@ interface Props {
 	    header relationship chips. */
   parentSession?: RelatedSession | null;
   workerSessions?: RelatedSession[];
-  /** Navigate to another session (used by the relationship chips). `created` is
-	    the server's copy of a session the panel just made (Auto-fix), so the app can
-	    open it without a loading placeholder. */
-  onOpenSession?: (id: string, created?: UnifiedSession | null) => void;
-  onOpenNewSession: (prefill: NewSessionPrefill) => void;
+  /** Whether relationship chips and delegated session links can navigate. */
+  canOpenSession?: boolean;
   /** Mirror live run state into the app-level session list for sidebar rows. */
   onRunningChange?: (id: string, isRunning: boolean) => void;
   /** Mirror a reviewer pick / sign-off into the app-level session list so the
@@ -518,8 +504,8 @@ interface Props {
    * When false, the session transcript shows.
    */
   showReview?: boolean;
-  /** Open/foreground this session's Review view-tab (PR/review triggers). */
-  onOpenReview?: () => void;
+  /** Whether PR/review triggers can foreground this session's Review view-tab. */
+  canOpenReview?: boolean;
   /**
    * Which PR the Review pane should land on, pulsed by the app when a sidebar
    * row or a `repo#123` chip opened it: a workspace can carry several PRs,
@@ -538,8 +524,6 @@ interface Props {
    * foregrounded — driven by the top tab strip's Preview environment view-tab (App state).
    */
   showStaging?: boolean;
-  /** Open/foreground this session's Preview environment view-tab. */
-  onOpenStaging?: () => void;
   /** Close this session's Preview environment view-tab (the deploy vanished, e.g. PR merged). */
   onCloseStaging?: () => void;
   /**
@@ -547,8 +531,8 @@ interface Props {
    * foregrounded — driven by the top tab strip's Assets view-tab (App state).
    */
   showAssets?: boolean;
-  /** Open/foreground this session's Assets view-tab (the Info panel's Assets button). */
-  onOpenAssets?: () => void;
+  /** Whether the Info panel can foreground this session's Assets view-tab. */
+  canOpenAssets?: boolean;
   /** Close this session's Assets view-tab (its last asset was deleted). */
   onCloseAssets?: () => void;
   /**
@@ -557,8 +541,6 @@ interface Props {
    * view-tab (App state).
    */
   showTerminal?: boolean;
-  /** Open/foreground this session's Terminal view-tab (the Info panel's row). */
-  onOpenTerminal?: () => void;
   /** Close this session's Terminal view-tab, tearing its shells down. */
   onCloseTerminal?: () => void;
   /**
@@ -585,20 +567,18 @@ interface Props {
   videoTitle?: string | null;
   /** Foregrounded full-width local-dev Preview view-tab (App state). */
   showPreviewTab?: boolean;
-  /** Open/foreground the Preview view-tab (header Preview button). */
-  onOpenPreviewTab?: () => void;
-  /** Open another PR in the review panel (stack map layer links). */
-  onOpenPr?: (repo: string, branch: string) => void;
+  /** Whether stack map layer links can open another PR in the review panel. */
+  canOpenPr?: boolean;
   /** Close the Preview view-tab (its Stop button / tab close). */
   onClosePreviewTab?: () => void;
   /** Foregrounded browser pane for a service selected in Portals. */
   showPortal?: boolean;
   /** The service currently loaded in the center-panel browser. */
   portalTarget?: PortalTarget | null;
-  /** Open a running service in the center-panel browser. */
-  onOpenPortal?: (target: PortalTarget) => void;
-  /** Return from a view-tab (Review/Preview environment/Assets) to this workspace's active session. */
-  onOpenWorkspace?: () => void;
+  /** Whether a running service can open in the center-panel browser. */
+  canOpenPortal?: boolean;
+  /** Whether a view-tab can return to this workspace's active session. */
+  canOpenWorkspace?: boolean;
   /**
    * Whether the sub-agent pane (a Task drill-in from this session's transcript,
    * full-width) is foregrounded — driven by the top tab strip's sub-agent
@@ -703,13 +683,10 @@ export function SessionViewer({
   focused = true,
   hideHeader = false,
   hideRightPanel = false,
-  onBack,
-  onNextChat,
+  canOpenNextChat,
   onArchive,
   onArchived,
-  send,
   setTyping,
-  addHandler,
   connected,
   pendingCreation = false,
   optimisticEmpty = false,
@@ -731,25 +708,23 @@ export function SessionViewer({
   workspaceSessions,
   onSetStatus,
   allSessions,
-  onNewSession,
-  onNewWorkspace,
-  onStartNewChat,
+  canStartNewSession,
+  canOpenNewWorkspace,
   tabStripVisible,
   archivedSessions,
   onRestoreSession,
   parentSession,
   workerSessions,
-  onOpenSession,
-  onOpenNewSession,
+  canOpenSession,
   onRunningChange,
   onReviewChange,
   showReview = false,
-  onOpenReview,
+  canOpenReview,
   reviewFocusPr,
   showStaging = false,
-  onOpenStaging,
   onCloseStaging,
   showAssets = false,
+  canOpenAssets,
   showTerminal = false,
   terminalTabOpen = false,
   showConversation = false,
@@ -758,23 +733,39 @@ export function SessionViewer({
   videoPanel = null,
   videoTitle = null,
   showPreviewTab = false,
-  onOpenPreviewTab,
-  onOpenPr,
+  canOpenPr,
   onClosePreviewTab,
   showPortal = false,
   portalTarget = null,
-  onOpenPortal,
-  onOpenAssets,
+  canOpenPortal,
   onCloseAssets,
-  onOpenTerminal,
   onCloseTerminal,
-  onOpenWorkspace,
+  canOpenWorkspace,
   showSubagent = false,
   subagentStack = NO_SUBAGENTS,
   onOpenSubagent,
   onSubagentBack,
   onSubagentLabel,
 }: Props) {
+  const navigation = useNavigation();
+  const { send, addHandler } = useSessionSocket();
+  const goBack = navigation.goBack;
+  const openNextChat = canOpenNextChat ? navigation.openNextChat : undefined;
+  const openNewSession = canStartNewSession
+    ? navigation.openNewSessionInWorkspace
+    : undefined;
+  const openNewWorkspace = canOpenNewWorkspace
+    ? navigation.openNewWorkspace
+    : undefined;
+  const openSession = canOpenSession ? navigation.openSession : undefined;
+  const openReview = canOpenReview ? navigation.openReview : undefined;
+  const openAssets = canOpenAssets ? navigation.openAssets : undefined;
+  const openPr = canOpenPr ? navigation.openPr : undefined;
+  const openPortal = canOpenPortal ? navigation.openPortal : undefined;
+  const openCurrentWorkspace = canOpenWorkspace
+    ? navigation.openCurrentWorkspace
+    : undefined;
+
   // Repos the Review tab can target: the session's own, then each attached
   // one. Keyed on the contents like the PR lists below, and for a sharper
   // reason than they have — this was a bare literal, so it handed PrPanel a
@@ -793,11 +784,11 @@ export function SessionViewer({
     [session.prs],
   );
   const worktreeDiffSource: "worktree" | undefined =
-    onOpenReview && (prPresentation.primary || prPresentation.additional.length)
+    openReview && (prPresentation.primary || prPresentation.additional.length)
       ? "worktree"
       : undefined;
   const changeWorktreeDiffSource = (next: "pull-request" | "worktree") => {
-    if (next === "pull-request") onOpenReview?.();
+    if (next === "pull-request") openReview?.();
   };
   const mergedPrValue =
     prPresentation.primary?.state === "MERGED"
@@ -984,9 +975,9 @@ export function SessionViewer({
     (ref?: { repo: string; branch: string }, view?: "checks") => {
       if (ref || view)
         setReviewFocus((prev) => ({ ...ref, view, seq: (prev?.seq ?? 0) + 1 }));
-      onOpenReview?.();
+      openReview?.();
     },
-    [onOpenReview],
+    [openReview],
   );
   // The app opened Review on a specific PR (a sidebar PR row, or a workspace
   // row whose PR isn't this session's primary). Re-sequenced locally so it
@@ -1525,7 +1516,7 @@ export function SessionViewer({
   // Main session-area view: the transcript+composer vs. the full-width PR review
   // that takes over the whole session column. Which one shows is now owned by App
   // (the top tab strip's Review view-tab) and passed in as `showReview`; the
-  // open triggers call onOpenReview. Only meaningful on a code session
+  // open triggers call openReview. Only meaningful on a code session
   // (hasWorkspace) — App only offers the Review tab there.
   // Sub-agents open as their own view-tab (App owns the breadcrumb stack, like
   // every other tab) — a sub-agent run is a conversation, so it gets the session
@@ -1661,13 +1652,12 @@ export function SessionViewer({
   // go deliberately, and the overlay's own header is how you get promoted
   // into it.
   const [overlayAssetPath, setOverlayAssetPath] = useState<string | null>(null);
-  // Through a ref because `onOpenAssets` is a fresh closure on every App
-  // render, and this reaches the memoized transcript as a context value —
-  // an unstable one would re-render the whole thing on every sessions poll.
-  const openAssetsRef = useRef(onOpenAssets);
+  // Through a ref because this reaches the memoized transcript as a context
+  // value — changing action availability must not re-render the whole thing.
+  const openAssetsRef = useRef(openAssets);
   useLayoutEffect(() => {
-    openAssetsRef.current = onOpenAssets;
-  }, [onOpenAssets]);
+    openAssetsRef.current = openAssets;
+  }, [openAssets]);
   const openAssetFromTranscript = useCallback((path: string) => {
     setOverlayAssetPath(path);
   }, []);
@@ -2468,19 +2458,15 @@ export function SessionViewer({
     () => isHiddenForSession(session),
     () => false,
   );
-  // A linked session can be open without belonging to your sidebar: teammate
-  // work, automation runs and agent-spawned probes all stay out until claimed.
-  // A normal session you started (or a workspace with one) is already yours.
-  const naturallyInSidebar = claimSessions.some(
-    (c) => !c.spawnedBy && !c.automation && ownedBy(c, currentUser),
-  );
+  // An open session can sit outside your sidebar for many reasons: teammate
+  // work, automation runs, spawned probes, or your own chat that only lives in
+  // the transient bands. Until it is claimed into a lane it is not really kept,
+  // so every unclaimed session offers the add affordance.
   const canKeepInSidebar =
-    !session.archived &&
-    !!onSetStatus &&
-    (hiddenFromSidebar || (!claimed && !naturallyInSidebar));
+    !session.archived && !!onSetStatus && (hiddenFromSidebar || !claimed);
   function keepInSidebar() {
     unhideForSession(session);
-    if (!claimed && !naturallyInSidebar) onSetStatus?.(claimSessions, "mine");
+    if (!claimed) onSetStatus?.(claimSessions, "mine");
   }
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -4181,15 +4167,15 @@ export function SessionViewer({
       }
       const el = target.closest?.("[data-session-id]") as HTMLElement | null;
       const id = el?.dataset.sessionId;
-      if (!id || !onOpenSession) return;
+      if (!id || !openSession) return;
       // Modified clicks on href-carrying chips (markdown links to session
       // URLs) keep native browser behavior (open in new tab, etc.).
       if ((e.metaKey || e.ctrlKey || e.shiftKey) && el?.getAttribute("href"))
         return;
       e.preventDefault();
-      onOpenSession(id);
+      openSession(id);
     },
-    [onOpenSession, openAssetFromTranscript],
+    [openSession, openAssetFromTranscript],
   );
 
   // The transcript passage explicitly attached to the next message. It stays
@@ -5127,7 +5113,7 @@ export function SessionViewer({
       await deleteSessionApi(session.id, cleanWorktree);
       // Leave the overlay up through the navigation so it never flashes back to
       // the (now-deleted) session view.
-      onBack();
+      goBack();
     } catch (error) {
       alert(
         `Delete failed: ${error instanceof Error ? error.message : "Unknown error"}`,
@@ -5153,7 +5139,7 @@ export function SessionViewer({
       const { stoppedRun } = await archiveSessionApi(session.id, next);
       if (next) {
         onArchived?.(stoppedRun);
-        onBack();
+        goBack();
       }
     } catch (error) {
       alert(
@@ -5164,7 +5150,7 @@ export function SessionViewer({
   }, [
     onArchive,
     onArchived,
-    onBack,
+    goBack,
     session.archived,
     session.id,
     setArchiving,
@@ -5187,9 +5173,9 @@ export function SessionViewer({
       if (editable && !editable.classList.contains("composer-textarea")) {
         return;
       }
-      if (matchesShortcut(e, "workspace-next-unread") && onNextChat) {
+      if (matchesShortcut(e, "workspace-next-unread") && openNextChat) {
         e.preventDefault();
-        onNextChat();
+        openNextChat();
         return;
       }
       // The sidebar handles live sessions when it can, because it knows which
@@ -5203,7 +5189,7 @@ export function SessionViewer({
     }
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [focused, archiving, handleArchive, onNextChat, session.archived]);
+  }, [focused, archiving, handleArchive, openNextChat, session.archived]);
 
   // Preview environment for the ⌘O chord — mirrors StagingLink's poll (same
   // relevance gate; the server caches PR details for 30s, so the duplicate
@@ -5428,7 +5414,7 @@ export function SessionViewer({
 
   /* Desktop shows reading controls between quick replies and Next. Phone keeps
 	   its existing standalone reading control and centered session toolbar. */
-  const nextAction = showNextChatButton && !!onNextChat;
+  const nextAction = showNextChatButton && !!openNextChat;
   const scrollAction = showScrollToBottom && entries.length > 0;
   const actionBand = quickReplies || nextAction || scrollAction || isPhone;
   const actionClearance = !actionBand
@@ -5609,11 +5595,11 @@ export function SessionViewer({
             );
           // The tab strip hides on phones, so More carries its
           // sibling-session action.
-          const newSessionAction = isPhone && onNewSession && (
+          const newSessionAction = isPhone && openNewSession && (
             <Menu.Item
               onClick={() => {
                 setOverflowOpen(false);
-                onNewSession("share");
+                void openNewSession("share");
               }}
               title="Start a new session in this workspace"
             >
@@ -5627,7 +5613,7 @@ export function SessionViewer({
           // likely to go looking for what was closed.
           const archivedActions = !tabStripVisible &&
             !!archivedSessions?.length &&
-            onOpenSession &&
+            openSession &&
             onRestoreSession && (
               <Menu.SubmenuRoot>
                 <Menu.SubmenuTrigger title="Closed sessions in this workspace">
@@ -5640,7 +5626,7 @@ export function SessionViewer({
                     sessions={archivedSessions}
                     onSelect={(s) => {
                       setOverflowOpen(false);
-                      onOpenSession(s.id);
+                      openSession(s.id);
                     }}
                     onRestore={(s) => {
                       setOverflowOpen(false);
@@ -5819,7 +5805,7 @@ export function SessionViewer({
               entries={entries}
               send={send}
               connected={connected}
-              onOpenNewSession={onOpenNewSession}
+              onOpenNewSession={navigation.openPrefilledSession}
             />
           );
           // Archive is the reversible primary "done with this" action — it sits
@@ -6126,12 +6112,12 @@ export function SessionViewer({
 					    bar reads repo > session > worker and the middle crumb is the way
 					    back up. It replaces the "worker of …" chip that used to trail the
 					    title while a temporary tab said the same thing again in the strip. */}
-                {parentSession && onOpenSession && (
+                {parentSession && openSession && (
                   <>
                     <button
                       type="button"
                       className={cn(VIEWER_BRANCH, VIEWER_CRUMB_UP)}
-                      onClick={() => onOpenSession(parentSession.id)}
+                      onClick={() => openSession(parentSession.id)}
                       title={`Back to ${workspaceName || parentSession.title}`}
                     >
                       {workspaceName || parentSession.title}
@@ -6270,11 +6256,11 @@ export function SessionViewer({
                 />
                 {/* The parent edge is the crumb before the title; this is the other
 					    direction, the workers this session delegated to. */}
-                {onOpenSession && !!workerSessions?.length && (
+                {openSession && !!workerSessions?.length && (
                   <SessionRelations
                     workers={workerSessions}
                     models={models}
-                    onOpen={onOpenSession}
+                    onOpen={openSession}
                   />
                 )}
                 {/* This workspace's own controls, at the end of its own cluster: the
@@ -6302,7 +6288,7 @@ export function SessionViewer({
                     {/* Not on a worker: its header is a level below the workspace, and
 							    a new tab belongs to the session above it. */}
                     {!session.desk &&
-                      onNewSession &&
+                      openNewSession &&
                       !tabStripVisible &&
                       !parentSession &&
                       workspaceSessions?.length === 1 && (
@@ -6323,7 +6309,7 @@ export function SessionViewer({
                               const rect = animate
                                 ? event.currentTarget.getBoundingClientRect()
                                 : null;
-                              onNewSession(
+                              void openNewSession(
                                 "share",
                                 rect
                                   ? {
@@ -6441,15 +6427,15 @@ export function SessionViewer({
                         setPanelPage("changes");
                         setActivePanelOpen(true);
                       } else {
-                        onOpenReview?.();
+                        openReview?.();
                       }
                     }}
                     onOpenPr={() => focusPrInReview()}
-                    onOpenStackPr={onOpenPr}
+                    onOpenStackPr={openPr}
                     onOpenChecks={() => focusPrInReview(undefined, "checks")}
                     onOpenAsset={openAssetFromTranscript}
-                    onOpenAssets={onOpenAssets}
-                    onOpenSession={onOpenSession}
+                    onOpenAssets={openAssets}
+                    onOpenSession={openSession}
                     onArchive={handleArchive}
                     // Already resolved across the workspace's sessions (the
                     // request may live on a sibling), and already folded
@@ -6607,7 +6593,7 @@ export function SessionViewer({
                         hideHeader
                         onOpenPortal={(target) => {
                           setInfoPageOpen(false);
-                          onOpenPortal?.(target);
+                          openPortal?.(target);
                         }}
                         onStartPortal={startDeclaredPortal}
                         onPortalAction={async (name, action) => {
@@ -6697,7 +6683,7 @@ export function SessionViewer({
                               }}
                               onOpenStackPr={(repo, branch) => {
                                 setInfoPageOpen(false);
-                                onOpenPr?.(repo, branch);
+                                openPr?.(repo, branch);
                               }}
                               onOpenChecks={() => {
                                 setInfoPageOpen(false);
@@ -6706,9 +6692,9 @@ export function SessionViewer({
                               onOpenAsset={openAssetFromTranscript}
                               onOpenAssets={() => {
                                 setInfoPageOpen(false);
-                                onOpenAssets?.();
+                                openAssets?.();
                               }}
-                              onOpenSession={onOpenSession}
+                              onOpenSession={openSession}
                               onArchive={handleArchive}
                               reviewRequest={effectiveReview?.req ?? null}
                               reviewRequestSessionId={effectiveReview?.ownerId}
@@ -6742,7 +6728,9 @@ export function SessionViewer({
                             <div className={INFO_SECTION}>
                               <SessionReportsPanel
                                 reports={sessionReports}
-                                onOpenNewSession={onOpenNewSession}
+                                onOpenNewSession={
+                                  navigation.openPrefilledSession
+                                }
                               />
                             </div>
                           )}
@@ -7015,7 +7003,7 @@ export function SessionViewer({
                 refresh={refreshAssets}
                 selectedPath={selectedAssetPath}
                 onSelectPath={setSelectedAssetPath}
-                onOpenNewSession={onOpenNewSession}
+                onOpenNewSession={navigation.openPrefilledSession}
               />
             </div>
           ) : subagentOpen ? (
@@ -7069,14 +7057,12 @@ export function SessionViewer({
           ) : showReview && hasWorkspace ? (
             <div className={VIEWER_REVIEW_MAIN}>
               <PrPanel
-                onOpenPr={onOpenPr}
+                onOpenPr={openPr}
                 sessionId={session.id}
-                send={send}
-                addHandler={addHandler}
                 sessions={allSessions || workspaceSessions || []}
-                onOpenSessionById={onOpenSession}
+                onOpenSessionById={openSession}
                 editGate={connected && !isBusy && !noEngine}
-                onOpenSession={onOpenWorkspace}
+                onOpenSession={openCurrentWorkspace}
                 onAddToInput={(text) =>
                   setComposerPrefill((p) => ({
                     seq: (p?.seq ?? 0) + 1,
@@ -7137,7 +7123,10 @@ export function SessionViewer({
                   quote={quote}
                   onQuote={setQuote}
                   onStartNewChat={(selection) =>
-                    onStartNewChat(withQuotes([selection], ""))
+                    navigation.startNewChat(
+                      session,
+                      withQuotes([selection], ""),
+                    )
                   }
                   onClear={clearQuote}
                   onInputIntent={focusComposerForQuote}
@@ -7615,7 +7604,7 @@ export function SessionViewer({
                                     <IconChevronRight size={18} aria-hidden />
                                   }
                                   aria-label="Next chat"
-                                  onClick={onNextChat}
+                                  onClick={openNextChat}
                                 >
                                   Next
                                 </Button>
@@ -7654,8 +7643,8 @@ export function SessionViewer({
                                 className="size-11 min-h-11 rounded-control [corner-shape:squircle]"
                                 icon={<IconPlus size={22} aria-hidden />}
                                 aria-label="New workspace"
-                                disabled={!onNewWorkspace}
-                                onClick={onNewWorkspace}
+                                disabled={!openNewWorkspace}
+                                onClick={openNewWorkspace}
                               />
                               {showNextChatButton && (
                                 <Button
@@ -7666,8 +7655,8 @@ export function SessionViewer({
                                     <IconArrowRight size={22} aria-hidden />
                                   }
                                   aria-label="Next chat"
-                                  disabled={!onNextChat}
-                                  onClick={onNextChat}
+                                  disabled={!openNextChat}
+                                  onClick={openNextChat}
                                 />
                               )}
                             </div>
@@ -7858,12 +7847,7 @@ export function SessionViewer({
 					    tears the PTYs down; they also die with the socket. */}
           {hasWorkspace && !waitingForWorkspace && terminalTabOpen ? (
             <div className={showTerminal ? VIEWER_REVIEW_MAIN : "hidden"}>
-              <ShellPanel
-                sessionId={session.id}
-                send={send}
-                addHandler={addHandler}
-                visible={showTerminal}
-              />
+              <ShellPanel sessionId={session.id} visible={showTerminal} />
             </div>
           ) : null}
         </div>
@@ -7972,7 +7956,7 @@ export function SessionViewer({
                         activePortal={portalTarget}
                         onBack={() => setActivePanelOpen(false)}
                         hideHeader
-                        onOpenPortal={onOpenPortal}
+                        onOpenPortal={openPortal}
                         onStartPortal={startDeclaredPortal}
                         onPortalAction={async (name, action) => {
                           setPreviewStatus(
@@ -8004,8 +7988,6 @@ export function SessionViewer({
                         <div className="min-h-0 flex-1">
                           <ShellPanel
                             sessionId={session.id}
-                            send={send}
-                            addHandler={addHandler}
                             visible={desktopPanelPage === "terminal"}
                           />
                         </div>
@@ -8031,8 +8013,8 @@ export function SessionViewer({
         refresh={refreshAssets}
         onClose={closeAssetOverlay}
         onSelectPath={setOverlayAssetPath}
-        onOpenAsTab={onOpenAssets ? promoteAssetToTab : undefined}
-        onOpenNewSession={onOpenNewSession}
+        onOpenAsTab={openAssets ? promoteAssetToTab : undefined}
+        onOpenNewSession={navigation.openPrefilledSession}
       />
     </div>
   );

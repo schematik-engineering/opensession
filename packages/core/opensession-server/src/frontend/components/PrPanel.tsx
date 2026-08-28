@@ -137,6 +137,7 @@ import { reviewDiffLoadPolicy } from "../lib/review-diff";
 import { BrandMark } from "./BrandTile";
 import { useCopy } from "../ui/copy";
 import { useDeferredMergePhase } from "../hooks/useDeferredMerge";
+import { useOptionalSessionSocket } from "../hooks/useSessionSocket";
 import {
   cancelDeferredMergeByKey,
   deferredMergeKey,
@@ -313,19 +314,22 @@ export function PrPanel({
   discoveredPrs,
   focusTarget,
   linkable,
-  send,
+  send: sendProp,
   walkthrough,
   editGate,
   previewTarget,
   sessions,
   onOpenSessionById,
   onOpenPr,
-  addHandler,
+  addHandler: addHandlerProp,
   hideWideOverviewRail = false,
   page: controlledPage,
   onPageChange,
   compactToolbar = false,
 }: Props) {
+  const sessionSocket = useOptionalSessionSocket();
+  const send = sendProp ?? sessionSocket?.send;
+  const addHandler = addHandlerProp ?? sessionSocket?.addHandler;
   // Local copy of the linked-PR list so link/unlink applies instantly; the
   // sessions list catches up on its next refresh.
   const [linkedLocal, setLinkedLocal] = useState<LinkedPrEntry[] | null>(null);
@@ -1574,7 +1578,7 @@ export function PrPanel({
         className={`selectable relative flex h-full min-h-0 flex-col bg-surface ${compactToolbar ? "overflow-x-hidden overflow-y-auto" : "overflow-hidden"}`}
         data-review-canvas="true"
       >
-        <ReviewToolbar compact={compactToolbar} maskStickyFileHeaders={false}>
+        <ReviewToolbar compact={compactToolbar}>
           <div className={PR_NO_PR_BAR}>
             {targetPicker}
             {/* Opening the PR is what this state is for, so its action leads

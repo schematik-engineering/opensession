@@ -74,16 +74,13 @@ test("reviews with and without a PR share the floating toolbar", () => {
 
   expect(prPanelSource.match(/<ReviewToolbar/g)?.length).toBe(2);
   expect(prPanelSource).toMatch(
-    /<ReviewToolbar\s+compact=\{compactToolbar\}\s+maskStickyFileHeaders=\{false\}\s*>\s*<div className=\{PR_NO_PR_BAR\}>/,
+    /<ReviewToolbar\s+compact=\{compactToolbar\}\s*>\s*<div className=\{PR_NO_PR_BAR\}>/,
   );
-  expect(reviewToolbarSource).toMatch(/compact &&\s*maskStickyFileHeaders/);
+  expect(reviewToolbarSource).not.toContain("maskStickyFileHeaders");
   expect(reviewToolbarSource).toContain("desktop:pt-2.5");
   expect(reviewToolbarSource).not.toContain("desktop:mt-2.5");
-  expect(reviewToolbarSource).toContain(
-    '"pointer-events-none sticky top-[52px]',
-  );
+  expect(reviewToolbarSource).not.toContain("sticky top-[52px]");
   expect(reviewToolbarSource).not.toContain("linear-gradient");
-  expect(reviewToolbarSource).toContain("overflow-clip rounded-t-lg");
   expect(reviewToolbarSource).toContain("desktop:mb-2");
   expect(reviewToolbarSource).toContain("desktop:overflow-hidden");
   expect(reviewToolbarSource).toContain("desktop:rounded-lg");
@@ -202,7 +199,6 @@ test("wide Review keeps its controls stable while page navigation moves", () => 
   expect(reviewToolbarSource).toContain("sticky top-0");
   expect(reviewToolbarSource).toContain("desktop:mb-0");
   expect(reviewToolbarSource).toContain("desktop:pb-2");
-  expect(reviewToolbarSource).toContain("h-2.5 shrink-0 overflow-clip");
   expect(reviewToolbarSource).not.toContain("-mb-2.5");
   expect(reviewToolbarSource).toContain("WS_SUMMARY_REVIEW_BAR_CLEARANCE");
   expect(prPanelSource).toContain("WS_SUMMARY_REVIEW_CANVAS_CLEARANCE");

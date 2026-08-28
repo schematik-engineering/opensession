@@ -98,16 +98,13 @@ export const msgReasoningBody = `${msgBody} text-dim [&_strong]:font-normal`;
 
 /** Active model text doubles as its loading indicator. Match ChatGPT's quieter
  * wash: the text rests at its normal secondary color while a short,
- * low-contrast band crosses the glyphs. Inline-block is load-bearing: the sweep
- * is sized to the text, not the full transcript column. base.css freezes it for
- * reduced motion. Shared by streamed reasoning and the turn-level fallback, so
- * a silent provider still leaves one legible liveness signal. */
+ * low-contrast band crosses the glyphs. TextShimmer sizes the sweep to this
+ * inline label, and base.css freezes it for reduced motion. Shared by streamed
+ * reasoning and the turn-level fallback, so a silent provider still leaves one
+ * legible liveness signal. */
 export const msgActivityShimmer =
-  "inline-block bg-clip-text text-transparent [-webkit-background-clip:text] [-webkit-text-fill-color:transparent] " +
-  "[background-color:var(--text-dim)] " +
-  "[background-image:linear-gradient(to_right,var(--text-dim)_0,var(--reasoning-shimmer-contrast)_40%,var(--reasoning-shimmer-contrast)_60%,var(--text-dim)_100%)] " +
-  "[background-position:-100%_0] [background-size:50%_200%] [background-repeat:no-repeat] " +
-  "animate-[reasoning-shimmer_3s_ease_0.5s_infinite]";
+  "text-dim [--text-shimmer-highlight:var(--reasoning-shimmer-contrast)] " +
+  "[--text-shimmer-duration:3s] [--text-shimmer-easing:ease] [--text-shimmer-delay:0.5s]";
 
 export const msgReasoningShimmer = msgActivityShimmer;
 
