@@ -600,6 +600,9 @@ export function PrPanel({
   useLayoutEffect(() => {
     activeLoadTargetRef.current = loadTargetKey;
   }, [loadTargetKey]);
+  const loadRepo = active?.repo;
+  const loadBranch = active?.branch;
+  const loadLinked = active?.linked;
 
   const load = useCallback(
     (force = false): Promise<void> => {
@@ -627,7 +630,7 @@ export function PrPanel({
       const prRequest = (
         previewRepo && previewBranch
       ? fetchPrPreview(previewRepo, previewBranch)
-      : fetchPr(sessionId, active?.repo, active?.branch)
+      : fetchPr(sessionId, loadRepo, loadBranch)
     )
       .then((data) => {
         prSettled = true;
@@ -651,7 +654,7 @@ export function PrPanel({
       const diffRequest = (
         previewRepo && previewBranch
       ? fetchPrPreviewDiff(previewRepo, previewBranch)
-      : fetchPrDiff(sessionId, active?.repo, active?.branch)
+      : fetchPrDiff(sessionId, loadRepo, loadBranch)
     )
       .then((data) => {
         diffSettled = true;
@@ -668,9 +671,9 @@ export function PrPanel({
       });
     // A linked PR has no local worktree in this session — no git state.
       const gitRequest = (
-        previewRepo || active?.linked
+        previewRepo || loadLinked
       ? Promise.resolve(null)
-      : fetchGitStatus(sessionId, active?.repo)
+      : fetchGitStatus(sessionId, loadRepo)
     )
       .then((data) => {
         if (isCurrent()) setGit(data);
@@ -680,16 +683,15 @@ export function PrPanel({
       });
       const reviewThreadsRequest = prRequest.then(async () => {
         if (!prResult) return;
-        await (async () => {
-const threads = await fetchPrReviewThreads(
-            active?.repo,
+        try {
+          const threads = await fetchPrReviewThreads(
+            loadRepo,
             prResult.number,
           );
           if (isCurrent()) setReviewThreads({ key: loadTargetKey, threads });
-})().catch(async () => {
-// Resolved threads are supporting context. A provider or credential
-          // failure must not block the diff itself.
-});
+        } catch {
+          // Resolved threads are supporting context and never block the diff.
+        }
       });
 
       const promise = Promise.allSettled([
@@ -705,7 +707,7 @@ const threads = await fetchPrReviewThreads(
       });
       return promise;
     },
-    [sessionId, loadTargetKey, previewRepo, previewBranch, active?.repo, active?.branch, active?.linked],
+    [sessionId, loadTargetKey, previewRepo, previewBranch, loadRepo, loadBranch, loadLinked],
   );
 
   useEffect(() => {
@@ -820,59 +822,81 @@ const threads = await fetchPrReviewThreads(
   // A guide belongs to one target's head commit: the key is what makes a
   // guide from the PR the panel just left read as absent rather than current.
   const guideKey = diff ? `${loadTargetKey}\0${diff.headRefOid}` : "";
+  const guideRepo = active?.repo;
+  const guideBranch = active?.branch;
   const loadGuide = useCallback(async () => {
     if (!guideKey) return;
     const generation = ++guideGenerationRef.current;
+    const isCurrent = () => generation === guideGenerationRef.current;
     setGuideLoading(true);
     setGuideFailed(false);
-    await (async () => {
-const data = previewRepo && previewBranch
-        ? await fetchPrPreviewGuide(previewRepo, previewBranch)
-        : await fetchReviewGuide(sessionId, active?.repo, active?.branch);
-      if (generation !== guideGenerationRef.current) return;
-      if (data) setGuide({ key: guideKey, data });
-      else setGuideFailed(true);
-})().catch(async () => {
-if (generation === guideGenerationRef.current) setGuideFailed(true);
-}).finally(async () => {
-if (generation === guideGenerationRef.current) setGuideLoading(false);
-});
-  }, [guideKey, sessionId, previewRepo, previewBranch, active?.repo, active?.branch]);
+    try {
+      const data =
+        previewRepo && previewBranch
+          ? await fetchPrPreviewGuide(previewRepo, previewBranch)
+          : await fetchReviewGuide(sessionId, guideRepo, guideBranch);
+      if (isCurrent()) {
+        if (data) setGuide({ key: guideKey, data });
+        else setGuideFailed(true);
+      }
+    } catch {
+      if (isCurrent()) setGuideFailed(true);
+    }
+    if (isCurrent()) setGuideLoading(false);
+  }, [
+    guideKey,
+    sessionId,
+    previewRepo,
+    previewBranch,
+    guideRepo,
+    guideBranch,
+  ]);
 
   const prPatchVersion = diff?.diffVersion || "";
   const codeFlowKey =
     diff && prPatchVersion
       ? `${loadTargetKey}\0${diff.headRefOid}\0${prPatchVersion}`
       : "";
+  const codeFlowRepo = active?.repo;
+  const codeFlowBranch = active?.branch;
   const loadCodeFlow = useCallback(async () => {
     if ((!diff?.patch && !diff?.skippedFiles) || !codeFlowKey) return;
     const generation = ++codeFlowGenerationRef.current;
+    const isCurrent = () => generation === codeFlowGenerationRef.current;
     setCodeFlowLoading(true);
     setCodeFlowError(null);
-    await (async () => {
-const data = previewRepo && previewBranch
-        ? await fetchPrPreviewCodeFlow(previewRepo, previewBranch)
-        : await fetchPrCodeFlow(sessionId, active?.repo, active?.branch);
-      if (!data)
-        throw new Error("Code flow isn't available for this pull request.");
-      if (data.diffVersion !== prPatchVersion) {
-        if (generation === codeFlowGenerationRef.current) {
+    try {
+      const data =
+        previewRepo && previewBranch
+          ? await fetchPrPreviewCodeFlow(previewRepo, previewBranch)
+          : await fetchPrCodeFlow(sessionId, codeFlowRepo, codeFlowBranch);
+      if (!data) {
+        if (isCurrent())
+          setCodeFlowError("Code flow isn't available for this pull request.");
+      } else if (data.diffVersion !== prPatchVersion) {
+        if (isCurrent()) {
           setCodeFlowError(
             "The pull request updated while code flow was loading. Try again.",
           );
         }
-        return;
-      }
-      if (generation === codeFlowGenerationRef.current)
+      } else if (isCurrent()) {
         setCodeFlow({ key: codeFlowKey, data });
-})().catch(async (error) => {
-if (generation === codeFlowGenerationRef.current)
+      }
+    } catch (error) {
+      if (isCurrent())
         setCodeFlowError(errorMessage(error, "Couldn't load code flow."));
-}).finally(async () => {
-if (generation === codeFlowGenerationRef.current)
-        setCodeFlowLoading(false);
-});
-  }, [diff, codeFlowKey, sessionId, prPatchVersion, previewRepo, previewBranch, active?.repo, active?.branch]);
+    }
+    if (isCurrent()) setCodeFlowLoading(false);
+  }, [
+    diff,
+    codeFlowKey,
+    sessionId,
+    prPatchVersion,
+    previewRepo,
+    previewBranch,
+    codeFlowRepo,
+    codeFlowBranch,
+  ]);
 
   const refreshCodeFlow = async () => {
     codeFlowGenerationRef.current += 1;
@@ -980,19 +1004,24 @@ if (generation === codeFlowGenerationRef.current)
     }
     setSubmitting(true);
     setReviewError(null);
-    await (async () => {
-const payload = {
+    try {
+      const payload = {
         user: getCurrentUser(),
         event: reviewEvent,
         summary: summary.trim() || undefined,
         repo: active?.repo,
         branch: active?.branch,
-        comments: pending.map((c) => ({
-          text: c.text,
-          path: c.path,
-          line: c.endLine,
-          startLine: c.startLine !== c.endLine ? c.startLine : undefined,
-          side: (c.side === "deletions" ? "LEFT" : "RIGHT") as "LEFT" | "RIGHT",
+        comments: pending.map((comment) => ({
+          text: comment.text,
+          path: comment.path,
+          line: comment.endLine,
+          startLine:
+            comment.startLine !== comment.endLine
+              ? comment.startLine
+              : undefined,
+          side: (comment.side === "deletions" ? "LEFT" : "RIGHT") as
+            | "LEFT"
+            | "RIGHT",
         })),
       };
       const result = previewTarget
@@ -1004,41 +1033,48 @@ const payload = {
         : await submitPrReviewApi(sessionId, payload);
       let merged = false;
       if (reviewEvent === "APPROVE" && mergeAfterReview) {
-        await (async () => {
-if (previewTarget)
+        try {
+          if (previewTarget) {
             await mergePrPreviewApi(
               previewTarget.repo,
               previewTarget.branch,
               "squash",
             );
-          else
-            await mergePrApi(sessionId, "squash", active?.repo, active?.branch);
+          } else {
+            await mergePrApi(
+              sessionId,
+              "squash",
+              active?.repo,
+              active?.branch,
+            );
+          }
           merged = true;
-})().catch(async (error) => {
-setMergeError(
+        } catch (error) {
+          setMergeError(
             `Review approved, but merge failed: ${errorMessage(error, "unknown error")}`,
           );
-});
+        }
       }
-      if (actionTargetKey !== activeLoadTargetRef.current) return;
-      setPending([]);
-      setSummaryDraft("");
-      setReviewOpen(false);
-      setReviewEvent("APPROVE");
-      setMergeAfterReview(false);
-      setReviewDone(merged ? "merged" : result.url || "submitted");
-      setTimeout(() => {
-        if (actionTargetKey !== activeLoadTargetRef.current) return;
-        setReviewDone(null);
-        setReviewing(false);
-      }, 6000);
-      await load(true);
-})().catch(async (error) => {
-if (actionTargetKey === activeLoadTargetRef.current)
+      if (actionTargetKey === activeLoadTargetRef.current) {
+        setPending([]);
+        setSummaryDraft("");
+        setReviewOpen(false);
+        setReviewEvent("APPROVE");
+        setMergeAfterReview(false);
+        setReviewDone(merged ? "merged" : result.url || "submitted");
+        setTimeout(() => {
+          if (actionTargetKey !== activeLoadTargetRef.current) return;
+          setReviewDone(null);
+          setReviewing(false);
+        }, 6000);
+        await load(true);
+      }
+    } catch (error) {
+      if (actionTargetKey === activeLoadTargetRef.current) {
         setReviewError(errorMessage(error, "Failed to submit review"));
-}).finally(async () => {
-setSubmitting(false);
-});
+      }
+    }
+    setSubmitting(false);
   }
 
   function handleMerge() {
@@ -1051,22 +1087,24 @@ setSubmitting(false);
     setMergeError(null);
     const actionTargetKey = loadTargetKey;
     scheduleDeferredMerge(mergeKey, async () => {
-      await (async () => {
-if (previewTarget)
+      try {
+        if (previewTarget) {
           await mergePrPreviewApi(
             previewTarget.repo,
             previewTarget.branch,
             "squash",
           );
-        else await mergePrApi(sessionId, "squash", active?.repo, active?.branch);
+        } else {
+          await mergePrApi(sessionId, "squash", active?.repo, active?.branch);
+        }
         if (actionTargetKey === activeLoadTargetRef.current) await load(true);
-})().catch(async (error) => {
-if (actionTargetKey === activeLoadTargetRef.current) {
+      } catch (error) {
+        if (actionTargetKey === activeLoadTargetRef.current) {
           const message = errorMessage(error, "Merge failed");
           setMergeError(message);
           toast(message);
         }
-});
+      }
     });
   }
 
@@ -1081,17 +1119,19 @@ if (actionTargetKey === activeLoadTargetRef.current) {
     setClosing(true);
     setCloseError(null);
     const actionTargetKey = loadTargetKey;
-    await (async () => {
-if (previewTarget)
+    try {
+      if (previewTarget) {
         await closePrPreviewApi(previewTarget.repo, previewTarget.branch);
-      else await closePrApi(sessionId, active?.repo, active?.branch);
+      } else {
+        await closePrApi(sessionId, active?.repo, active?.branch);
+      }
       if (actionTargetKey === activeLoadTargetRef.current) await load(true);
-})().catch(async (error) => {
-if (actionTargetKey === activeLoadTargetRef.current)
+    } catch (error) {
+      if (actionTargetKey === activeLoadTargetRef.current) {
         setCloseError(errorMessage(error, "Failed to close pull request"));
-}).finally(async () => {
-setClosing(false);
-});
+      }
+    }
+    setClosing(false);
   }
 
   // Roll the per-check list up into headline counts, and split deployments

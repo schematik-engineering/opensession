@@ -691,11 +691,13 @@ const HIDDEN_REOPEN_MS = 30_000;
 // late: on the iOS PWA the WebSocket only reconnects after visibility, so what
 // streamed while backgrounded arrives moments after the visibilitychange.
 const RESUME_GROWTH_WINDOW_MS = 8_000;
-// Legacy transcripts have no structural outline frame, so a short fallback
-// lifts their opening curtain after the tail paints. Indexed transcripts never
-// use this deadline: revealing their bounded init before transcript_index lands
-// is the cold-open churn this curtain exists to prevent.
+// Positive settlement normally lifts the opening curtain first. These deadlines
+// are fail-safes: legacy transcripts have no structural outline callback, while
+// an indexed transcript must never stay invisible if its index or visible-range
+// callback is delayed or lost. Indexed opens get longer to avoid exposing the
+// bounded tail just before the complete outline lands on a busy phone.
 const LEGACY_OPEN_SETTLE_MAX_MS = 350;
+const INDEXED_OPEN_SETTLE_MAX_MS = 2_500;
 // "Jump to the start of the session" walks the backlog a page at a time rather
 // than asking for it in one frame: a multi-thousand-entry transcript would be a
 // tens-of-MB payload and one giant reconciliation. Fat pages keep the number of
@@ -1923,20 +1925,23 @@ export function SessionViewer({
 		[suspendEndMaintenance],
 	);
 
-	// Open-settle curtain: indexed transcripts lift only on positive proof that
-	// their complete outline and real near-visible rows have settled. On a phone
-	// under CPU pressure transcript_index can arrive seconds after the bounded
-	// init; the old unconditional 350ms deadline exposed that intermediate tail,
-	// then visibly regrouped and re-anchored it when the index finally committed.
-	// Legacy mode has no index/settled callback, so it keeps a short fallback.
+	// Open-settle curtain: indexed transcripts normally lift on positive proof
+	// that their complete outline and real near-visible rows have settled. On a
+	// phone under CPU pressure transcript_index can arrive seconds after the
+	// bounded init, so its fallback is deliberately longer than legacy mode's.
+	// It is still bounded: a dropped index frame or a virtualizer that cannot
+	// report visible rows must reveal the readable tail instead of leaving an
+	// apparently empty conversation forever.
 	const [openSettlePending, setOpenSettlePending] = useState(true);
 	const transcriptRendered =
 		!loading && (entries.length > 0 || Boolean(transcriptIndex));
 	useEffect(() => {
-		if (!transcriptRendered || transcriptIndexExpected) return;
+		if (!transcriptRendered) return;
 		const timer = window.setTimeout(
 			() => setOpenSettlePending(false),
-			LEGACY_OPEN_SETTLE_MAX_MS,
+			transcriptIndexExpected
+				? INDEXED_OPEN_SETTLE_MAX_MS
+				: LEGACY_OPEN_SETTLE_MAX_MS,
 		);
 		return () => window.clearTimeout(timer);
 	}, [transcriptIndexExpected, transcriptRendered]);

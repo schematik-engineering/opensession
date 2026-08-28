@@ -88,6 +88,7 @@ const MCP_BLURBS: Record<string, string> = {
   github: "Repos, issues & pull requests",
   circle: "Community & support workspace",
   vercel: "Projects, deployments & logs",
+  vero: "Broadcasts and customer journeys",
 };
 
 function LockIcon({ size = 12 }: { size?: number }) {
@@ -1754,6 +1755,10 @@ const TOKEN_CONNECT_URLS: Record<string, { url: string; label: string }> = {
   vercel: {
     url: "https://vercel.com/account/settings/tokens",
     label: "vercel.com/account/settings/tokens",
+  },
+  vero: {
+    url: "https://help.getvero.com/vero-ai/mcp-authentication",
+    label: "Vero's MCP authentication guide",
   },
 };
 

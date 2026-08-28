@@ -7,7 +7,7 @@ import { homeDir } from "./paths";
 import { existsSync, readFileSync, copyFileSync, watchFile } from "fs";
 import { writeFileAtomic } from "./shared/atomic-write";
 import { configuredPaths } from "./config";
-import { mcpOauthStatus, mcpSharedGrantHeader, mcpUserGrantHeader, mcpUserGrantToken, oauthPresetFor } from "./mcp-oauth";
+import { mcpOauthStatus, mcpSharedGrantHeader, mcpUserGrantHeader, mcpUserGrantToken, oauthPresetFor, supportsManualToken } from "./mcp-oauth";
 
 const HOME = homeDir();
 // mcp-config.json location. OPENSESSION_MCP_CONFIG env → config
@@ -319,6 +319,16 @@ async function checkServer(name: string, cfg: any): Promise<McpConnection> {
         try {
           const st = mcpOauthStatus(name);
           if (!st.shared && st.users.length === 0) {
+            if (supportsManualToken(name)) {
+              return {
+                name,
+                transport: "http",
+                target,
+                envKeys: Object.keys(cfg.env || {}),
+                status: "needs-auth",
+                detail: "API token required. Connect from this card's menu",
+              };
+            }
             const pr = await fetch(
               `${new URL(cfg.url).origin}/.well-known/oauth-protected-resource`,
               { signal: AbortSignal.timeout(3000) },

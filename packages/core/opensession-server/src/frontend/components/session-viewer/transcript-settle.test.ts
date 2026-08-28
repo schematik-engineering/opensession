@@ -18,16 +18,16 @@ test("setup and loading surfaces leave before transcript rows mount", () => {
 	expect(viewer).not.toContain('<AnimatePresence initial={false} mode="popLayout">');
 });
 
-test("indexed transcripts stay hidden until the complete outline settles", () => {
+test("indexed transcripts settle positively but cannot stay hidden forever", () => {
 	expect(settledCallback).toContain("if (!transcriptOutlineReady) return");
 	expect(settledCallback).toContain("setOpenSettlePending(false)");
 	expect(viewer).toContain("setTranscriptOutlineReady(!v2)");
 	expect(viewer).toContain("setTranscriptOutlineReady(true)");
 	expect(viewer).toContain("const LEGACY_OPEN_SETTLE_MAX_MS = 350");
-	expect(viewer).toContain(
-		"if (!transcriptRendered || transcriptIndexExpected) return",
-	);
-	expect(viewer).toContain("LEGACY_OPEN_SETTLE_MAX_MS,");
+	expect(viewer).toContain("const INDEXED_OPEN_SETTLE_MAX_MS = 2_500");
+	expect(viewer).toContain("if (!transcriptRendered) return");
+	expect(viewer).toContain("? INDEXED_OPEN_SETTLE_MAX_MS");
+	expect(viewer).toContain(": LEGACY_OPEN_SETTLE_MAX_MS,");
 	expect(viewer).toContain(
 		'"w-full shrink-0 motion-safe:transition-opacity motion-safe:duration-150"',
 	);
