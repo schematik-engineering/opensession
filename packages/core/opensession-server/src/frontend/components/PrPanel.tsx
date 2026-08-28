@@ -17,6 +17,7 @@ import type {
   CodeFlowResult,
   SessionWalkthrough,
   UnifiedSession,
+  WSClientMessage,
   WSServerMessage,
 } from "../lib/types";
 import { PrSessionsList, prRelatedSessions } from "./PrSessions";
@@ -78,6 +79,7 @@ import {
   WS_SUMMARY_REVIEW_CANVAS_CLEARANCE,
 } from "../lib/workspace-summary-classes";
 import { Textarea } from "../ui/input";
+import { errorMessage } from "../lib/error-message";
 import {
   IconBranches,
   IconCheck,
@@ -195,7 +197,7 @@ interface Props {
    * "Send to session" popover that delivers the selection + a message to this PR's
    * session (via a `prompt` message — the server steers/queues if it's busy).
    */
-  send?: (msg: any) => void;
+  send?: (msg: WSClientMessage) => void;
   /** Agent-published walkthrough (session.walkthrough) — rendered at the top
    *  of the info column; its mirrored section is stripped from the PR body. */
   walkthrough?: SessionWalkthrough;
@@ -636,11 +638,11 @@ export function PrPanel({
         }
         commitDiff();
       })
-      .catch((e: any) => {
+      .catch((error) => {
         prSettled = true;
         prResult = null;
           if (isCurrent())
-            setLoadError(e?.message || "Failed to load the pull request.");
+            setLoadError(errorMessage(error, "Failed to load the pull request."));
         commitDiff();
       })
       .finally(() => {
@@ -657,11 +659,11 @@ export function PrPanel({
         if (isCurrent()) setDiffError(null);
         commitDiff();
       })
-      .catch((e: any) => {
+      .catch((error) => {
         diffSettled = true;
         diffResult = null;
           if (isCurrent())
-            setDiffError(e?.message || "Failed to load pull request changes.");
+            setDiffError(errorMessage(error, "Failed to load pull request changes."));
         commitDiff();
       });
     // A linked PR has no local worktree in this session — no git state.
@@ -863,9 +865,9 @@ const data = previewRepo && previewBranch
       }
       if (generation === codeFlowGenerationRef.current)
         setCodeFlow({ key: codeFlowKey, data });
-})().catch(async (error: any) => {
+})().catch(async (error) => {
 if (generation === codeFlowGenerationRef.current)
-        setCodeFlowError(error?.message || "Couldn't load code flow.");
+        setCodeFlowError(errorMessage(error, "Couldn't load code flow."));
 }).finally(async () => {
 if (generation === codeFlowGenerationRef.current)
         setCodeFlowLoading(false);
@@ -1012,9 +1014,9 @@ if (previewTarget)
           else
             await mergePrApi(sessionId, "squash", active?.repo, active?.branch);
           merged = true;
-})().catch(async (e: any) => {
+})().catch(async (error) => {
 setMergeError(
-            `Review approved, but merge failed: ${e.message || "unknown error"}`,
+            `Review approved, but merge failed: ${errorMessage(error, "unknown error")}`,
           );
 });
       }
@@ -1031,9 +1033,9 @@ setMergeError(
         setReviewing(false);
       }, 6000);
       await load(true);
-})().catch(async (e: any) => {
+})().catch(async (error) => {
 if (actionTargetKey === activeLoadTargetRef.current)
-        setReviewError(e.message || "Failed to submit review");
+        setReviewError(errorMessage(error, "Failed to submit review"));
 }).finally(async () => {
 setSubmitting(false);
 });
@@ -1058,9 +1060,9 @@ if (previewTarget)
           );
         else await mergePrApi(sessionId, "squash", active?.repo, active?.branch);
         if (actionTargetKey === activeLoadTargetRef.current) await load(true);
-})().catch(async (e: any) => {
+})().catch(async (error) => {
 if (actionTargetKey === activeLoadTargetRef.current) {
-          const message = e.message || "Merge failed";
+          const message = errorMessage(error, "Merge failed");
           setMergeError(message);
           toast(message);
         }
@@ -1084,9 +1086,9 @@ if (previewTarget)
         await closePrPreviewApi(previewTarget.repo, previewTarget.branch);
       else await closePrApi(sessionId, active?.repo, active?.branch);
       if (actionTargetKey === activeLoadTargetRef.current) await load(true);
-})().catch(async (e: any) => {
+})().catch(async (error) => {
 if (actionTargetKey === activeLoadTargetRef.current)
-        setCloseError(e.message || "Failed to close pull request");
+        setCloseError(errorMessage(error, "Failed to close pull request"));
 }).finally(async () => {
 setClosing(false);
 });
@@ -1317,8 +1319,8 @@ const res = await unlinkPrApi(sessionId, t.repo, t.branch!);
       if (activeKey === t.key)
         setActiveKey((targets.find((x) => x.primary) ?? targets[0])?.key);
       toast("PR unlinked");
-})().catch(async (e: any) => {
-toast(e.message || "Couldn't unlink the PR");
+})().catch(async (error) => {
+toast(errorMessage(error, "Couldn't unlink the PR"));
 });
   }
 

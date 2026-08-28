@@ -1,4 +1,3 @@
-import { BASE_PATH } from "../lib/base";
 import { GITHUB_APP_GRANT_PERMISSIONS } from "../../shared/github-app-permissions";
 import React, { useCallback, useEffect, useEffectEvent, useState, useRef } from "react";
 import { Menu } from "../ui/menu";
@@ -48,6 +47,7 @@ import { ProjectsSection } from "./ProjectsSection";
 import { GithubPrivateKeyField } from "./GithubPrivateKeyField";
 import { request } from "../lib/api/request";
 import { errorMessage } from "../lib/error-message";
+import { parseMcpEnvironment } from "../lib/mcp-form";
 
 interface McpConnection {
   name: string;
@@ -1791,23 +1791,20 @@ function ConnectTokenDialog({
     if (!token.trim() || saving) return;
     setSaving(true);
     setError(null);
-    await (async () => {
-const res = await fetch(
-        `${BASE_PATH}/api/connections/mcp/${encodeURIComponent(active.name)}/token`,
+    try {
+      await request(
+        `/connections/mcp/${encodeURIComponent(active.name)}/token`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token: token.trim(), scope }),
+          body: { token: token.trim(), scope },
+          label: `Could not connect ${active.name}`,
         },
       );
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
       onConnected();
-})().catch(async (e: any) => {
-setError(e.message);
-}).finally(async () => {
-setSaving(false);
-});
+    } catch (cause) {
+      setError(errorMessage(cause, `Could not connect ${active.name}`));
+    }
+    setSaving(false);
   }
 
   return (
@@ -1892,38 +1889,33 @@ function AddMcpForm({ onClose, onAdded }: { onClose: () => void; onAdded: () => 
   async function handleAdd() {
     setSaving(true);
     setError(null);
-    await (async () => {
-const envObj: Record<string, string> = {};
-      for (const line of env.split("\n")) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        const eq = trimmed.indexOf("=");
-        if (eq === -1) throw new Error(`Env line "${trimmed}" must be KEY=VALUE`);
-        envObj[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim();
-      }
-
-      const allowed = allowedUsers.split(",").map((u) => u.trim()).filter(Boolean);
-
-      const res = await fetch(`${BASE_PATH}/api/connections/mcp`, {
+    try {
+      const envValues = parseMcpEnvironment(env);
+      const allowed = allowedUsers
+        .split(",")
+        .map((user) => user.trim())
+        .filter(Boolean);
+      await request("/connections/mcp", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: {
           name,
           transport,
           url: transport === "http" ? url.trim() : undefined,
           command: transport === "stdio" ? command.trim() : undefined,
-          args: transport === "stdio" ? args.split(/\s+/).filter(Boolean) : undefined,
-          env: transport === "stdio" ? envObj : undefined,
+          args:
+            transport === "stdio"
+              ? args.split(/\s+/).filter(Boolean)
+              : undefined,
+          env: transport === "stdio" ? envValues : undefined,
           allowedUsers: allowed.length ? allowed : undefined,
-        }),
+        },
+        label: "Could not add MCP server",
       });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
       onAdded();
-})().catch(async (e: any) => {
-setError(e.message);
+    } catch (cause) {
+      setError(errorMessage(cause, "Could not add MCP server"));
       setSaving(false);
-});
+    }
   }
 
   const valid =
@@ -1947,7 +1939,9 @@ setError(e.message);
               { value: "http", label: "http · remote MCP endpoint" },
               { value: "stdio", label: "stdio · local command" },
             ]}
-            onChange={(next) => setTransport(next as any)}
+            onChange={(next) => {
+              if (next === "http" || next === "stdio") setTransport(next);
+            }}
           />
         </SettingsField>
       </SettingsFormRow>
