@@ -19,6 +19,7 @@ import {
   LAUNCHD_LAUNCHER,
   metadataInstallBlockGuidance,
   renderExecutorUnit,
+  renderIngressUnit,
   renderLauncher,
   renderPlist,
   renderUnit,
@@ -41,7 +42,9 @@ describe("cloud metadata install refusal", () => {
     expect(guidance).toContain(
       "sudo iptables -I OUTPUT -d 169.254.169.254 -m owner --uid-owner 1234 -j REJECT",
     );
-    expect(guidance).toContain("rerun the same Open Session installation command");
+    expect(guidance).toContain(
+      "rerun the same Open Session installation command",
+    );
     expect(guidance).toContain("OPENSESSION_ALLOW_IMDS=1");
     expect(guidance).toContain("explicitly skip this safety check");
   });
@@ -56,13 +59,14 @@ describe.skipIf(!onServiceHost)("systemd unit", () => {
     // start at boot.
     expect(unit).not.toMatch(/^User=/m);
     expect(unit).not.toMatch(/^IPAddressDeny=/m);
+    expect(unit).not.toMatch(/^Slice=opensession-control\.slice$/m);
     expect(unit).toMatch(/^WantedBy=default\.target$/m);
     // Optional env file: a box with no secrets yet must still start.
     expect(unit).toContain(`EnvironmentFile=-${ENV_PATH}`);
     expect(unit).toContain(`WorkingDirectory=${serviceWorkdir()}`);
     expect(
       unit.match(
-        /^ExecStart=(\S+) run packages\/core\/opensession-server\/opensession\.ts$/m,
+        /^ExecStart=(\S+) run packages\/core\/opensession-server\/src\/server\/gateway-supervisor\.ts$/m,
       )?.[1],
     ).toMatch(/bun$/);
     expect(unit).not.toContain("opensession-executor.service");
@@ -85,9 +89,10 @@ describe.skipIf(!onServiceHost)("systemd unit", () => {
 
     expect(unit).toContain(`WorkingDirectory=${serviceWorkdir()}`);
     expect(unit).toContain(`EnvironmentFile=${ENV_PATH}`);
+    expect(unit).toContain("Slice=opensession-control.slice");
     expect(
       unit.match(
-        /^ExecStart=(\S+) run packages\/core\/opensession-server\/opensession\.ts$/m,
+        /^ExecStart=(\S+) run packages\/core\/opensession-server\/src\/server\/gateway-supervisor\.ts$/m,
       )?.[1],
     ).toMatch(/bun$/);
   });
@@ -100,7 +105,13 @@ describe.skipIf(!onServiceHost)("systemd unit", () => {
     expect(unit).toContain("IPAddressDeny=169.254.169.254/32");
     expect(unit).toMatch(/^TimeoutStopSec=\d+$/m);
     expect(unit).toContain("[Install]");
-    expect(unit).toContain("Wants=opensession-executor.service");
+    expect(unit).not.toContain("Wants=opensession-session-kernel.service");
+    expect(unit).not.toContain("Wants=opensession-executor.service");
+    expect(unit).toContain(
+      "Wants=opensession.socket opensession-ingress.service",
+    );
+    expect(unit).not.toContain("Sockets=opensession.socket");
+    expect(unit).toContain('Environment="OPENSESSION_EXTERNAL_INGRESS=1"');
     expect(unit).not.toContain("Requires=opensession-executor.service");
     expect(unit).toContain(
       "LoadCredential=executor-token:/etc/opensession/executor-token",
@@ -116,6 +127,18 @@ describe.skipIf(!onServiceHost)("systemd unit", () => {
   });
 });
 
+describe.skipIf(!onServiceHost)("ingress systemd unit", () => {
+  test("owns the socket independently from gateway lifecycle", async () => {
+    const unit = await renderIngressUnit("system");
+    expect(unit).toContain(`WorkingDirectory=${serviceWorkdir()}`);
+    expect(unit).toContain("Sockets=opensession.socket");
+    expect(unit).toContain("Requires=opensession.socket");
+    expect(unit).toContain("src/server/gateway-ingress.ts");
+    expect(unit).not.toContain("EnvironmentFile=");
+    expect(unit).toContain("Restart=always");
+  });
+});
+
 describe.skipIf(!onServiceHost)("executor systemd unit", () => {
   test("is independently restartable and host-specific", async () => {
     const unit = await renderExecutorUnit();
@@ -127,6 +150,7 @@ describe.skipIf(!onServiceHost)("executor systemd unit", () => {
     );
     expect(unit).toContain("Restart=always");
     expect(unit).toContain("RuntimeDirectory=opensession-executor");
+    expect(unit).toContain("Slice=opensession-control.slice");
     expect(unit).toContain(
       "LoadCredential=executor-token:/etc/opensession/executor-token",
     );
@@ -154,6 +178,7 @@ describe.skipIf(!onServiceHost)("launchd plist", () => {
       expect(plist).toContain(`<key>${key}</key>`);
     }
     expect(plist).toContain(`<string>${LAUNCHD_LABEL}</string>`);
+    expect(plist).toContain(`<key>HOME</key><string>${HOME}</string>`);
   });
 
   test("execs the named launcher, not /bin/bash (macOS background-item identity)", () => {
@@ -166,15 +191,17 @@ describe.skipIf(!onServiceHost)("launchd plist", () => {
     expect(LAUNCHD_LAUNCHER.endsWith("/OpenSession")).toBe(true);
   });
 
-  test("launcher sources the env file and execs bun (launchd has no EnvironmentFile)", () => {
+  test("launcher sources the env file and execs the gateway supervisor", () => {
     const launcher = renderLauncher();
     // Without sourcing the env file the server boots looking healthy but with
     // no integration flags and no secrets — inert, and hard to diagnose.
     expect(launcher).toStartWith("#!/bin/bash");
     expect(launcher).toContain(ENV_PATH);
     expect(launcher).toContain("set -a");
+    expect(launcher).toContain("export OPENSESSION_EXECUTOR=0");
+    expect(launcher).toContain("export OPENSESSION_PI_DETACH=0");
     expect(launcher).toMatch(
-      /exec \S*bun run packages\/core\/opensession-server\/opensession\.ts/,
+      /exec \S*bun run packages\/core\/opensession-server\/src\/server\/gateway-supervisor\.ts/,
     );
   });
 

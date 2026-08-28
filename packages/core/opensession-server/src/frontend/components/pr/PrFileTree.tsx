@@ -1,5 +1,11 @@
 import { FileTree, useFileTree } from "@pierre/trees/react";
-import React, { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
+import React, {
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import type { PrFile } from "../../lib/types";
 
 const WIDTH_KEY = "opensession-pr-file-tree-width";
@@ -46,9 +52,9 @@ export function PrFileTree({
   const onOpenFileRef = useRef(onOpenFile);
   const rootRef = useRef<HTMLElement | null>(null);
   const stopResizeRef = useRef<(() => void) | null>(null);
-	useLayoutEffect(() => {
-		onOpenFileRef.current = onOpenFile;
-	});
+  useLayoutEffect(() => {
+    onOpenFileRef.current = onOpenFile;
+  });
   const { model } = useFileTree({
     paths,
     initialExpandedPaths: allDirectories(paths),

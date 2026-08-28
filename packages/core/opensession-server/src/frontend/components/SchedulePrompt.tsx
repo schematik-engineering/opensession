@@ -30,7 +30,7 @@ function inTime(iso: string): string {
  *  a thin inset divider (short of the top/bottom edges, Slack-style) rather
  *  than a full-height seam. */
 const caretButton =
-	"relative inline-flex w-[30px] items-center justify-center rounded-r-lg bg-accent text-on-accent transition-[background-color] before:absolute before:top-1/2 before:left-0 before:h-4 before:w-px before:-translate-y-1/2 before:bg-white/45 before:content-[''] enabled:hover:bg-accent-hover disabled:cursor-default disabled:opacity-35";
+  "relative inline-flex w-[30px] items-center justify-center rounded-r-lg bg-accent text-on-accent transition-[background-color] before:absolute before:top-1/2 before:left-0 before:h-4 before:w-px before:-translate-y-1/2 before:bg-white/45 before:content-[''] enabled:hover:bg-accent-hover disabled:cursor-default disabled:opacity-35";
 
 /** Date / time field in the custom-time dialog. `bg-transparent` is deliberate:
  *  the stylesheet asked for `var(--bg-surface)`, a token that has never been
@@ -38,7 +38,7 @@ const caretButton =
  *  fell back to `transparent` — these fields have always shown the dialog's own
  *  surface. Without it they would pick up the UA's opaque field colour. */
 const scheduleField =
-	"min-w-0 rounded-control border border-line bg-transparent px-3 py-[9px] text-item-title font-medium text-fg outline-none focus:border-line-strong";
+  "min-w-0 rounded-control border border-line bg-transparent px-3 py-[9px] text-item-title font-medium text-fg outline-none focus:border-line-strong";
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const fmtTime = (d: Date) =>
@@ -104,7 +104,11 @@ export function SchedulePromptButton({
   useEffect(() => {
     if (!open && !customOpen) return;
     const onDown = (e: MouseEvent) => {
-      if (open && rootRef.current && !rootRef.current.contains(e.target as Node))
+      if (
+        open &&
+        rootRef.current &&
+        !rootRef.current.contains(e.target as Node)
+      )
         setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
@@ -142,7 +146,7 @@ export function SchedulePromptButton({
     tomorrow.setHours(9, 0, 0, 0);
     add(`Tomorrow at ${fmtTime(tomorrow)}`, tomorrow);
     const monday = new Date(now);
-    monday.setDate(now.getDate() + (((8 - monday.getDay()) % 7) || 7));
+    monday.setDate(now.getDate() + ((8 - monday.getDay()) % 7 || 7));
     monday.setHours(9, 0, 0, 0);
     add(
       `${monday.toLocaleDateString([], { weekday: "long" })} at ${fmtTime(monday)}`,
@@ -157,7 +161,7 @@ export function SchedulePromptButton({
     setSaving(true);
     setError(null);
     await (async () => {
-await createScheduledPromptApi(sessionId, {
+      await createScheduledPromptApi(sessionId, {
         prompt,
         at: at.toISOString(),
         user: getCurrentUser(),
@@ -166,9 +170,9 @@ await createScheduledPromptApi(sessionId, {
       setCustomOpen(false);
       onScheduled?.();
       await load();
-})().catch(async (e: any) => {
-setError(e.message);
-});
+    })().catch(async (e: any) => {
+      setError(e.message);
+    });
     setSaving(false);
   }
 
@@ -253,7 +257,11 @@ setError(e.message);
         // stylesheet (equal specificity, later wins), so the menu has always
         // been 172px.
         <div
-          className={cn(composerMenuPopup, composerMenuAnchorRight, composerMenuWidth)}
+          className={cn(
+            composerMenuPopup,
+            composerMenuAnchorRight,
+            composerMenuWidth,
+          )}
           role="menu"
         >
           {/* Pending scheduled messages, listed above the picks with a cancel. */}
@@ -279,11 +287,9 @@ setError(e.message);
                     title="Cancel this scheduled message"
                     onClick={async () => {
                       await (async () => {
-await deleteScheduledPromptApi(p.id);
+                        await deleteScheduledPromptApi(p.id);
                         load();
-})().catch(async () => {
-
-});
+                      })().catch(async () => {});
                     }}
                   >
                     ✕
@@ -321,7 +327,9 @@ await deleteScheduledPromptApi(p.id);
             Custom time
           </button>
           {error && !customOpen && (
-            <div className="px-[9px] pt-1 pb-0.5 text-meta text-red">{error}</div>
+            <div className="px-[9px] pt-1 pb-0.5 text-meta text-red">
+              {error}
+            </div>
           )}
         </div>
       )}
@@ -341,7 +349,9 @@ await deleteScheduledPromptApi(p.id);
                 <div className="text-dialog-title font-semibold text-fg">
                   Schedule message
                 </div>
-                <div className="mt-[3px] text-meta text-dim">Time zone: {tz}</div>
+                <div className="mt-[3px] text-meta text-dim">
+                  Time zone: {tz}
+                </div>
               </div>
               <Button
                 variant="ghost"
@@ -368,10 +378,16 @@ await deleteScheduledPromptApi(p.id);
               />
             </div>
             {error && (
-              <div className="px-[9px] pt-1 pb-0.5 text-meta text-red">{error}</div>
+              <div className="px-[9px] pt-1 pb-0.5 text-meta text-red">
+                {error}
+              </div>
             )}
             <div className="mt-5 flex justify-end gap-2">
-              <Button variant="soft" size="lg" onClick={() => setCustomOpen(false)}>
+              <Button
+                variant="soft"
+                size="lg"
+                onClick={() => setCustomOpen(false)}
+              >
                 Cancel
               </Button>
               <Button

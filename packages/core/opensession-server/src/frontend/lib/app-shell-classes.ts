@@ -49,9 +49,9 @@
  * page stack's positioning context instead, and the plain page colour.
  */
 export const APP_BODY =
-	"app-body flex min-h-0 flex-1 bg-sidebar " +
-	"desktop:[background:linear-gradient(var(--sidebar-material),var(--sidebar-material)),var(--sidebar-bg)] " +
-	"phone:relative phone:overflow-hidden phone:bg-surface";
+  "app-body flex min-h-0 flex-1 bg-sidebar " +
+  "desktop:[background:linear-gradient(var(--sidebar-material),var(--sidebar-material)),var(--sidebar-bg)] " +
+  "phone:relative phone:overflow-hidden phone:bg-surface";
 
 /**
  * The detail pane and its optional right panel as one object, flush to the
@@ -67,12 +67,12 @@ export const APP_BODY =
  * relationship their mobile positioning rules expect.
  */
 export const WORKSPACE_SHELL =
-	// Above the sidebar's pinned labels (z 20), so their scroll-under washes
-	// cannot cut the shadow. The resize grabber stays above both at z 30.
-	"relative z-[25] flex min-h-0 min-w-0 flex-1 overflow-hidden border-l border-divider bg-surface desktop:[box-shadow:var(--content-edge-shadow)] " +
-	// Collapsed sidebar: nothing to divide from or cast depth onto.
-	"[.app-body.sidebar-collapsed_&]:border-l-0 [.app-body.sidebar-collapsed_&]:[box-shadow:none] " +
-	"phone:contents";
+  // Above the sidebar's pinned labels (z 20), so their scroll-under washes
+  // cannot cut the shadow. The resize grabber stays above both at z 30.
+  "relative z-[25] flex min-h-0 min-w-0 flex-1 overflow-hidden border-l border-divider bg-surface desktop:[box-shadow:var(--content-edge-shadow)] " +
+  // Collapsed sidebar: nothing to divide from or cast depth onto.
+  "[.app-body.sidebar-collapsed_&]:border-l-0 [.app-body.sidebar-collapsed_&]:[box-shadow:none] " +
+  "phone:contents";
 
 /**
  * The pane itself. `relative` anchors the floating re-open control that appears
@@ -90,27 +90,27 @@ export const WORKSPACE_SHELL =
  * inside the pane is viewport-relative and keeps using `--header-h`.
  */
 export const DETAIL_PANE =
-	"detail-pane relative flex min-h-0 min-w-0 flex-1 flex-col " +
-	"phone:absolute phone:inset-0 phone:z-10 phone:bg-surface " +
-	"phone:[--pane-header-h:var(--header-h)] " +
-	"phone:[.app:not(:has(.app-header-overlay))_&]:[--pane-header-h:0px] " +
-	// `transform`, not Tailwind's `translate` property, because that is what
-	// the transition beside it names — and what the header animates with.
-	"phone:[transform:translateX(100%)] " +
-	"phone:[transition:transform_var(--dur-lg)_var(--ease)] " +
-	// Pushed on top. The shadow rides the pushed state rather than the pane,
-	// or its left-side shadow bleeds back onto the sidebar while it rests just
-	// off the right edge.
-	"phone:[.app-body.mobile-detail_&]:[transform:translateX(0)] " +
-	"phone:[.app-body.mobile-detail_&]:shadow-[-10px_0_28px_rgba(0,0,0,0.35)] " +
-	// How much extra top room the phone's DOCKED tab bar takes, published to
-	// everything inside the pane that has to start below it — the transcript
-	// (VIEWER_MESSAGES), the view-tab panes, the review host. It is only set
-	// when a strip is really shown: a lone session with no view tabs hides the
-	// strip, and then the default 0 is the right answer. Two selectors because
-	// "a strip is shown" is either a view tab or a second session tab.
-	"phone:[&:has(.session-tab-view)]:[--strip-clearance:46px] " +
-	"phone:[&:has(.session-tab-reorder~.session-tab-reorder)]:[--strip-clearance:46px]";
+  "detail-pane relative flex min-h-0 min-w-0 flex-1 flex-col " +
+  "phone:absolute phone:inset-0 phone:z-10 phone:bg-surface " +
+  "phone:[--pane-header-h:var(--header-h)] " +
+  "phone:[.app:not(:has(.app-header-overlay))_&]:[--pane-header-h:0px] " +
+  // `transform`, not Tailwind's `translate` property, because that is what
+  // the transition beside it names — and what the header animates with.
+  "phone:[transform:translateX(100%)] " +
+  "phone:[transition:transform_var(--dur-lg)_var(--ease)] " +
+  // Pushed on top. The shadow rides the pushed state rather than the pane,
+  // or its left-side shadow bleeds back onto the sidebar while it rests just
+  // off the right edge.
+  "phone:[.app-body.mobile-detail_&]:[transform:translateX(0)] " +
+  "phone:[.app-body.mobile-detail_&]:shadow-[-10px_0_28px_rgba(0,0,0,0.35)] " +
+  // How much extra top room the phone's DOCKED tab bar takes, published to
+  // everything inside the pane that has to start below it — the transcript
+  // (VIEWER_MESSAGES), the view-tab panes, the review host. It is only set
+  // when a strip is really shown: a lone session with no view tabs hides the
+  // strip, and then the default 0 is the right answer. Two selectors because
+  // "a strip is shown" is either a view tab or a second session tab.
+  "phone:[&:has(.session-tab-view)]:[--strip-clearance:46px] " +
+  "phone:[&:has(.session-tab-reorder~.session-tab-reorder)]:[--strip-clearance:46px]";
 
 /**
  * The drop target outlined while a tab is dragged to the pane's edge to split
@@ -127,14 +127,14 @@ export const DETAIL_PANE =
  * it moves with the band.
  */
 export const tabSplitDropPreviewClass = (side: "left" | "right") =>
-	"pointer-events-none absolute top-[calc(var(--desktop-header-h)+36px)] bottom-2 z-[25] " +
-	"w-[calc(var(--split-preview-share,50%)-12px)] " +
-	"rounded-[calc(10px*var(--rf))] [corner-shape:var(--cs)] border-2 border-accent " +
-	"bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] " +
-	// A hairline of white inside the accent edge, so the outline still reads
-	// against a light screenshot or a pale diff behind it.
-	"shadow-[inset_0_0_0_1px_color-mix(in_srgb,white_16%,transparent)] " +
-	(side === "left" ? "left-2" : "right-2");
+  "pointer-events-none absolute top-[calc(var(--desktop-header-h)+36px)] bottom-2 z-[25] " +
+  "w-[calc(var(--split-preview-share,50%)-12px)] " +
+  "rounded-[calc(10px*var(--rf))] [corner-shape:var(--cs)] border-2 border-accent " +
+  "bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] " +
+  // A hairline of white inside the accent edge, so the outline still reads
+  // against a light screenshot or a pale diff behind it.
+  "shadow-[inset_0_0_0_1px_color-mix(in_srgb,white_16%,transparent)] " +
+  (side === "left" ? "left-2" : "right-2");
 
 /**
  * The hairline a chrome row grows once content has scrolled underneath it.
@@ -157,10 +157,10 @@ export const tabSplitDropPreviewClass = (side: "left" | "right") =>
  * content and dissolves it with a mask instead (see `appHeader`).
  */
 export const SCROLL_EDGE_DIVIDER =
-	"relative after:pointer-events-none after:absolute after:inset-x-0 " +
-	"after:bottom-0 after:h-px after:bg-divider after:opacity-0 " +
-	"after:transition-opacity after:content-[''] " +
-	"desktop:data-[scrolled]:after:opacity-100";
+  "relative after:pointer-events-none after:absolute after:inset-x-0 " +
+  "after:bottom-0 after:h-px after:bg-divider after:opacity-0 " +
+  "after:transition-opacity after:content-[''] " +
+  "desktop:data-[scrolled]:after:opacity-100";
 
 /** Top bar above the tab strip: the session's header portals in here on
  *  session routes, other views render a plain title. `empty:hidden` collapses
@@ -172,8 +172,8 @@ export const SCROLL_EDGE_DIVIDER =
  *  `:has(+ .session-tabs)`: a split gives each column its own strip, nested a
  *  level down from this row. */
 export const DETAIL_TOPBAR =
-	`detail-topbar flex min-w-0 shrink-0 flex-col items-stretch empty:hidden ${SCROLL_EDGE_DIVIDER} ` +
-	"[.detail-pane:has(.session-tabs)_&]:after:content-none";
+  `detail-topbar flex min-w-0 shrink-0 flex-col items-stretch empty:hidden ${SCROLL_EDGE_DIVIDER} ` +
+  "[.detail-pane:has(.session-tabs)_&]:after:content-none";
 
 /**
  * The plain title. Matches `.viewer-header` and the sidebar brand row's height
@@ -198,13 +198,13 @@ export const DETAIL_TOPBAR =
  * the bar, so the pane's content would jump 52px up and down as you scrolled.
  */
 export const DETAIL_TOPBAR_TITLE =
-	"detail-topbar-title wco-chrome flex h-[var(--desktop-header-h)] items-center px-4 " +
-	"bg-surface " +
-	"text-item-title font-semibold text-fg " +
-	// Collapsed desktop sidebar: clear the floating re-open control and the
-	// fallback nav/search cluster beside it.
-	"desktop:[.app-body.sidebar-collapsed_&]:pl-[148px] " +
-	"phone:hidden";
+  "detail-topbar-title wco-chrome flex h-[var(--desktop-header-h)] items-center px-4 " +
+  "bg-surface " +
+  "text-item-title font-semibold text-fg " +
+  // Collapsed desktop sidebar: clear the floating re-open control and the
+  // fallback nav/search cluster beside it.
+  "desktop:[.app-body.sidebar-collapsed_&]:pl-[148px] " +
+  "phone:hidden";
 
 /**
  * The trailing slot of that row: a page's own controls, portaled up out of its
@@ -222,7 +222,7 @@ export const DETAIL_TOPBAR_TITLE =
  * its own padding in the row.
  */
 export const DETAIL_TOPBAR_ACTIONS =
-	"ml-auto flex min-w-0 items-center gap-2 pl-4 font-normal empty:hidden";
+  "ml-auto flex min-w-0 items-center gap-2 pl-4 font-normal empty:hidden";
 
 /**
  * The word inside that row, which is only there once the page's own heading has
@@ -239,13 +239,13 @@ export const DETAIL_TOPBAR_ACTIONS =
  * top of the window with it.
  */
 export const DETAIL_TOPBAR_TITLE_TEXT =
-	// It gives way first to whatever a page puts in the actions slot beside it,
-	// and gives way hard: at rest this word is invisible, so a narrow pane would
-	// otherwise be cutting a page's controls to hold room for a title nobody can
-	// see yet. Scrolled, it truncates, which is what a name in a bar does.
-	"min-w-0 shrink-[100] truncate translate-y-1 opacity-0 " +
-	"transition-[opacity,translate] " +
-	"data-[shown]:translate-y-0 data-[shown]:opacity-100";
+  // It gives way first to whatever a page puts in the actions slot beside it,
+  // and gives way hard: at rest this word is invisible, so a narrow pane would
+  // otherwise be cutting a page's controls to hold room for a title nobody can
+  // see yet. Scrolled, it truncates, which is what a name in a bar does.
+  "min-w-0 shrink-[100] truncate translate-y-1 opacity-0 " +
+  "transition-[opacity,translate] " +
+  "data-[shown]:translate-y-0 data-[shown]:opacity-100";
 
 /**
  * The right panel portals into this slot. `contents` dissolves it so the panel
@@ -258,4 +258,5 @@ export const RIGHT_PANEL_SLOT = "contents";
 /** Bottom spacer that lets the latest turn reach the top of the viewport. The
  *  scroll hook sets its height imperatively; no transition, so it tracks a
  *  streaming reply exactly. */
-export const TURN_SPACER = "pointer-events-none h-0 shrink-0 [overflow-anchor:none]";
+export const TURN_SPACER =
+  "pointer-events-none h-0 shrink-0 [overflow-anchor:none]";

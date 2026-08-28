@@ -25,15 +25,15 @@
  * target, so its padding is all that stands between it and 44.
  */
 export const SETTING_ROW =
-	"flex w-full items-center gap-3 rounded-md px-2 py-2 phone:py-3 text-left text-item-title";
+  "flex w-full items-center gap-3 rounded-md px-2 py-2 phone:py-3 text-left text-item-title";
 
 /** A row you can press: the value rows and the switch rows, whose whole box is
  *  the target. A row holding a segmented control does not take this, because
  *  there the options are the targets and the row is only their label. */
 export const SETTING_ROW_PRESSABLE =
-	"cursor-pointer select-none hover:bg-hover data-[popup-open]:bg-hover";
+  "cursor-pointer select-none hover:bg-hover data-[popup-open]:bg-hover";
 
 /** The leading glyph in a row and in its menu: one 16px box either way, so a
  *  list where only some options carry one keeps its labels on a single x. */
 export const SETTING_GLYPH =
-	"flex size-4 shrink-0 items-center justify-center text-dim";
+  "flex size-4 shrink-0 items-center justify-center text-dim";

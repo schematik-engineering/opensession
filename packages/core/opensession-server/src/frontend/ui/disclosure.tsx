@@ -21,38 +21,43 @@ import { Collapsible, collapsiblePanelClasses } from "./collapsible";
  * a `<button>` is neither valid nor clickable.
  */
 export function Disclosure({
-	title,
-	actions,
-	defaultOpen,
-	className,
-	panelClassName,
-	children,
+  title,
+  actions,
+  defaultOpen,
+  className,
+  panelClassName,
+  children,
 }: {
-	title: React.ReactNode;
-	/** Rendered on the trigger's right, outside its hit area. */
-	actions?: React.ReactNode;
-	defaultOpen?: boolean;
-	className?: string;
-	panelClassName?: string;
-	children: React.ReactNode;
+  title: React.ReactNode;
+  /** Rendered on the trigger's right, outside its hit area. */
+  actions?: React.ReactNode;
+  defaultOpen?: boolean;
+  className?: string;
+  panelClassName?: string;
+  children: React.ReactNode;
 }) {
-	return (
-		<Collapsible.Root defaultOpen={defaultOpen} className={cn("min-w-0", className)}>
-			<div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-				{/* -mx-2 lets the row's hover wash bleed past the text without
+  return (
+    <Collapsible.Root
+      defaultOpen={defaultOpen}
+      className={cn("min-w-0", className)}
+    >
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+        {/* -mx-2 lets the row's hover wash bleed past the text without
 				    indenting the title away from the content it labels. */}
-				<Collapsible.Trigger className="focus-ring group -mx-2 flex min-w-0 items-center gap-1.5 rounded-control px-2 py-1 text-label font-semibold text-fg transition-colors hover:bg-hover">
-					<IconChevronRight
-						size={14}
-						className="shrink-0 text-faint transition-transform duration-[var(--dur-micro)] ease-[var(--ease)] group-data-[panel-open]:rotate-90"
-					/>
-					<span className="min-w-0 truncate">{title}</span>
-				</Collapsible.Trigger>
-				{actions}
-			</div>
-			<Collapsible.Panel className={cn(collapsiblePanelClasses, panelClassName)}>
-				<div className="pt-3">{children}</div>
-			</Collapsible.Panel>
-		</Collapsible.Root>
-	);
+        <Collapsible.Trigger className="focus-ring group -mx-2 flex min-w-0 items-center gap-1.5 rounded-control px-2 py-1 text-label font-semibold text-fg transition-colors hover:bg-hover">
+          <IconChevronRight
+            size={14}
+            className="shrink-0 text-faint transition-transform duration-[var(--dur-micro)] ease-[var(--ease)] group-data-[panel-open]:rotate-90"
+          />
+          <span className="min-w-0 truncate">{title}</span>
+        </Collapsible.Trigger>
+        {actions}
+      </div>
+      <Collapsible.Panel
+        className={cn(collapsiblePanelClasses, panelClassName)}
+      >
+        <div className="pt-3">{children}</div>
+      </Collapsible.Panel>
+    </Collapsible.Root>
+  );
 }

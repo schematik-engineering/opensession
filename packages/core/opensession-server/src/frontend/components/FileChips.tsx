@@ -59,7 +59,11 @@ export function FileChips({
       {Array.from({ length: pending }, (_, i) => (
         <div
           key={`staging-${i}`}
-          className={cn(fileChipCard, fileChipCardPaddingRemovable, "animate-pulse")}
+          className={cn(
+            fileChipCard,
+            fileChipCardPaddingRemovable,
+            "animate-pulse",
+          )}
         >
           <span className={cn(fileChipThumb, "bg-hover")} />
           <span className={fileChipMeta}>

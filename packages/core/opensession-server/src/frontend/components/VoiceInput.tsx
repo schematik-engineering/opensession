@@ -1,9 +1,9 @@
 import React, {
-	useEffect,
-	useEffectEvent,
-	useLayoutEffect,
-	useRef,
-	useState,
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useRef,
+  useState,
 } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
@@ -30,7 +30,12 @@ import {
   type BrowserDictation,
 } from "../lib/browser-dictation";
 
-type Phase = "idle" | "requesting" | "recording" | "cancelling" | "transcribing";
+type Phase =
+  | "idle"
+  | "requesting"
+  | "recording"
+  | "cancelling"
+  | "transcribing";
 
 /** Dictation is capped. This is a session input, not a memo recorder. */
 const MAX_SECONDS = 120;
@@ -51,7 +56,7 @@ const BAR_GAP = 4;
    the waveform reads as drawn straight onto the container, not onto a second
    raised slab inside it. */
 const OVERLAY =
-	"pointer-events-auto absolute inset-0 z-[6] flex items-end gap-1.5 bg-[var(--composer-surface)] px-3.5 pb-2.5 phone:px-3 phone:pb-[9px]";
+  "pointer-events-auto absolute inset-0 z-[6] flex items-end gap-1.5 bg-[var(--composer-surface)] px-3.5 pb-2.5 phone:px-3 phone:pb-[9px]";
 /** Default corner. A host whose container is rounded differently passes its
  *  own (the new-session card is `rounded-2xl`). */
 const OVERLAY_RADIUS = "rounded-[var(--composer-radius)]";
@@ -62,12 +67,12 @@ const OVERLAY_RADIUS = "rounded-[var(--composer-radius)]";
    ones get their height inline from the level meter. */
 const WAVE_BAR_IDLE = "h-0.5 w-[3px] shrink-0 rounded-full bg-faint";
 const WAVE_BAR_LIVE =
-	"h-0.5 w-[3px] shrink-0 rounded-full bg-dim transition-[height] duration-[90ms] ease-linear";
+  "h-0.5 w-[3px] shrink-0 rounded-full bg-dim transition-[height] duration-[90ms] ease-linear";
 
 /* Hosts can match cancel to the control it replaces. This fallback keeps the
    standalone VoiceInput target at the same 40px size as its idle mic. */
 const GLYPH_CANCEL =
-	"inline-flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-md border-none bg-transparent text-dim transition-colors hover:bg-hover hover:text-fg disabled:cursor-default disabled:opacity-35";
+  "inline-flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-md border-none bg-transparent text-dim transition-colors hover:bg-hover hover:text-fg disabled:cursor-default disabled:opacity-35";
 
 /** Each period fades in after the one before it, then all three clear together.
  *  Their spans stay in layout while transparent so the label never shifts. */
@@ -82,29 +87,29 @@ const TRANSCRIBING_DOT_MOTION = {
  *  overlay's surface itself is not animated: it covers the field on the first
  *  frame, so text cannot remain visible while the controls settle in. */
 const ROW_MOTION = {
-	initial: { filter: "blur(4px)" },
-	animate: { filter: "blur(0px)" },
-	transition: { type: "tween", duration: duration.base, ease },
+  initial: { filter: "blur(4px)" },
+  animate: { filter: "blur(0px)" },
+  transition: { type: "tween", duration: duration.base, ease },
 } as const;
 const GLYPH_MORPH = {
-	type: "spring",
-	duration: duration.large,
-	bounce: 0,
+  type: "spring",
+  duration: duration.large,
+  bounce: 0,
 } as const;
 const MIC_OUT = {
-	initial: { opacity: 1, filter: "blur(0px)", scale: 1 },
-	animate: { opacity: 0, filter: "blur(4px)", scale: 0.25 },
-	transition: GLYPH_MORPH,
+  initial: { opacity: 1, filter: "blur(0px)", scale: 1 },
+  animate: { opacity: 0, filter: "blur(4px)", scale: 0.25 },
+  transition: GLYPH_MORPH,
 } as const;
 const CHECK_IN = {
-	initial: { opacity: 0, filter: "blur(4px)", scale: 0.25 },
-	animate: { opacity: 1, filter: "blur(0px)", scale: 1 },
-	transition: GLYPH_MORPH,
+  initial: { opacity: 0, filter: "blur(4px)", scale: 0.25 },
+  animate: { opacity: 1, filter: "blur(0px)", scale: 1 },
+  transition: GLYPH_MORPH,
 } as const;
 const PLUS_TO_CANCEL = {
-	initial: { rotate: 0 },
-	animate: { rotate: 45 },
-	transition: GLYPH_MORPH,
+  initial: { rotate: 0 },
+  animate: { rotate: 45 },
+  transition: GLYPH_MORPH,
 } as const;
 
 /**
@@ -305,7 +310,10 @@ export function VoiceInput({
     setError(null);
     // getUserMedia only exists in secure contexts. Over plain http (the
     // :3850 hostname) the mic simply isn't there.
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+    if (
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof MediaRecorder === "undefined"
+    ) {
       setError(`Mic needs HTTPS. Open ${PRODUCT_NAME} at its ts.net URL.`);
       return;
     }
@@ -348,7 +356,10 @@ export function VoiceInput({
       ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((m) =>
         MediaRecorder.isTypeSupported?.(m),
       ) || "";
-    const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    const rec = new MediaRecorder(
+      stream,
+      mime ? { mimeType: mime } : undefined,
+    );
     recRef.current = rec;
     chunksRef.current = [];
     acceptRef.current = false;
@@ -408,12 +419,9 @@ export function VoiceInput({
     // Browser speech recognition streams partial text while the clip is still
     // being recorded. The audio blob remains the accuracy-preserving fallback
     // when the browser service is absent or fails.
-    speechRef.current = startBrowserDictation(
-      (text) => {
-        if (request === requestRef.current) setLiveTranscript(text);
-      },
-      stream,
-    );
+    speechRef.current = startBrowserDictation((text) => {
+      if (request === requestRef.current) setLiveTranscript(text);
+    }, stream);
     setPhase("recording");
   };
 
@@ -480,11 +488,7 @@ export function VoiceInput({
     return () => window.removeEventListener("keydown", startFromShortcut);
   }, [disabled, editTargetRef, phase, shortcutActive]);
   const stopOnSend = useEffectEvent(function onKeyDown(event: KeyboardEvent) {
-    if (
-      event.defaultPrevented ||
-      event.repeat ||
-      !isSendCombo(event, sendKey)
-    )
+    if (event.defaultPrevented || event.repeat || !isSendCombo(event, sendKey))
       return;
     event.preventDefault();
     stop(true, true);
@@ -508,7 +512,9 @@ export function VoiceInput({
       (child): child is HTMLElement =>
         child instanceof HTMLElement && child !== target,
     );
-    const previous = siblings.map((element) => [element, element.inert] as const);
+    const previous = siblings.map(
+      (element) => [element, element.inert] as const,
+    );
     for (const [element] of previous) element.inert = true;
     return () => {
       for (const [element, inert] of previous) element.inert = inert;
@@ -527,7 +533,9 @@ export function VoiceInput({
       className={cn(OVERLAY, overlayClassName || OVERLAY_RADIUS)}
       style={overlayStyle}
     >
-      {phase === "recording" || phase === "requesting" || phase === "cancelling" ? (
+      {phase === "recording" ||
+      phase === "requesting" ||
+      phase === "cancelling" ? (
         <motion.div
           key="recording"
           className="flex h-10 min-w-0 flex-1 items-center gap-2 phone:gap-1.5"
@@ -700,7 +708,9 @@ export function VoiceInput({
           {error}
         </div>
       )}
-      {overlayTarget && overlay ? createPortal(overlay, overlayTarget) : overlay}
+      {overlayTarget && overlay
+        ? createPortal(overlay, overlayTarget)
+        : overlay}
     </>
   );
 }

@@ -39,46 +39,46 @@ import { cn } from "./cn";
 // and hands specific liveness signals back by class, so a rename silently
 // freezes the indicator. This one cannot be orphaned by a rename.
 const PULSE =
-	"animate-[pulse_1.4s_ease-in-out_infinite] " +
-	"motion-reduce:[animation-duration:1.4s]! motion-reduce:[animation-iteration-count:infinite]!";
+  "animate-[pulse_1.4s_ease-in-out_infinite] " +
+  "motion-reduce:[animation-duration:1.4s]! motion-reduce:[animation-iteration-count:infinite]!";
 
 export function PulseDot({
-	size = 8,
-	className,
+  size = 8,
+  className,
 }: {
-	/** 8px standalone; 7px when it sits inside text or the Running pill. */
-	size?: 7 | 8;
-	className?: string;
+  /** 8px standalone; 7px when it sits inside text or the Running pill. */
+  size?: 7 | 8;
+  className?: string;
 }) {
-	return (
-		<span
-			aria-hidden
-			className={cn(
-				"shrink-0 rounded-full bg-yellow",
-				size === 8 ? "size-2" : "size-[7px]",
-				PULSE,
-				className,
-			)}
-		/>
-	);
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "shrink-0 rounded-full bg-yellow",
+        size === 8 ? "size-2" : "size-[7px]",
+        PULSE,
+        className,
+      )}
+    />
+  );
 }
 
 export function WorkingPill({
-	children = "Running",
-	className,
+  children = "Running",
+  className,
 }: {
-	children?: React.ReactNode;
-	className?: string;
+  children?: React.ReactNode;
+  className?: string;
 }) {
-	return (
-		<span
-			className={cn(
-				"inline-flex shrink-0 items-center gap-1.5 rounded-full bg-yellow-soft px-2.5 py-[3px] text-meta font-semibold text-yellow",
-				className,
-			)}
-		>
-			<PulseDot size={7} />
-			{children}
-		</span>
-	);
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1.5 rounded-full bg-yellow-soft px-2.5 py-[3px] text-meta font-semibold text-yellow",
+        className,
+      )}
+    >
+      <PulseDot size={7} />
+      {children}
+    </span>
+  );
 }

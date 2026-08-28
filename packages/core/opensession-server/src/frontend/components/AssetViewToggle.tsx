@@ -3,8 +3,8 @@ import { cn } from "../ui/cn";
 import { IconViewGrid, IconViewList } from "./icons";
 
 const OPTIONS = [
-	{ mode: "preview" as const, label: "Show previews", icon: IconViewGrid },
-	{ mode: "list" as const, label: "Show as list", icon: IconViewList },
+  { mode: "preview" as const, label: "Show previews", icon: IconViewGrid },
+  { mode: "list" as const, label: "Show as list", icon: IconViewList },
 ];
 
 /**
@@ -23,46 +23,46 @@ const OPTIONS = [
  * buttons occupy.
  */
 export function AssetViewToggle({
-	mode,
-	onChange,
-	className,
+  mode,
+  onChange,
+  className,
 }: {
-	mode: AssetViewMode;
-	onChange: (mode: AssetViewMode) => void;
-	className?: string;
+  mode: AssetViewMode;
+  onChange: (mode: AssetViewMode) => void;
+  className?: string;
 }) {
-	return (
-		<span
-			className={cn(
-				"flex shrink-0 items-center gap-px opacity-0 transition-opacity",
-				"focus-within:opacity-100 group-hover/assets:opacity-100 phone:opacity-100",
-				className,
-			)}
-		>
-			{OPTIONS.map((option) => {
-				const active = option.mode === mode;
-				return (
-					<button
-						key={option.mode}
-						type="button"
-						aria-pressed={active}
-						aria-label={option.label}
-						title={option.label}
-						onClick={(event) => {
-							// Both headings sit in surfaces where a click means "open what
-							// this row is about", so the toggle keeps its click.
-							event.stopPropagation();
-							onChange(option.mode);
-						}}
-						className={cn(
-							"focus-ring grid size-5 place-items-center rounded-control transition-colors",
-							active ? "bg-hover text-fg" : "text-faint hover:text-dim",
-						)}
-					>
-						<option.icon size={16} />
-					</button>
-				);
-			})}
-		</span>
-	);
+  return (
+    <span
+      className={cn(
+        "flex shrink-0 items-center gap-px opacity-0 transition-opacity",
+        "focus-within:opacity-100 group-hover/assets:opacity-100 phone:opacity-100",
+        className,
+      )}
+    >
+      {OPTIONS.map((option) => {
+        const active = option.mode === mode;
+        return (
+          <button
+            key={option.mode}
+            type="button"
+            aria-pressed={active}
+            aria-label={option.label}
+            title={option.label}
+            onClick={(event) => {
+              // Both headings sit in surfaces where a click means "open what
+              // this row is about", so the toggle keeps its click.
+              event.stopPropagation();
+              onChange(option.mode);
+            }}
+            className={cn(
+              "focus-ring grid size-5 place-items-center rounded-control transition-colors",
+              active ? "bg-hover text-fg" : "text-faint hover:text-dim",
+            )}
+          >
+            <option.icon size={16} />
+          </button>
+        );
+      })}
+    </span>
+  );
 }

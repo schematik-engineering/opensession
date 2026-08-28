@@ -14,6 +14,8 @@ import {
   fetchRepos,
   cachedRepos,
   relativeTime,
+  type Goal,
+  type GoalStatus,
   type ModelOption,
   type RepoInfo,
 } from "../lib/api";
@@ -36,6 +38,7 @@ import {
 } from "../ui/settings";
 import { EmptyState, InlineAlert, LoadingState } from "../ui/state";
 import { WorkingPill } from "../ui/status";
+import { errorMessage } from "../lib/error-message";
 
 /* Goals is a tool surface hosted inside Settings, so it reads as one of its
    pages: the settings reading column, a SettingsHeader on top, the rows on a
@@ -52,33 +55,6 @@ const SECTION_LABEL = "mb-1.5 text-label font-semibold text-faint";
 /** .automation-session-link */
 const LINK = "cursor-pointer text-link no-underline hover:underline";
 
-type GoalStatus = "active" | "paused" | "done" | "failed";
-
-interface Goal {
-  id: string;
-  name: string;
-  mission: string;
-  status: GoalStatus;
-  mode: "ask" | "code";
-  repo?: string;
-  bksSessionId?: string;
-  nextWakeAt: string;
-  minWakeMinutes: number;
-  maxWakes?: number;
-  wakeCount: number;
-  lastRunAt?: string;
-  lastRunStatus?: "running" | "ok" | "error";
-  lastRunError?: string;
-  phase?: string;
-  pauseReason?: string;
-  doneReason?: string;
-  model?: string;
-  fallbackModel?: string;
-  mcpServers?: string[];
-  createdBy: string;
-  isRunning?: boolean;
-}
-
 interface Props {
   onOpenSession: (sessionId: string) => void;
   /** Selected goal id (or name) — from the route. */
@@ -88,10 +64,10 @@ interface Props {
 }
 
 const STATUS_COLOR: Record<GoalStatus, string> = {
-  active: "#1f9d55",
-  paused: "#b7791f",
-  done: "#3182ce",
-  failed: "#e03131",
+  active: "var(--green)",
+  paused: "var(--yellow)",
+  done: "var(--blue)",
+  failed: "var(--red)",
 };
 
 export function Goals({ onOpenSession, selectedId, onSelect }: Props) {
@@ -108,15 +84,13 @@ export function Goals({ onOpenSession, selectedId, onSelect }: Props) {
       .catch(() => {});
   }, []);
 
-  // Stable identity: only setters and module functions are captured, so the
-  // polling effect can list `load` without ever refiring from re-renders.
   const load = useCallback(async () => {
-    await (async () => {
-setGoals(await fetchGoals());
-      setLoading(false);
-})().catch(async () => {
-
-});
+    try {
+      setGoals(await fetchGoals());
+    } catch (cause) {
+      setError(errorMessage(cause, "Could not load goals"));
+    }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -130,9 +104,9 @@ setGoals(await fetchGoals());
   }, [load]);
 
   // The routed selection — matched by id, or by name for deep-links.
-  const sel = (selectedId
-        ? goals.find((g) => g.id === selectedId || g.name === selectedId) || null
-        : null);
+  const sel = selectedId
+    ? goals.find((g) => g.id === selectedId || g.name === selectedId) || null
+    : null;
 
   // Leaving the selection also leaves edit mode.
   useEffect(() => setEditMode(false), [sel?.id]);
@@ -144,7 +118,13 @@ setGoals(await fetchGoals());
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.isContentEditable)
+      )
+        return;
       if (editMode) setEditMode(false);
       else onSelect("");
     };
@@ -152,17 +132,21 @@ setGoals(await fetchGoals());
     return () => window.removeEventListener("keydown", onKey);
   }, [hasSelection, editMode, onSelect]);
 
-  async function act(fn: () => Promise<unknown>, refreshDelay = 400) {
-    await (async () => {
-await fn();
+  async function act(action: () => Promise<unknown>, refreshDelay = 400) {
+    try {
+      await action();
       setTimeout(load, refreshDelay);
-})().catch(async (e: any) => {
-setError(e.message);
-});
+    } catch (cause) {
+      setError(errorMessage(cause, "Could not update goal"));
+    }
   }
 
   async function handleDelete(g: Goal) {
-    if (!confirm(`Delete goal "${g.name}" and its ledger? The session it created is left as-is.`))
+    if (
+      !confirm(
+        `Delete goal "${g.name}" and its ledger? The session it created is left as-is.`,
+      )
+    )
       return;
     if (sel?.id === g.id) onSelect("");
     await act(() => deleteGoalApi(g.id), 100);
@@ -170,131 +154,141 @@ setError(e.message);
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1">
-    {/* Drawer open: the list compresses to a narrow rail, and on phones it
+      {/* Drawer open: the list compresses to a narrow rail, and on phones it
         steps aside entirely — Back returns to it. */}
-    <div
-      className={cn(
-        "flex min-w-0 justify-center overflow-y-auto",
-        sel
-          ? "flex-[0_0_340px] border-r border-line px-2.5 pt-4 pb-10 max-[900px]:hidden"
-          : "flex-1 px-8 pt-11 pb-22 phone:px-4 phone:pt-5 phone:pb-12",
-      )}
-    >
-    <SettingsPanel className={cn("self-start", sel && "max-w-none")}>
-      <SettingsHeader
-        title="Goals"
-        description={
-          sel
-            ? undefined
-            : "Long-running missions that pace themselves, keep a ledger, and stop when done."
-        }
+      <div
         className={cn(
-          "phone:flex-col phone:items-start phone:gap-3",
-          sel && "mb-3 px-2 [&_h1]:text-item-title",
+          "flex min-w-0 justify-center overflow-y-auto",
+          sel
+            ? "flex-[0_0_340px] border-r border-line px-2.5 pt-4 pb-10 max-[900px]:hidden"
+            : "flex-1 px-8 pt-11 pb-22 phone:px-4 phone:pt-5 phone:pb-12",
         )}
-        actions={
-          <Button
-            variant="primary"
-            icon={<IconPlus size={16} />}
-            onClick={() => setShowForm(true)}
-          >
-            New goal
-          </Button>
-        }
-      />
-
-      {error && (
-        <InlineAlert className="mb-3" onDismiss={() => setError(null)}>
-          {error}
-        </InlineAlert>
-      )}
-
-      {showForm && (
-        <GoalForm
-          initial={null}
-          onClose={() => setShowForm(false)}
-          onSaved={() => {
-            setShowForm(false);
-            load();
-          }}
-        />
-      )}
-
-      {loading ? (
-        <LoadingState>Loading…</LoadingState>
-      ) : goals.length === 0 && !showForm ? (
-        <EmptyState title="No goals yet">
-          A goal pursues one mission over days or weeks. It wakes itself, reads its ledger,
-          ships work via PRs, measures, and iterates until the objective is met.
-        </EmptyState>
-      ) : (
-        <SettingCard>
-          {goals.map((g) => {
-            const running = g.isRunning || g.lastRunStatus === "running";
-            return (
-              <button
-                key={g.id}
-                className={cn(
-                  "flex w-full min-w-0 items-center gap-3 px-5 py-3.5 text-left outline-none transition-colors",
-                  "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/50",
-                  sel?.id === g.id ? "bg-selected" : "hover:bg-hover",
-                  sel && "gap-2.5 px-3 py-2.5",
-                )}
-                onClick={() => onSelect(g.id)}
+      >
+        <SettingsPanel className={cn("self-start", sel && "max-w-none")}>
+          <SettingsHeader
+            title="Goals"
+            description={
+              sel
+                ? undefined
+                : "Long-running missions that pace themselves, keep a ledger, and stop when done."
+            }
+            className={cn(
+              "phone:flex-col phone:items-start phone:gap-3",
+              sel && "mb-3 px-2 [&_h1]:text-item-title",
+            )}
+            actions={
+              <Button
+                variant="primary"
+                icon={<IconPlus size={16} />}
+                onClick={() => setShowForm(true)}
               >
-                <span
-                  className="size-2 shrink-0 rounded-full"
-                  style={{ background: STATUS_COLOR[g.status] }}
-                  title={g.pauseReason || g.doneReason || g.status}
-                />
-                <span
-                  className={cn(
-                    "flex min-w-0 flex-1 flex-col",
-                    g.status !== "active" && "opacity-55",
-                  )}
-                >
-                  <span className="truncate text-item-title font-medium text-fg">{g.name}</span>
-                  <span className="mt-0.5 truncate text-supporting text-dim">
-                    {g.status}
-                    {g.phase ? ` · ${g.phase}` : ""}
-                    {` · wake #${g.wakeCount}${g.maxWakes ? ` / ${g.maxWakes}` : ""}`}
-                  </span>
-                </span>
-                {running ? (
-                  <WorkingPill />
-                ) : g.lastRunStatus === "ok" || g.lastRunStatus === "error" ? (
-                  <span
+                New goal
+              </Button>
+            }
+          />
+
+          {error && (
+            <InlineAlert className="mb-3" onDismiss={() => setError(null)}>
+              {error}
+            </InlineAlert>
+          )}
+
+          {showForm && (
+            <GoalForm
+              initial={null}
+              onClose={() => setShowForm(false)}
+              onSaved={() => {
+                setShowForm(false);
+                load();
+              }}
+            />
+          )}
+
+          {loading ? (
+            <LoadingState>Loading…</LoadingState>
+          ) : goals.length === 0 && !showForm ? (
+            <EmptyState title="No goals yet">
+              A goal pursues one mission over days or weeks. It wakes itself,
+              reads its ledger, ships work via PRs, measures, and iterates until
+              the objective is met.
+            </EmptyState>
+          ) : (
+            <SettingCard>
+              {goals.map((g) => {
+                const running = g.isRunning || g.lastRunStatus === "running";
+                return (
+                  <button
+                    key={g.id}
                     className={cn(
-                      "flex size-5 shrink-0 items-center justify-center [&_svg]:size-3.5",
-                      g.lastRunStatus === "ok" ? "text-green" : "text-red",
+                      "flex w-full min-w-0 items-center gap-3 px-5 py-3.5 text-left outline-none transition-colors",
+                      "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/50",
+                      sel?.id === g.id ? "bg-selected" : "hover:bg-hover",
+                      sel && "gap-2.5 px-3 py-2.5",
                     )}
-                    title={
-                      g.lastRunStatus === "ok"
-                        ? `Last wake ok${g.lastRunAt ? ` · ${relativeTime(g.lastRunAt)}` : ""}`
-                        : g.lastRunError || "Last wake failed"
-                    }
+                    onClick={() => onSelect(g.id)}
                   >
-                    <CheckStatusIcon kind={g.lastRunStatus === "ok" ? "success" : "failure"} />
-                  </span>
-                ) : null}
-                {/* Only the next wake: the status itself is already the first
+                    <span
+                      className="size-2 shrink-0 rounded-full"
+                      style={{ background: STATUS_COLOR[g.status] }}
+                      title={g.pauseReason || g.doneReason || g.status}
+                    />
+                    <span
+                      className={cn(
+                        "flex min-w-0 flex-1 flex-col",
+                        g.status !== "active" && "opacity-55",
+                      )}
+                    >
+                      <span className="truncate text-item-title font-medium text-fg">
+                        {g.name}
+                      </span>
+                      <span className="mt-0.5 truncate text-supporting text-dim">
+                        {g.status}
+                        {g.phase ? ` · ${g.phase}` : ""}
+                        {` · wake #${g.wakeCount}${g.maxWakes ? ` / ${g.maxWakes}` : ""}`}
+                      </span>
+                    </span>
+                    {running ? (
+                      <WorkingPill />
+                    ) : g.lastRunStatus === "ok" ||
+                      g.lastRunStatus === "error" ? (
+                      <span
+                        className={cn(
+                          "flex size-5 shrink-0 items-center justify-center [&_svg]:size-3.5",
+                          g.lastRunStatus === "ok" ? "text-green" : "text-red",
+                        )}
+                        title={
+                          g.lastRunStatus === "ok"
+                            ? `Last wake ok${g.lastRunAt ? ` · ${relativeTime(g.lastRunAt)}` : ""}`
+                            : g.lastRunError || "Last wake failed"
+                        }
+                      >
+                        <CheckStatusIcon
+                          kind={
+                            g.lastRunStatus === "ok" ? "success" : "failure"
+                          }
+                        />
+                      </span>
+                    ) : null}
+                    {/* Only the next wake: the status itself is already the first
                     word of the line on the left, and saying it twice made a
                     paused goal read as two different facts. */}
-                <span
-                  className={cn(
-                    "w-21 shrink-0 text-right text-meta text-faint",
-                    sel ? "hidden" : "phone:hidden",
-                  )}
-                >
-                  {g.status === "active" && g.nextWakeAt ? `next ${formatNext(g.nextWakeAt)}` : ""}
-                </span>
-              </button>
-            );
-          })}
-        </SettingCard>
-      )}
-    </SettingsPanel>
-    </div>
+                    <span
+                      className={cn(
+                        "w-21 shrink-0 text-right text-meta text-faint",
+                        sel ? "hidden" : "phone:hidden",
+                      )}
+                    >
+                      {g.status === "active" && g.nextWakeAt
+                        ? `next ${formatNext(g.nextWakeAt)}`
+                        : ""}
+                    </span>
+                  </button>
+                );
+              })}
+            </SettingCard>
+          )}
+        </SettingsPanel>
+      </div>
 
       {sel && (
         <aside className="flex min-h-0 min-w-0 flex-auto flex-col border-l border-line bg-panel max-[900px]:border-l-0">
@@ -305,7 +299,14 @@ setError(e.message);
               onClick={() => onSelect("")}
               title="Back to goals"
             >
-              <svg width="19" height="19" viewBox="0 0 16 16" fill="currentColor" className="text-dim" aria-hidden>
+              <svg
+                width="19"
+                height="19"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+                className="text-dim"
+                aria-hidden
+              >
                 <path d="M9.78 12.78a.75.75 0 0 1-1.06 0L4.47 8.53a.75.75 0 0 1 0-1.06l4.25-4.25a.749.749 0 1 1 1.06 1.06L6.06 8l3.72 3.72a.75.75 0 0 1 0 1.06Z" />
               </svg>
               Goals
@@ -326,18 +327,34 @@ setError(e.message);
                   </Button>
                 )}
                 {sel.status === "active" ? (
-                  <Button size="sm" variant="soft" onClick={() => act(() => pauseGoalApi(sel.id))}>
+                  <Button
+                    size="sm"
+                    variant="soft"
+                    onClick={() => act(() => pauseGoalApi(sel.id))}
+                  >
                     Pause
                   </Button>
                 ) : (
-                  <Button size="sm" variant="soft" onClick={() => act(() => resumeGoalApi(sel.id))}>
+                  <Button
+                    size="sm"
+                    variant="soft"
+                    onClick={() => act(() => resumeGoalApi(sel.id))}
+                  >
                     Resume
                   </Button>
                 )}
-                <Button size="sm" variant="soft" onClick={() => setEditMode(true)}>
+                <Button
+                  size="sm"
+                  variant="soft"
+                  onClick={() => setEditMode(true)}
+                >
                   Edit
                 </Button>
-                <Button size="sm" variant="danger" onClick={() => handleDelete(sel)}>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  onClick={() => handleDelete(sel)}
+                >
                   Delete
                 </Button>
               </div>
@@ -347,7 +364,13 @@ setError(e.message);
               onClick={() => onSelect("")}
               title="Close"
             >
-              <svg width="19" height="19" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+              <svg
+                width="19"
+                height="19"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+                aria-hidden
+              >
                 <path d="M3.72 3.72a.75.75 0 0 1 1.06 0L8 6.94l3.22-3.22a.749.749 0 1 1 1.06 1.06L9.06 8l3.22 3.22a.749.749 0 1 1-1.06 1.06L8 9.06l-3.22 3.22a.749.749 0 0 1-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 0 1 0-1.06Z" />
               </svg>
             </button>
@@ -369,7 +392,10 @@ setError(e.message);
                 <div className="flex items-center gap-2.5">
                   <span
                     className={SOURCE_CHIP}
-                    style={{ background: STATUS_COLOR[sel.status], color: "#fff" }}
+                    style={{
+                      background: STATUS_COLOR[sel.status],
+                      color: "#fff",
+                    }}
                   >
                     {sel.status}
                   </span>
@@ -377,7 +403,10 @@ setError(e.message);
                     <WorkingPill />
                   )}
                   {sel.status === "active" && sel.nextWakeAt && (
-                    <span className="text-faint text-label ml-auto shrink-0" title={sel.nextWakeAt}>
+                    <span
+                      className="text-faint text-label ml-auto shrink-0"
+                      title={sel.nextWakeAt}
+                    >
                       next wake {formatNext(sel.nextWakeAt)}
                     </span>
                   )}
@@ -387,11 +416,13 @@ setError(e.message);
                     Paused: {sel.pauseReason}
                   </div>
                 )}
-                {(sel.status === "done" || sel.status === "failed") && sel.doneReason && (
-                  <div className="text-dim text-supporting leading-snug">
-                    {sel.status === "done" ? "Done" : "Failed"}: {sel.doneReason}
-                  </div>
-                )}
+                {(sel.status === "done" || sel.status === "failed") &&
+                  sel.doneReason && (
+                    <div className="text-dim text-supporting leading-snug">
+                      {sel.status === "done" ? "Done" : "Failed"}:{" "}
+                      {sel.doneReason}
+                    </div>
+                  )}
 
                 <div>
                   <div className={SECTION_LABEL}>Mission</div>
@@ -425,7 +456,8 @@ setError(e.message);
                           className="text-faint"
                           title="Used only when every account for the primary model has hit its usage limit"
                         >
-                          {" "}· falls back to {sel.fallbackModel}
+                          {" "}
+                          · falls back to {sel.fallbackModel}
                         </span>
                       )}
                     </span>
@@ -438,7 +470,9 @@ setError(e.message);
 
                     <DetailKey>MCPs</DetailKey>
                     <span className="text-dim min-w-0">
-                      {sel.mcpServers?.length ? sel.mcpServers.join(", ") : "all connectors"}
+                      {sel.mcpServers?.length
+                        ? sel.mcpServers.join(", ")
+                        : "all connectors"}
                     </span>
 
                     {sel.bksSessionId && (
@@ -473,9 +507,14 @@ setError(e.message);
                       <>
                         {" · last wake "}
                         {relativeTime(sel.lastRunAt)}
-                        {sel.lastRunStatus === "ok" && <span className="text-green"> ✓</span>}
+                        {sel.lastRunStatus === "ok" && (
+                          <span className="text-green"> ✓</span>
+                        )}
                         {sel.lastRunStatus === "error" && (
-                          <span className="text-red" title={sel.lastRunError}> ✗</span>
+                          <span className="text-red" title={sel.lastRunError}>
+                            {" "}
+                            ✗
+                          </span>
                         )}
                       </>
                     )}
@@ -494,7 +533,9 @@ setError(e.message);
 /** Left column of the drawer's Configuration grid. */
 function DetailKey({ children }: { children: React.ReactNode }) {
   return (
-    <span className="text-faint text-label leading-[1.7] whitespace-nowrap">{children}</span>
+    <span className="text-faint text-label leading-[1.7] whitespace-nowrap">
+      {children}
+    </span>
   );
 }
 
@@ -573,10 +614,18 @@ function GoalForm({
   // picker opens on the real list rather than empty; the fetch below corrects it.
   const [repos, setRepos] = useState<RepoInfo[]>(cachedRepos);
   const [model, setModel] = useState(initial?.model || "");
-  const [fallbackModel, setFallbackModel] = useState(initial?.fallbackModel || "");
-  const [mcpServers, setMcpServers] = useState((initial?.mcpServers || []).join(", "));
-  const [minWakeMinutes, setMinWakeMinutes] = useState(String(initial?.minWakeMinutes ?? 30));
-  const [maxWakes, setMaxWakes] = useState(initial?.maxWakes ? String(initial.maxWakes) : "");
+  const [fallbackModel, setFallbackModel] = useState(
+    initial?.fallbackModel || "",
+  );
+  const [mcpServers, setMcpServers] = useState(
+    (initial?.mcpServers || []).join(", "),
+  );
+  const [minWakeMinutes, setMinWakeMinutes] = useState(
+    String(initial?.minWakeMinutes ?? 30),
+  );
+  const [maxWakes, setMaxWakes] = useState(
+    initial?.maxWakes ? String(initial.maxWakes) : "",
+  );
   const [models, setModels] = useState<ModelOption[]>([]);
   const [defaultModel, setDefaultModel] = useState("");
   const [saving, setSaving] = useState(false);
@@ -588,11 +637,12 @@ function GoalForm({
         setModels(m.models);
         setDefaultModel(m.default);
         if (repoItems.length) setRepos(repoItems);
-        setRepo((current) =>
-          current ||
-          repoItems.find((item) => item.default)?.id ||
-          repoItems[0]?.id ||
-          "",
+        setRepo(
+          (current) =>
+            current ||
+            repoItems.find((item) => item.default)?.id ||
+            repoItems[0]?.id ||
+            "",
         );
       })
       .catch(() => {});
@@ -616,17 +666,17 @@ function GoalForm({
       minWakeMinutes: Number(minWakeMinutes) || undefined,
       maxWakes: maxWakes.trim() ? Number(maxWakes) : undefined,
     };
-    await (async () => {
-if (initial) {
+    try {
+      if (initial) {
         await updateGoalApi(initial.id, payload);
       } else {
         await createGoalApi({ ...payload, createdBy: getCurrentUser() });
       }
       onSaved();
-})().catch(async (e: any) => {
-setError(e.message);
+    } catch (cause) {
+      setError(errorMessage(cause, "Could not save goal"));
       setSaving(false);
-});
+    }
   }
 
   const fields = (
@@ -654,8 +704,14 @@ setError(e.message);
             label="Mode"
             value={mode}
             options={[
-              { value: "ask", label: "Ask · read-only research and measurement" },
-              { value: "code", label: "Code · persistent worktree, can open PRs" },
+              {
+                value: "ask",
+                label: "Ask · read-only research and measurement",
+              },
+              {
+                value: "code",
+                label: "Code · persistent worktree, can open PRs",
+              },
             ]}
             onChange={(next) => setMode(next as "ask" | "code")}
           />
@@ -678,8 +734,14 @@ setError(e.message);
             label="Model"
             value={model}
             options={[
-              { value: "", label: `Default${defaultModel ? ` · ${defaultModel}` : ""}` },
-              ...models.map((m) => ({ value: m.id, label: m.label + accountPoolSuffix(m) })),
+              {
+                value: "",
+                label: `Default${defaultModel ? ` · ${defaultModel}` : ""}`,
+              },
+              ...models.map((m) => ({
+                value: m.id,
+                label: m.label + accountPoolSuffix(m),
+              })),
             ]}
             onChange={setModel}
           />
@@ -694,14 +756,20 @@ setError(e.message);
             value={fallbackModel}
             options={[
               { value: "", label: "None · fail instead" },
-              ...models.map((m) => ({ value: m.id, label: m.label + accountPoolSuffix(m) })),
+              ...models.map((m) => ({
+                value: m.id,
+                label: m.label + accountPoolSuffix(m),
+              })),
             ]}
             onChange={setFallbackModel}
           />
         </Field>
       </FieldGrid>
 
-      <Field label="MCP servers" title="Comma-separated. Blank means every connector.">
+      <Field
+        label="MCP servers"
+        title="Comma-separated. Blank means every connector."
+      >
         <Input
           value={mcpServers}
           onChange={(e) => setMcpServers(e.target.value)}
@@ -711,7 +779,10 @@ setError(e.message);
       </Field>
 
       <FieldGrid>
-        <Field label="Minutes between wakes" title="The goal never wakes sooner than this.">
+        <Field
+          label="Minutes between wakes"
+          title="The goal never wakes sooner than this."
+        >
           <Input
             type="number"
             value={minWakeMinutes}
@@ -749,7 +820,10 @@ setError(e.message);
 
   // In the drawer the panel is already the surface, so the form drops the
   // plate and the title the drawer's own header carries.
-  if (inline) return <div className={`flex flex-col gap-3.5 ${FORM_FIELDS}`}>{fields}</div>;
+  if (inline)
+    return (
+      <div className={`flex flex-col gap-3.5 ${FORM_FIELDS}`}>{fields}</div>
+    );
 
   return (
     <SettingsForm className={`mb-3 flex flex-col gap-3.5 ${FORM_FIELDS}`}>

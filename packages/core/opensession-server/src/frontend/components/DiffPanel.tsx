@@ -1,11 +1,13 @@
 import { repoLabel } from "../lib/repo-label";
-import React, { useCallback, useEffect, useEffectEvent, useState, useRef } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useState,
+  useRef,
+} from "react";
 import { createPortal } from "react-dom";
-import type {
-  CodeFlowResult,
-  DiffFileGroup,
-  RepoDiff,
-} from "../lib/types";
+import type { CodeFlowResult, DiffFileGroup, RepoDiff } from "../lib/types";
 import { useSessionDiffResource } from "../hooks/useApiResources";
 import {
   API_BASE,
@@ -67,7 +69,7 @@ export interface SessionDiffState {
   repos: RepoDiff[] | null;
   loading: boolean;
   error: string | null;
-	reload: () => Promise<void>;
+  reload: () => Promise<void>;
 }
 
 /**
@@ -76,16 +78,16 @@ export interface SessionDiffState {
  * empty-diff placeholder carries no hash, which is what the size guards cover.
  */
 function sameRepoDiffs(a: RepoDiff[] | null, b: RepoDiff[]): boolean {
-	if (a === null || a.length !== b.length) return false;
-	return a.every((repo, i) => {
-		const next = b[i];
-		return (
-			repo.repo === next.repo &&
-			repo.diff.diffVersion === next.diff.diffVersion &&
-			repo.diff.rawPatch.length === next.diff.rawPatch.length &&
-			repo.diff.files.length === next.diff.files.length
-		);
-	});
+  if (a === null || a.length !== b.length) return false;
+  return a.every((repo, i) => {
+    const next = b[i];
+    return (
+      repo.repo === next.repo &&
+      repo.diff.diffVersion === next.diff.diffVersion &&
+      repo.diff.rawPatch.length === next.diff.rawPatch.length &&
+      repo.diff.files.length === next.diff.files.length
+    );
+  });
 }
 
 /**
@@ -99,20 +101,22 @@ export function useSessionDiff(
   opts: { enabled?: boolean; isRunning: boolean },
 ): SessionDiffState {
   const { enabled = true, isRunning } = opts;
-  const { data, error: requestError, isLoading, mutate } = useSessionDiffResource(
-    sessionId,
-    {
-      enabled,
-      refreshInterval: enabled ? (isRunning ? 8000 : 30000) : 0,
-      // The same patch comes back on most polls. Suppress that update before it
-      // reaches React, because rendering a large diff parses every file again.
-      compare: (previous, next) => {
-        if (previous === next) return true;
-        if (!previous || !next) return false;
-        return sameRepoDiffs(previous.repos || [], next.repos || []);
-      },
+  const {
+    data,
+    error: requestError,
+    isLoading,
+    mutate,
+  } = useSessionDiffResource(sessionId, {
+    enabled,
+    refreshInterval: enabled ? (isRunning ? 8000 : 30000) : 0,
+    // The same patch comes back on most polls. Suppress that update before it
+    // reaches React, because rendering a large diff parses every file again.
+    compare: (previous, next) => {
+      if (previous === next) return true;
+      if (!previous || !next) return false;
+      return sameRepoDiffs(previous.repos || [], next.repos || []);
     },
-  );
+  });
   const repos = data?.repos ?? null;
   const loading = isLoading && !data;
   // A failed background revalidation must not replace a usable stale patch.
@@ -149,12 +153,8 @@ export function DiffPanel({
   // unified fallback until the person picks a layout.
   const codeDisplaySettings = useCodeDisplaySettings("unified");
   const organizationSettings = useCodeOrganizationSettings();
-  const {
-    grouping,
-    fileListMode,
-    fileOrder,
-    sortDirection,
-  } = organizationSettings;
+  const { grouping, fileListMode, fileOrder, sortDirection } =
+    organizationSettings;
   const [groups, setGroups] = useState<{
     repo: string;
     patch: string;
@@ -177,18 +177,23 @@ export function DiffPanel({
   const syncActiveRepo = useEffectEvent(() => {
     if (!repo) return;
     const index = changed.findIndex((candidate) => candidate.repo === repo);
-    if (index >= 0) setActive((current) => (current === index ? current : index));
+    if (index >= 0)
+      setActive((current) => (current === index ? current : index));
   });
   useEffect(() => {
     syncActiveRepo();
   }, [repo, changedReposKey]);
-  const cur = changed[Math.min(active, changed.length - 1)] || changed[0] || null;
+  const cur =
+    changed[Math.min(active, changed.length - 1)] || changed[0] || null;
   const groupPatch = cur?.diff.rawPatch || "";
   const groupFileCount = cur?.diff.files.length || 0;
   const patchVersion = cur?.diff.diffVersion || "";
   const flowRepo = cur?.repo;
   const flowKey = cur ? `${sessionId}\0${flowRepo}\0${patchVersion}` : "";
-  const [flow, setFlow] = useState<{ key: string; data: CodeFlowResult } | null>(null);
+  const [flow, setFlow] = useState<{
+    key: string;
+    data: CodeFlowResult;
+  } | null>(null);
   const [flowLoading, setFlowLoading] = useState(false);
   const [flowError, setFlowError] = useState<string | null>(null);
   const flowGeneration = useRef(0);
@@ -196,44 +201,52 @@ export function DiffPanel({
   const [diffControlsTarget, setDiffControlsTarget] =
     useState<HTMLDivElement | null>(null);
 
-	// Keyed on the semantic inputs (session/repo/diff version), not the
-	// per-poll `cur` object, so the flow effect doesn't re-arm every poll.
-	const loadFlow = useCallback(async () => {
+  // Keyed on the semantic inputs (session/repo/diff version), not the
+  // per-poll `cur` object, so the flow effect doesn't re-arm every poll.
+  const loadFlow = useCallback(async () => {
     if (!flowRepo || !flowKey) return;
     const generation = ++flowGeneration.current;
     setFlowLoading(true);
     setFlowError(null);
     await (async () => {
-const data = await fetchCodeFlow(sessionId, flowRepo);
-      if (!data) throw new Error("Code flow isn't available for these changes.");
+      const data = await fetchCodeFlow(sessionId, flowRepo);
+      if (!data)
+        throw new Error("Code flow isn't available for these changes.");
       if (data.diffVersion !== patchVersion) {
         if (generation === flowGeneration.current) {
-          setFlowError("Changes updated while code flow was loading. Try again.");
+          setFlowError(
+            "Changes updated while code flow was loading. Try again.",
+          );
         }
         return;
       }
-      if (generation === flowGeneration.current) setFlow({ key: flowKey, data });
-})().catch(async (error: any) => {
-if (generation === flowGeneration.current)
-        setFlowError(error?.message || "Couldn't load code flow.");
-}).finally(async () => {
-if (generation === flowGeneration.current) setFlowLoading(false);
-});
-	}, [sessionId, flowRepo, flowKey, patchVersion]);
+      if (generation === flowGeneration.current)
+        setFlow({ key: flowKey, data });
+    })()
+      .catch(async (error: any) => {
+        if (generation === flowGeneration.current)
+          setFlowError(error?.message || "Couldn't load code flow.");
+      })
+      .finally(async () => {
+        if (generation === flowGeneration.current) setFlowLoading(false);
+      });
+  }, [sessionId, flowRepo, flowKey, patchVersion]);
 
-	const refreshFlow = async () => {
-		flowGeneration.current += 1;
-		setFlow(null);
-		setFlowError(null);
-		setFlowLoading(true);
-		await reload();
-		setFlowLoading(false);
-	};
+  const refreshFlow = async () => {
+    flowGeneration.current += 1;
+    setFlow(null);
+    setFlowError(null);
+    setFlowLoading(true);
+    await reload();
+    setFlowLoading(false);
+  };
 
   useEffect(() => {
     if (view !== "flow" || flowLoading || flowError) return;
     if (flow && flow.key !== flowKey) {
-      setFlowError("Changes updated. Refresh code flow to analyze the latest diff.");
+      setFlowError(
+        "Changes updated. Refresh code flow to analyze the latest diff.",
+      );
       return;
     }
     if (!flow) void loadFlow();
@@ -250,7 +263,9 @@ if (generation === flowGeneration.current) setFlowLoading(false);
 
   function openFlowLocation(path: string) {
     setView("files");
-    requestAnimationFrame(() => requestAnimationFrame(() => revealDiffFile(panelRef.current, path)));
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => revealDiffFile(panelRef.current, path)),
+    );
   }
 
   const loadGroups = useEffectEvent(() => {
@@ -264,7 +279,10 @@ if (generation === flowGeneration.current) setFlowLoading(false);
     setGroups(null);
     setGroupsLoading(true);
     const retryLater = () => {
-      retryTimer = setTimeout(() => setGroupsRetry((attempt) => attempt + 1), 125_000);
+      retryTimer = setTimeout(
+        () => setGroupsRetry((attempt) => attempt + 1),
+        125_000,
+      );
     };
     fetchDiffGroups(sessionId, cur.repo, cur.diff.files, groupPatch)
       .then((result) => {
@@ -299,7 +317,9 @@ if (generation === flowGeneration.current) setFlowLoading(false);
   // the worktree — nothing is committed — so we offer a one-click note that
   // tells the agent about the hand-edits (it reviews them and folds them into
   // its next commit). Cleared per session and once sent.
-  const [handEdited, setHandEdited] = useState<{ repo: string; path: string }[]>([]);
+  const [handEdited, setHandEdited] = useState<
+    { repo: string; path: string }[]
+  >([]);
   useEffect(() => setHandEdited([]), [sessionId]);
   const recordHandEdit = (repo: string, path: string) =>
     setHandEdited((prev) =>
@@ -323,8 +343,15 @@ if (generation === flowGeneration.current) setFlowLoading(false);
     setHandEdited([]);
   }
 
-  async function handleComment(repo: string, target: CommentTarget, text: string) {
-    if (!canSend) throw new Error(`${AGENT_NAME} is busy. Wait for the current run to finish.`);
+  async function handleComment(
+    repo: string,
+    target: CommentTarget,
+    text: string,
+  ) {
+    if (!canSend)
+      throw new Error(
+        `${AGENT_NAME} is busy. Wait for the current run to finish.`,
+      );
     const lines =
       target.startLine === target.endLine
         ? `line ${target.startLine}`
@@ -442,7 +469,8 @@ if (generation === flowGeneration.current) setFlowLoading(false);
         {d.files.length} file{d.files.length === 1 ? "" : "s"}
         {groupsLoading && (
           <span role="status" aria-label="Organizing files">
-            {" "}(organizing…)
+            {" "}
+            (organizing…)
           </span>
         )}
       </span>
@@ -539,96 +567,113 @@ if (generation === flowGeneration.current) setFlowLoading(false);
       {toolbar}
 
       <div className="flex min-h-0 min-w-0 flex-1">
-        {showFileList && fileListMode !== "hidden" && orderedFiles.length > 0 && (
-          <PrFileTree
-            files={orderedFiles}
-            mode={fileListMode}
-            showFileStats={codeDisplaySettings.showFileStats}
-            onOpenFile={openFlowLocation}
-          />
-        )}
+        {showFileList &&
+          fileListMode !== "hidden" &&
+          orderedFiles.length > 0 && (
+            <PrFileTree
+              files={orderedFiles}
+              mode={fileListMode}
+              showFileStats={codeDisplaySettings.showFileStats}
+              onOpenFile={openFlowLocation}
+            />
+          )}
         <div className="min-w-0 flex-1">
-      {view === "flow" ? (
-        <CodeFlow
-          data={flow?.key === flowKey ? flow.data : null}
-          loading={flowLoading || (flow?.key !== flowKey && !flowError)}
-          error={flowError}
-			onRetry={() => void refreshFlow()}
-          onOpenLocation={openFlowLocation}
-        />
-      ) : (
-      /* @pierre/diffs sizes its own generated markup, which no utility on our
+          {view === "flow" ? (
+            <CodeFlow
+              data={flow?.key === flowKey ? flow.data : null}
+              loading={flowLoading || (flow?.key !== flowKey && !flowError)}
+              error={flowError}
+              onRetry={() => void refreshFlow()}
+              onOpenLocation={openFlowLocation}
+            />
+          ) : (
+            /* @pierre/diffs sizes its own generated markup, which no utility on our
          side can reach — hold it inside the panel from here. A parent toolbar
          supplies the review canvas's shared 8px inset; standalone Changes
          keeps this panel's own inset. */
-      <div
-        className={`${toolbarTarget === undefined ? "px-2.5 pt-2.5" : "px-0 pt-0"} min-w-0 max-w-full overflow-clip pb-7 [&_[class*=pierre]]:max-w-full`}
-      >
-        <CommentableDiff
-          key={cur.repo}
-          patch={d.rawPatch || ""}
-          defaultExpandedFiles={10}
-          controlsTarget={diffControlsTarget}
-          diffStyle={codeDisplaySettings.diffStyle}
-          wrapLines={codeDisplaySettings.wrapLines}
-          structuralHighlighting={codeDisplaySettings.structuralHighlighting}
-          showFileStats={codeDisplaySettings.showFileStats}
-          codeTheme={codeDisplaySettings.codeTheme}
-          visibleFileOrder={visibleFileOrder}
-          // The sidebar owns this scrollport. Keep each file's title below its
-          // standing toolbar until the following file pushes it away.
-          stickyFileHeaders={toolbarTarget === undefined}
-          groups={
-            grouping === "ai" &&
-            groups?.repo === cur.repo &&
-            groups.patch === d.rawPatch
-              ? groups.groups || undefined
-              : undefined
-          }
-          groupsLoading={grouping === "ai" && groupsLoading}
-          showGroupsStatus={false}
-          submitLabel={`Send to ${AGENT_NAME}`}
-          placeholder={`Leave feedback on these lines. ${AGENT_NAME} picks it up in this session…`}
-          disabled={!canSend}
-          disabledHint={`${AGENT_NAME} is working. You can send feedback once the current run finishes.`}
-          onSubmit={(target, text) => handleComment(cur.repo, target, text)}
-          // Discarding edits the worktree — withhold it while the agent is running
-          // to avoid racing its writes.
-          onDiscard={canSend ? (path, oldPath) => handleDiscard(cur.repo, path, oldPath) : undefined}
-          // In-place edit mode (@pierre/diffs edit): same live-worktree gate as
-          // discard. Load pulls full file contents (the editor can't work from
-          // hunks alone); save writes back and refreshes the diff.
-          editFile={
-            canSend
-              ? {
-                  load: (file, side) =>
-                    fetchWorktreeFile(
-                      sessionId,
-                      side === "base" ? file.prevName || file.name : file.name,
-                      cur.repo,
-                      side,
-                    ),
-                  save: async (path, content) => {
-                    await saveWorktreeFile(sessionId, path, content, cur.repo);
-                    recordHandEdit(cur.repo, path);
-                    await reload();
-                  },
+            <div
+              className={`${toolbarTarget === undefined ? "px-2.5 pt-2.5" : "px-0 pt-0"} min-w-0 max-w-full overflow-clip pb-7 [&_[class*=pierre]]:max-w-full`}
+            >
+              <CommentableDiff
+                key={cur.repo}
+                patch={d.rawPatch || ""}
+                defaultExpandedFiles={10}
+                controlsTarget={diffControlsTarget}
+                diffStyle={codeDisplaySettings.diffStyle}
+                wrapLines={codeDisplaySettings.wrapLines}
+                structuralHighlighting={
+                  codeDisplaySettings.structuralHighlighting
                 }
-              : undefined
-          }
-          // Changed images render as pictures: new side straight from the
-          // worktree, old side from the diff's merge base.
-          imageSrcs={(file) => {
-            const src = (side: "new" | "base", p: string) =>
-              `${API_BASE}/sessions/${encodeURIComponent(sessionId)}/worktree-image?repo=${encodeURIComponent(cur.repo)}&side=${side}&path=${encodeURIComponent(p)}`;
-            return {
-              oldSrc: src("base", file.prevName || file.name),
-              newSrc: src("new", file.name),
-            };
-          }}
-        />
-      </div>
-      )}
+                showFileStats={codeDisplaySettings.showFileStats}
+                codeTheme={codeDisplaySettings.codeTheme}
+                visibleFileOrder={visibleFileOrder}
+                // The sidebar owns this scrollport. Keep each file's title below its
+                // standing toolbar until the following file pushes it away.
+                stickyFileHeaders={toolbarTarget === undefined}
+                groups={
+                  grouping === "ai" &&
+                  groups?.repo === cur.repo &&
+                  groups.patch === d.rawPatch
+                    ? groups.groups || undefined
+                    : undefined
+                }
+                groupsLoading={grouping === "ai" && groupsLoading}
+                showGroupsStatus={false}
+                submitLabel={`Send to ${AGENT_NAME}`}
+                placeholder={`Leave feedback on these lines. ${AGENT_NAME} picks it up in this session…`}
+                disabled={!canSend}
+                disabledHint={`${AGENT_NAME} is working. You can send feedback once the current run finishes.`}
+                onSubmit={(target, text) =>
+                  handleComment(cur.repo, target, text)
+                }
+                // Discarding edits the worktree — withhold it while the agent is running
+                // to avoid racing its writes.
+                onDiscard={
+                  canSend
+                    ? (path, oldPath) => handleDiscard(cur.repo, path, oldPath)
+                    : undefined
+                }
+                // In-place edit mode (@pierre/diffs edit): same live-worktree gate as
+                // discard. Load pulls full file contents (the editor can't work from
+                // hunks alone); save writes back and refreshes the diff.
+                editFile={
+                  canSend
+                    ? {
+                        load: (file, side) =>
+                          fetchWorktreeFile(
+                            sessionId,
+                            side === "base"
+                              ? file.prevName || file.name
+                              : file.name,
+                            cur.repo,
+                            side,
+                          ),
+                        save: async (path, content) => {
+                          await saveWorktreeFile(
+                            sessionId,
+                            path,
+                            content,
+                            cur.repo,
+                          );
+                          recordHandEdit(cur.repo, path);
+                          await reload();
+                        },
+                      }
+                    : undefined
+                }
+                // Changed images render as pictures: new side straight from the
+                // worktree, old side from the diff's merge base.
+                imageSrcs={(file) => {
+                  const src = (side: "new" | "base", p: string) =>
+                    `${API_BASE}/sessions/${encodeURIComponent(sessionId)}/worktree-image?repo=${encodeURIComponent(cur.repo)}&side=${side}&path=${encodeURIComponent(p)}`;
+                  return {
+                    oldSrc: src("base", file.prevName || file.name),
+                    newSrc: src("new", file.name),
+                  };
+                }}
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -660,7 +705,9 @@ function DiffEmptyState({ isRunning }: { isRunning: boolean }) {
         <path d="M13 18v5a4 4 0 0 0 4 4h5" />
       </svg>
       <div className="flex flex-col gap-1">
-        <div className="text-item-title font-medium text-dim">No file changes yet</div>
+        <div className="text-item-title font-medium text-dim">
+          No file changes yet
+        </div>
         <div className="text-sm text-faint">Changes appear here.</div>
       </div>
       {isRunning && (

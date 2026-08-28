@@ -4,11 +4,15 @@ import { fileURLToPath } from "url";
 import { DOCKER_HOST_ENTRY, DOCKER_RUNNER_ROOT } from "./docker";
 
 const dockerfile = readFileSync(
-  fileURLToPath(new URL("../../../../../../deploy/sandbox/Dockerfile", import.meta.url)),
+  fileURLToPath(
+    new URL("../../../../../../deploy/sandbox/Dockerfile", import.meta.url),
+  ),
   "utf8",
 );
 const buildScript = readFileSync(
-  fileURLToPath(new URL("../../../../../../deploy/sandbox/build.sh", import.meta.url)),
+  fileURLToPath(
+    new URL("../../../../../../deploy/sandbox/build.sh", import.meta.url),
+  ),
   "utf8",
 );
 
@@ -25,8 +29,10 @@ describe("Docker runner root", () => {
       "COPY --chown=ubuntu:ubuntu scripts ${OPENSESSION_RUNNER_ROOT}/scripts",
     );
     expect(dockerfile).toContain("/runner-host/host.ts \\");
-    expect(dockerfile).toContain("--outfile=/tmp/opensession-runner-host-smoke.js");
+    expect(dockerfile).toContain(
+      "--outfile=/tmp/opensession-runner-host-smoke.js",
+    );
     expect(dockerfile).toContain("/home/ubuntu/.opensession \\");
-    expect(buildScript).not.toContain("--build-arg \"OPENSESSION_RUNNER_ROOT=");
+    expect(buildScript).not.toContain('--build-arg "OPENSESSION_RUNNER_ROOT=');
   });
 });

@@ -88,7 +88,10 @@ export function RepoBar({
   useEffect(() => {
     // Every open, not just the first: a repo added since is exactly what the
     // cached list is missing, and a failed refresh keeps the rows on screen.
-    if (open) fetchRepos().then(setRepos).catch(() => {});
+    if (open)
+      fetchRepos()
+        .then(setRepos)
+        .catch(() => {});
   }, [open]);
 
   const attachedIds = new Set(attached.map((r) => r.repo));
@@ -102,24 +105,28 @@ export function RepoBar({
     setBusy("Attaching…");
     setError(null);
     await (async () => {
-setAttached(await attachRepoApi(sessionId, repo, branch || undefined));
-})().catch(async (e: any) => {
-setError(e.message || String(e));
-}).finally(async () => {
-setBusy(null);
-});
+      setAttached(await attachRepoApi(sessionId, repo, branch || undefined));
+    })()
+      .catch(async (e: any) => {
+        setError(e.message || String(e));
+      })
+      .finally(async () => {
+        setBusy(null);
+      });
   }
 
   async function detach(repo: string) {
     setBusy("Detaching…");
     setError(null);
     await (async () => {
-setAttached(await detachRepoApi(sessionId, repo));
-})().catch(async (e: any) => {
-setError(e.message || String(e));
-}).finally(async () => {
-setBusy(null);
-});
+      setAttached(await detachRepoApi(sessionId, repo));
+    })()
+      .catch(async (e: any) => {
+        setError(e.message || String(e));
+      })
+      .finally(async () => {
+        setBusy(null);
+      });
   }
 
   function switchPrimary(repo: string) {
@@ -141,26 +148,29 @@ setBusy(null);
     setBusy("Switching…");
     setError(null);
     await (async () => {
-const res = await switchPrimaryRepoApi(sessionId, repo, hasWork);
+      const res = await switchPrimaryRepoApi(sessionId, repo, hasWork);
       setPrimary(res.repo);
       setHasWork(false); // the new worktree starts fresh
       setAttached((prev) => prev.filter((r) => r.repo !== res.repo));
-})().catch(async (e: any) => {
-setError(e.message || String(e));
-      // Resync in case a concurrent turn changed the session's state.
-      fetchRepoSwitchable(sessionId)
-        .then(({ switchable, hasWork }) => {
-          setSwitchable(switchable);
-          setHasWork(hasWork);
-        })
-        .catch(() => {});
-}).finally(async () => {
-setBusy(null);
-});
+    })()
+      .catch(async (e: any) => {
+        setError(e.message || String(e));
+        // Resync in case a concurrent turn changed the session's state.
+        fetchRepoSwitchable(sessionId)
+          .then(({ switchable, hasWork }) => {
+            setSwitchable(switchable);
+            setHasWork(hasWork);
+          })
+          .catch(() => {});
+      })
+      .finally(async () => {
+        setBusy(null);
+      });
   };
 
   // Static (non-menu-item) row — current repo when it can't switch, attached rows.
-  const staticRow = "flex items-center gap-2 rounded-md px-2.5 py-2 text-control-label text-fg";
+  const staticRow =
+    "flex items-center gap-2 rounded-md px-2.5 py-2 text-control-label text-fg";
 
   const trigger =
     variant === "menu-row" ? (
@@ -171,7 +181,9 @@ setBusy(null);
       >
         <RepoTile name={primary} size={18} />
         <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-left">
-          <span className="text-meta font-semibold leading-none text-faint">Repository</span>
+          <span className="text-meta font-semibold leading-none text-faint">
+            Repository
+          </span>
           <span className="truncate text-control-label leading-[1.2] text-fg">
             {busy ?? repoLabel(primary)}
             {attached.length > 0 && (
@@ -200,7 +212,9 @@ setBusy(null);
         <RepoTile name={primary} />
         {/* Type sits optically high beside a centered image tile: its descender
             space otherwise makes the word look low even when the line boxes agree. */}
-        <span className="max-w-[180px] -translate-y-px truncate">{busy ?? repoLabel(primary)}</span>
+        <span className="max-w-[180px] -translate-y-px truncate">
+          {busy ?? repoLabel(primary)}
+        </span>
         {attached.length > 0 && (
           <span
             className="text-label text-dim"
@@ -227,14 +241,22 @@ setBusy(null);
                 [{ id: primary }, ...switchTargets].map((p) => (
                   <Menu.Item key={p.id} onClick={() => switchPrimary(p.id)}>
                     <RepoTile name={p.id} />
-                    <span className="min-w-0 flex-1 truncate">{repoLabel(p.id)}</span>
-                    <Menu.Check on={p.id === primary} size={20} className="text-dim" />
+                    <span className="min-w-0 flex-1 truncate">
+                      {repoLabel(p.id)}
+                    </span>
+                    <Menu.Check
+                      on={p.id === primary}
+                      size={20}
+                      className="text-dim"
+                    />
                   </Menu.Item>
                 ))
               ) : (
                 <div className={staticRow}>
                   <RepoTile name={primary} />
-                  <span className="min-w-0 flex-1 truncate">{repoLabel(primary)}</span>
+                  <span className="min-w-0 flex-1 truncate">
+                    {repoLabel(primary)}
+                  </span>
                   <IconCheck size={20} className="text-dim" />
                 </div>
               )}
@@ -244,10 +266,15 @@ setBusy(null);
                   <Menu.Group>
                     <Menu.GroupLabel>Attached</Menu.GroupLabel>
                     {attached.map((r) => (
-                      <div key={r.repo} className={staticRow} title={`${r.dir} · branch ${r.branch}`}>
+                      <div
+                        key={r.repo}
+                        className={staticRow}
+                        title={`${r.dir} · branch ${r.branch}`}
+                      >
                         <RepoTile name={r.repo} />
                         <span className="min-w-0 flex-1 truncate">
-                          {repoLabel(r.repo)} <span className="text-faint">· {r.branch}</span>
+                          {repoLabel(r.repo)}{" "}
+                          <span className="text-faint">· {r.branch}</span>
                         </span>
                         <button
                           className="cursor-pointer rounded border-0 bg-transparent p-0.5 text-faint hover:text-fg"
@@ -273,7 +300,9 @@ setBusy(null);
                       title="Attach to this session as an isolated worktree"
                     >
                       <RepoTile name={p.id} />
-                      <span className="min-w-0 flex-1 truncate">{repoLabel(p.id)}</span>
+                      <span className="min-w-0 flex-1 truncate">
+                        {repoLabel(p.id)}
+                      </span>
                       <IconPlus size={18} className="text-faint" />
                     </Menu.Item>
                   ))
@@ -285,14 +314,15 @@ setBusy(null);
               </Menu.Group>
               {!switchable ? (
                 <div className="max-w-[240px] px-2.5 pt-1.5 pb-0.5 text-supporting leading-snug text-faint">
-                  Ask sessions read the shared checkout, so there's no primary repo
-                  to switch.
+                  Ask sessions read the shared checkout, so there's no primary
+                  repo to switch.
                 </div>
               ) : (
                 hasWork && (
                   <div className="max-w-[240px] px-2.5 pt-1.5 pb-0.5 text-supporting leading-snug text-faint">
-                    Switching keeps your current changes in the {repoLabel(primary)} worktree.
-                    They won't move to the new repo.
+                    Switching keeps your current changes in the{" "}
+                    {repoLabel(primary)} worktree. They won't move to the new
+                    repo.
                   </div>
                 )
               )}
@@ -301,14 +331,21 @@ setBusy(null);
         </Menu.Popup>
       </Menu.Root>
       {error && (
-        <span className="max-w-[220px] truncate text-meta text-red" title={error}>
+        <span
+          className="max-w-[220px] truncate text-meta text-red"
+          title={error}
+        >
           {error}
         </span>
       )}
       {/* Switch-with-work confirmation — a real choice (the move leaves the
           current changes behind), so an explicit, non-dismissible dialog rather
           than a native confirm(). */}
-      <Modal.Root open={confirmOpen} onOpenChange={setConfirmOpen} disablePointerDismissal>
+      <Modal.Root
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        disablePointerDismissal
+      >
         <Modal.Content>
           <Modal.Header
             title="Switch repository?"
@@ -322,13 +359,7 @@ setBusy(null);
           />
           <Modal.Footer>
             <div className="flex-1" />
-            <Modal.Close
-              render={
-                <Button variant="ghost">
-                  Cancel
-                </Button>
-              }
-            />
+            <Modal.Close render={<Button variant="ghost">Cancel</Button>} />
             <Button
               variant="primary"
               onClick={() => confirmTarget && doSwitch(confirmTarget)}

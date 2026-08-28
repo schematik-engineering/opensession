@@ -18,31 +18,32 @@ import { IconEye } from "./icons";
  * that is a fact rather than an inference.
  */
 export function ReviewAskerFace({ asker }: { asker: ReviewAsker }) {
-	// A teammate's GitHub login pictures and reads better as their own name.
-	const name = (asker.login && personNameForGithubLogin(asker.login)) || asker.name;
-	const label = asker.viaPr
-		? `Review requested on ${name}'s pull request`
-		: `${name} asked you to review this`;
-	return (
-		<span
-			className="relative ml-1 flex shrink-0 items-center"
-			title={label}
-			aria-label={label}
-		>
-			<UserAvatar
-				name={name}
-				login={asker.login ?? undefined}
-				size={16}
-				className="shrink-0"
-			/>
-			{/* Same 12px corner mark the mention badge uses: big enough to read as
+  // A teammate's GitHub login pictures and reads better as their own name.
+  const name =
+    (asker.login && personNameForGithubLogin(asker.login)) || asker.name;
+  const label = asker.viaPr
+    ? `Review requested on ${name}'s pull request`
+    : `${name} asked you to review this`;
+  return (
+    <span
+      className="relative ml-1 flex shrink-0 items-center"
+      title={label}
+      aria-label={label}
+    >
+      <UserAvatar
+        name={name}
+        login={asker.login ?? undefined}
+        size={16}
+        className="shrink-0"
+      />
+      {/* Same 12px corner mark the mention badge uses: big enough to read as
 			    deliberate, small enough to leave the face recognisable. */}
-			<span
-				aria-hidden="true"
-				className="absolute -bottom-1 -right-1 flex size-3 items-center justify-center rounded-full bg-blue text-white ring-2 ring-panel"
-			>
-				<IconEye size={8} />
-			</span>
-		</span>
-	);
+      <span
+        aria-hidden="true"
+        className="absolute -bottom-1 -right-1 flex size-3 items-center justify-center rounded-full bg-blue text-white ring-2 ring-panel"
+      >
+        <IconEye size={8} />
+      </span>
+    </span>
+  );
 }

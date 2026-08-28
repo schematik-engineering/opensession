@@ -14,7 +14,16 @@ import { ClampedBody, EntryImages, EntryVideos } from "./MessageBubble";
 import { IconChevronDown, IconStack } from "./icons";
 import { cn } from "../ui/cn";
 import { Fold } from "../ui/fold";
-import { msgBody } from "../lib/msg-classes";
+import {
+  msgBody,
+  msgReasoningBody,
+  msgReasoningShimmer,
+  msgReasoningTitle,
+} from "../lib/msg-classes";
+import {
+  isLegacyReasoningHeading,
+  reasoningDisplay,
+} from "../lib/reasoning-display";
 import { formatDuration } from "../lib/time";
 import {
   getTurnActivityPrefs,
@@ -29,8 +38,8 @@ import { transcriptDisclosureLedger } from "../lib/transcript-disclosures";
 import { turnScrollAnchor } from "../lib/transcript-block-identity";
 
 interface Props {
-  /** One consecutive run of tool calls. Assistant entries are accepted only
-   * defensively and always render outside the fold. */
+  /** One turn's tool calls, provider reasoning, and intermediate narration.
+   * The final assistant output is never passed here. */
   items: TranscriptEntry[];
   toolResults: Map<string, TranscriptEntry>;
   live: boolean; // this is the active block of a running stream
@@ -43,9 +52,10 @@ interface Props {
 }
 
 /**
- * One run of tool calls, folded into a single calm line — "Worked · 12m 4s
- * · 51 steps" — closed by default so the session reads as question → answer.
- * Expanding shows the complete tool run. Model output never enters this fold.
+ * One turn's work, folded into a single calm line — "Worked · 12m 4s · 51
+ * steps" — closed by default so the session reads as question → answer. It
+ * stays open while working, showing intermediate narration and reasoning beside
+ * the tools they describe. The final assistant output never enters this fold.
  *
  * The collapsed line carries what a folded turn can't otherwise say: duration,
  * step count, and the ±lines it moved when the turn wrote files. Line changes
@@ -75,6 +85,11 @@ export const TurnBlock = function TurnBlock({
   const pathRoots = useToolPathRoots();
   const tools = items.filter((it) => it.type === "tool_use");
   const messages = items.filter((it) => it.type === "assistant");
+  const lastMessage = messages[messages.length - 1];
+  const activeReasoning =
+    live && lastMessage && reasoningEntry(lastMessage)
+      ? lastMessage
+      : undefined;
   const hasNarration = messages.length > 0;
 
   // Default fold state follows the two preferences (Settings → Preferences),
@@ -86,7 +101,7 @@ export const TurnBlock = function TurnBlock({
   const [pref, setPref] = useState(getTurnActivityPrefs);
   useEffect(
     () => onTurnActivityChanged(() => setPref(getTurnActivityPrefs())),
-    []
+    [],
   );
   const defaultExpanded =
     pref.work === "open" ||
@@ -95,11 +110,11 @@ export const TurnBlock = function TurnBlock({
     transcriptDisclosureLedger.read(
       "turn",
       sessionId,
-      items.map((item) => item.id)
-    )
+      items.map((item) => item.id),
+    ),
   );
   const [expanded, setExpanded] = useState(
-    rememberedExpanded ?? defaultExpanded
+    rememberedExpanded ?? defaultExpanded,
   );
   // `tools` owns the nested grouped-call disclosures. Open renders each call
   // in place; folded keeps routine runs behind their compact step rows.
@@ -120,7 +135,7 @@ export const TurnBlock = function TurnBlock({
       "turn",
       sessionId,
       items.map((item) => item.id),
-      next
+      next,
     );
     setExpanded(next);
   }
@@ -131,7 +146,7 @@ export const TurnBlock = function TurnBlock({
   // Memoized against the house rule: a live turn re-renders on every stream
   // event, and this walks every step it has taken so far (collectTouchedFiles
   // skips non-tool entries itself, so `items` and `tools` give the same set).
-  const editedFiles = (collectTouchedFiles(items));
+  const editedFiles = collectTouchedFiles(items);
   // Presentation stats cover code-writing tools that do not expose their input
   // as a plain Edit or Write call. Keep the parsed files for the hover card,
   // but let the server-derived aggregate own the summary's total.
@@ -151,21 +166,30 @@ export const TurnBlock = function TurnBlock({
         : "";
   // One run of faint meta rather than three separately-shrinking ones, so the
   // line collapses by dropping characters off its tail instead of overflowing.
-  const metaLabel = [!live && duration, countsLabel].filter(Boolean).join(" · ");
+  const metaLabel = [!live && duration, countsLabel]
+    .filter(Boolean)
+    .join(" · ");
 
-  // Interleave: consecutive tool calls share one timeline rail; intermediate
-  // assistant messages break the rail into segments.
+  // Interleave tools, intermediate narration, and provider reasoning. Adjacent
+  // reasoning summaries are status revisions rather than separate moments:
+  // keep their latest heading while retaining prose and media. Narration stays
+  // as ordinary readable output inside the work rail.
   const sections: Array<
     | { kind: "tools"; items: TranscriptEntry[] }
-    | { kind: "msg"; entry: TranscriptEntry }
+    | { kind: "reasoning"; items: TranscriptEntry[] }
+    | { kind: "narration"; entry: TranscriptEntry }
   > = [];
-  for (const it of items) {
-    if (it.type === "tool_use") {
+  for (const entry of items) {
+    if (entry.type === "tool_use") {
       const last = sections[sections.length - 1];
-      if (last?.kind === "tools") last.items.push(it);
-      else sections.push({ kind: "tools", items: [it] });
+      if (last?.kind === "tools") last.items.push(entry);
+      else sections.push({ kind: "tools", items: [entry] });
+    } else if (reasoningEntry(entry)) {
+      const last = sections[sections.length - 1];
+      if (last?.kind === "reasoning") last.items.push(entry);
+      else sections.push({ kind: "reasoning", items: [entry] });
     } else {
-      sections.push({ kind: "msg", entry: it });
+      sections.push({ kind: "narration", entry });
     }
   }
   // Survives the fold: a marked screenshot is the answer to "show me", so
@@ -204,7 +228,7 @@ export const TurnBlock = function TurnBlock({
         <span
           className={cn(
             "grid size-5 flex-shrink-0 self-center place-items-center leading-none text-faint transition-transform duration-150",
-            !expanded && "-rotate-90"
+            !expanded && "-rotate-90",
           )}
         >
           <IconChevronDown size={20} className="block" />
@@ -238,7 +262,7 @@ export const TurnBlock = function TurnBlock({
               lastTool.toolName || "Tool",
               lastTool.toolInput,
               lastTool.content,
-              pathRoots
+              pathRoots,
             )}
           </span>
         )}
@@ -256,7 +280,7 @@ export const TurnBlock = function TurnBlock({
             // the seam; the rail says "still inside the work" from any
             // scroll position). The 5px puts the hairline under the chevron's
             // center after the disclosure line's 8px left shift.
-            "relative mb-2 ml-[5px] border-l border-line pl-2.5"
+            "relative mb-2 ml-[5px] border-l border-line pl-2.5",
           )}
         >
           <button
@@ -266,7 +290,23 @@ export const TurnBlock = function TurnBlock({
             className="absolute inset-y-0 -left-2 w-4 cursor-pointer border-0 bg-transparent p-0 after:absolute after:inset-y-0 after:left-1/2 after:border-l after:border-transparent after:transition-colors hover:after:border-line-strong focus-visible:after:border-line-strong"
           />
           {sections.map((sec) =>
-            sec.kind === "msg" ? null : (
+            sec.kind === "reasoning" ? (
+              <ReasoningMessage
+                key={sec.items[0].id}
+                entries={sec.items}
+                active={
+                  activeReasoning !== undefined &&
+                  sec.items.includes(activeReasoning)
+                }
+                sessionId={sessionId}
+              />
+            ) : sec.kind === "narration" ? (
+              <NarrationMessage
+                key={sec.entry.id}
+                entry={sec.entry}
+                sessionId={sessionId}
+              />
+            ) : (
               // Tool icons align with the fold chevron on desktop. Phones use
               // the 1px optical correction for the icon's inset glyph.
               <div
@@ -274,31 +314,26 @@ export const TurnBlock = function TurnBlock({
                 className="-ml-px desktop:ml-0"
                 data-eid={`${sec.items[sec.items.length - 1].id}#sec`}
               >
-                {/* The outer Working row is already the tool-only run's
+                {/* The outer Working row is already a tool-only run's
                     summary. If someone opens it, reveal the calls directly
-                    instead of inserting a second, identical disclosure. */}
+                    instead of inserting a second, identical disclosure. A
+                    narrated turn still lets the Tool calls preference fold
+                    routine calls between its updates. */}
                 <ToolSection
                   items={sec.items}
                   toolResults={toolResults}
                   live={live}
-                  expandAll={pref.tools === "open"}
+                  expandAll={pref.tools === "open" || !hasNarration}
                   sessionId={sessionId}
                   onOpenSubagent={onOpenSubagent}
                 />
               </div>
-            )
+            ),
           )}
         </div>
       </Fold>
 
-      {/* Defensive only: TranscriptBlocks splits every assistant entry out
-          before constructing a TurnBlock. If another caller ever passes one,
-          it still remains visible rather than inheriting this disclosure. */}
-      {messages.map((entry) => (
-        <TurnMessage key={entry.id} entry={entry} sessionId={sessionId} />
-      ))}
-
-      {/* Aligned with the fold's own rows (see TurnMessage on the 7px). */}
+      {/* Explicitly surfaced media survives the work fold. */}
       {(featured.images.length > 0 || featured.videos.length > 0) && (
         <div className="pl-[7px] pr-1">
           <EntryImages images={featured.images} sessionId={sessionId} />
@@ -385,7 +420,7 @@ export function ToolSection(props: ToolSectionProps) {
           />
         ))}
       </React.Fragment>
-    )
+    ),
   );
 }
 
@@ -404,27 +439,21 @@ function ToolRunBlock({
       transcriptDisclosureLedger.read(
         "tool-run",
         sessionId,
-        items.map((item) => item.id)
-      ) ?? false
+        items.map((item) => item.id),
+      ) ?? false,
   );
   function rememberExpansion(next: boolean) {
     transcriptDisclosureLedger.write(
       "tool-run",
       sessionId,
       items.map((item) => item.id),
-      next
+      next,
     );
     setExpanded(next);
   }
 
-  const {
-    label,
-    pending,
-    additions,
-    deletions,
-    statusLabel,
-    mediaLabel,
-  } = toolRunAggregate(items, toolResults, live);
+  const { label, pending, additions, deletions, statusLabel, mediaLabel } =
+    toolRunAggregate(items, toolResults, live);
 
   return (
     <div data-tool-run="true" data-eid={`${items[items.length - 1].id}#run`}>
@@ -443,16 +472,19 @@ function ToolRunBlock({
           <span
             className={cn(
               "absolute inset-0 transition-opacity duration-150 group-hover:opacity-0 group-focus-visible:opacity-0",
-              expanded && "opacity-0"
+              expanded && "opacity-0",
             )}
           >
-            <IconStack size={18} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" />
+            <IconStack
+              size={18}
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+            />
           </span>
           <IconChevronDown
             size={20}
             className={cn(
               "absolute block transition-[opacity,transform] duration-150 group-hover:opacity-100 group-focus-visible:opacity-100",
-              expanded ? "opacity-100" : "-rotate-90 opacity-0"
+              expanded ? "opacity-100" : "-rotate-90 opacity-0",
             )}
           />
         </span>
@@ -470,7 +502,9 @@ function ToolRunBlock({
         )}
         <span className="min-w-0 flex-1" />
         {mediaLabel && (
-          <span className="flex-shrink-0 text-meta text-faint">{mediaLabel}</span>
+          <span className="flex-shrink-0 text-meta text-faint">
+            {mediaLabel}
+          </span>
         )}
         {pending > 0 && (
           <span className="size-[11px] flex-shrink-0 animate-spin rounded-full border border-b-line-strong border-l-line-strong border-r-line-strong border-t-dim" />
@@ -487,9 +521,7 @@ function ToolRunBlock({
                 entry.toolUseId ? toolResults.get(entry.toolUseId) : undefined
               }
               pending={
-                live &&
-                !!entry.toolUseId &&
-                !toolResults.has(entry.toolUseId)
+                live && !!entry.toolUseId && !toolResults.has(entry.toolUseId)
               }
               onOpenSubagent={onOpenSubagent}
             />
@@ -502,17 +534,20 @@ function ToolRunBlock({
 
 function isCompactTool(
   entry: TranscriptEntry,
-  result: TranscriptEntry | undefined
+  result: TranscriptEntry | undefined,
 ): boolean {
   const name = entry.toolName || "Tool";
-  if (!COMPACT_TOOL_FAMILIES.has(toolFamily(name))) return false;
+  const routine =
+    canonicalToolName(name) === "ListAgents" ||
+    COMPACT_TOOL_FAMILIES.has(toolFamily(name));
+  if (!routine) return false;
   if (assetToolPath(name, entry.toolInput)) return false;
   return !result?.featuredMedia?.length;
 }
 
 /** The run's tools in call order, each with how often it ran. */
 function groupedTools(
-  items: TranscriptEntry[]
+  items: TranscriptEntry[],
 ): Array<{ name: string; count: number }> {
   const counts = new Map<string, number>();
   for (const entry of items) {
@@ -569,7 +604,7 @@ const aggregateByRun = new WeakMap<
 function toolRunAggregate(
   items: TranscriptEntry[],
   toolResults: Map<string, TranscriptEntry>,
-  live: boolean
+  live: boolean,
 ): ToolRunAggregate {
   const key = items[items.length - 1];
   const hit = key ? aggregateByRun.get(key) : undefined;
@@ -577,7 +612,7 @@ function toolRunAggregate(
     return hit.value;
 
   const results = items.map((entry) =>
-    entry.toolUseId ? toolResults.get(entry.toolUseId) : undefined
+    entry.toolUseId ? toolResults.get(entry.toolUseId) : undefined,
   );
   let pending = 0;
   let images = 0;
@@ -607,7 +642,9 @@ function toolRunAggregate(
     statusLabel: [
       mediaCount > 0 ? `${mediaCount} media` : "",
       pending > 0 ? "running" : "",
-    ].filter(Boolean).join(", "),
+    ]
+      .filter(Boolean)
+      .join(", "),
     mediaLabel:
       mediaCount === 0
         ? ""
@@ -617,7 +654,8 @@ function toolRunAggregate(
             ? `${videos} video${videos === 1 ? "" : "s"}`
             : `${mediaCount} media`,
   };
-  if (key) aggregateByRun.set(key, { items: items.slice(), results, live, value });
+  if (key)
+    aggregateByRun.set(key, { items: items.slice(), results, live, value });
   return value;
 }
 
@@ -627,7 +665,7 @@ function sameRunInputs(
     results: Array<TranscriptEntry | undefined>;
   },
   items: TranscriptEntry[],
-  toolResults: Map<string, TranscriptEntry>
+  toolResults: Map<string, TranscriptEntry>,
 ): boolean {
   if (cached.items.length !== items.length) return false;
   for (let i = 0; i < items.length; i++) {
@@ -640,8 +678,13 @@ function sameRunInputs(
   return true;
 }
 
-/** Intermediate reasoning stays readable while the turn itself provides the fold. */
-function TurnMessage({
+function reasoningEntry(entry: TranscriptEntry): boolean {
+  return Boolean(entry.isReasoning || isLegacyReasoningHeading(entry.content));
+}
+
+/** Ordinary intermediate output inside the work rail. It keeps answer styling
+ * so grouping changes placement only, never the meaning or readability. */
+function NarrationMessage({
   entry,
   sessionId,
 }: {
@@ -649,15 +692,7 @@ function TurnMessage({
   sessionId?: string;
 }) {
   return (
-    <div
-      // 7px, not the row's 4px: the fold header and the tool rows both pad by
-      // 4 and then draw a glyph inset ~5px into its own box, so text padded to
-      // 4 starts left of every other line in the turn. 7 sits just inside the
-      // chevron's ink — the glyph's own side bearing makes a true 9 read as an
-      // indent rather than an alignment.
-      className="mx-auto my-2 w-full max-w-[var(--session-col)] pr-1 pl-[7px]"
-      data-eid={entry.id}
-    >
+    <div className="my-2 px-1" data-eid={entry.id} data-narration="">
       <ClampedBody
         className={cn(msgBody, "markdown text-fg")}
         content={entry.content}
@@ -665,6 +700,59 @@ function TurnMessage({
         sessionId={sessionId}
       />
       <EntryImages images={entry.images} sessionId={sessionId} />
+      <EntryVideos videos={entry.videos} />
+    </div>
+  );
+}
+
+/** One visible reasoning step inside the work rail. Adjacent provider events
+ * revise its heading instead of producing a ladder of near-identical traces. */
+function ReasoningMessage({
+  entries,
+  active,
+  sessionId,
+}: {
+  entries: TranscriptEntry[];
+  active: boolean;
+  sessionId?: string;
+}) {
+  const displays = entries.map((entry) => reasoningDisplay(entry.content));
+  const batchedTitle =
+    displays.findLast((display) => display.title)?.title ?? "";
+  const title = batchedTitle.split("\n").at(-1) ?? "";
+  const last = entries[entries.length - 1];
+  return (
+    <div className="my-2 px-1" data-eid={last.id} data-reasoning="">
+      {title ? (
+        <div className={cn(msgReasoningTitle, active && msgReasoningShimmer)}>
+          {title}
+        </div>
+      ) : active ? (
+        // Some providers expose prose thinking rather than a short status
+        // heading. Keep that prose readable and shimmer a stable activity label.
+        <div className={cn(msgReasoningTitle, msgReasoningShimmer)}>
+          Thinking
+        </div>
+      ) : null}
+      {entries.map((entry, index) => {
+        const body = displays[index].body;
+        return body ? (
+          <ClampedBody
+            key={entry.id}
+            className={cn(msgReasoningBody, "markdown")}
+            content={body}
+            entry={entry}
+            sessionId={sessionId}
+          />
+        ) : null;
+      })}
+      {entries.map((entry) => (
+        <EntryImages
+          key={`${entry.id}:images`}
+          images={entry.images}
+          sessionId={sessionId}
+        />
+      ))}
     </div>
   );
 }
@@ -685,13 +773,15 @@ function TurnMessage({
  */
 function featuredTurnMedia(
   items: TranscriptEntry[],
-  toolResults: Map<string, TranscriptEntry>
+  toolResults: Map<string, TranscriptEntry>,
 ): { images: string[]; videos: string[] } {
   const images: string[] = [];
   const videos: string[] = [];
   const seen = new Set<string>();
   for (const entry of items) {
-    const result = entry.toolUseId ? toolResults.get(entry.toolUseId) : undefined;
+    const result = entry.toolUseId
+      ? toolResults.get(entry.toolUseId)
+      : undefined;
     if (!result?.featuredMedia?.length) continue;
     // Take the srcs off images[]/videos[] rather than off featuredMedia, so
     // what renders is always something the entry can resolve — bounded entries
@@ -729,7 +819,7 @@ function turnBlockPropsEqual(prev: Props, next: Props): boolean {
 
 function blockDuration(
   items: TranscriptEntry[],
-  toolResults: Map<string, TranscriptEntry>
+  toolResults: Map<string, TranscriptEntry>,
 ): string | null {
   if (items.length === 0) return null;
   const first = new Date(items[0].timestamp).getTime();

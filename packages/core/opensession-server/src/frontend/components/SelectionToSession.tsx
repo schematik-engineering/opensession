@@ -25,7 +25,12 @@ interface Selection {
  * turn if idle, or steers/queues if the session is busy — same path as the diff
  * comment feature). Renders as `display:contents` so it doesn't disturb layout.
  */
-export function SelectionToSession({ sessionId, label, send, children }: Props) {
+export function SelectionToSession({
+  sessionId,
+  label,
+  send,
+  children,
+}: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
   const [sel, setSel] = useState<Selection | null>(null);
@@ -49,7 +54,8 @@ export function SelectionToSession({ sessionId, label, send, children }: Props) 
       if (!s || s.rangeCount === 0 || text.length < 2) return;
       const anchor = s.anchorNode;
       // Only act on selections inside our region (ignore the popover's own text).
-      if (!anchor || !hostRef.current || !hostRef.current.contains(anchor)) return;
+      if (!anchor || !hostRef.current || !hostRef.current.contains(anchor))
+        return;
       if (popRef.current && anchor && popRef.current.contains(anchor)) return;
       const rect = s.getRangeAt(0).getBoundingClientRect();
       setSel({ text, x: rect.left + rect.width / 2, y: rect.bottom });
@@ -88,7 +94,9 @@ export function SelectionToSession({ sessionId, label, send, children }: Props) 
     const content =
       `${user} selected this text in ${label} and wants you to act on it:\n\n` +
       `${quoted}\n\n` +
-      (note ? note : "(no extra message: use the selection as the instruction or context)");
+      (note
+        ? note
+        : "(no extra message: use the selection as the instruction or context)");
     send({ type: "prompt", sessionId, user, content });
     setSent(true);
     setTimeout(dismiss, 1400);

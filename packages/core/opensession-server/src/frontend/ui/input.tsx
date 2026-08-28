@@ -30,9 +30,9 @@ type Size = "sm" | "md" | "lg";
  * Inputs take the exact step height rather than only a minimum, so their
  * single line can be centered consistently across Chromium and WebKit. */
 const sizes: Record<Size, string> = {
-	sm: "min-h-[26px] px-2 text-xs [&:where(input)]:h-[26px]",
-	md: "min-h-8 px-2.5 text-sm [&:where(input)]:h-8",
-	lg: "min-h-9 px-3 text-base [&:where(input)]:h-9",
+  sm: "min-h-[26px] px-2 text-xs [&:where(input)]:h-[26px]",
+  md: "min-h-8 px-2.5 text-sm [&:where(input)]:h-8",
+  lg: "min-h-9 px-3 text-base [&:where(input)]:h-9",
 };
 
 /**
@@ -42,12 +42,12 @@ const sizes: Record<Size, string> = {
  * appearance reset, a contenteditable).
  */
 export const fieldClass =
-	// Block padding and a one-line box center input text vertically. The element
-	// selector deliberately leaves multiline textareas and native selects alone.
-	"w-full rounded-control border border-line bg-surface text-fg outline-none transition-colors placeholder:text-faint focus:border-accent disabled:cursor-default disabled:opacity-40 [&:where(input)]:py-0 [&:where(input)]:leading-none";
+  // Block padding and a one-line box center input text vertically. The element
+  // selector deliberately leaves multiline textareas and native selects alone.
+  "w-full rounded-control border border-line bg-surface text-fg outline-none transition-colors placeholder:text-faint focus:border-accent disabled:cursor-default disabled:opacity-40 [&:where(input)]:py-0 [&:where(input)]:leading-none";
 
 export function fieldClasses(size: Size = "md", className?: string) {
-	return cn(fieldClass, sizes[size], className);
+  return cn(fieldClass, sizes[size], className);
 }
 
 // `ComponentProps` rather than `ComponentPropsWithoutRef`: under React 19 a ref
@@ -57,25 +57,30 @@ export function fieldClasses(size: Size = "md", className?: string) {
 // a raw element — the exact copy-the-classes pattern this primitive exists to
 // end.
 type InputProps = Omit<React.ComponentProps<"input">, "size"> & {
-	size?: Size;
+  size?: Size;
 };
 
 export function Input({ className, size = "md", ...props }: InputProps) {
-	return <input className={fieldClasses(size, className)} {...props} />;
+  return <input className={fieldClasses(size, className)} {...props} />;
 }
 
 type TextareaProps = React.ComponentProps<"textarea"> & {
-	size?: Size;
+  size?: Size;
 };
 
 /** Multi-line entry. Vertically resizable and padded like a paragraph rather
  *  than a single line, but the same well as `Input` in every other respect. */
 export function Textarea({ className, size = "md", ...props }: TextareaProps) {
-	return <textarea className={fieldClasses(size, cn("resize-y py-2", className))} {...props} />;
+  return (
+    <textarea
+      className={fieldClasses(size, cn("resize-y py-2", className))}
+      {...props}
+    />
+  );
 }
 
 type SelectProps = Omit<React.ComponentProps<"select">, "size"> & {
-	size?: Size;
+  size?: Size;
 };
 
 /** Native select in the field shape. `ui/select` is the default now: it wears
@@ -84,7 +89,12 @@ type SelectProps = Omit<React.ComponentProps<"select">, "size"> & {
  *  or a native select's own keyboard behaviour (see `PaletteSelect`,
  *  `SessionSearch`). */
 export function Select({ className, size = "md", ...props }: SelectProps) {
-	return <select className={fieldClasses(size, cn("cursor-pointer", className))} {...props} />;
+  return (
+    <select
+      className={fieldClasses(size, cn("cursor-pointer", className))}
+      {...props}
+    />
+  );
 }
 
 /**
@@ -98,30 +108,36 @@ export function Select({ className, size = "md", ...props }: SelectProps) {
  * dialog form want the identical shape, so it lives here with the field itself.
  */
 export function Field({
-	label,
-	className,
-	children,
-	...props
+  label,
+  className,
+  children,
+  ...props
 }: Omit<React.ComponentPropsWithoutRef<"label">, "children"> & {
-	label: React.ReactNode;
-	children: React.ReactNode;
+  label: React.ReactNode;
+  children: React.ReactNode;
 }) {
-	return (
-		<label className={cn("flex min-w-0 flex-col gap-1.5", className)} {...props}>
-			<span className="text-label font-medium text-dim">{label}</span>
-			{children}
-		</label>
-	);
+  return (
+    <label
+      className={cn("flex min-w-0 flex-col gap-1.5", className)}
+      {...props}
+    >
+      <span className="text-label font-medium text-dim">{label}</span>
+      {children}
+    </label>
+  );
 }
 
 /** Two `Field`s side by side, stacking on a phone. Only for genuinely short
  *  values (an id, a login) — a column is ~half a dialog wide, so anything the
  *  length of an email address clips at every viewport. */
 export function FieldGrid({
-	className,
-	...props
+  className,
+  ...props
 }: React.ComponentPropsWithoutRef<"div">) {
-	return (
-		<div className={cn("grid grid-cols-2 gap-3 phone:grid-cols-1", className)} {...props} />
-	);
+  return (
+    <div
+      className={cn("grid grid-cols-2 gap-3 phone:grid-cols-1", className)}
+      {...props}
+    />
+  );
 }

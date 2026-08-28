@@ -206,30 +206,33 @@ export interface SessionControl {
       slackReplyTo?: { channel: string; threadTs: string };
       /** Decoded images for the run/steer path. */
       images?: ImageInput[];
-		/** The same images as `data:` URLs, for the queue's stored copy. */
-		imageUrls?: string[];
-		/** Raw composer file references. Files must wait for a real turn. */
-		files?: unknown;
-		/** Sibling-session transcripts attached to this prompt. */
-		contextSessions?: string[];
+      /** The same images as `data:` URLs, for the queue's stored copy. */
+      imageUrls?: string[];
+      /** Raw composer file references. Files must wait for a real turn. */
+      files?: unknown;
+      /** Sibling-session transcripts attached to this prompt. */
+      contextSessions?: string[];
       /**
        * Hold a queued message until the agent FULLY completes (child workers
        * included) instead of delivering at the next drain point — the web and
        * native composers' "queue" semantics.
        */
       hold?: boolean;
-		/** Caller-supplied receipt id (agent-to-agent tools); generated otherwise. */
-		deliveryId?: string;
-		/** Automated PR findings wait behind an active user turn and drain alone. */
-		reviewHandoff?: boolean;
-		/** Stable identity included in the durable command payload. */
-		admissionKey?: string;
-		/** Trusted synchronous precondition checked inside the session lease. */
-		admit?: () => boolean;
-	},
+      /** Caller-supplied receipt id (agent-to-agent tools); generated otherwise. */
+      deliveryId?: string;
+      /** Automated PR findings wait behind an active user turn and drain alone. */
+      reviewHandoff?: boolean;
+      /** Stable identity included in the durable command payload. */
+      admissionKey?: string;
+      /** Trusted synchronous precondition checked inside the session lease. */
+      admit?: () => boolean;
+    },
   ): Promise<DeliverResult>;
   /** Cancel a session's in-flight run (only runs this process owns). */
-  cancelSession(id: string, opts?: { requestId?: string }): boolean | Promise<boolean>;
+  cancelSession(
+    id: string,
+    opts?: { requestId?: string },
+  ): boolean | Promise<boolean>;
   /** Create a new session and start its first turn in the background. */
   createSession(opts: CreateSessionOpts): Promise<{
     id: string;
@@ -249,7 +252,7 @@ export function registerSessionControl(c: SessionControl): void {
 export function getSessionControl(): SessionControl {
   if (!impl) {
     throw new Error(
-      "session control not registered — opensession-sessions tools only work inside the opensession server process"
+      "session control not registered — opensession-sessions tools only work inside the opensession server process",
     );
   }
   return impl;

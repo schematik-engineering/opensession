@@ -46,9 +46,9 @@
      `background`, `padding` and `border: none`, so only the deviations are
      written here. */
 export const paletteIconBtn =
-	"relative inline-flex size-10 items-center justify-center rounded-control border border-transparent text-item-title text-dim transition-[color] hover:text-fg disabled:cursor-default disabled:opacity-50 " +
-	"before:absolute before:inset-1 before:z-0 before:rounded-control before:[corner-shape:var(--cs)] before:transition-[background,box-shadow] before:content-[''] hover:before:bg-hover " +
-	"[&>*]:relative [&>*]:z-[1] phone:[&_svg]:size-5";
+  "relative inline-flex size-10 items-center justify-center rounded-control border border-transparent text-item-title text-dim transition-[color] hover:text-fg disabled:cursor-default disabled:opacity-50 " +
+  "before:absolute before:inset-1 before:z-0 before:rounded-control before:[corner-shape:var(--cs)] before:transition-[background,box-shadow] before:content-[''] hover:before:bg-hover " +
+  "[&>*]:relative [&>*]:z-[1] phone:[&_svg]:size-5";
 
 /** The phone composer's resting pill, and the ONE place `rounded-full` is the
  *  right spelling in this family. base.css grants `corner-shape: squircle` to
@@ -59,7 +59,7 @@ export const paletteIconBtn =
  *  The wash needs the same treatment or a circular button hovers into a
  *  squircle. Everywhere else this family keeps its squircle. */
 export const paletteIconBtnRound =
-	"rounded-full before:rounded-full before:[corner-shape:round]";
+  "rounded-full before:rounded-full before:[corner-shape:round]";
 
 /** On reads as one filled accent chip: the glyph lights up with its wash. The
  *  hover colour is restated because the base's `hover:text-fg` is a different
@@ -69,7 +69,7 @@ export const paletteIconBtnRound =
  *  ring read as a validation outline, and it is the one thing that survived
  *  on the plan-mode surface, which carries its own accent tint. */
 export const paletteIconBtnOn =
-	"text-accent hover:text-accent before:bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] hover:before:bg-[color-mix(in_srgb,var(--accent)_24%,transparent)]";
+  "text-accent hover:text-accent before:bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] hover:before:bg-[color-mix(in_srgb,var(--accent)_24%,transparent)]";
 
 /* ── The model/effort pill ────────────────────────────────────────
    ModelEffortSelect's trigger, in the composer toolbar and in the new-session
@@ -87,4 +87,4 @@ export const paletteIconBtnOn =
    and as a utility it outranked the stylesheet's `var(--border)` on source
    order. Written out here so the constant describes what actually paints. */
 export const palettePill =
-	"relative inline-flex min-h-8 max-w-[180px] items-center gap-1.5 rounded-full border border-transparent px-[11px] py-[5px] text-label font-medium text-dim transition-[background,border-color,color] hover:bg-hover hover:text-fg disabled:cursor-default disabled:opacity-55";
+  "relative inline-flex min-h-8 max-w-[180px] items-center gap-1.5 rounded-full border border-transparent px-[11px] py-[5px] text-label font-medium text-dim transition-[background,border-color,color] hover:bg-hover hover:text-fg disabled:cursor-default disabled:opacity-55";

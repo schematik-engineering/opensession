@@ -103,21 +103,32 @@ export function prepareSnapshotEnv(label: string): SnapshotDirs {
     state: process.env.OPENSESSION_STATE_DIR,
     mcpConfig: process.env.OPENSESSION_MCP_CONFIG,
     piDetach: process.env.OPENSESSION_PI_DETACH,
+    executor: process.env.OPENSESSION_EXECUTOR,
   };
   process.env.OPENSESSION_STATE_DIR = state;
   process.env.OPENSESSION_MCP_CONFIG = mcpConfig;
   process.env.OPENSESSION_PI_DETACH = "0";
+  // Snapshot turns run the engine fake in this process. A production default
+  // that prefers the privileged executor must not make the keyless harness
+  // look for a host socket in its private temporary state directory.
+  process.env.OPENSESSION_EXECUTOR = "0";
   dirs = { root, state, sessions, automations, memory, mcpConfig };
   return dirs;
 }
 
-let prevEnv: { state?: string; mcpConfig?: string; piDetach?: string } = {};
+let prevEnv: {
+  state?: string;
+  mcpConfig?: string;
+  piDetach?: string;
+  executor?: string;
+} = {};
 
 function restoreEnv(): void {
   for (const [name, value] of [
     ["OPENSESSION_STATE_DIR", prevEnv.state],
     ["OPENSESSION_MCP_CONFIG", prevEnv.mcpConfig],
     ["OPENSESSION_PI_DETACH", prevEnv.piDetach],
+    ["OPENSESSION_EXECUTOR", prevEnv.executor],
   ] as const) {
     if (value === undefined) delete process.env[name];
     else process.env[name] = value;
@@ -164,8 +175,9 @@ export async function loadSnapshotHarness(): Promise<SnapshotHarness> {
   if (!dirs) throw new Error("call prepareSnapshotEnv() at module top level");
   const d = dirs;
   // Module-scope tickers must never arm in a test process.
-  (globalThis as unknown as { __opensessionBooted?: boolean })
-    .__opensessionBooted = true;
+  (
+    globalThis as unknown as { __opensessionBooted?: boolean }
+  ).__opensessionBooted = true;
 
   const paths = await import("../paths");
   const prevSessionsDir = paths.__setSessionsDirForTest(d.sessions);
@@ -180,6 +192,8 @@ export async function loadSnapshotHarness(): Promise<SnapshotHarness> {
   const memory = await import("../../agents/slack/memory");
   const memoryV2 = await import("../memory-v2/runtime");
   const prevMemoryDir = memory.__setMemoryDirForTest(d.memory);
+  const hostClient = await import("../host-client");
+  const prevRunHostsInProcess = hostClient.__setRunHostsInProcessForTest(true);
 
   const runSession = await import("../run-session");
   const agentRunner = await import("../agent-runner");
@@ -255,20 +269,29 @@ export async function loadSnapshotHarness(): Promise<SnapshotHarness> {
       const files = require("fs").readdirSync(d.sessions) as string[];
       const owner = files
         .filter((file) => file.endsWith(".json"))
-        .map((file) => JSON.parse(require("fs").readFileSync(join(d.sessions, file), "utf8")))
-        .find((session) =>
-          session.piSessionId === engineSessionId ||
-          session.claudeSessionId === engineSessionId ||
-          session.codexThreadId === engineSessionId,
+        .map((file) =>
+          JSON.parse(
+            require("fs").readFileSync(join(d.sessions, file), "utf8"),
+          ),
+        )
+        .find(
+          (session) =>
+            session.piSessionId === engineSessionId ||
+            session.claudeSessionId === engineSessionId ||
+            session.codexThreadId === engineSessionId,
         );
-      if (!owner?.id) throw new Error(`No session owns engine id ${engineSessionId}`);
-      const { parseJsonlLines } = require("../jsonl-parser") as typeof import("../jsonl-parser");
-      await transcriptStore.transcriptStore().importLegacyTranscript(
-        owner.id,
-        parseJsonlLines(lines.map((line) => JSON.stringify(line))),
-        "merged",
-        null,
-      );
+      if (!owner?.id)
+        throw new Error(`No session owns engine id ${engineSessionId}`);
+      const { parseJsonlLines } =
+        require("../jsonl-parser") as typeof import("../jsonl-parser");
+      await transcriptStore
+        .transcriptStore()
+        .importLegacyTranscript(
+          owner.id,
+          parseJsonlLines(lines.map((line) => JSON.stringify(line))),
+          "merged",
+          null,
+        );
       transcriptPersistence.recordEngineSessionOwner(engineSessionId, owner.id);
       return transcriptStore.transcriptStore().dbPath;
     },
@@ -278,7 +301,10 @@ export async function loadSnapshotHarness(): Promise<SnapshotHarness> {
         writeFileSync(
           join(dir, `${scope}.json`),
           JSON.stringify({
-            entries: entries.map((e) => ({ ...e, at: "2026-01-01T00:00:00.000Z" })),
+            entries: entries.map((e) => ({
+              ...e,
+              at: "2026-01-01T00:00:00.000Z",
+            })),
           }),
         );
       const prev = memory.__setMemoryDirForTest(dir);
@@ -295,7 +321,14 @@ export async function loadSnapshotHarness(): Promise<SnapshotHarness> {
         memory.__setMemoryDirForTest(prev);
       }
     },
-    async prompt({ sessionId, content, user, turns, collect, contextSessions }) {
+    async prompt({
+      sessionId,
+      content,
+      user,
+      turns,
+      collect,
+      contextSessions,
+    }) {
       const fake = fakeEngine.makeFakeEngine(turns, {
         // A real adapter persists the turn it produced; without this the store
         // would only ever hold user lines (run-session broadcasts, it does not
@@ -332,6 +365,7 @@ export async function loadSnapshotHarness(): Promise<SnapshotHarness> {
     },
     restore() {
       agentRunner.__setEngineForTest(null);
+      hostClient.__setRunHostsInProcessForTest(prevRunHostsInProcess);
       memory.__setMemoryDirForTest(prevMemoryDir);
       transcriptPersistence.__setEngineSessionMapPathForTest(prevMapPath);
       runJournal.__setActiveRunsPathForTest(prevJournal);

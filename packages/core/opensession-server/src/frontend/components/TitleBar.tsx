@@ -23,66 +23,76 @@ import { matchesShortcut } from "../lib/shortcuts";
  * display-mode media query never matches.
  */
 export function TitleBar({
-	pane,
-	onSearch,
+  pane,
+  onSearch,
 }: {
-	pane?: boolean;
-	onSearch?: () => void;
+  pane?: boolean;
+  onSearch?: () => void;
 }) {
-	const commandMenuKeys = useShortcutKeys("command-menu");
-	const backKeys = useShortcutKeys("history-back");
-	const forwardKeys = useShortcutKeys("history-forward");
+  const commandMenuKeys = useShortcutKeys("command-menu");
+  const backKeys = useShortcutKeys("history-back");
+  const forwardKeys = useShortcutKeys("history-forward");
 
-	useEffect(() => {
-		// App renders a second, pane-positioned copy for a collapsed sidebar. The
-		// primary instance owns the listener so one keypress moves one history entry.
-		if (pane) return;
-		const onKeyDown = (event: KeyboardEvent) => {
-			if (matchesShortcut(event, "history-back")) {
-				event.preventDefault();
-				history.back();
-				return;
-			}
-			if (matchesShortcut(event, "history-forward")) {
-				event.preventDefault();
-				history.forward();
-			}
-		};
-		window.addEventListener("keydown", onKeyDown);
-		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [pane]);
+  useEffect(() => {
+    // App renders a second, pane-positioned copy for a collapsed sidebar. The
+    // primary instance owns the listener so one keypress moves one history entry.
+    if (pane) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (matchesShortcut(event, "history-back")) {
+        event.preventDefault();
+        history.back();
+        return;
+      }
+      if (matchesShortcut(event, "history-forward")) {
+        event.preventDefault();
+        history.forward();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [pane]);
 
-	return (
-		<div className={`${pane ? "wco-nav wco-nav-pane" : "wco-nav"} phone:hidden`}>
-			<Tooltip label="Back" side="bottom" shortcut={backKeys ?? undefined}>
-				<button
-					className="inline-flex size-[30px] cursor-pointer items-center justify-center rounded-md border-none bg-transparent p-0 text-dim hover:bg-hover hover:text-fg [-webkit-app-region:no-drag] [app-region:no-drag]"
-					onClick={() => history.back()}
-					aria-label="Back"
-				>
-					<IconChevronLeft size={24} />
-				</button>
-			</Tooltip>
-			<Tooltip label="Forward" side="bottom" shortcut={forwardKeys ?? undefined}>
-				<button
-					className="inline-flex size-[30px] cursor-pointer items-center justify-center rounded-md border-none bg-transparent p-0 text-dim hover:bg-hover hover:text-fg [-webkit-app-region:no-drag] [app-region:no-drag]"
-					onClick={() => history.forward()}
-					aria-label="Forward"
-				>
-					<IconChevronRight size={24} />
-				</button>
-			</Tooltip>
-			{onSearch && (
-				<Tooltip label="Command menu" side="bottom" shortcut={commandMenuKeys ?? undefined}>
-					<button
-						className="inline-flex size-[30px] cursor-pointer items-center justify-center rounded-md border-none bg-transparent p-0 text-dim hover:bg-hover hover:text-fg [-webkit-app-region:no-drag] [app-region:no-drag]"
-						onClick={onSearch}
-						aria-label="Open command menu"
-					>
-						<IconSearch size={24} />
-					</button>
-				</Tooltip>
-			)}
-		</div>
-	);
+  return (
+    <div
+      className={`${pane ? "wco-nav wco-nav-pane" : "wco-nav"} phone:hidden`}
+    >
+      <Tooltip label="Back" side="bottom" shortcut={backKeys ?? undefined}>
+        <button
+          className="inline-flex size-[30px] cursor-pointer items-center justify-center rounded-md border-none bg-transparent p-0 text-dim hover:bg-hover hover:text-fg [-webkit-app-region:no-drag] [app-region:no-drag]"
+          onClick={() => history.back()}
+          aria-label="Back"
+        >
+          <IconChevronLeft size={24} />
+        </button>
+      </Tooltip>
+      <Tooltip
+        label="Forward"
+        side="bottom"
+        shortcut={forwardKeys ?? undefined}
+      >
+        <button
+          className="inline-flex size-[30px] cursor-pointer items-center justify-center rounded-md border-none bg-transparent p-0 text-dim hover:bg-hover hover:text-fg [-webkit-app-region:no-drag] [app-region:no-drag]"
+          onClick={() => history.forward()}
+          aria-label="Forward"
+        >
+          <IconChevronRight size={24} />
+        </button>
+      </Tooltip>
+      {onSearch && (
+        <Tooltip
+          label="Command menu"
+          side="bottom"
+          shortcut={commandMenuKeys ?? undefined}
+        >
+          <button
+            className="inline-flex size-[30px] cursor-pointer items-center justify-center rounded-md border-none bg-transparent p-0 text-dim hover:bg-hover hover:text-fg [-webkit-app-region:no-drag] [app-region:no-drag]"
+            onClick={onSearch}
+            aria-label="Open command menu"
+          >
+            <IconSearch size={24} />
+          </button>
+        </Tooltip>
+      )}
+    </div>
+  );
 }

@@ -35,61 +35,61 @@ type Tone = "neutral" | "accent" | "success" | "warning" | "danger" | "info";
 type Variant = "soft" | "outline";
 
 const soft: Record<Tone, string> = {
-	neutral: "bg-active text-dim",
-	accent: "bg-accent-soft text-accent",
-	success: "bg-green-soft text-green",
-	warning: "bg-yellow-soft text-yellow",
-	danger: "bg-red-soft text-red",
-	info: "bg-blue-soft text-blue",
+  neutral: "bg-active text-dim",
+  accent: "bg-accent-soft text-accent",
+  success: "bg-green-soft text-green",
+  warning: "bg-yellow-soft text-yellow",
+  danger: "bg-red-soft text-red",
+  info: "bg-blue-soft text-blue",
 };
 
 // The outline set borrows the tone's own ink for its edge at low strength, so
 // a warning chip does not read as a neutral box with yellow text in it.
 const outline: Record<Tone, string> = {
-	// `text-dim`, not `text-faint`: an outlined chip already gives up the fill
-	// that a soft badge reads against, and faint ink on top of that leaves the
-	// label barely there — which matters most here, since the neutral outline
-	// is the one that carries names (a branch, "current") rather than states.
-	neutral: "border border-line text-dim",
-	accent: "border border-accent/40 text-accent",
-	success: "border border-green/40 text-green",
-	warning: "border border-yellow/40 text-yellow",
-	danger: "border border-red/40 text-red",
-	info: "border border-blue/40 text-blue",
+  // `text-dim`, not `text-faint`: an outlined chip already gives up the fill
+  // that a soft badge reads against, and faint ink on top of that leaves the
+  // label barely there — which matters most here, since the neutral outline
+  // is the one that carries names (a branch, "current") rather than states.
+  neutral: "border border-line text-dim",
+  accent: "border border-accent/40 text-accent",
+  success: "border border-green/40 text-green",
+  warning: "border border-yellow/40 text-yellow",
+  danger: "border border-red/40 text-red",
+  info: "border border-blue/40 text-blue",
 };
 
 export type BadgeProps = React.ComponentPropsWithoutRef<"span"> & {
-	tone?: Tone;
-	variant?: Variant;
-	/** A leading state dot, filled with the tone's ink. */
-	dot?: boolean;
+  tone?: Tone;
+  variant?: Variant;
+  /** A leading state dot, filled with the tone's ink. */
+  dot?: boolean;
 };
 
 export function Badge({
-	tone = "neutral",
-	variant = "soft",
-	dot,
-	className,
-	children,
-	...rest
+  tone = "neutral",
+  variant = "soft",
+  dot,
+  className,
+  children,
+  ...rest
 }: BadgeProps) {
-	return (
-		<span
-			className={cn(
-				"inline-flex shrink-0 items-center gap-1 rounded-sm px-1.5 py-0.5",
-				"text-meta whitespace-nowrap",
-				variant === "outline" ? outline[tone] : soft[tone],
-				className,
-			)}
-			{...rest}
-		>
-			{dot && (
-				<span
-					className="size-1.5 shrink-0 rounded-full bg-current"
-					aria-hidden="true"
-				/>
-			)}
-			{children}
-		</span>
-	);
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded-sm px-1.5 py-0.5",
+        "text-meta whitespace-nowrap",
+        variant === "outline" ? outline[tone] : soft[tone],
+        className,
+      )}
+      {...rest}
+    >
+      {dot && (
+        <span
+          className="size-1.5 shrink-0 rounded-full bg-current"
+          aria-hidden="true"
+        />
+      )}
+      {children}
+    </span>
+  );
 }

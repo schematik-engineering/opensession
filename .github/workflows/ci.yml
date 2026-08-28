@@ -26,9 +26,14 @@ concurrency:
 
 jobs:
   check:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Type-check and tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Upstream now carries 600+ unit-test files. This job deliberately runs
+    # each in its own process to contain env/global fixtures, then exercises
+    # the browser motion, ownership, and transcript gates. Keep that isolation
+    # and give the complete sequence enough wall-clock budget on hosted runners.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
       # Pinned to a SHA, not a tag: this is the one third-party action that runs
@@ -40,6 +45,9 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Check formatting
+        run: bun run format:check
 
       - name: Type-check
         run: bun run typecheck
@@ -57,6 +65,41 @@ jobs:
       # fixtures have tight readiness budgets under shared-runner contention.
       - name: Unit tests
         run: scripts/test-unit-isolated.sh
+
+      # A deterministic local fixture drives the production transcript stack
+      # without credentials, sessions, or API traffic. Chrome is preinstalled
+      # on the hosted runner; the explicit profile makes remote debugging work
+      # on current headless Chrome.
+      - name: Transcript motion performance budgets
+        run: |
+          google-chrome --headless=new --no-sandbox \
+            --remote-debugging-port=9222 --remote-allow-origins='*' \
+            --user-data-dir="$RUNNER_TEMP/transcript-motion-chrome" \
+            about:blank > "$RUNNER_TEMP/transcript-motion-chrome.log" 2>&1 &
+          chrome_pid=$!
+          PORT=4899 bun packages/core/opensession-server/src/frontend/tools/transcript-motion-fixture-server.ts \
+            > "$RUNNER_TEMP/transcript-motion-fixture.log" 2>&1 &
+          fixture_pid=$!
+          trap 'kill "$fixture_pid" "$chrome_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..120}; do
+            if curl -fsS http://127.0.0.1:4899/__fixtures/transcript-motion >/dev/null \
+              && curl -fsS http://127.0.0.1:9222/json/version >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 120 ]; then
+              cat "$RUNNER_TEMP/transcript-motion-fixture.log"
+              cat "$RUNNER_TEMP/transcript-motion-chrome.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          CDP_PORT=9222 OPENSESSION_URL=http://127.0.0.1:4899 \
+            bun packages/core/opensession-server/src/frontend/tools/transcript-motion-fuzz.ts \
+              --seeds 24 --speed 8 --out "$RUNNER_TEMP/transcript-motion-report.json"
+          CDP_PORT=9222 OPENSESSION_URL=http://127.0.0.1:4899 \
+            bun packages/core/opensession-server/src/frontend/tools/transcript-motion-fuzz.ts \
+              --profile stream --seeds 1 --speed 1 \
+              --out "$RUNNER_TEMP/transcript-stream-report.json"
 
       # The snapshot scenarios are exactly the part of that sweep the ordering
       # problem eats: they redirect the sessions dir, transcript store, MCP
@@ -83,6 +126,7 @@ jobs:
         run: bun run test:snapshots
 
   installer:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Install (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
@@ -108,10 +152,23 @@ jobs:
         # (Azure metadata) with no role attached; without the override the
         # installer would rightly refuse the user service on such a box.
         run: |
-          OPENSESSION_REPO="file://$GITHUB_WORKSPACE" \
-          OPENSESSION_HOME="$HOME/.opensession" \
-          OPENSESSION_ALLOW_IMDS=1 \
-            bash install.sh --yes --no-engine
+          if ! OPENSESSION_REPO="file://$GITHUB_WORKSPACE" \
+            OPENSESSION_HOME="$HOME/.opensession" \
+            OPENSESSION_ALLOW_IMDS=1 \
+              bash install.sh --yes --no-engine; then
+            "$HOME/.opensession/bin/opensession" logs -n 160 || true
+            tail -n 160 "$HOME/.opensession/logs/server.log" \
+              "$HOME/.opensession/logs/server.err.log" 2>/dev/null || true
+            if command -v systemctl >/dev/null; then
+              systemctl --user status \
+                opensession.service opensession-session-kernel.service \
+                --no-pager || true
+            elif command -v launchctl >/dev/null; then
+              launchctl print "gui/$(id -u)/dev.opensession.server" || true
+              launchctl print "gui/$(id -u)/dev.opensession.session-kernel" || true
+            fi
+            exit 1
+          fi
 
       - name: Put the command and bun on PATH for later steps
         # Steps do not share a shell and do not source profiles, so the
@@ -162,8 +219,8 @@ jobs:
             const text = kind === "launchd"
               ? `${renderPlist()}\n${renderLauncher()}`
               : await renderUnit();
-            if (!text.includes("opensession.ts") && !text.includes("opensession server")) {
-              throw new Error("no service command");
+            if (!text.includes("gateway-supervisor")) {
+              throw new Error("service does not launch the stable gateway supervisor");
             }
             const user = text.match(/^User=(.*)$/m)?.[1];
             if (user === "unknown") throw new Error("User=unknown would fail 217/USER");
@@ -180,6 +237,7 @@ jobs:
         run: bash install.sh --uninstall
 
   runner-windows:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     # Same situation as the macOS installer job above: the Windows Runner
     # client (install.ps1, the scheduled-task service, PowerShell command
     # execution, the Windows env whitelist) was written without a Windows box

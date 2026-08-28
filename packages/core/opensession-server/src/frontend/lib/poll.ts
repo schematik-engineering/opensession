@@ -6,15 +6,15 @@
  * Returns a cleanup function.
  */
 export function pollWhileVisible(fn: () => void, ms: number): () => void {
-	const tick = () => {
-		if (!document.hidden) fn();
-	};
-	const iv = setInterval(tick, ms);
-	document.addEventListener("visibilitychange", tick);
-	return () => {
-		clearInterval(iv);
-		document.removeEventListener("visibilitychange", tick);
-	};
+  const tick = () => {
+    if (!document.hidden) fn();
+  };
+  const iv = setInterval(tick, ms);
+  document.addEventListener("visibilitychange", tick);
+  return () => {
+    clearInterval(iv);
+    document.removeEventListener("visibilitychange", tick);
+  };
 }
 
 /** GitHub webhooks are the primary PR refresh path; this only recovers missed events. */

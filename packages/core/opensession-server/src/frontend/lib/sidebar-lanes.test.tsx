@@ -27,17 +27,19 @@ describe("mineStatus", () => {
 
   test("files a safety pause under needs input even with a stale running bit", () => {
     expect(
-      mineStatus(session({
-        isRunning: true,
-        safety: {
-          status: "paused_for_safety",
-          explanation: "Paused",
-          automaticReconciliationRunning: false,
-          pausedAt: "2026-08-22T12:00:00Z",
-          operation: "finishing the current turn",
-          repairAvailable: false,
-        },
-      })),
+      mineStatus(
+        session({
+          isRunning: true,
+          safety: {
+            status: "paused_for_safety",
+            explanation: "Paused",
+            automaticReconciliationRunning: false,
+            pausedAt: "2026-08-22T12:00:00Z",
+            operation: "finishing the current turn",
+            repairAvailable: false,
+          },
+        }),
+      ),
     ).toBe("needsinput");
   });
 

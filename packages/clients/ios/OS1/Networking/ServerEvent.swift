@@ -6,6 +6,7 @@ import Foundation
 /// Sendable so large frames can decode off the main actor (see OS1Socket).
 enum ServerEvent: Sendable {
     case hello(bootId: String)
+    case serverRestarting
     case pong
     case transcriptInit(sessionId: String, entries: [TranscriptEntry], cursor: HistoryCursor)
     case transcriptHistory(sessionId: String, entries: [TranscriptEntry], cursor: HistoryCursor)
@@ -85,6 +86,8 @@ enum ServerEvent: Sendable {
         switch frame.type {
         case "hello":
             return .hello(bootId: frame.bootId ?? "")
+        case "server_restarting":
+            return .serverRestarting
         case "pong":
             return .pong
         case "transcript_init":

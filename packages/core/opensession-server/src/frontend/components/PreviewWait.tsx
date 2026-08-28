@@ -30,8 +30,8 @@ import { PageLoader } from "../ui/page-loader";
 
 /** `/preview-wait/<sessionId>` (either prefix) → sessionId, else null. */
 export function matchPreviewWaitRoute(pathname: string): string | null {
-	const m = stripBasePath(pathname).match(/^\/preview-wait\/(.+)$/);
-	return m ? decodeURIComponent(m[1]) : null;
+  const m = stripBasePath(pathname).match(/^\/preview-wait\/(.+)$/);
+  return m ? decodeURIComponent(m[1]) : null;
 }
 
 // Dev-server bring-ups are minutes at worst (first build); past this we stop
@@ -42,117 +42,115 @@ const POLL_MS = 2000;
 type WaitState = "waiting" | "timeout" | "gone";
 
 export function PreviewWait({ sessionId }: { sessionId: string }) {
-	const [state, setState] = useState<WaitState>("waiting");
-	// Whose preview this is (title · branch), from the status poll — so a
-	// reused/stale tab is immediately recognizable as belonging to a session.
-	const [who, setWho] = useState<string | null>(null);
+  const [state, setState] = useState<WaitState>("waiting");
+  // Whose preview this is (title · branch), from the status poll — so a
+  // reused/stale tab is immediately recognizable as belonging to a session.
+  const [who, setWho] = useState<string | null>(null);
 
-	// Tear down the launch splash (rendered in index.html), same as App does.
-	useEffect(() => {
-		document.title = docTitle("Starting preview");
-		const splash = document.getElementById("splash");
-		if (!splash) return;
-		splash.classList.add("splash-hide");
-		const t = setTimeout(() => splash.remove(), 400);
-		return () => clearTimeout(t);
-	}, []);
+  // Tear down the launch splash (rendered in index.html), same as App does.
+  useEffect(() => {
+    document.title = docTitle("Starting preview");
+    const splash = document.getElementById("splash");
+    if (!splash) return;
+    splash.classList.add("splash-hide");
+    const t = setTimeout(() => splash.remove(), 400);
+    return () => clearTimeout(t);
+  }, []);
 
-	useEffect(() => {
-		let alive = true;
-		let timer: ReturnType<typeof setTimeout> | null = null;
-		const deadline = Date.now() + TIMEOUT_MS;
-		// Deep-link recorded by the agent (set_preview_path), snapshotted onto the
-		// interstitial URL by the button so the redirect lands on the feature
-		// under test, matching what a direct click on the live link would open.
-		const previewPath = new URLSearchParams(location.search).get("path");
+  useEffect(() => {
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const deadline = Date.now() + TIMEOUT_MS;
+    // Deep-link recorded by the agent (set_preview_path), snapshotted onto the
+    // interstitial URL by the button so the redirect lands on the feature
+    // under test, matching what a direct click on the live link would open.
+    const previewPath = new URLSearchParams(location.search).get("path");
 
-		const tick = async () => {
-			await (async () => {
-const s = await fetchPreview(sessionId);
-				if (!alive) return;
-				const label = [s.sessionTitle, s.sessionBranch]
-					.filter(Boolean)
-					.join(" · ");
-				if (label) setWho(label);
-				if (s.running && s.previewUrl) {
-					// Sever the opener link before leaving — the preview is another
-					// origin and has no business scripting the tab that spawned us.
-					await (async () => {
-window.opener = null;
-})().catch(async () => {
+    const tick = async () => {
+      await (async () => {
+        const s = await fetchPreview(sessionId);
+        if (!alive) return;
+        const label = [s.sessionTitle, s.sessionBranch]
+          .filter(Boolean)
+          .join(" · ");
+        if (label) setWho(label);
+        if (s.running && s.previewUrl) {
+          // Sever the opener link before leaving — the preview is another
+          // origin and has no business scripting the tab that spawned us.
+          await (async () => {
+            window.opener = null;
+          })().catch(async () => {});
+          location.replace(withPreviewPath(s.previewUrl, previewPath));
+          return; // keep showing the spinner while the browser navigates
+        }
+      })().catch(async (e) => {
+        if (e instanceof ApiError && e.status === 404) {
+          if (alive) setState("gone");
+          return;
+        }
+        // Transient fetch errors (server restart blip) — just keep polling.
+      });
+      if (!alive) return;
+      if (Date.now() >= deadline) {
+        setState("timeout");
+        return;
+      }
+      timer = setTimeout(tick, POLL_MS);
+    };
+    tick();
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [sessionId]);
 
-});
-					location.replace(withPreviewPath(s.previewUrl, previewPath));
-					return; // keep showing the spinner while the browser navigates
-				}
-})().catch(async (e) => {
-if (e instanceof ApiError && e.status === 404) {
-					if (alive) setState("gone");
-					return;
-				}
-				// Transient fetch errors (server restart blip) — just keep polling.
-});
-			if (!alive) return;
-			if (Date.now() >= deadline) {
-				setState("timeout");
-				return;
-			}
-			timer = setTimeout(tick, POLL_MS);
-		};
-		tick();
-		return () => {
-			alive = false;
-			if (timer) clearTimeout(timer);
-		};
-	}, [sessionId]);
+  // A vanished session has nothing to go back to — send those home instead.
+  const backHref =
+    state === "gone"
+      ? `${BASE_PATH}/`
+      : `${BASE_PATH}/session/${encodeURIComponent(sessionId)}`;
 
-	// A vanished session has nothing to go back to — send those home instead.
-	const backHref =
-		state === "gone"
-			? `${BASE_PATH}/`
-			: `${BASE_PATH}/session/${encodeURIComponent(sessionId)}`;
-
-	return (
-		<div className="fixed inset-0 flex flex-col items-center justify-center gap-4 bg-surface px-6 text-center">
-			<div className="text-label font-semibold tracking-wide text-faint select-none">
-				{PRODUCT_NAME}
-			</div>
-			{state === "waiting" ? (
-				<>
-					<PageLoader className="text-dim" />
-					<div className="text-item-title font-semibold text-fg">
-						Starting the dev server…
-					</div>
-					{who && (
-						<div className="max-w-sm truncate text-label font-semibold text-dim">
-							{who}
-						</div>
-					)}
-					<div className="max-w-sm text-label font-medium leading-relaxed text-dim">
-						The first build can take a minute. This tab will open the app
-						automatically when it's ready, so keep it in the background.
-					</div>
-				</>
-			) : (
-				<>
-					<div className="text-item-title font-semibold text-fg">
-						{state === "gone"
-							? "Session not found"
-							: "The dev server didn't come up"}
-					</div>
-					<div className="max-w-sm text-label font-medium leading-relaxed text-dim">
-						{state === "gone"
-							? "This preview link points at a session that no longer exists."
-							: "It's been a few minutes with nothing listening, so the boot may have failed. Check the session's Preview services for details, or try starting it again."}
-					</div>
-					<a
-						href={backHref}
-						className="rounded-control border border-line-strong px-3.5 py-1.5 text-label font-semibold text-fg no-underline hover:border-accent hover:bg-accent-soft"
-					>
-						{state === "gone" ? "Open " + PRODUCT_NAME : "Back to the session"}
-					</a>
-				</>
-			)}
-		</div>
-	);
+  return (
+    <div className="fixed inset-0 flex flex-col items-center justify-center gap-4 bg-surface px-6 text-center">
+      <div className="text-label font-semibold tracking-wide text-faint select-none">
+        {PRODUCT_NAME}
+      </div>
+      {state === "waiting" ? (
+        <>
+          <PageLoader className="text-dim" />
+          <div className="text-item-title font-semibold text-fg">
+            Starting the dev server…
+          </div>
+          {who && (
+            <div className="max-w-sm truncate text-label font-semibold text-dim">
+              {who}
+            </div>
+          )}
+          <div className="max-w-sm text-label font-medium leading-relaxed text-dim">
+            The first build can take a minute. This tab will open the app
+            automatically when it's ready, so keep it in the background.
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="text-item-title font-semibold text-fg">
+            {state === "gone"
+              ? "Session not found"
+              : "The dev server didn't come up"}
+          </div>
+          <div className="max-w-sm text-label font-medium leading-relaxed text-dim">
+            {state === "gone"
+              ? "This preview link points at a session that no longer exists."
+              : "It's been a few minutes with nothing listening, so the boot may have failed. Check the session's Preview services for details, or try starting it again."}
+          </div>
+          <a
+            href={backHref}
+            className="rounded-control border border-line-strong px-3.5 py-1.5 text-label font-semibold text-fg no-underline hover:border-accent hover:bg-accent-soft"
+          >
+            {state === "gone" ? "Open " + PRODUCT_NAME : "Back to the session"}
+          </a>
+        </>
+      )}
+    </div>
+  );
 }

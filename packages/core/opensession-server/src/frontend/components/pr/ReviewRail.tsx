@@ -10,7 +10,13 @@ import type {
   PrFile,
   PrReviewer,
 } from "../../lib/types";
-import { IconCheck, IconChevronRight, IconFile, IconMessages, IconX } from "../icons";
+import {
+  IconCheck,
+  IconChevronRight,
+  IconFile,
+  IconMessages,
+  IconX,
+} from "../icons";
 import { CheckRow } from "./CheckRow";
 import { GitStatusRows } from "./GitStatus";
 import { CommitIcon } from "./PrViews";
@@ -118,13 +124,19 @@ export function ReviewRail({
           merging={merging}
           mergeScheduled={mergeScheduled}
         />
-        {mergeError && <p className="m-0 px-2 pt-1 text-supporting text-red">{mergeError}</p>}
+        {mergeError && (
+          <p className="m-0 px-2 pt-1 text-supporting text-red">{mergeError}</p>
+        )}
       </RailSection>
 
       {caps.reviewers && reviewers.length > 0 && (
         <RailSection title="Reviewers">
           {reviewers.map((reviewer: PrReviewer) => (
-            <ReviewerRow key={reviewer.login} reviewer={reviewer} provider={provider} />
+            <ReviewerRow
+              key={reviewer.login}
+              reviewer={reviewer}
+              provider={provider}
+            />
           ))}
         </RailSection>
       )}
@@ -139,7 +151,9 @@ export function ReviewRail({
                 {checkSummary.failed > 0 ? (
                   <IconX size={15} />
                 ) : checkSummary.pending > 0 ? (
-                  <span className="pr-check-mark-pending animate-[pulse_1.4s_infinite]">●</span>
+                  <span className="pr-check-mark-pending animate-[pulse_1.4s_infinite]">
+                    ●
+                  </span>
                 ) : (
                   <IconCheck size={15} />
                 )}
@@ -154,9 +168,15 @@ export function ReviewRail({
             }
             trailing={
               <span className="inline-flex gap-1.5 text-meta tabular-nums">
-                {checkSummary.passed > 0 && <span className="text-green">{checkSummary.passed}</span>}
-                {checkSummary.failed > 0 && <span className="text-red">{checkSummary.failed}</span>}
-                {checkSummary.pending > 0 && <span className="text-yellow">{checkSummary.pending}</span>}
+                {checkSummary.passed > 0 && (
+                  <span className="text-green">{checkSummary.passed}</span>
+                )}
+                {checkSummary.failed > 0 && (
+                  <span className="text-red">{checkSummary.failed}</span>
+                )}
+                {checkSummary.pending > 0 && (
+                  <span className="text-yellow">{checkSummary.pending}</span>
+                )}
               </span>
             }
           />
@@ -168,9 +188,10 @@ export function ReviewRail({
               {checkSummary.deployments.map((check, index) => (
                 <CheckRow check={check} key={`d${index}`} />
               ))}
-              {checkSummary.deployments.length > 0 && checkSummary.checks.length > 0 && (
-                <RailGroupLabel>Checks</RailGroupLabel>
-              )}
+              {checkSummary.deployments.length > 0 &&
+                checkSummary.checks.length > 0 && (
+                  <RailGroupLabel>Checks</RailGroupLabel>
+                )}
               {checkSummary.checks.map((check, index) => (
                 <CheckRow check={check} key={`c${index}`} />
               ))}
@@ -184,7 +205,11 @@ export function ReviewRail({
           <RollupRow
             open={commitsOpen}
             onToggle={() => setCommitsOpen((o) => !o)}
-            icon={<span className="text-faint"><CommitIcon /></span>}
+            icon={
+              <span className="text-faint">
+                <CommitIcon />
+              </span>
+            }
             label={`${commits.length} commit${commits.length === 1 ? "" : "s"}`}
           />
           {commitsOpen && (
@@ -192,10 +217,15 @@ export function ReviewRail({
               {commits.map((commit) => (
                 <div className="flex items-start gap-2 px-1.5" key={commit.oid}>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-label text-fg" title={commit.messageHeadline}>
+                    <span
+                      className="block truncate text-label text-fg"
+                      title={commit.messageHeadline}
+                    >
                       {commit.messageHeadline}
                     </span>
-                    <span className="block truncate text-meta text-faint">{commit.author}</span>
+                    <span className="block truncate text-meta text-faint">
+                      {commit.author}
+                    </span>
                     {caps.commitNotes &&
                       commit.notes?.map((note) => (
                         <span
@@ -206,7 +236,9 @@ export function ReviewRail({
                         </span>
                       ))}
                   </span>
-                  <code className="shrink-0 text-meta text-faint">{commit.oid.slice(0, 7)}</code>
+                  <code className="shrink-0 text-meta text-faint">
+                    {commit.oid.slice(0, 7)}
+                  </code>
                 </div>
               ))}
             </div>
@@ -231,7 +263,11 @@ export function ReviewRail({
           {filesOpen && (
             <div className="mt-1">
               {shownFiles.map((file: PrFile) => (
-                <FileRow file={file} key={file.path} onClick={() => onOpenFile(file.path)} />
+                <FileRow
+                  file={file}
+                  key={file.path}
+                  onClick={() => onOpenFile(file.path)}
+                />
               ))}
               <div className="flex items-center gap-3 px-1.5 pt-1.5">
                 {files.length > 8 && (
@@ -298,7 +334,10 @@ function RailSection({
   ref?: React.Ref<HTMLElement>;
 }) {
   return (
-    <section className="scroll-mt-[72px] border-b border-line py-4 first:pt-0 last:border-b-0" ref={ref}>
+    <section
+      className="scroll-mt-[72px] border-b border-line py-4 first:pt-0 last:border-b-0"
+      ref={ref}
+    >
       <div className="mb-1.5 flex items-center gap-2 px-1">
         <h3 className="m-0 text-meta font-semibold text-faint">{title}</h3>
         {action}
@@ -309,7 +348,11 @@ function RailSection({
 }
 
 function RailGroupLabel({ children }: { children: React.ReactNode }) {
-  return <div className="px-1.5 pb-1 pt-2 text-meta font-semibold text-faint">{children}</div>;
+  return (
+    <div className="px-1.5 pb-1 pt-2 text-meta font-semibold text-faint">
+      {children}
+    </div>
+  );
 }
 
 /** Shared shape for the rail's one-line summaries, whether they expand in
@@ -333,7 +376,9 @@ function RollupRow({
 }) {
   return (
     <button className={RAIL_ROW} onClick={onToggle} aria-expanded={open}>
-      <span className="inline-flex w-4 shrink-0 items-center justify-center [&>svg]:block">{icon}</span>
+      <span className="inline-flex w-4 shrink-0 items-center justify-center [&>svg]:block">
+        {icon}
+      </span>
       <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
       {trailing}
       <IconChevronRight

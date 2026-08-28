@@ -98,7 +98,9 @@ export function ConversationView({
                 {onAddToInput && pr && (
                   <button
                     className="rounded-md border-0 bg-transparent px-1.5 py-1 text-meta text-faint opacity-0 transition-opacity hover:bg-hover hover:text-fg focus-visible:opacity-100 group-hover:opacity-100"
-                    onClick={() => onAddToInput(formatPrCommentPrompt(comment, pr))}
+                    onClick={() =>
+                      onAddToInput(formatPrCommentPrompt(comment, pr))
+                    }
                   >
                     Add to session
                   </button>
@@ -130,7 +132,13 @@ export function ConversationView({
 
 export function CommitIcon() {
   return (
-    <svg width="17" height="17" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+    <svg
+      width="17"
+      height="17"
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      aria-hidden
+    >
       <path d="M11.5 7.25a3.5 3.5 0 0 0-6.92 0H1.75a.75.75 0 0 0 0 1.5h2.83a3.5 3.5 0 0 0 6.92 0h2.75a.75.75 0 0 0 0-1.5H11.5ZM8 10a2 2 0 1 1 0-4 2 2 0 0 1 0 4Z" />
     </svg>
   );

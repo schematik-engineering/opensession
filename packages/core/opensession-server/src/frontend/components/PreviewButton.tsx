@@ -161,10 +161,17 @@ export function PreviewButton({
         {isStarting ? (
           <span className={spinnerClass} />
         ) : (
-          <IconPlayOutline size={20} className={running ? "text-green" : MENU_ICON} />
+          <IconPlayOutline
+            size={20}
+            className={running ? "text-green" : MENU_ICON}
+          />
         )}
         <span className="grow">
-          {isStarting ? "Cancel preview startup" : running ? "Open preview" : "Preview"}
+          {isStarting
+            ? "Cancel preview startup"
+            : running
+              ? "Open preview"
+              : "Preview"}
         </span>
       </Menu.Item>
     );
@@ -177,7 +184,9 @@ export function PreviewButton({
   // so the redirect lands where a click on the live link would.
   const waitUrl =
     `${BASE_PATH}/preview-wait/${encodeURIComponent(session.id)}` +
-    (session.previewPath ? `?path=${encodeURIComponent(session.previewPath)}` : "");
+    (session.previewPath
+      ? `?path=${encodeURIComponent(session.previewPath)}`
+      : "");
 
   const start = async () => {
     // In-app tab flow: opening the tab both starts the preview (the pane
@@ -207,27 +216,27 @@ export function PreviewButton({
     const wait = window.open(waitUrl, `preview-${session.id}`);
     setStarting(true);
     await (async () => {
-const s = await startPreviewApi(session.id);
+      const s = await startPreviewApi(session.id);
       setStatus(s);
       // Nothing actually started (repo not bootable, sandbox gate off) — don't
       // leave the interstitial spinning toward a boot that will never come.
       if (!s.running && !s.starting) wait?.close();
-})().catch(async () => {
-setStarting(false);
+    })().catch(async () => {
+      setStarting(false);
       wait?.close();
-});
+    });
   };
 
   const stop = async () => {
     setStopping(true);
     await (async () => {
-setStatus(await stopPreviewApi(session.id));
+      setStatus(await stopPreviewApi(session.id));
       setStarting(false);
-})().catch(async () => {
-
-}).finally(async () => {
-setStopping(false);
-});
+    })()
+      .catch(async () => {})
+      .finally(async () => {
+        setStopping(false);
+      });
   };
 
   async function snap() {
@@ -235,11 +244,11 @@ setStopping(false);
     setSnapping(true);
     setShotError(null);
     await (async () => {
-setShot(await capturePreviewShot(session.id));
-})().catch(async (e: any) => {
-setShotError(e.message);
+      setShot(await capturePreviewShot(session.id));
+    })().catch(async (e: any) => {
+      setShotError(e.message);
       setShot(null);
-});
+    });
     setSnapping(false);
     // Hand over to the snapshot modal. The popup keeps its "Capturing…" label
     // until the result lands, then steps aside — it is portalled at the popover
@@ -322,7 +331,9 @@ setShotError(e.message);
       initialFocus
       className="min-w-[240px] p-2.5"
     >
-      <div className="mb-2 text-meta font-bold tracking-[-0.01em] text-faint">Dev services</div>
+      <div className="mb-2 text-meta font-bold tracking-[-0.01em] text-faint">
+        Dev services
+      </div>
       {status.services.length === 0 ? (
         <div className="px-0 py-1 text-xs text-faint">
           {isStarting ? "Starting up…" : "Not started yet"}
@@ -330,7 +341,10 @@ setShotError(e.message);
       ) : (
         <ul className="mb-2 flex list-none flex-col gap-[5px] p-0">
           {status.services.map((s) => (
-            <li key={s.key} className="flex min-h-10 items-center gap-[7px] text-xs text-dim">
+            <li
+              key={s.key}
+              className="flex min-h-10 items-center gap-[7px] text-xs text-dim"
+            >
               <span
                 className={cn(
                   "size-[7px] shrink-0 rounded-full",
@@ -352,7 +366,12 @@ setShotError(e.message);
                 <span className="font-semibold">{s.name}</span>
               )}
               <span className="text-faint">:{s.port}</span>
-              <span className={cn("ml-auto text-meta text-faint", s.running && "text-green")}>
+              <span
+                className={cn(
+                  "ml-auto text-meta text-faint",
+                  s.running && "text-green",
+                )}
+              >
                 {s.running ? "running" : "stopped"}
               </span>
             </li>
@@ -360,11 +379,19 @@ setShotError(e.message);
         </ul>
       )}
       {running || anyRunning ? (
-        <button className={popoverActionClass} onClick={stop} disabled={!anyRunning || stopping}>
+        <button
+          className={popoverActionClass}
+          onClick={stop}
+          disabled={!anyRunning || stopping}
+        >
           {stopping ? "Stopping…" : "Stop dev server"}
         </button>
       ) : isStarting ? (
-        <button className={popoverActionClass} onClick={stop} disabled={stopping}>
+        <button
+          className={popoverActionClass}
+          onClick={stop}
+          disabled={stopping}
+        >
           {stopping ? "Cancelling…" : "Cancel startup"}
         </button>
       ) : bootable ? (
@@ -375,7 +402,11 @@ setShotError(e.message);
         <div className="px-0 py-1 text-xs text-faint">{notBootableHint}.</div>
       )}
       {variant !== "bar" && running && (
-        <button className={cn(popoverActionClass, "mt-1.5")} onClick={snap} disabled={snapping}>
+        <button
+          className={cn(popoverActionClass, "mt-1.5")}
+          onClick={snap}
+          disabled={snapping}
+        >
           {snapping ? "Capturing…" : "Snapshot preview"}
         </button>
       )}
@@ -390,13 +421,11 @@ setShotError(e.message);
         </button>
       )}
       <div className="mt-1.5 text-center text-meta text-faint">
-        {running || anyRunning ? (
-          "Stops this worktree's dev process group only."
-        ) : bootable ? (
-          "Runs the repo's preview boot script in this worktree (first build ~1 min)."
-        ) : (
-          "Add .agents/start.sh or configure previewCommand."
-        )}
+        {running || anyRunning
+          ? "Stops this worktree's dev process group only."
+          : bootable
+            ? "Runs the repo's preview boot script in this worktree (first build ~1 min)."
+            : "Add .agents/start.sh or configure previewCommand."}
       </div>
     </Popover.Popup>
   );
@@ -416,7 +445,11 @@ setShotError(e.message);
     const mainContent = (
       <>
         <span className="inline-flex size-5 shrink-0 items-center justify-center text-faint">
-          {isStarting ? <span className={spinnerClass} /> : <IconPlay size={17} />}
+          {isStarting ? (
+            <span className={spinnerClass} />
+          ) : (
+            <IconPlay size={17} />
+          )}
         </span>
         <span className="min-w-0 flex-1 truncate">
           {isStarting ? (stopping ? "Cancelling…" : "Starting…") : "Preview"}
@@ -451,7 +484,11 @@ setShotError(e.message);
               {mainContent}
             </button>
           ) : !bootable ? (
-            <button className={mainClass} onClick={openServices} aria-disabled="true">
+            <button
+              className={mainClass}
+              onClick={openServices}
+              aria-disabled="true"
+            >
               {mainContent}
             </button>
           ) : (
@@ -517,7 +554,10 @@ setShotError(e.message);
               side="bottom"
             >
               <a
-                className={cn(headerIconBase, "text-green hover:bg-hover hover:text-green")}
+                className={cn(
+                  headerIconBase,
+                  "text-green hover:bg-hover hover:text-green",
+                )}
                 href={url}
                 target="_blank"
                 rel="noopener"
@@ -539,16 +579,27 @@ setShotError(e.message);
                   }
                 }}
               >
-                <CopyCheck copied={copied} size={22} idle={<IconPlayOutline size={22} />} />
+                <CopyCheck
+                  copied={copied}
+                  size={22}
+                  idle={<IconPlayOutline size={22} />}
+                />
               </a>
             </Tooltip>
           ) : isStarting ? (
             <Tooltip
-              label={stopping ? "Cancelling…" : "Starting the dev server. Click to cancel."}
+              label={
+                stopping
+                  ? "Cancelling…"
+                  : "Starting the dev server. Click to cancel."
+              }
               side="bottom"
             >
               <button
-                className={cn(headerIconBase, "text-yellow hover:bg-hover hover:text-yellow")}
+                className={cn(
+                  headerIconBase,
+                  "text-yellow hover:bg-hover hover:text-yellow",
+                )}
                 onClick={stop}
                 onContextMenu={openServices}
                 disabled={stopping}
@@ -563,7 +614,11 @@ setShotError(e.message);
               </button>
             </Tooltip>
           ) : !bootable ? (
-            <Tooltip label={`${notBootableHint} Right-click for details.`} side="bottom" multiline>
+            <Tooltip
+              label={`${notBootableHint} Right-click for details.`}
+              side="bottom"
+              multiline
+            >
               <button
                 className={cn(
                   headerIconBase,
@@ -577,9 +632,15 @@ setShotError(e.message);
               </button>
             </Tooltip>
           ) : (
-            <Tooltip label="Run the dev server (right-click for dev services)" side="bottom">
+            <Tooltip
+              label="Run the dev server (right-click for dev services)"
+              side="bottom"
+            >
               <button
-                className={cn(headerIconBase, "text-faint hover:bg-hover hover:text-dim")}
+                className={cn(
+                  headerIconBase,
+                  "text-faint hover:bg-hover hover:text-dim",
+                )}
                 onClick={start}
                 onContextMenu={openServices}
               >
@@ -681,7 +742,11 @@ setShotError(e.message);
             if (running) copy(url, { toast: "Preview link copied" });
           }}
           aria-disabled={!running || undefined}
-          title={running ? `Copy the preview link · ${url}` : "Start the preview first"}
+          title={
+            running
+              ? `Copy the preview link · ${url}`
+              : "Start the preview first"
+          }
         >
           <CopyCheck copied={copied} size={18} idle={<IconLink size={18} />} />
         </button>
@@ -696,7 +761,11 @@ setShotError(e.message);
             disabled={snapping}
             title="Snapshot the preview (headless Chrome screenshot)"
           >
-            {snapping ? <span className={spinnerClass} /> : <IconCamera size={18} />}
+            {snapping ? (
+              <span className={spinnerClass} />
+            ) : (
+              <IconCamera size={18} />
+            )}
           </button>
         )}
         <Popover.Trigger
@@ -711,8 +780,10 @@ setShotError(e.message);
                 open || running
                   ? "relative z-[1] border-[color-mix(in_srgb,var(--green)_50%,transparent)] bg-[color-mix(in_srgb,var(--green)_12%,transparent)] text-green"
                   : "",
-                !running && "hover:relative hover:z-[1] hover:border-accent hover:bg-hover hover:text-accent",
-                running && !open &&
+                !running &&
+                  "hover:relative hover:z-[1] hover:border-accent hover:bg-hover hover:text-accent",
+                running &&
+                  !open &&
                   "hover:relative hover:z-[1] hover:border-[color-mix(in_srgb,var(--green)_50%,transparent)] hover:bg-[color-mix(in_srgb,var(--green)_12%,transparent)] hover:text-green",
               )}
               title="Dev server processes"

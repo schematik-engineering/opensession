@@ -101,8 +101,8 @@
  * otherwise be settled by.
  */
 export const SIDEBAR_DENSITY_VARS =
-	"[--sidebar-row-pad:7px] [--sidebar-tool-pad:5px] [--sidebar-line-h:36px] [--sidebar-cap-h:28px] [--sidebar-band-slot:32px] [--sidebar-group-gap:14px] [--sidebar-row-action:26px] " +
-	"desktop:data-[density=compact]:[--sidebar-row-pad:4px] desktop:data-[density=compact]:[--sidebar-tool-pad:4px] desktop:data-[density=compact]:[--sidebar-line-h:30px] desktop:data-[density=compact]:[--sidebar-cap-h:24px] desktop:data-[density=compact]:[--sidebar-band-slot:28px] desktop:data-[density=compact]:[--sidebar-group-gap:8px] desktop:data-[density=compact]:[--sidebar-row-action:24px]";
+  "[--sidebar-row-pad:7px] [--sidebar-tool-pad:5px] [--sidebar-line-h:36px] [--sidebar-cap-h:28px] [--sidebar-band-slot:32px] [--sidebar-group-gap:14px] [--sidebar-row-action:26px] " +
+  "desktop:data-[density=compact]:[--sidebar-row-pad:4px] desktop:data-[density=compact]:[--sidebar-tool-pad:4px] desktop:data-[density=compact]:[--sidebar-line-h:30px] desktop:data-[density=compact]:[--sidebar-cap-h:24px] desktop:data-[density=compact]:[--sidebar-band-slot:28px] desktop:data-[density=compact]:[--sidebar-group-gap:8px] desktop:data-[density=compact]:[--sidebar-row-action:24px]";
 
 /**
  * The rail's HORIZONTAL scale, the counterpart to the vertical one above, on
@@ -126,7 +126,8 @@ export const SIDEBAR_DENSITY_VARS =
  * other — and a truncating title faded out 14px short of that seam, which read
  * as the sidebar running out of room rather than as a margin.
  */
-export const SIDEBAR_NAV_X = "[--sidebar-nav-x:6px] desktop:[--sidebar-nav-x:10px]";
+export const SIDEBAR_NAV_X =
+  "[--sidebar-nav-x:6px] desktop:[--sidebar-nav-x:10px]";
 
 /**
  * The left padding a box inside that inset takes to put its leading mark back
@@ -140,9 +141,9 @@ export const SIDEBAR_NAV_X = "[--sidebar-nav-x:6px] desktop:[--sidebar-nav-x:10p
  * the prefixed one.
  */
 export const SIDEBAR_RAIL_PAD =
-	"pl-[calc(var(--sidebar-icon-left,16px)-var(--sidebar-nav-x,6px))]";
+  "pl-[calc(var(--sidebar-icon-left,16px)-var(--sidebar-nav-x,6px))]";
 export const SIDEBAR_RAIL_PAD_DESKTOP =
-	"desktop:pl-[calc(var(--sidebar-icon-left,16px)-var(--sidebar-nav-x,6px))]";
+  "desktop:pl-[calc(var(--sidebar-icon-left,16px)-var(--sidebar-nav-x,6px))]";
 
 /**
  * The sidebar's leading column. Every row and group header opens with one of
@@ -155,7 +156,7 @@ export const SIDEBAR_RAIL_PAD_DESKTOP =
  * where a 22px box would be wrong.
  */
 export const SIDEBAR_RAIL =
-	"relative flex size-[22px] flex-[0_0_22px] items-center justify-center";
+  "relative flex size-[22px] flex-[0_0_22px] items-center justify-center";
 
 /**
  * The air between that rail and the title after it — one value, shared by
@@ -194,7 +195,7 @@ export const SIDEBAR_RAIL_GAP = "gap-[7px]";
  * class name would read as styling.
  */
 export const SIDEBAR_LIST =
-	"flex-none overflow-y-visible px-3 pt-px pb-0 desktop:px-[var(--sidebar-nav-x)]";
+  "flex-none overflow-y-visible px-3 pt-px pb-0 desktop:px-[var(--sidebar-nav-x)]";
 
 /**
  * Bands that are siblings of the workspace list (Automations, People) but
@@ -202,7 +203,7 @@ export const SIDEBAR_LIST =
  * scroll panes.
  */
 export const SIDEBAR_INDEPENDENT_SECTION =
-	"block min-w-0 flex-none mx-3 desktop:mx-[var(--sidebar-nav-x)]";
+  "block min-w-0 flex-none mx-3 desktop:mx-[var(--sidebar-nav-x)]";
 
 /** The scroll flow inside one of those bands — visible, not a nested pane. */
 export const SIDEBAR_INDEPENDENT_SCROLL = "min-w-0 overflow-y-visible pb-1.5";
@@ -231,7 +232,7 @@ export const SIDEBAR_INDEPENDENT_SCROLL = "min-w-0 overflow-y-visible pb-1.5";
  * {@link SIDEBAR_ROW_CHIP}.
  */
 export const SIDEBAR_HOVER_LAYER =
-	"hover:bg-[image:linear-gradient(var(--hover),var(--hover))]";
+  "hover:bg-[image:linear-gradient(var(--hover),var(--hover))]";
 
 /**
  * The pin/archive chip's hover — the deliberate exception to the wash.
@@ -265,7 +266,7 @@ export const SIDEBAR_STATUS_GROUP = "[[data-status-group]+&]:mt-2";
  */
 export const SIDEBAR_LANE_EMPTY = "opacity-55";
 export const SIDEBAR_LANE_DROP_HOVER =
-	"rounded-row bg-pressed opacity-100 shadow-[inset_0_0_0_1px_var(--accent,#6b8afd)]";
+  "rounded-row bg-pressed opacity-100 shadow-[inset_0_0_0_1px_var(--accent,#6b8afd)]";
 
 /** The drag-to-reorder wrapper around each Pinned row (Motion Reorder.Item). */
 export const SIDEBAR_PIN_ENTRY = "relative";
@@ -282,7 +283,7 @@ export const SIDEBAR_PIN_ENTRY = "relative";
  * list-level selector did — so the list needs no class of its own.
  */
 export const SIDEBAR_PIN_ENTRY_DRAGGING =
-	"z-[5] rounded-row bg-bg smooth-shadow-ring-sm";
+  "z-[5] rounded-row bg-bg smooth-shadow-ring-sm";
 export const SIDEBAR_PIN_DRAG_ACTIVE = "[&>*]:pointer-events-none";
 
 /**
@@ -326,8 +327,7 @@ export const SIDEBAR_REPO_TILE = "size-[18px] shrink-0 text-meta";
    pixel between them is what says so; taken all the way down to the label step
    it stopped reading as the same app as the transcript. On a phone the sidebar
    IS the page, so its rows are the thing being read and stay at body. */
-export const SIDEBAR_GROUP_HEADER =
-	`group/gh flex w-full items-center ${SIDEBAR_RAIL_GAP} rounded-[calc(10px*var(--rf))] border-none bg-transparent font-medium tracking-[0px] text-dim hover:text-fg`;
+export const SIDEBAR_GROUP_HEADER = `group/gh flex w-full items-center ${SIDEBAR_RAIL_GAP} rounded-[calc(10px*var(--rf))] border-none bg-transparent font-medium tracking-[0px] text-dim hover:text-fg`;
 
 /**
  * A FULL-LINE heading — a repo or feed band, an automation group, Archived.
@@ -346,11 +346,10 @@ export const SIDEBAR_GROUP_HEADER =
  * gives it.
  */
 export const SIDEBAR_HEADER_ROW =
-	"text-body desktop:h-[var(--sidebar-line-h)] desktop:min-h-[var(--sidebar-line-h)] desktop:text-item-title";
+  "text-body desktop:h-[var(--sidebar-line-h)] desktop:min-h-[var(--sidebar-line-h)] desktop:text-item-title";
 
 /** Left pad puts the icon on the shared rail, whatever the list's inset is. */
-export const SIDEBAR_GROUP_HEADER_INSET =
-	`pt-[11px] pr-1 pb-[11px] pl-1 desktop:pt-1 desktop:pr-1.5 desktop:pb-1 ${SIDEBAR_RAIL_PAD_DESKTOP}`;
+export const SIDEBAR_GROUP_HEADER_INSET = `pt-[11px] pr-1 pb-[11px] pl-1 desktop:pt-1 desktop:pr-1.5 desktop:pb-1 ${SIDEBAR_RAIL_PAD_DESKTOP}`;
 
 /**
  * Status lanes, inbox bands and Snoozed — the groups nested inside a list or a
@@ -368,7 +367,7 @@ export const SIDEBAR_GROUP_HEADER_INSET =
  * rows that lead nowhere between the rows that do.
  */
 export const SIDEBAR_LANE_HEADER =
-	"gap-[5px] pt-[9px] pb-[5px] text-label font-semibold desktop:h-[var(--sidebar-cap-h)] desktop:min-h-[var(--sidebar-cap-h)] desktop:pt-1 desktop:pb-1";
+  "gap-[5px] pt-[9px] pb-[5px] text-label font-semibold desktop:h-[var(--sidebar-cap-h)] desktop:min-h-[var(--sidebar-cap-h)] desktop:pt-1 desktop:pb-1";
 
 /**
  * The heading's own name. `truncate` before any width utility: it is the pair
@@ -389,7 +388,7 @@ export const SIDEBAR_LANE_NAME = "pl-0.5 desktop:pl-0";
  * collapsed state by the call site's inline transform.
  */
 export const SIDEBAR_GROUP_CHEVRON =
-	"shrink-0 text-faint opacity-0 transition-[transform,opacity] group-hover/gh:text-fg group-hover/gh:opacity-100";
+  "shrink-0 text-faint opacity-0 transition-[transform,opacity] group-hover/gh:text-fg group-hover/gh:opacity-100";
 
 /**
  * A collapsed heading keeps its chevron out of hover. Expanded, the rows below
@@ -466,10 +465,10 @@ export const SIDEBAR_GROUP_DOT = "size-[7px] shrink-0 rounded-full opacity-85";
  * as a second, already-lit control rather than as the row's own hover.
  */
 export const SIDEBAR_AUTO_COG =
-	"relative -my-1 ml-auto hidden w-6 shrink-0 cursor-pointer items-center justify-center self-stretch text-dim group-hover/gh:inline-flex hover:text-fg " +
-	"before:absolute before:top-1/2 before:left-1/2 before:z-0 before:size-7 before:-translate-x-1/2 before:-translate-y-1/2 before:rounded-[calc(6px*var(--rf))] before:[corner-shape:var(--cs)] before:transition-[background] before:content-[''] hover:before:bg-pressed " +
-	"after:absolute after:-inset-x-1 after:inset-y-0 after:content-[''] " +
-	"[&>svg]:relative [&>svg]:z-[1]";
+  "relative -my-1 ml-auto hidden w-6 shrink-0 cursor-pointer items-center justify-center self-stretch text-dim group-hover/gh:inline-flex hover:text-fg " +
+  "before:absolute before:top-1/2 before:left-1/2 before:z-0 before:size-7 before:-translate-x-1/2 before:-translate-y-1/2 before:rounded-[calc(6px*var(--rf))] before:[corner-shape:var(--cs)] before:transition-[background] before:content-[''] hover:before:bg-pressed " +
+  "after:absolute after:-inset-x-1 after:inset-y-0 after:content-[''] " +
+  "[&>svg]:relative [&>svg]:z-[1]";
 
 /**
  * What sits under an automation heading: its latest report, then its runs.
@@ -510,8 +509,7 @@ export const SIDEBAR_AUTOMATION_RUNS = "[--sidebar-icon-left:28px]";
  */
 
 /** Tier 1 — a band heading pinned at the top of the rail. */
-export const SIDEBAR_STICKY_BAND =
-	"desktop:sticky desktop:top-0 desktop:z-20";
+export const SIDEBAR_STICKY_BAND = "desktop:sticky desktop:top-0 desktop:z-20";
 
 /**
  * One invariant row height for the tier-1 headings, which is what stops the
@@ -528,7 +526,7 @@ export const SIDEBAR_STICKY_BAND =
  * what every tier-2 header pins under, so the offsets below start from it.
  */
 export const SIDEBAR_STICKY_BAND_ROW =
-	"desktop:mt-0 desktop:flex desktop:h-[var(--sidebar-band-slot)] desktop:min-h-[var(--sidebar-band-slot)] desktop:items-center desktop:py-0";
+  "desktop:mt-0 desktop:flex desktop:h-[var(--sidebar-band-slot)] desktop:min-h-[var(--sidebar-band-slot)] desktop:items-center desktop:py-0";
 
 /**
  * Tier 2: a lane / repo / status header, pinned one band-row lower. Once
@@ -543,8 +541,8 @@ export const SIDEBAR_STICKY_BAND_ROW =
  * rows around them instead of with each other.
  */
 export const SIDEBAR_STICKY_LANE =
-	"desktop:sticky desktop:top-[var(--sidebar-band-slot)] desktop:z-[15] " +
-	"desktop:[&.is-stuck::after]:pointer-events-none desktop:[&.is-stuck::after]:absolute desktop:[&.is-stuck::after]:top-[calc(100%-8px)] desktop:[&.is-stuck::after]:left-[-400px] desktop:[&.is-stuck::after]:right-[-400px] desktop:[&.is-stuck::after]:z-[-1] desktop:[&.is-stuck::after]:h-5 desktop:[&.is-stuck::after]:content-[''] desktop:[&.is-stuck::after]:[background:linear-gradient(to_bottom,var(--sidebar-material),transparent),linear-gradient(to_bottom,var(--sidebar-bg),transparent)]";
+  "desktop:sticky desktop:top-[var(--sidebar-band-slot)] desktop:z-[15] " +
+  "desktop:[&.is-stuck::after]:pointer-events-none desktop:[&.is-stuck::after]:absolute desktop:[&.is-stuck::after]:top-[calc(100%-8px)] desktop:[&.is-stuck::after]:left-[-400px] desktop:[&.is-stuck::after]:right-[-400px] desktop:[&.is-stuck::after]:z-[-1] desktop:[&.is-stuck::after]:h-5 desktop:[&.is-stuck::after]:content-[''] desktop:[&.is-stuck::after]:[background:linear-gradient(to_bottom,var(--sidebar-material),transparent),linear-gradient(to_bottom,var(--sidebar-bg),transparent)]";
 
 /**
  * A status lane nested inside a repo band sits one row lower again — its repo
@@ -559,7 +557,7 @@ export const SIDEBAR_STICKY_LANE =
  * number is what keeps it right at both densities.
  */
 export const SIDEBAR_STICKY_LANE_NESTED =
-	"desktop:top-[calc(var(--sidebar-band-slot)+var(--sidebar-line-h))] desktop:z-[14]";
+  "desktop:top-[calc(var(--sidebar-band-slot)+var(--sidebar-line-h))] desktop:z-[14]";
 
 /**
  * ── Band headings ───────────────────────────────────────────────────────────
@@ -586,17 +584,17 @@ export const SIDEBAR_BAND_LABEL = "text-label font-semibold text-dim";
  * call site. Give it `group/band` so the chevron can key off its hover.
  */
 export const SIDEBAR_BAND_TOGGLE =
-	// `border-none`, not `border-0`: the latter zeroes the width but leaves the
-	// style at Tailwind's `solid` default, which is not what the `border: none`
-	// this replaced computed to. Width resolves to 0 under either.
-	//
-	// A band heading is a LABEL, so it paints no hover fill: only the ink
-	// brightens, to `text-fg`, which is the same step a lane caption takes (see
-	// SIDEBAR_GROUP_HEADER). `--sidebar-cap-h` is the 28px label height; it sits
-	// inside the 32px slot SIDEBAR_STICKY_BAND_ROW reserves, so the caption keeps
-	// a little air around it without the pinned slot growing. Compact takes the
-	// pair to 24 inside 28, which is the same 4px of air.
-	"group/band m-0 flex min-h-[var(--sidebar-cap-h)] w-full cursor-pointer items-center gap-[5px] rounded-[calc(8px*var(--rf))] border-none bg-transparent py-1 text-left text-inherit [font:inherit] hover:text-fg";
+  // `border-none`, not `border-0`: the latter zeroes the width but leaves the
+  // style at Tailwind's `solid` default, which is not what the `border: none`
+  // this replaced computed to. Width resolves to 0 under either.
+  //
+  // A band heading is a LABEL, so it paints no hover fill: only the ink
+  // brightens, to `text-fg`, which is the same step a lane caption takes (see
+  // SIDEBAR_GROUP_HEADER). `--sidebar-cap-h` is the 28px label height; it sits
+  // inside the 32px slot SIDEBAR_STICKY_BAND_ROW reserves, so the caption keeps
+  // a little air around it without the pinned slot growing. Compact takes the
+  // pair to 24 inside 28, which is the same 4px of air.
+  "group/band m-0 flex min-h-[var(--sidebar-cap-h)] w-full cursor-pointer items-center gap-[5px] rounded-[calc(8px*var(--rf))] border-none bg-transparent py-1 text-left text-inherit [font:inherit] hover:text-fg";
 
 /**
  * The inset the Automations and People headings take. The desktop value lands
@@ -628,7 +626,7 @@ export const SIDEBAR_BAND_CHEVRON_COLLAPSED = "visible";
  * listener re-rasterized the whole sidebar mid-scroll on loaded machines.
  */
 export const SIDEBAR_STUCK_BACKING =
-	"desktop:[&.is-stuck::before]:absolute desktop:[&.is-stuck::before]:top-0 desktop:[&.is-stuck::before]:bottom-[-1px] desktop:[&.is-stuck::before]:left-[-400px] desktop:[&.is-stuck::before]:right-[-400px] desktop:[&.is-stuck::before]:z-[-1] desktop:[&.is-stuck::before]:content-[''] desktop:[&.is-stuck::before]:[background:linear-gradient(var(--sidebar-material),var(--sidebar-material)),var(--sidebar-bg)]";
+  "desktop:[&.is-stuck::before]:absolute desktop:[&.is-stuck::before]:top-0 desktop:[&.is-stuck::before]:bottom-[-1px] desktop:[&.is-stuck::before]:left-[-400px] desktop:[&.is-stuck::before]:right-[-400px] desktop:[&.is-stuck::before]:z-[-1] desktop:[&.is-stuck::before]:content-[''] desktop:[&.is-stuck::before]:[background:linear-gradient(var(--sidebar-material),var(--sidebar-material)),var(--sidebar-bg)]";
 
 /**
  * The live-state dot a row, group header or hover card carries, minus the
@@ -658,7 +656,7 @@ export const SIDEBAR_STUCK_BACKING =
  * ordering rather than to the call site.
  */
 export const SIDEBAR_CHROME_BTN =
-	"shrink-0 items-center justify-center rounded-control text-faint transition-[color,background] hover:bg-hover hover:text-fg";
+  "shrink-0 items-center justify-center rounded-control text-faint transition-[color,background] hover:bg-hover hover:text-fg";
 
 /**
  * The square icon buttons in the workspace header — the filter and the new
@@ -676,7 +674,8 @@ export const SIDEBAR_HEADER_BTN = "shrink-0 rounded-control font-medium";
  * line-height and the glyph starts riding on `normal`.
  */
 export const SIDEBAR_HEADER_BTN_PHONE = "size-[38px] text-[22px] leading-none";
-export const SIDEBAR_HEADER_BTN_DESKTOP = "size-[34px] text-[20px] leading-none";
+export const SIDEBAR_HEADER_BTN_DESKTOP =
+  "size-[34px] text-[20px] leading-none";
 
 /**
  * The trailing icon button on a band heading (the feed filter). Carries no
@@ -685,7 +684,7 @@ export const SIDEBAR_HEADER_BTN_DESKTOP = "size-[34px] text-[20px] leading-none"
  * not by which one you wrote last.
  */
 export const SIDEBAR_BAND_ACTION =
-	"ml-auto inline-flex size-7 shrink-0 items-center justify-center rounded-control hover:bg-hover hover:text-fg";
+  "ml-auto inline-flex size-7 shrink-0 items-center justify-center rounded-control hover:bg-hover hover:text-fg";
 
 /**
  * The dot a filter button wears while a non-default filter is applied — the
@@ -695,7 +694,7 @@ export const SIDEBAR_BAND_ACTION =
  * correct spelling here.
  */
 export const SIDEBAR_FILTER_DOT =
-	"relative after:absolute after:top-[5px] after:right-[5px] after:size-1.5 after:rounded-full after:bg-accent after:content-['']";
+  "relative after:absolute after:top-[5px] after:right-[5px] after:size-1.5 after:rounded-full after:bg-accent after:content-['']";
 
 /**
  * The attention count on a COLLAPSED band — urgent rows must not vanish inside
@@ -707,7 +706,7 @@ export const SIDEBAR_FILTER_DOT =
  * rounded-full is the one radius spelling base.css leaves un-squircled.
  */
 export const SIDEBAR_ATTN_COUNT =
-	"min-w-4 flex-[0_0_auto] rounded-full px-1 text-center text-[10px] leading-4 font-semibold text-white";
+  "min-w-4 flex-[0_0_auto] rounded-full px-1 text-center text-[10px] leading-4 font-semibold text-white";
 
 /**
  * ── Workspace rows: the trailing cluster ────────────────────────────────────
@@ -761,7 +760,7 @@ export const SIDEBAR_WS_ROW = `flex items-center ${SIDEBAR_RAIL_GAP} hover:pr-[9
  * (never) and an archived row on touch (always).
  */
 export const SIDEBAR_WS_ACTIONS =
-	"absolute top-1/2 right-[7px] -translate-y-1/2 items-center gap-1 rounded-sm";
+  "absolute top-1/2 right-[7px] -translate-y-1/2 items-center gap-1 rounded-sm";
 
 /**
  * The hover-only reveal. `group-hover` is gated to real hover devices by
@@ -799,8 +798,7 @@ export const SIDEBAR_WS_ACTIONS_TOUCH = "[@media(hover:none)]:inline-flex";
  * three `color` declarations that used to be settled by where their rules sat
  * in the sheet relative to each other.
  */
-export const SIDEBAR_WS_ACTION =
-	`inline-flex size-[var(--sidebar-row-action,26px)] cursor-pointer items-center justify-center rounded-md ${SIDEBAR_ROW_CHIP}`;
+export const SIDEBAR_WS_ACTION = `inline-flex size-[var(--sidebar-row-action,26px)] cursor-pointer items-center justify-center rounded-md ${SIDEBAR_ROW_CHIP}`;
 
 /**
  * Compact last-activity time. It has no `display` of its own on purpose: as a
@@ -811,7 +809,7 @@ export const SIDEBAR_WS_ACTION =
  * would split the free space and strand one of them mid-row.
  */
 export const SIDEBAR_WS_TIME =
-	"ml-auto min-w-[28px] flex-[0_0_auto] justify-end pr-1.5 text-right text-meta text-faint desktop:min-w-[34px] desktop:pr-1";
+  "ml-auto min-w-[28px] flex-[0_0_auto] justify-end pr-1.5 text-right text-meta text-faint desktop:min-w-[34px] desktop:pr-1";
 
 /** Hidden at rest and revealed on row hover. The room for the action cluster is
  *  the row's own (see {@link SIDEBAR_WS_ROW}), so this no longer carries a
@@ -831,7 +829,7 @@ export const SIDEBAR_WS_TIME_HOVER = "hidden group-hover:inline-flex";
  * stands in for instead of growing a clock's worth of digits.
  */
 export const SIDEBAR_WS_TICKER =
-	"ml-auto min-w-[28px] flex-[0_0_auto] justify-end pr-0.5 text-right text-meta tabular-nums text-yellow group-hover:hidden desktop:min-w-[34px] desktop:pr-1";
+  "ml-auto min-w-[28px] flex-[0_0_auto] justify-end pr-0.5 text-right text-meta tabular-nums text-yellow group-hover:hidden desktop:min-w-[34px] desktop:pr-1";
 
 /**
  * Teammates focused on this row's work, as the same overlapping pile used by
@@ -842,10 +840,10 @@ export const SIDEBAR_WS_TICKER =
  * a sidebar-coloured halo through it.
  */
 export const SIDEBAR_WS_FACES =
-	"flex shrink-0 items-center [--sidebar-face-ring:var(--sidebar-bg)] " +
-	"group-hover:[--sidebar-face-ring:var(--sidebar-row-hover)] " +
-	"group-data-[selected]:[--sidebar-face-ring:var(--sidebar-row-selected)] " +
-	"group-hover:group-data-[selected]:[--sidebar-face-ring:var(--sidebar-row-selected-hover)]";
+  "flex shrink-0 items-center [--sidebar-face-ring:var(--sidebar-bg)] " +
+  "group-hover:[--sidebar-face-ring:var(--sidebar-row-hover)] " +
+  "group-data-[selected]:[--sidebar-face-ring:var(--sidebar-row-selected)] " +
+  "group-hover:group-data-[selected]:[--sidebar-face-ring:var(--sidebar-row-selected-hover)]";
 export const SIDEBAR_WS_FACE = "[&:not(:first-child)]:-ml-1.5";
 
 /**
@@ -853,7 +851,8 @@ export const SIDEBAR_WS_FACE = "[&:not(:first-child)]:-ml-1.5";
  * workspace row it pins itself to the right edge, unless a ticker or a snooze
  * countdown already did that pushing.
  */
-export const SIDEBAR_WS_DRAFT = "inline-flex flex-[0_0_auto] items-center text-dim";
+export const SIDEBAR_WS_DRAFT =
+  "inline-flex flex-[0_0_auto] items-center text-dim";
 
 /**
  * Wake countdown on a snoozed workspace row (moon + "1h"). It stands in for
@@ -861,7 +860,7 @@ export const SIDEBAR_WS_DRAFT = "inline-flex flex-[0_0_auto] items-center text-d
  * type, and yields to the pin/archive actions like every other trailing badge.
  */
 export const SIDEBAR_WS_SNOOZE =
-	"ml-auto inline-flex flex-[0_0_auto] items-center gap-1 text-meta tabular-nums text-faint group-hover:hidden";
+  "ml-auto inline-flex flex-[0_0_auto] items-center gap-1 text-meta tabular-nums text-faint group-hover:hidden";
 
 /**
  * ── Swipe rows ──────────────────────────────────────────────────────────────
@@ -884,10 +883,10 @@ export const SIDEBAR_SWIPE_ROW = "relative mt-0.5 overflow-hidden rounded-row";
  * `--swipe-action-w`, written straight onto the wrapper per frame.
  */
 export const SIDEBAR_SWIPE_ACTION =
-	// `border-none`, not `border-0`: the latter zeroes the width but leaves
-	// the style at Tailwind's `solid` default, where the `border: 0` this
-	// replaced computed to `none`. Width resolves to 0 under either.
-	"absolute top-0 bottom-0 z-0 hidden w-[var(--swipe-action-w,82px)] flex-col items-center justify-center gap-0.5 border-none text-meta font-semibold will-change-[width] [&>svg]:shrink-0";
+  // `border-none`, not `border-0`: the latter zeroes the width but leaves
+  // the style at Tailwind's `solid` default, where the `border: 0` this
+  // replaced computed to `none`. Width resolves to 0 under either.
+  "absolute top-0 bottom-0 z-0 hidden w-[var(--swipe-action-w,82px)] flex-col items-center justify-center gap-0.5 border-none text-meta font-semibold will-change-[width] [&>svg]:shrink-0";
 
 /** Revealed because the gesture opened this side. Touch only, as above. */
 export const SIDEBAR_SWIPE_ACTION_OPEN = "[@media(hover:none)]:flex";
@@ -895,7 +894,7 @@ export const SIDEBAR_SWIPE_ACTION_OPEN = "[@media(hover:none)]:flex";
 /** The action grows and shrinks with the finger, except while the finger is
  *  actually down — a transition there would lag the drag by a frame. */
 export const SIDEBAR_SWIPE_ACTION_TRANSITION =
-	"transition-[width] duration-(--dur) ease-(--ease)";
+  "transition-[width] duration-(--dur) ease-(--ease)";
 
 /**
  * Each side carries its own fill AND its own ink, so exactly one `text-*` ever
@@ -919,12 +918,12 @@ export const SIDEBAR_SWIPE_ACTION_STAR = "left-0 bg-yellow text-[#17130a]";
 export const SIDEBAR_SWIPE_ACTION_STAR_ON = "left-0 bg-accent text-on-accent";
 
 export const SIDEBAR_STATUS_DOT = {
-	/** Yellow to match the "In progress" lane — green means "In review". */
-	running:
-		"bg-yellow animate-[pulse_1.4s_ease-in-out_infinite] motion-reduce:[animation-duration:1.4s]! motion-reduce:[animation-iteration-count:infinite]!",
-	/** A stopped run is actionable, but it is not a question for the person. */
-	failed: "bg-red shadow-[0_0_6px_var(--red)]",
-	waiting:
-		"bg-blue shadow-[0_0_6px_var(--blue)] animate-[pulse_1.2s_ease-in-out_infinite] motion-reduce:[animation-duration:1.2s]! motion-reduce:[animation-iteration-count:infinite]!",
-	idle: "bg-faint",
+  /** Yellow to match the "In progress" lane — green means "In review". */
+  running:
+    "bg-yellow animate-[pulse_1.4s_ease-in-out_infinite] motion-reduce:[animation-duration:1.4s]! motion-reduce:[animation-iteration-count:infinite]!",
+  /** A stopped run is actionable, but it is not a question for the person. */
+  failed: "bg-red shadow-[0_0_6px_var(--red)]",
+  waiting:
+    "bg-blue shadow-[0_0_6px_var(--blue)] animate-[pulse_1.2s_ease-in-out_infinite] motion-reduce:[animation-duration:1.2s]! motion-reduce:[animation-iteration-count:infinite]!",
+  idle: "bg-faint",
 } as const;

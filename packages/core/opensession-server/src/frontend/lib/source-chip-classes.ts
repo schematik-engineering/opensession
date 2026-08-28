@@ -15,16 +15,16 @@ import type { SessionSource } from "./types";
  * for the light theme on their own; see the note there.
  */
 export const SOURCE_CHIP =
-	"shrink-0 rounded-full px-2 py-0.5 text-meta font-bold tracking-[-0.01em]";
+  "shrink-0 rounded-full px-2 py-0.5 text-meta font-bold tracking-[-0.01em]";
 
 /** Neutral pill — the origins that get no hue of their own. */
 const NEUTRAL = "bg-active text-dim";
 
 const TONE: Record<string, string> = {
-	slack: "bg-[var(--chip-slack-bg)] text-[var(--chip-slack-fg)]",
-	linear: "bg-[var(--chip-linear-bg)] text-[var(--chip-linear-fg)]",
-	ask: "bg-[var(--chip-ask-bg)] text-[var(--chip-ask-fg)]",
-	cli: NEUTRAL,
+  slack: "bg-[var(--chip-slack-bg)] text-[var(--chip-slack-fg)]",
+  linear: "bg-[var(--chip-linear-bg)] text-[var(--chip-linear-fg)]",
+  ask: "bg-[var(--chip-ask-bg)] text-[var(--chip-ask-fg)]",
+  cli: NEUTRAL,
 };
 
 /**
@@ -35,5 +35,5 @@ const TONE: Record<string, string> = {
  * carries that source any more.)
  */
 export function sourceChipTone(source: SessionSource | "ask" | string): string {
-	return TONE[source] ?? "";
+  return TONE[source] ?? "";
 }

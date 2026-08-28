@@ -17,7 +17,10 @@
  */
 
 import type { UnifiedSession } from "./types";
-import { automationDeniedTools, automationMcpServersByName } from "./automations";
+import {
+  automationDeniedTools,
+  automationMcpServersByName,
+} from "./automations";
 
 /** Which config decided the run's MCP allowlist. */
 export type McpScopeSource =
@@ -81,7 +84,9 @@ export function sessionInProcessMcpBranch(
 
 /** Which config supplies the MCP allowlist. Pure; the `feed` branch still has
  *  to be resolved asynchronously to learn the server NAMES. */
-export function sessionMcpScopeSource(session: RunInputsSession): McpScopeSource {
+export function sessionMcpScopeSource(
+  session: RunInputsSession,
+): McpScopeSource {
   if (session.automation) return "automation";
   if (session.mcpServers && session.mcpServers.length) return "session";
   if (session.externalRefs?.length) return "feed";
@@ -110,7 +115,9 @@ export async function resolveSessionRunInputs(
         ? // Feed-workspace sessions are scoped to their feed's declared MCP
           // servers even when the session file predates the stamping (least
           // privilege — the feeds design).
-          await (await import("./feeds")).feedMcpServersForRefs(session.externalRefs!)
+          await (
+            await import("./feeds")
+          ).feedMcpServersForRefs(session.externalRefs!)
         : undefined;
   return {
     isAutomationSession,

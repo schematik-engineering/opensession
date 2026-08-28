@@ -1,14 +1,29 @@
 import { afterAll, describe, expect, it } from "bun:test";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { diskUsagePct, findTargetCaches, hasEntryNewerThan, worktreesInUse } from "./disk-gc";
+import {
+  diskUsagePct,
+  findTargetCaches,
+  hasEntryNewerThan,
+  worktreesInUse,
+} from "./disk-gc";
 
 const root = mkdtempSync(join(tmpdir(), "disk-gc-test-"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 /** Build a worktree with an optional cargo target dir at `rel`. */
-function worktree(name: string, opts: { targetAt?: string; cargo?: boolean; ageDays?: number } = {}) {
+function worktree(
+  name: string,
+  opts: { targetAt?: string; cargo?: boolean; ageDays?: number } = {},
+) {
   const wt = join(root, name);
   mkdirSync(wt, { recursive: true });
   if (opts.targetAt) {
@@ -16,7 +31,11 @@ function worktree(name: string, opts: { targetAt?: string; cargo?: boolean; ageD
     mkdirSync(join(target, "debug", "deps"), { recursive: true });
     writeFileSync(join(target, "debug", "deps", "lib.rlib"), "x");
     // Cargo marks its target dirs with CACHEDIR.TAG; that's how we identify them.
-    if (opts.cargo !== false) writeFileSync(join(target, "CACHEDIR.TAG"), "Signature: 8a477f597d28d172");
+    if (opts.cargo !== false)
+      writeFileSync(
+        join(target, "CACHEDIR.TAG"),
+        "Signature: 8a477f597d28d172",
+      );
     if (opts.ageDays) {
       const t = new Date(Date.now() - opts.ageDays * 86_400_000);
       for (const p of [
@@ -39,13 +58,18 @@ function worktree(name: string, opts: { targetAt?: string; cargo?: boolean; ageD
 }
 
 worktree("tella-fusion-cold", { targetAt: "target", ageDays: 30 });
-worktree("tella-fusion-cold", { targetAt: "packages/core/webapp/wasm-bindings/target", ageDays: 30 });
+worktree("tella-fusion-cold", {
+  targetAt: "packages/core/webapp/wasm-bindings/target",
+  ageDays: 30,
+});
 worktree("tella-fusion-fresh", { targetAt: "target" });
 worktree("tella-fusion-notcargo", { targetAt: "target", cargo: false });
 worktree("tella-fusion-warm-template", { targetAt: "target", ageDays: 30 });
 worktree("tella-fusion-ask-checkout", { targetAt: "target", ageDays: 30 });
 // node_modules can contain a dir literally named "target" — must never match.
-mkdirSync(join(root, "tella-fusion-fresh", "node_modules", "pkg", "target"), { recursive: true });
+mkdirSync(join(root, "tella-fusion-fresh", "node_modules", "pkg", "target"), {
+  recursive: true,
+});
 
 describe("findTargetCaches", () => {
   const found = findTargetCaches(root);
@@ -53,7 +77,9 @@ describe("findTargetCaches", () => {
 
   it("finds cargo target dirs, including nested ones", () => {
     expect(paths).toContain("tella-fusion-cold/target");
-    expect(paths).toContain("tella-fusion-cold/packages/core/webapp/wasm-bindings/target");
+    expect(paths).toContain(
+      "tella-fusion-cold/packages/core/webapp/wasm-bindings/target",
+    );
     expect(paths).toContain("tella-fusion-fresh/target");
   });
 
@@ -66,8 +92,12 @@ describe("findTargetCaches", () => {
   });
 
   it("spares infrastructure worktrees", () => {
-    expect(paths.some((p) => p.startsWith("tella-fusion-warm-template"))).toBe(false);
-    expect(paths.some((p) => p.startsWith("tella-fusion-ask-checkout"))).toBe(false);
+    expect(paths.some((p) => p.startsWith("tella-fusion-warm-template"))).toBe(
+      false,
+    );
+    expect(paths.some((p) => p.startsWith("tella-fusion-ask-checkout"))).toBe(
+      false,
+    );
   });
 
   it("attributes each cache to its worktree", () => {
@@ -76,8 +106,12 @@ describe("findTargetCaches", () => {
   });
 
   it("reports an old mtime for cold caches and a recent one for fresh", () => {
-    const cold = found.find((c) => c.path === join(root, "tella-fusion-cold", "target"))!;
-    const fresh = found.find((c) => c.path === join(root, "tella-fusion-fresh", "target"))!;
+    const cold = found.find(
+      (c) => c.path === join(root, "tella-fusion-cold", "target"),
+    )!;
+    const fresh = found.find(
+      (c) => c.path === join(root, "tella-fusion-fresh", "target"),
+    )!;
     const cutoff = Date.now() - 7 * 86_400_000;
     expect(cold.mtimeMs).toBeLessThan(cutoff);
     expect(fresh.mtimeMs).toBeGreaterThan(cutoff);
@@ -88,11 +122,15 @@ describe("hasEntryNewerThan", () => {
   const cutoff = Date.now() - 24 * 3_600_000;
 
   it("is true for a freshly built cache", () => {
-    expect(hasEntryNewerThan(join(root, "tella-fusion-fresh", "target"), cutoff)).toBe(true);
+    expect(
+      hasEntryNewerThan(join(root, "tella-fusion-fresh", "target"), cutoff),
+    ).toBe(true);
   });
 
   it("is false for a cache untouched since the cutoff", () => {
-    expect(hasEntryNewerThan(join(root, "tella-fusion-cold", "target"), cutoff)).toBe(false);
+    expect(
+      hasEntryNewerThan(join(root, "tella-fusion-cold", "target"), cutoff),
+    ).toBe(false);
   });
 
   it("is false for a path that does not exist", () => {

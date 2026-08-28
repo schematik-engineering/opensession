@@ -12,12 +12,12 @@ The app's label is **OS** (`productName`), the full product name is **Open
 Session**. On macOS that label is one knob for four things, and they cannot be
 separated:
 
-| Follows `productName` | Why it matters |
-| --- | --- |
-| `OS.app` and its executable | what Finder and the Dock show |
-| `CFBundleName` | the menu-bar title |
-| `OS Helper.app` (and friends) | Electron looks child processes up by `CFBundleName`; a mismatch is a fatal "Unable to find helper app" |
-| Keychain item `OS Safe Storage` | the key Chromium encrypts the cookie jar with |
+| Follows `productName`           | Why it matters                                                                                         |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `OS.app` and its executable     | what Finder and the Dock show                                                                          |
+| `CFBundleName`                  | the menu-bar title                                                                                     |
+| `OS Helper.app` (and friends)   | Electron looks child processes up by `CFBundleName`; a mismatch is a fatal "Unable to find helper app" |
+| Keychain item `OS Safe Storage` | the key Chromium encrypts the cookie jar with                                                          |
 
 So each rename costs one sign-in: Electron resolves the Keychain name from the
 bundle before `src/main.js` is loaded, and the new key cannot read what the old
@@ -182,13 +182,13 @@ publishes a GitHub Release for matching version tags. Manual "Run workflow" does
 run with artifacts attached to the run. Repository secrets (the values below
 are Tella's — supply your own):
 
-| Secret | Value |
-|---|---|
-| `APPLE_CERTIFICATES_P12` | "Developer ID Application: Tella HQ Inc. (6GUXT43C8B)" as base64 .p12 |
-| `APPLE_CERTIFICATES_PASSWORD` | password of that .p12 export |
+| Secret                            | Value                                                                                                        |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `APPLE_CERTIFICATES_P12`          | "Developer ID Application: Tella HQ Inc. (6GUXT43C8B)" as base64 .p12                                        |
+| `APPLE_CERTIFICATES_PASSWORD`     | password of that .p12 export                                                                                 |
 | `OS1_PROVISIONING_PROFILE_BASE64` | Developer ID provisioning profile for `dev.tella.os1.shell`, including Associated Domains, encoded as base64 |
-| `APPLE_ID` | Apple ID with app access |
-| `APPLE_APP_PASSWORD` | app-specific password for that Apple ID |
+| `APPLE_ID`                        | Apple ID with app access                                                                                     |
+| `APPLE_APP_PASSWORD`              | app-specific password for that Apple ID                                                                      |
 
 Set `version` in `packages/clients/mac/package.json` to the intended `X.Y.Z`
 and commit it, then run `git tag vX.Y.Z && git push origin vX.Y.Z`. The package
@@ -205,7 +205,7 @@ Chromium's unused locale set otherwise adds roughly 49 MB to the installed app.
 The shell has no production dependencies, and `package.json` declares an empty
 `workspaces` list to say so structurally. Without it, electron-builder finds no
 node modules here, walks up to the repository's own workspace root and tries to
-resolve *that* package's production dependencies, which the release runner never
+resolve _that_ package's production dependencies, which the release runner never
 installs: the build then fails with "Production dependency ... not found for
 package opensession". The empty list stops the search at this directory.
 

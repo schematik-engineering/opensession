@@ -31,8 +31,8 @@ export const plainEntryIn = "flex flex-col gap-1";
  *  The transcript's own reply bubble, at the same cap, corner and padding
  *  (`msgBubbleUser`, lib/msg-classes.ts). */
 export const plainEntryOut =
-	"flex max-w-[min(600px,90%)] flex-col gap-1 self-end rounded-lg bg-panel " +
-	"px-3.5 py-2.5";
+  "flex max-w-[min(600px,90%)] flex-col gap-1 self-end rounded-lg bg-panel " +
+  "px-3.5 py-2.5";
 
 /** An internal note. Full width and washed rather than plated, so it reads as
  *  an aside on the thread instead of another message in it. The wash itself is
@@ -58,5 +58,5 @@ export const plainEntryMeta = "text-meta text-faint";
  *  renderer (lib/markdown.ts) keeps an email's hard line breaks, which is why
  *  this no longer needs `whitespace-pre-wrap`: that would double every one. */
 export const plainEntryBody =
-	"markdown break-words text-body leading-relaxed text-fg " +
-	"[&>:first-child]:mt-0 [&>:last-child]:mb-0";
+  "markdown break-words text-body leading-relaxed text-fg " +
+  "[&>:first-child]:mt-0 [&>:last-child]:mb-0";

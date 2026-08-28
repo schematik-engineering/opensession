@@ -46,81 +46,88 @@ import { Spinner } from "./spinner";
 export type StatePlacement = "block" | "card" | "row";
 
 const placements: Record<StatePlacement, string> = {
-	// Stands in for a whole region: the `.loading`/`.empty` look (40px of air,
-	// centred) so it reads as "this area is empty", not "this row is".
-	block: "flex flex-col items-center justify-center gap-2 py-10 text-center",
-	// Stands in for a card: borrows SettingCard's surface so the page's rhythm
-	// survives the emptiness.
-	card: "rounded-2xl bg-raised px-5 py-4",
-	// Lives inside a card's row list: matches SettingRow's padding so it lands
-	// on the same left edge as the rows it replaces.
-	row: "px-5 py-4",
+  // Stands in for a whole region: the `.loading`/`.empty` look (40px of air,
+  // centred) so it reads as "this area is empty", not "this row is".
+  block: "flex flex-col items-center justify-center gap-2 py-10 text-center",
+  // Stands in for a card: borrows SettingCard's surface so the page's rhythm
+  // survives the emptiness.
+  card: "rounded-2xl bg-raised px-5 py-4",
+  // Lives inside a card's row list: matches SettingRow's padding so it lands
+  // on the same left edge as the rows it replaces.
+  row: "px-5 py-4",
 };
 
 export function EmptyState({
-	icon,
-	title,
-	action,
-	placement = "block",
-	className,
-	children,
-	...props
+  icon,
+  title,
+  action,
+  placement = "block",
+  className,
+  children,
+  ...props
 }: Omit<React.ComponentPropsWithoutRef<"div">, "title"> & {
-	/** 22px glyph from components/icons.tsx. Block placement only — in a row
-	 *  or card it would out-weigh the sentence beside it. */
-	icon?: React.ReactNode;
-	title?: React.ReactNode;
-	/** Usually a <Button size="sm">: the one thing that fills the emptiness. */
-	action?: React.ReactNode;
-	placement?: StatePlacement;
+  /** 22px glyph from components/icons.tsx. Block placement only — in a row
+   *  or card it would out-weigh the sentence beside it. */
+  icon?: React.ReactNode;
+  title?: React.ReactNode;
+  /** Usually a <Button size="sm">: the one thing that fills the emptiness. */
+  action?: React.ReactNode;
+  placement?: StatePlacement;
 }) {
-	const block = placement === "block";
-	return (
-		<div className={cn(placements[placement], className)} {...props}>
-			{block && icon && <span className="text-faint">{icon}</span>}
-			{title && <div className="text-control-label font-medium text-fg">{title}</div>}
-			{children && (
-				<div className={cn("text-supporting leading-snug text-dim", block && "max-w-[46ch]")}>
-					{children}
-				</div>
-			)}
-			{action && <div className={cn(block ? "mt-1" : "mt-2")}>{action}</div>}
-		</div>
-	);
+  const block = placement === "block";
+  return (
+    <div className={cn(placements[placement], className)} {...props}>
+      {block && icon && <span className="text-faint">{icon}</span>}
+      {title && (
+        <div className="text-control-label font-medium text-fg">{title}</div>
+      )}
+      {children && (
+        <div
+          className={cn(
+            "text-supporting leading-snug text-dim",
+            block && "max-w-[46ch]",
+          )}
+        >
+          {children}
+        </div>
+      )}
+      {action && <div className={cn(block ? "mt-1" : "mt-2")}>{action}</div>}
+    </div>
+  );
 }
 
 export function LoadingState({
-	placement = "block",
-	spinner = true,
-	className,
-	children,
-	...props
+  placement = "block",
+  spinner = true,
+  className,
+  children,
+  ...props
 }: React.ComponentPropsWithoutRef<"div"> & {
-	placement?: StatePlacement;
-	spinner?: boolean;
+  placement?: StatePlacement;
+  spinner?: boolean;
 }) {
-	// The mark follows the placement, because the placement is already the
-	// answer to "how much is waiting". A `block` stands in for a whole region,
-	// which is what the launch wave is for, and it sits ABOVE the label there —
-	// the splash's own arrangement, and the one that reads as a page rather than
-	// as a sentence with a mark in front of it. A `row` or a `card` is a small
-	// thing working inside a page that has already arrived, so it keeps the ring
-	// on the label's line, where bars would be illegible anyway.
-	const block = placement === "block";
-	return (
-		<div
-			role="status"
-			aria-live="polite"
-			className={cn(placements[placement], className)}
-			{...props}
-		>
-			{block && spinner && <PageLoader className="text-dim" />}
-			<div className="inline-flex items-center gap-2 text-supporting text-faint">
-				{!block && spinner && <Spinner />}
-				{children}
-			</div>
-		</div>
-	);
+  // The mark follows the placement, because the placement is already the
+  // answer to "how much is waiting". A `block` stands in for a whole region,
+  // which is what the launch wave is for, and it sits ABOVE the label there —
+  // the splash's own arrangement, and the one that reads as a page rather than
+  // as a sentence with a mark in front of it. A `row` or a `card` is a small
+  // thing working inside a page that has already arrived, so it keeps the ring
+  // on the label's line, where bars would be illegible anyway.
+  const block = placement === "block";
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={cn(placements[placement], className)}
+      {...props}
+    >
+      {block && spinner && <PageLoader className="text-dim" />}
+      <div className="inline-flex items-center gap-2 text-supporting text-faint">
+        {!block && spinner && <Spinner />}
+        {children}
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -142,22 +149,22 @@ export function LoadingState({
  * inside. `className` styles the inner box — the one that IS the ghost.
  */
 export function Skeleton({
-	label = "Loading",
-	className,
-	children,
-	...props
+  label = "Loading",
+  className,
+  children,
+  ...props
 }: React.ComponentPropsWithoutRef<"div"> & { label?: string }) {
-	return (
-		<div
-			role="status"
-			aria-live="polite"
-			aria-label={label}
-			className="[animation:ghost-in_var(--dur)_var(--ease)_180ms_both]"
-			{...props}
-		>
-			<div className={cn("animate-pulse", className)}>{children}</div>
-		</div>
-	);
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label={label}
+      className="[animation:ghost-in_var(--dur)_var(--ease)_180ms_both]"
+      {...props}
+    >
+      <div className={cn("animate-pulse", className)}>{children}</div>
+    </div>
+  );
 }
 
 /**
@@ -167,10 +174,12 @@ export function Skeleton({
  * placeholder is made of is one edit.
  */
 export function SkeletonBar({
-	className,
-	...props
+  className,
+  ...props
 }: React.ComponentPropsWithoutRef<"div">) {
-	return <div className={cn("h-3 rounded-sm bg-hover", className)} {...props} />;
+  return (
+    <div className={cn("h-3 rounded-sm bg-hover", className)} {...props} />
+  );
 }
 
 /**
@@ -180,14 +189,14 @@ export function SkeletonBar({
  * width: Tailwind only compiles class names it can find in the source.
  */
 const SKELETON_WIDTHS = [
-	"w-[62%]",
-	"w-[41%]",
-	"w-[73%]",
-	"w-[52%]",
-	"w-[35%]",
-	"w-[66%]",
-	"w-[47%]",
-	"w-[58%]",
+  "w-[62%]",
+  "w-[41%]",
+  "w-[73%]",
+  "w-[52%]",
+  "w-[35%]",
+  "w-[66%]",
+  "w-[47%]",
+  "w-[58%]",
 ];
 
 /**
@@ -203,57 +212,59 @@ const SKELETON_WIDTHS = [
  * amount of "gentler, not zero" for a placeholder.
  */
 export function ListSkeleton({
-	rows = 6,
-	variant = "cards",
-	rowClassName,
-	label = "Loading",
-	className,
-	...props
+  rows = 6,
+  variant = "cards",
+  rowClassName,
+  label = "Loading",
+  className,
+  ...props
 }: React.ComponentPropsWithoutRef<"div"> & {
-	rows?: number;
-	/**
-	 * Which list this stands in for. `cards` is a column of separate panels;
-	 * `rows` is the divided list inside one `CardList`; `bare` is a quiet,
-	 * borderless navigation list. Standing in for the wrong one is its own kind
-	 * of lie — the placeholder should be the shape that replaces it.
-	 */
-	variant?: "cards" | "rows" | "bare";
-	/** Match the geometry of the row this stands in for. */
-	rowClassName?: string;
-	label?: string;
+  rows?: number;
+  /**
+   * Which list this stands in for. `cards` is a column of separate panels;
+   * `rows` is the divided list inside one `CardList`; `bare` is a quiet,
+   * borderless navigation list. Standing in for the wrong one is its own kind
+   * of lie — the placeholder should be the shape that replaces it.
+   */
+  variant?: "cards" | "rows" | "bare";
+  /** Match the geometry of the row this stands in for. */
+  rowClassName?: string;
+  label?: string;
 }) {
-	const cards = variant === "cards";
-	const divided = variant === "rows";
-	return (
-		<Skeleton
-			label={label}
-			className={cn(
-				"flex flex-col",
-				cards
-					? "gap-1.5"
-					: divided
-						? "[&>*+*]:border-t [&>*+*]:border-line"
-						: "gap-0.5",
-				className,
-			)}
-			{...props}
-		>
-			{Array.from({ length: rows }, (_, i) => (
-				<div
-					key={i}
-					className={cn(
-						cards
-							? "rounded-control border border-line bg-panel px-3.5 py-[11px]"
-							: "px-3.5 py-[13px]",
-						rowClassName,
-					)}
-				>
-					<SkeletonBar className={SKELETON_WIDTHS[i % SKELETON_WIDTHS.length]} />
-					{cards && <SkeletonBar className="mt-2 h-2.5 w-[26%]" />}
-				</div>
-			))}
-		</Skeleton>
-	);
+  const cards = variant === "cards";
+  const divided = variant === "rows";
+  return (
+    <Skeleton
+      label={label}
+      className={cn(
+        "flex flex-col",
+        cards
+          ? "gap-1.5"
+          : divided
+            ? "[&>*+*]:border-t [&>*+*]:border-line"
+            : "gap-0.5",
+        className,
+      )}
+      {...props}
+    >
+      {Array.from({ length: rows }, (_, i) => (
+        <div
+          key={i}
+          className={cn(
+            cards
+              ? "rounded-control border border-line bg-panel px-3.5 py-[11px]"
+              : "px-3.5 py-[13px]",
+            rowClassName,
+          )}
+        >
+          <SkeletonBar
+            className={SKELETON_WIDTHS[i % SKELETON_WIDTHS.length]}
+          />
+          {cards && <SkeletonBar className="mt-2 h-2.5 w-[26%]" />}
+        </div>
+      ))}
+    </Skeleton>
+  );
 }
 
 /**
@@ -274,34 +285,38 @@ export function ListSkeleton({
  * a turn to scroll to.
  */
 const TRANSCRIPT_GHOST_TURNS: {
-	bubble: string;
-	lines: string[];
+  bubble: string;
+  lines: string[];
 }[] = [
-	{ bubble: "h-[42px] w-[42%]", lines: ["w-[68%]", "w-[84%]", "w-[51%]"] },
-	{ bubble: "h-[32px] w-[28%]", lines: ["w-[76%]", "w-[38%]"] },
+  { bubble: "h-[42px] w-[42%]", lines: ["w-[68%]", "w-[84%]", "w-[51%]"] },
+  { bubble: "h-[32px] w-[28%]", lines: ["w-[76%]", "w-[38%]"] },
 ];
 
 export function TranscriptSkeleton({
-	className,
-	label = "Loading conversation",
-	...props
+  className,
+  label = "Loading conversation",
+  ...props
 }: React.ComponentPropsWithoutRef<"div"> & { label?: string }) {
-	return (
-		<Skeleton label={label} className={cn("flex flex-col", className)} {...props}>
-			{TRANSCRIPT_GHOST_TURNS.map((turn) => (
-				<React.Fragment key={turn.bubble}>
-					<div className="mx-auto mb-4.5 flex w-full max-w-[var(--session-col)] flex-col">
-						<SkeletonBar className={cn("self-end rounded-lg", turn.bubble)} />
-					</div>
-					<div className="mx-auto mb-4.5 flex w-full max-w-[var(--session-col)] flex-col gap-2.5">
-						{turn.lines.map((width) => (
-							<SkeletonBar key={width} className={width} />
-						))}
-					</div>
-				</React.Fragment>
-			))}
-		</Skeleton>
-	);
+  return (
+    <Skeleton
+      label={label}
+      className={cn("flex flex-col", className)}
+      {...props}
+    >
+      {TRANSCRIPT_GHOST_TURNS.map((turn) => (
+        <React.Fragment key={turn.bubble}>
+          <div className="mx-auto mb-4.5 flex w-full max-w-[var(--session-col)] flex-col">
+            <SkeletonBar className={cn("self-end rounded-lg", turn.bubble)} />
+          </div>
+          <div className="mx-auto mb-4.5 flex w-full max-w-[var(--session-col)] flex-col gap-2.5">
+            {turn.lines.map((width) => (
+              <SkeletonBar key={width} className={width} />
+            ))}
+          </div>
+        </React.Fragment>
+      ))}
+    </Skeleton>
+  );
 }
 
 type AlertVariant = "error" | "warn" | "info";
@@ -311,77 +326,79 @@ type AlertVariant = "error" | "warn" | "info";
 // spells it; a hand-written color-mix here is a second vocabulary for one
 // recipe.
 const alertVariants: Record<AlertVariant, string> = {
-	error: "border-red/40 bg-red-soft text-red",
-	warn: "border-yellow/40 bg-yellow-soft text-yellow",
-	info: "border-blue/40 bg-blue-soft text-blue",
+  error: "border-red/40 bg-red-soft text-red",
+  warn: "border-yellow/40 bg-yellow-soft text-yellow",
+  info: "border-blue/40 bg-blue-soft text-blue",
 };
 
 export function InlineAlert({
-	variant = "error",
-	title,
-	onDismiss,
-	onRetry,
-	retryLabel = "Try again",
-	className,
-	children,
-	onClick,
-	...props
+  variant = "error",
+  title,
+  onDismiss,
+  onRetry,
+  retryLabel = "Try again",
+  className,
+  children,
+  onClick,
+  ...props
 }: Omit<React.ComponentPropsWithoutRef<"div">, "title"> & {
-	variant?: AlertVariant;
-	title?: React.ReactNode;
-	/** Renders a × and, preserving how these boxes have always behaved, makes
-	 *  the whole box dismiss on click — the × is what makes that discoverable
-	 *  and reachable from the keyboard. */
-	onDismiss?: () => void;
-	onRetry?: () => void;
-	retryLabel?: string;
+  variant?: AlertVariant;
+  title?: React.ReactNode;
+  /** Renders a × and, preserving how these boxes have always behaved, makes
+   *  the whole box dismiss on click — the × is what makes that discoverable
+   *  and reachable from the keyboard. */
+  onDismiss?: () => void;
+  onRetry?: () => void;
+  retryLabel?: string;
 }) {
-	return (
-		<div
-			role="alert"
-			className={cn(
-				"flex items-start gap-2 rounded-md border px-3 py-2.5 text-sm",
-				alertVariants[variant],
-				onDismiss && "cursor-pointer",
-				className,
-			)}
-			onClick={(e) => {
-				onClick?.(e);
-				onDismiss?.();
-			}}
-			{...props}
-		>
-			<div className="min-w-0 flex-1">
-				{title && <div className="font-medium">{title}</div>}
-				<div className={cn("min-w-0", title && "mt-0.5 opacity-90")}>{children}</div>
-			</div>
-			{onRetry && (
-				<button
-					type="button"
-					className="focus-ring shrink-0 self-center whitespace-nowrap text-supporting font-medium underline underline-offset-2 opacity-80 transition-opacity hover:opacity-100"
-					onClick={(e) => {
-						e.stopPropagation();
-						onRetry();
-					}}
-				>
-					{retryLabel}
-				</button>
-			)}
-			{onDismiss && (
-				<button
-					type="button"
-					aria-label="Dismiss"
-					// Visually 24px so it sits inside the box's 10px padding; the
-					// pseudo-element takes the hit area out to 40px.
-					className="focus-ring relative -mr-1 flex size-6 shrink-0 items-center justify-center rounded-control opacity-60 transition-opacity hover:opacity-100 before:absolute before:-inset-2 before:content-['']"
-					onClick={(e) => {
-						e.stopPropagation();
-						onDismiss();
-					}}
-				>
-					<IconX size={20} />
-				</button>
-			)}
-		</div>
-	);
+  return (
+    <div
+      role="alert"
+      className={cn(
+        "flex items-start gap-2 rounded-md border px-3 py-2.5 text-sm",
+        alertVariants[variant],
+        onDismiss && "cursor-pointer",
+        className,
+      )}
+      onClick={(e) => {
+        onClick?.(e);
+        onDismiss?.();
+      }}
+      {...props}
+    >
+      <div className="min-w-0 flex-1">
+        {title && <div className="font-medium">{title}</div>}
+        <div className={cn("min-w-0", title && "mt-0.5 opacity-90")}>
+          {children}
+        </div>
+      </div>
+      {onRetry && (
+        <button
+          type="button"
+          className="focus-ring shrink-0 self-center whitespace-nowrap text-supporting font-medium underline underline-offset-2 opacity-80 transition-opacity hover:opacity-100"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRetry();
+          }}
+        >
+          {retryLabel}
+        </button>
+      )}
+      {onDismiss && (
+        <button
+          type="button"
+          aria-label="Dismiss"
+          // Visually 24px so it sits inside the box's 10px padding; the
+          // pseudo-element takes the hit area out to 40px.
+          className="focus-ring relative -mr-1 flex size-6 shrink-0 items-center justify-center rounded-control opacity-60 transition-opacity hover:opacity-100 before:absolute before:-inset-2 before:content-['']"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDismiss();
+          }}
+        >
+          <IconX size={20} />
+        </button>
+      )}
+    </div>
+  );
 }

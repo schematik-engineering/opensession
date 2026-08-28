@@ -15,57 +15,57 @@ import { githubLoginFor } from "./UserAvatar";
  * `@word` stays prose.
  */
 export function MentionText({ text }: { text: string }) {
-	const people = usePeople();
-	const tokens = parseMentions(text, people);
-	if (!tokens.length) return null;
+  const people = usePeople();
+  const tokens = parseMentions(text, people);
+  if (!tokens.length) return null;
 
-	return (
-		<>
-			{tokens.map((token, i) => {
-				if (token.kind === "url")
-					return (
-						<a
-							key={i}
-							href={token.text}
-							target="_blank"
-							rel="noreferrer"
-							className="text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent"
-						>
-							{token.text}
-						</a>
-					);
-				if (token.kind === "mention") {
-					const login = githubLoginFor(token.name);
-					return (
-						<a
-							key={i}
-							role="button"
-							tabIndex={0}
-							className="person-chip"
-							data-person={token.name}
-							title={`Show ${token.name}'s sidebar`}
-						>
-							{login ? (
-								<img
-									className="person-chip-face"
-									src={`https://github.com/${login}.png?size=36`}
-									alt=""
-									loading="lazy"
-								/>
-							) : (
-								<span
-									className="person-chip-face person-chip-initial"
-									aria-hidden="true"
-								>
-									{token.name.slice(0, 1).toUpperCase()}
-								</span>
-							)}
-							<span>{token.name}</span>
-						</a>
-					);
-				}
-				return <React.Fragment key={i}>{token.text}</React.Fragment>;
-			})}
-		</>
-	);
+  return (
+    <>
+      {tokens.map((token, i) => {
+        if (token.kind === "url")
+          return (
+            <a
+              key={i}
+              href={token.text}
+              target="_blank"
+              rel="noreferrer"
+              className="text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent"
+            >
+              {token.text}
+            </a>
+          );
+        if (token.kind === "mention") {
+          const login = githubLoginFor(token.name);
+          return (
+            <a
+              key={i}
+              role="button"
+              tabIndex={0}
+              className="person-chip"
+              data-person={token.name}
+              title={`Show ${token.name}'s sidebar`}
+            >
+              {login ? (
+                <img
+                  className="person-chip-face"
+                  src={`https://github.com/${login}.png?size=36`}
+                  alt=""
+                  loading="lazy"
+                />
+              ) : (
+                <span
+                  className="person-chip-face person-chip-initial"
+                  aria-hidden="true"
+                >
+                  {token.name.slice(0, 1).toUpperCase()}
+                </span>
+              )}
+              <span>{token.name}</span>
+            </a>
+          );
+        }
+        return <React.Fragment key={i}>{token.text}</React.Fragment>;
+      })}
+    </>
+  );
 }

@@ -1,0 +1,216 @@
+import { describe, expect, test } from "bun:test";
+import { EventEmitter } from "node:events";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import {
+  acquireGatewayActivationLease,
+  gatewayRole,
+  waitForGatewayActivationIfStandby,
+  waitForRuntimePeerGeneration,
+  type GatewayPreloadedMessage,
+} from "./gateway-activation";
+
+class FakePort extends EventEmitter {
+  pid = 42;
+  sent: GatewayPreloadedMessage[] = [];
+  send = (message: GatewayPreloadedMessage) => {
+    this.sent.push(message);
+    return true;
+  };
+}
+
+describe("gateway activation preload barrier", () => {
+  test("keeps the compatibility path active by default", async () => {
+    expect(gatewayRole({})).toBe("active");
+    await expect(
+      waitForGatewayActivationIfStandby({ env: {} }),
+    ).resolves.toBeUndefined();
+  });
+
+  test("rejects unknown roles and unsupervised standby launches", async () => {
+    expect(() =>
+      gatewayRole({ OPENSESSION_GATEWAY_ROLE: "candidate" }),
+    ).toThrow("Invalid OPENSESSION_GATEWAY_ROLE");
+    await expect(
+      waitForGatewayActivationIfStandby({
+        env: { OPENSESSION_GATEWAY_ROLE: "standby" },
+        processPort: new FakePort(),
+      }),
+    ).rejects.toThrow("requires OPENSESSION_GATEWAY_NONCE");
+    await expect(
+      waitForGatewayActivationIfStandby({
+        env: {
+          OPENSESSION_GATEWAY_ROLE: "standby",
+          OPENSESSION_GATEWAY_NONCE: "nonce-one",
+        },
+        processPort: {
+          pid: 42,
+          on() {},
+          removeListener() {},
+        },
+      }),
+    ).rejects.toThrow("requires a supervised IPC channel");
+  });
+
+  test("announces preload and waits for the exact parent activation", async () => {
+    const port = new FakePort();
+    let activated = false;
+    const waiting = waitForGatewayActivationIfStandby({
+      env: {
+        OPENSESSION_GATEWAY_ROLE: "standby",
+        OPENSESSION_GATEWAY_NONCE: "nonce-one",
+      },
+      processPort: port,
+    }).then(() => {
+      activated = true;
+    });
+
+    expect(port.sent).toEqual([
+      { type: "opensession_gateway_preloaded", nonce: "nonce-one", pid: 42 },
+    ]);
+    port.emit("message", { type: "unrelated" });
+    await Promise.resolve();
+    expect(activated).toBe(false);
+    port.emit("message", {
+      type: "opensession_gateway_activate",
+      nonce: "nonce-one",
+    });
+    await waiting;
+    expect(activated).toBe(true);
+    expect(port.listenerCount("message")).toBe(0);
+  });
+
+  test("entrypoint waits before every production boot effect", async () => {
+    const entry = await Bun.file(
+      resolve(import.meta.dir, "../../opensession.ts"),
+    ).text();
+    const prewarm = entry.indexOf("preloadPreparedFrontend()");
+    const precheck = entry.indexOf(
+      "waitForRuntimePeerGeneration({ timeoutMs: 5_000 })",
+    );
+    const barrier = entry.indexOf("await waitForGatewayActivationIfStandby()");
+    const peers = entry.indexOf("await waitForRuntimePeerGeneration()");
+    const lease = entry.indexOf("await acquireGatewayActivationLease");
+    expect(prewarm).toBeGreaterThan(0);
+    expect(precheck).toBeGreaterThan(prewarm);
+    expect(barrier).toBeGreaterThan(precheck);
+    expect(peers).toBeGreaterThan(barrier);
+    expect(lease).toBeGreaterThan(peers);
+    expect(entry).not.toContain("}, 1500);");
+    for (const effect of [
+      "devInstanceBootError()",
+      "startRunRpcServer()",
+      "startMcpHttpServer()",
+      "startTimerPoisonHeartbeat()",
+      "mkdirSync(SESSIONS_DIR",
+      "await startSessionKernelActor()",
+      "await ensureFrontendBuilt()",
+    ]) {
+      expect(entry.indexOf(effect)).toBeGreaterThan(lease);
+    }
+  });
+
+  test("admits effects only when each peer reports its selected generation", async () => {
+    const kernel = "a".repeat(40);
+    const executor = "b".repeat(40);
+    await expect(
+      waitForRuntimePeerGeneration({
+        env: {
+          OPENSESSION_RELEASE_GENERATION: "c".repeat(40),
+          OPENSESSION_KERNEL_GENERATION: kernel,
+          OPENSESSION_EXECUTOR_GENERATION: executor,
+        },
+        fetchReady: async () => Response.json({ generation: kernel }),
+        readReadyFile: () => JSON.stringify({ pid: 7, generation: executor }),
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      waitForRuntimePeerGeneration({
+        env: { OPENSESSION_RELEASE_GENERATION: "not-a-sha" },
+      }),
+    ).rejects.toThrow("Invalid runtime peer generation");
+  });
+
+  test("does not require an executor peer when simple mode disables it", async () => {
+    const kernel = "a".repeat(40);
+    let readExecutor = false;
+    await expect(
+      waitForRuntimePeerGeneration({
+        env: {
+          OPENSESSION_EXECUTOR: "0",
+          OPENSESSION_KERNEL_GENERATION: kernel,
+          OPENSESSION_EXECUTOR_GENERATION: kernel,
+        },
+        fetchReady: async () => Response.json({ generation: kernel }),
+        readReadyFile: () => {
+          readExecutor = true;
+          throw new Error("disabled executor must not be read");
+        },
+      }),
+    ).resolves.toBeUndefined();
+    expect(readExecutor).toBe(false);
+  });
+
+  test("holds an OS lease until explicit release", async () => {
+    const root = mkdtempSync(join(tmpdir(), "gateway-lease-"));
+    const lockPath = join(root, "gateway-active.lock");
+    const lease = await acquireGatewayActivationLease({
+      env: {
+        OPENSESSION_GATEWAY_LEASE: lockPath,
+        OPENSESSION_GATEWAY_LEASE_WAIT_SECS: "0",
+      },
+    });
+    expect(existsSync(lockPath)).toBe(true);
+    await expect(
+      acquireGatewayActivationLease({
+        env: {
+          OPENSESSION_GATEWAY_LEASE: lockPath,
+          OPENSESSION_GATEWAY_LEASE_WAIT_SECS: "0",
+        },
+      }),
+    ).rejects.toThrow("already held");
+    await lease.release();
+    expect(existsSync(lockPath)).toBe(false);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("reclaims a lease only after its recorded process is dead", async () => {
+    const root = mkdtempSync(join(tmpdir(), "gateway-stale-lease-"));
+    const lockPath = join(root, "gateway-active.lock");
+    await acquireGatewayActivationLease({
+      env: { OPENSESSION_GATEWAY_LEASE: lockPath },
+      pid: 111,
+      nonce: "dead-owner",
+    });
+    const replacement = await acquireGatewayActivationLease({
+      env: {
+        OPENSESSION_GATEWAY_LEASE: lockPath,
+        OPENSESSION_GATEWAY_LEASE_WAIT_SECS: "0",
+      },
+      pid: 222,
+      nonce: "replacement",
+      processAlive: (pid) => pid === 222,
+    });
+    expect(existsSync(lockPath)).toBe(true);
+    await replacement.release();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("fails closed on an activation nonce mismatch", async () => {
+    const port = new FakePort();
+    const waiting = waitForGatewayActivationIfStandby({
+      env: {
+        OPENSESSION_GATEWAY_ROLE: "standby",
+        OPENSESSION_GATEWAY_NONCE: "nonce-one",
+      },
+      processPort: port,
+    });
+    port.emit("message", {
+      type: "opensession_gateway_activate",
+      nonce: "nonce-two",
+    });
+    await expect(waiting).rejects.toThrow("nonce mismatch");
+    expect(port.listenerCount("message")).toBe(0);
+  });
+});

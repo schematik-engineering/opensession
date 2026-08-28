@@ -141,16 +141,6 @@ extension View {
         #endif
     }
 
-    /// Keep fixed controls above the keyboard while their content scrolls.
-    @ViewBuilder
-    func scrollKeepsKeyboardPresentedCompat() -> some View {
-        #if os(iOS)
-        scrollDismissesKeyboard(.never)
-        #else
-        self
-        #endif
-    }
-
     /// `.insetGrouped` is iOS-only; `.inset` is the closest Mac list style.
     @ViewBuilder
     func insetGroupedListCompat() -> some View {

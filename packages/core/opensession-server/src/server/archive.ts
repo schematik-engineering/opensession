@@ -106,7 +106,10 @@ export function setArchived(
 }
 
 /** Archive everything idle for more than `days` days. Returns count. */
-export function archiveOlderThan(sessions: UnifiedSession[], days: number): number {
+export function archiveOlderThan(
+  sessions: UnifiedSession[],
+  days: number,
+): number {
   const cutoff = Date.now() - days * 86_400_000;
   const registry = { ...load() };
   let archived = 0;

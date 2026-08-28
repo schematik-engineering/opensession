@@ -29,7 +29,11 @@ export const EXECUTOR_PROVIDERS = ["box", "daytona", "modal"] as const;
 export type ExecutorProvider = (typeof EXECUTOR_PROVIDERS)[number];
 
 export type ExecutorLifecycle =
-  "preparing" | "awake" | "sleeping" | "waking" | "needs_attention";
+  | "preparing"
+  | "awake"
+  | "sleeping"
+  | "waking"
+  | "needs_attention";
 
 /** Where tool and workspace operations execute. This state contains no model
  * or conversation identity. Omission at creation normalizes to `local`. */
@@ -63,6 +67,14 @@ export interface TranscriptEntry {
   toolInput?: unknown;
   toolUseId?: string;
   requestId?: string;
+  /** Stable delivery identities whose accepted messages formed this user turn.
+   * A batched engine turn can represent several independently sent messages. */
+  sourceMessageIds?: string[];
+  /** Content-free wire marker for a hidden system-triggered turn. It separates
+   * completed assistant output from later background work without rendering a
+   * fake user message. Stored context payloads remain private; the server
+   * projects only this boolean boundary. */
+  turnBoundary?: boolean;
   // Set on a tool_result whose block carried is_error — the UI shows the step
   // with an error state instead of a success check.
   isError?: boolean;
@@ -392,6 +404,11 @@ export type ProtocolClientMessage =
        * stack a new worktree off it, or ask (no worktree).
        */
       worktreeMode?: "share" | "stack" | "ask";
+      /**
+       * Where a new code workspace starts. `default` follows the repository's
+       * setting; the explicit choices are that user's override for this repo.
+       */
+      checkoutMode?: "default" | "checkout" | "worktree";
       model?: string;
       /** Optional MCP server allowlist for the opening run. [] means none. */
       mcpServers?: string[];

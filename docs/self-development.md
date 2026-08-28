@@ -37,7 +37,7 @@ The Preview button uses the repo's own lifecycle scripts, the same convention
 every other repo uses ([repo-lifecycle.md](repo-lifecycle.md)):
 
 - `.agents/setup` — one-shot per worktree: `bun install
-  --frozen-lockfile`. Safe to re-run.
+--frozen-lockfile`. Safe to re-run.
 - `.agents/start.sh` — boots the dev instance in the foreground on
   `$WEBAPP_PORT`, loopback only, with the three flags above and
   `OPENSESSION_STATE_DIR=$PWD/.dev-state`.
@@ -87,10 +87,10 @@ installed directly from a checkout still follows
 [the checkout watcher/restart behavior](setup/install.md#10-frontend-rebuilds-vs-restart)
 until an operator deliberately adopts the immutable-release deploy path.
 
-| Path | Use it for | Entry point |
-| --- | --- | --- |
+| Path             | Use it for                                                                                                                                                                                                                                | Entry point                                           |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
 | Standard (light) | Ordinary frontend, backend, protocol, and dependency changes that can reuse the installed units, credentials, and helper. Frontend-only targets are promoted without a restart; other targets restart and health-gate the three services. | interactive MCP `deploy_self({ sha, confirm: true })` |
-| Full (root) | Changes to the live deploy controllers, `opensession*.service`, credential installers, the fixed run-host helper/installer, or systemd artifacts managed by the root script | `sudo deploy/deploy.sh <sha>` |
+| Full (root)      | Changes to the live deploy controllers, `opensession*.service`, credential installers, the fixed run-host helper/installer, or systemd artifacts managed by the root script                                                               | `sudo deploy/deploy.sh <sha>`                         |
 
 A docs-only commit does not need a live rollout. A frontend-only commit does.
 The production frontend watcher follows the pinned release worktree, not the

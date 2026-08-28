@@ -466,6 +466,10 @@ enum TranscriptGrouping {
                         worktreeDir: worktreeDir
                     )
                 )))
+            case .entry(let entry) where entry.turnBoundary == true:
+                // Hidden system-triggered turns separate completed output from
+                // later work without drawing an empty user message.
+                flush(isTrailing: false)
             case .entry(let entry) where entry.isAssistant:
                 turn.append(.message(entry))
             case .entry(let entry) where entry.isTool:

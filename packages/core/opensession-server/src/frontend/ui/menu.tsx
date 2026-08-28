@@ -4,11 +4,11 @@ import { ContextMenu as BaseContextMenu } from "@base-ui/react/context-menu";
 import { IconCheck } from "../components/icons";
 import { cn } from "./cn";
 import {
-	FLOATING_OVERLAY_LAYER,
-	POPUP_HOOK,
-	popupItemClasses,
-	popupScrollClasses,
-	popupSurfaceClasses,
+  FLOATING_OVERLAY_LAYER,
+  POPUP_HOOK,
+  popupItemClasses,
+  popupScrollClasses,
+  popupSurfaceClasses,
 } from "./popup-classes";
 
 /**
@@ -23,12 +23,14 @@ import {
  */
 
 function Trigger({
-	className,
-	...props
+  className,
+  ...props
 }: Omit<React.ComponentProps<typeof BaseMenu.Trigger>, "className"> & {
-	className?: string;
+  className?: string;
 }) {
-	return <BaseMenu.Trigger {...props} className={cn("focus-ring", className)} />;
+  return (
+    <BaseMenu.Trigger {...props} className={cn("focus-ring", className)} />
+  );
 }
 
 // The popup chrome, the scroller inside it, and the row live in
@@ -36,135 +38,147 @@ function Trigger({
 // wear the same surface, so it has one home.
 
 function Popup({
-	className,
-	positionerClassName,
-	side,
-	align,
-	sideOffset = 8,
-	alignOffset = 0,
-	anchor,
-	finalFocus,
-	children,
+  className,
+  positionerClassName,
+  side,
+  align,
+  sideOffset = 8,
+  alignOffset = 0,
+  anchor,
+  finalFocus,
+  children,
 }: {
-	className?: string;
-	/** Override the portal layer when this menu opens inside a higher popup. */
-	positionerClassName?: string;
-	side?: React.ComponentProps<typeof BaseMenu.Positioner>["side"];
-	align?: React.ComponentProps<typeof BaseMenu.Positioner>["align"];
-	sideOffset?: number;
-	/** Shift the popup along its alignment axis. */
-	alignOffset?: React.ComponentProps<typeof BaseMenu.Positioner>["alignOffset"];
-	/** Anchor something other than the trigger — an element, a ref, or a
-	 * virtual element with `getBoundingClientRect`. That last form is for a
-	 * menu whose subject is not a control at all: the composer's pill menu
-	 * hangs off a box of TEXT inside a textarea (Composer.tsx), which has no
-	 * element of its own to point at. */
-	anchor?: React.ComponentProps<typeof BaseMenu.Positioner>["anchor"];
-	/** Where focus goes on close. Defaults to the trigger, which a menu opened
-	 * from an anchor rather than a trigger does not have. */
-	finalFocus?: React.ComponentProps<typeof BaseMenu.Popup>["finalFocus"];
-	children: React.ReactNode;
+  className?: string;
+  /** Override the portal layer when this menu opens inside a higher popup. */
+  positionerClassName?: string;
+  side?: React.ComponentProps<typeof BaseMenu.Positioner>["side"];
+  align?: React.ComponentProps<typeof BaseMenu.Positioner>["align"];
+  sideOffset?: number;
+  /** Shift the popup along its alignment axis. */
+  alignOffset?: React.ComponentProps<typeof BaseMenu.Positioner>["alignOffset"];
+  /** Anchor something other than the trigger — an element, a ref, or a
+   * virtual element with `getBoundingClientRect`. That last form is for a
+   * menu whose subject is not a control at all: the composer's pill menu
+   * hangs off a box of TEXT inside a textarea (Composer.tsx), which has no
+   * element of its own to point at. */
+  anchor?: React.ComponentProps<typeof BaseMenu.Positioner>["anchor"];
+  /** Where focus goes on close. Defaults to the trigger, which a menu opened
+   * from an anchor rather than a trigger does not have. */
+  finalFocus?: React.ComponentProps<typeof BaseMenu.Popup>["finalFocus"];
+  children: React.ReactNode;
 }) {
-	return (
-		<BaseMenu.Portal>
-			<BaseMenu.Positioner
-				side={side}
-				align={align}
-				sideOffset={sideOffset}
-				alignOffset={alignOffset}
-				anchor={anchor}
-				collisionPadding={8}
-				className={cn(FLOATING_OVERLAY_LAYER, "outline-none", positionerClassName)}
-			>
-				<BaseMenu.Popup
-					className={cn(POPUP_HOOK, popupSurfaceClasses, className)}
-					finalFocus={finalFocus}
-				>
-					<div className={popupScrollClasses}>{children}</div>
-				</BaseMenu.Popup>
-			</BaseMenu.Positioner>
-		</BaseMenu.Portal>
-	);
+  return (
+    <BaseMenu.Portal>
+      <BaseMenu.Positioner
+        side={side}
+        align={align}
+        sideOffset={sideOffset}
+        alignOffset={alignOffset}
+        anchor={anchor}
+        collisionPadding={8}
+        className={cn(
+          FLOATING_OVERLAY_LAYER,
+          "outline-none",
+          positionerClassName,
+        )}
+      >
+        <BaseMenu.Popup
+          className={cn(POPUP_HOOK, popupSurfaceClasses, className)}
+          finalFocus={finalFocus}
+        >
+          <div className={popupScrollClasses}>{children}</div>
+        </BaseMenu.Popup>
+      </BaseMenu.Positioner>
+    </BaseMenu.Portal>
+  );
 }
 
 /** Right-click context-menu popup. Anchors to the cursor (Base UI positions it
  * from the contextmenu event), reusing the same chrome + Item styling as Menu. */
 function ContextPopup({
-	className,
-	finalFocus,
-	children,
+  className,
+  finalFocus,
+  children,
 }: {
-	className?: string;
-	/** Where focus goes on close — pass `false` when the menu opens an inline
-	 * editor that autofocuses itself (default restores focus to the trigger). */
-	finalFocus?: React.ComponentProps<typeof BaseContextMenu.Popup>["finalFocus"];
-	children: React.ReactNode;
+  className?: string;
+  /** Where focus goes on close — pass `false` when the menu opens an inline
+   * editor that autofocuses itself (default restores focus to the trigger). */
+  finalFocus?: React.ComponentProps<typeof BaseContextMenu.Popup>["finalFocus"];
+  children: React.ReactNode;
 }) {
-	return (
-		<BaseContextMenu.Portal
-			// Base UI otherwise inherits a containing popup's portal target. A
-			// right-click menu is the active interaction, so mount it at the page
-			// root where its floating layer paints above hover previews.
-			container={typeof document !== "undefined" ? document.body : undefined}
-		>
-			<BaseContextMenu.Positioner
-				collisionPadding={8}
-				className={cn(FLOATING_OVERLAY_LAYER, "outline-none")}
-			>
-				<BaseContextMenu.Popup
-					className={cn(POPUP_HOOK, popupSurfaceClasses, className)}
-					finalFocus={finalFocus}
-				>
-					<div className={popupScrollClasses}>{children}</div>
-				</BaseContextMenu.Popup>
-			</BaseContextMenu.Positioner>
-		</BaseContextMenu.Portal>
-	);
+  return (
+    <BaseContextMenu.Portal
+      // Base UI otherwise inherits a containing popup's portal target. A
+      // right-click menu is the active interaction, so mount it at the page
+      // root where its floating layer paints above hover previews.
+      container={typeof document !== "undefined" ? document.body : undefined}
+    >
+      <BaseContextMenu.Positioner
+        collisionPadding={8}
+        className={cn(FLOATING_OVERLAY_LAYER, "outline-none")}
+      >
+        <BaseContextMenu.Popup
+          className={cn(POPUP_HOOK, popupSurfaceClasses, className)}
+          finalFocus={finalFocus}
+        >
+          <div className={popupScrollClasses}>{children}</div>
+        </BaseContextMenu.Popup>
+      </BaseContextMenu.Positioner>
+    </BaseContextMenu.Portal>
+  );
 }
 
 function Item({
-	className,
-	...props
+  className,
+  ...props
 }: Omit<React.ComponentProps<typeof BaseMenu.Item>, "className"> & {
-	className?: string;
+  className?: string;
 }) {
-	return <BaseMenu.Item {...props} className={cn(popupItemClasses, className)} />;
+  return (
+    <BaseMenu.Item {...props} className={cn(popupItemClasses, className)} />
+  );
 }
 
 function SubmenuTrigger({
-	className,
-	...props
+  className,
+  ...props
 }: Omit<React.ComponentProps<typeof BaseMenu.SubmenuTrigger>, "className"> & {
-	className?: string;
+  className?: string;
 }) {
-	return (
-		<BaseMenu.SubmenuTrigger
-			{...props}
-			className={cn(popupItemClasses, "data-[popup-open]:bg-hover", className)}
-		/>
-	);
+  return (
+    <BaseMenu.SubmenuTrigger
+      {...props}
+      className={cn(popupItemClasses, "data-[popup-open]:bg-hover", className)}
+    />
+  );
 }
 
 function RadioItem({
-	className,
-	...props
+  className,
+  ...props
 }: Omit<React.ComponentProps<typeof BaseMenu.RadioItem>, "className"> & {
-	className?: string;
+  className?: string;
 }) {
-	return (
-		<BaseMenu.RadioItem {...props} className={cn(popupItemClasses, className)} />
-	);
+  return (
+    <BaseMenu.RadioItem
+      {...props}
+      className={cn(popupItemClasses, className)}
+    />
+  );
 }
 
 function CheckboxItem({
-	className,
-	...props
+  className,
+  ...props
 }: Omit<React.ComponentProps<typeof BaseMenu.CheckboxItem>, "className"> & {
-	className?: string;
+  className?: string;
 }) {
-	return (
-		<BaseMenu.CheckboxItem {...props} className={cn(popupItemClasses, className)} />
-	);
+  return (
+    <BaseMenu.CheckboxItem
+      {...props}
+      className={cn(popupItemClasses, className)}
+    />
+  );
 }
 
 /**
@@ -182,17 +196,17 @@ export const MENU_ICON = "text-dim";
  * popover (its rows carry the iOS touchend handling Base UI can't), and its
  * hints have to read exactly like the ones in a real menu. */
 export function MenuShortcut({
-	className,
-	children,
+  className,
+  children,
 }: {
-	className?: string;
-	children: React.ReactNode;
+  className?: string;
+  children: React.ReactNode;
 }) {
-	return (
-		<span className={cn("shrink-0 pl-4 text-label text-faint", className)}>
-			{children}
-		</span>
-	);
+  return (
+    <span className={cn("shrink-0 pl-4 text-label text-faint", className)}>
+      {children}
+    </span>
+  );
 }
 
 /**
@@ -208,79 +222,89 @@ export function MenuShortcut({
  * Base UI can't own, and their ticks have to read like the ones in a real menu.
  */
 export function MenuCheck({
-	on,
-	size = 17,
-	className,
+  on,
+  size = 17,
+  className,
 }: {
-	/** Whether this row is the picked one. */
-	on: boolean;
-	size?: number;
-	className?: string;
+  /** Whether this row is the picked one. */
+  on: boolean;
+  size?: number;
+  className?: string;
 }) {
-	return (
-		<IconCheck
-			size={size}
-			aria-hidden
-			className={cn("shrink-0 text-accent", !on && "invisible", className)}
-		/>
-	);
+  return (
+    <IconCheck
+      size={size}
+      aria-hidden
+      className={cn("shrink-0 text-accent", !on && "invisible", className)}
+    />
+  );
 }
 
 function Separator({ className }: { className?: string }) {
-	return <BaseMenu.Separator className={cn("-mx-1.5 my-1.5 h-px bg-line", className)} />;
+  return (
+    <BaseMenu.Separator
+      className={cn("-mx-1.5 my-1.5 h-px bg-line", className)}
+    />
+  );
 }
 
-function GroupLabel({ className, ...props }: { className?: string; children?: React.ReactNode }) {
-	return (
-		<BaseMenu.GroupLabel
-			{...props}
-			className={cn(
-				"px-2 pb-1 text-meta font-semibold tracking-[-0.01em] text-faint",
-				className,
-			)}
-		/>
-	);
+function GroupLabel({
+  className,
+  ...props
+}: {
+  className?: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <BaseMenu.GroupLabel
+      {...props}
+      className={cn(
+        "px-2 pb-1 text-meta font-semibold tracking-[-0.01em] text-faint",
+        className,
+      )}
+    />
+  );
 }
 
 /** Right-click context menu. Trigger wraps the target (render it as the anchor);
  * left-click passes through, contextmenu opens the popup at the cursor. Reuses
  * Menu's Item/Separator — Base UI's ContextMenu.Item is the same MenuItem. */
 export const ContextMenu = {
-	Root: BaseContextMenu.Root,
-	Trigger: BaseContextMenu.Trigger,
-	Popup: ContextPopup,
-	Item,
-	Separator,
-	Shortcut: MenuShortcut,
-	Check: MenuCheck,
-	// Grouping and checkable rows are the plain Menu parts for the same reason
-	// the submenu parts below are: Base UI builds both menus on one primitive,
-	// so a context menu can offer a checkable list without a second styling
-	// path. Only the popup differs, because that is the part that anchors.
-	Group: BaseMenu.Group,
-	GroupLabel,
-	CheckboxItem,
-	// Submenus are the plain Menu parts (ContextMenu re-exports them), so a
-	// submenu's own popup is Menu.Popup: it anchors to its trigger row rather
-	// than to the cursor the way ContextPopup does.
-	SubmenuRoot: BaseContextMenu.SubmenuRoot,
-	SubmenuTrigger,
+  Root: BaseContextMenu.Root,
+  Trigger: BaseContextMenu.Trigger,
+  Popup: ContextPopup,
+  Item,
+  Separator,
+  Shortcut: MenuShortcut,
+  Check: MenuCheck,
+  // Grouping and checkable rows are the plain Menu parts for the same reason
+  // the submenu parts below are: Base UI builds both menus on one primitive,
+  // so a context menu can offer a checkable list without a second styling
+  // path. Only the popup differs, because that is the part that anchors.
+  Group: BaseMenu.Group,
+  GroupLabel,
+  CheckboxItem,
+  // Submenus are the plain Menu parts (ContextMenu re-exports them), so a
+  // submenu's own popup is Menu.Popup: it anchors to its trigger row rather
+  // than to the cursor the way ContextPopup does.
+  SubmenuRoot: BaseContextMenu.SubmenuRoot,
+  SubmenuTrigger,
 };
 
 export const Menu = {
-	Root: BaseMenu.Root,
-	Trigger,
-	Popup,
-	Item,
-	Separator,
-	Shortcut: MenuShortcut,
-	Check: MenuCheck,
-	Group: BaseMenu.Group,
-	GroupLabel,
-	SubmenuRoot: BaseMenu.SubmenuRoot,
-	SubmenuTrigger,
-	RadioGroup: BaseMenu.RadioGroup,
-	RadioItem,
-	RadioItemIndicator: BaseMenu.RadioItemIndicator,
-	CheckboxItem,
+  Root: BaseMenu.Root,
+  Trigger,
+  Popup,
+  Item,
+  Separator,
+  Shortcut: MenuShortcut,
+  Check: MenuCheck,
+  Group: BaseMenu.Group,
+  GroupLabel,
+  SubmenuRoot: BaseMenu.SubmenuRoot,
+  SubmenuTrigger,
+  RadioGroup: BaseMenu.RadioGroup,
+  RadioItem,
+  RadioItemIndicator: BaseMenu.RadioItemIndicator,
+  CheckboxItem,
 };

@@ -1,4 +1,10 @@
-import React, { startTransition, useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, {
+  startTransition,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { parsePatchFiles } from "@pierre/diffs";
 import { EditProvider, FileDiff } from "@pierre/diffs/react";
@@ -49,9 +55,11 @@ const DIFF_ADD = "font-semibold text-green";
 const DIFF_DEL = "font-semibold text-red";
 
 /* One collapsible file. The header is the hover group for the edit and discard
-   actions revealed inside editable worktree diffs. */
+   actions revealed inside editable worktree diffs. Do not isolate this stacking
+   context: the sticky header's z-index must clear ReviewToolbar's code mask,
+   while the body stays beneath it. */
 const FILE_ROW =
-  "isolate min-w-0 max-w-full overflow-clip rounded-lg border border-line bg-bg";
+  "min-w-0 max-w-full overflow-clip rounded-lg border border-line bg-bg";
 const FILE_HEADER =
   "group relative flex min-h-9 w-full min-w-0 items-center gap-1.5 overflow-clip px-2 text-left text-fg hover:bg-hover phone:min-h-11 phone:px-2.5";
 // Clip the scrolling diff at its own lower corners. The parent keeps sticky
@@ -115,7 +123,8 @@ class CommentDraftText {
   }
 }
 
-let editModulePromise: Promise<typeof import("@pierre/diffs/edit")> | null = null;
+let editModulePromise: Promise<typeof import("@pierre/diffs/edit")> | null =
+  null;
 function loadEditModule() {
   if (!editModulePromise) editModulePromise = import("@pierre/diffs/edit");
   return editModulePromise;
@@ -257,9 +266,7 @@ function parseFileDiffs(
   try {
     const parsed = parsePatchFiles(patch).flatMap((p) => p.files);
     if (!visibleFileOrder) return parsed;
-    const order = new Map(
-      visibleFileOrder.map((path, index) => [path, index]),
-    );
+    const order = new Map(visibleFileOrder.map((path, index) => [path, index]));
     return parsed
       .filter((file) => order.has(file.name))
       .sort((a, b) => order.get(a.name)! - order.get(b.name)!);
@@ -358,7 +365,7 @@ export function CommentableDiff({
   // GitHub-backed "Viewed" checkboxes: hidden until the parent's fetch lands.
   const viewedEnabled = !!onToggleViewed && viewedFiles !== undefined;
   const viewed = viewedFiles ?? NO_VIEWED;
-  const stats = (files.map(fileStats));
+  const stats = files.map(fileStats);
 
   // Files render collapsed by default (just the header row) — mounting a
   // FileDiff parses + highlights on the main thread, so a large change would
@@ -370,10 +377,10 @@ export function CommentableDiff({
           .slice(0, defaultExpandedFiles)
           .map((_, index) => index)
           .filter((index) =>
-              canAutoExpandDiffFile(
-                files[index].name,
-                stats[index].add + stats[index].del,
-              ),
+            canAutoExpandDiffFile(
+              files[index].name,
+              stats[index].add + stats[index].del,
+            ),
           ),
       ),
   );
@@ -438,23 +445,23 @@ export function CommentableDiff({
     setArmed(null);
   };
   const handleDiscard = async (file: FileDiffMetadata) => {
-      if (!onDiscard) return;
-      const key = file.name;
-      if (armed !== key) {
-        setArmed(key);
-        clearTimeout(disarmTimer.current);
-        disarmTimer.current = setTimeout(() => setArmed(null), 4000);
-        return;
-      }
+    if (!onDiscard) return;
+    const key = file.name;
+    if (armed !== key) {
+      setArmed(key);
       clearTimeout(disarmTimer.current);
-      setArmed(null);
-      setDiscarding(key);
-      await (async () => {
-await onDiscard(file.name, file.prevName);
-})().finally(async () => {
-setDiscarding(null);
-});
-    };
+      disarmTimer.current = setTimeout(() => setArmed(null), 4000);
+      return;
+    }
+    clearTimeout(disarmTimer.current);
+    setArmed(null);
+    setDiscarding(key);
+    await (async () => {
+      await onDiscard(file.name, file.prevName);
+    })().finally(async () => {
+      setDiscarding(null);
+    });
+  };
   useEffect(() => () => clearTimeout(disarmTimer.current), []);
 
   // Copying the path is the reliable way to get it out of the diff — text
@@ -481,13 +488,14 @@ setDiscarding(null);
     const loadContents = fileActions?.loadContents;
     if (!loadContents) return;
     await (async () => {
-const contents = await loadContents(file);
-        if (contents == null) throw new Error("File is not available at this revision");
-        copyMenuValue(contents, "File contents copied");
-})().catch(async (error: any) => {
-toast(error?.message || "Couldn’t copy file contents");
-});
-    };
+      const contents = await loadContents(file);
+      if (contents == null)
+        throw new Error("File is not available at this revision");
+      copyMenuValue(contents, "File contents copied");
+    })().catch(async (error: any) => {
+      toast(error?.message || "Couldn’t copy file contents");
+    });
+  };
 
   const viewedCollapseKey = useRef<string | null>(null);
   useEffect(() => {
@@ -527,17 +535,17 @@ toast(error?.message || "Couldn’t copy file contents");
   }, [viewedFiles, patch, files]);
 
   const toggleViewed = (file: FileDiffMetadata, index: number) => {
-      if (!onToggleViewed) return;
-      const wasViewed = viewed.has(file.name);
-      onToggleViewed(file.name, !wasViewed);
-      // Marking viewed collapses the file (done reading it); unmarking reopens.
-      setExpanded((prev) => {
-        const n = new Set(prev);
-        if (wasViewed) n.add(index);
-        else n.delete(index);
-        return n;
-      });
-    };
+    if (!onToggleViewed) return;
+    const wasViewed = viewed.has(file.name);
+    onToggleViewed(file.name, !wasViewed);
+    // Marking viewed collapses the file (done reading it); unmarking reopens.
+    setExpanded((prev) => {
+      const n = new Set(prev);
+      if (wasViewed) n.add(index);
+      else n.delete(index);
+      return n;
+    });
+  };
 
   // ---- Edit mode (@pierre/diffs edit) ------------------------------------
   // One file edits at a time. The editor engine is lazy-loaded on first use
@@ -557,7 +565,7 @@ toast(error?.message || "Couldn’t copy file contents");
     setEditError(null);
     setEditingPath(file.name);
     setExpanded((prev) => new Set(prev).add(index));
-    };
+  };
 
   const cancelEdit = () => {
     editorRef.current = null;
@@ -571,14 +579,16 @@ toast(error?.message || "Couldn’t copy file contents");
     setSavingEdit(true);
     setEditError(null);
     await (async () => {
-await editFile.save(editingPath, editor.getText());
+      await editFile.save(editingPath, editor.getText());
       editorRef.current = null;
       setEditingPath(null);
-})().catch(async (e: any) => {
-setEditError(e?.message || "Failed to save");
-}).finally(async () => {
-setSavingEdit(false);
-});
+    })()
+      .catch(async (e: any) => {
+        setEditError(e?.message || "Failed to save");
+      })
+      .finally(async () => {
+        setSavingEdit(false);
+      });
   };
 
   const createEditor = (options: EditorOptions<Meta>) => {
@@ -590,20 +600,22 @@ setSavingEdit(false);
   // Full-contents loader for the file being edited: the editor needs whole
   // files, while a patch only carries hunks (saving hunk-only text would
   // truncate the file on disk).
-  const loadDiffFiles = async (fd: FileDiffMetadata): Promise<FileDiffLoadedFiles> => {
-      if (!editFile) throw new Error("Not editable");
-      const [oldText, newText] = await Promise.all([
-        editFile.load(fd, "base"),
-        editFile.load(fd, "new"),
-      ]);
-      return {
-        oldFile:
-          oldText == null
-            ? null
-            : { name: fd.prevName || fd.name, contents: oldText },
-        newFile: { name: fd.name, contents: newText ?? "" },
-      } as FileDiffLoadedFiles;
-    };
+  const loadDiffFiles = async (
+    fd: FileDiffMetadata,
+  ): Promise<FileDiffLoadedFiles> => {
+    if (!editFile) throw new Error("Not editable");
+    const [oldText, newText] = await Promise.all([
+      editFile.load(fd, "base"),
+      editFile.load(fd, "new"),
+    ]);
+    return {
+      oldFile:
+        oldText == null
+          ? null
+          : { name: fd.prevName || fd.name, contents: oldText },
+      newFile: { name: fd.name, contents: newText ?? "" },
+    } as FileDiffLoadedFiles;
+  };
 
   const [draft, setDraft] = useState<Draft | null>(null);
   const [confirmation, setConfirmation] = useState<string | null>(null);
@@ -615,11 +627,15 @@ setSavingEdit(false);
   // without making the full diff tree rerender on every textarea keystroke.
   const [draftText] = useState(() => new CommentDraftText());
 
-  const handleSelect = (fileIndex: number, path: string, range: SelectedLineRange | null) => {
+  const handleSelect = (
+    fileIndex: number,
+    path: string,
+    range: SelectedLineRange | null,
+  ) => {
     if (!range) return; // keep the draft on stray deselects; Cancel closes it
     setConfirmation(null);
     setDraft({ fileIndex, path, range });
-    };
+  };
 
   const closeDraft = () => {
     draftText.clear();
@@ -627,100 +643,102 @@ setSavingEdit(false);
   };
 
   const submitDraft = async (body: string) => {
-      const d = draftRef.current;
-      if (!d) return;
-      const side: "additions" | "deletions" =
-        d.range.side === "deletions" ? "deletions" : "additions";
-      await onSubmit(
-        {
-          path: d.path,
-          startLine: Math.min(d.range.start, d.range.end),
-          endLine: Math.max(d.range.start, d.range.end),
-          side,
-        },
-        body,
-      );
-      draftText.clear();
-      setDraft(null);
-      // In review mode the pending card is the confirmation; skip the toast.
-      if (!reviewMode) {
-        setConfirmation(`${submitLabel} ✓`);
-        setTimeout(() => setConfirmation(null), 4000);
-      }
-    };
+    const d = draftRef.current;
+    if (!d) return;
+    const side: "additions" | "deletions" =
+      d.range.side === "deletions" ? "deletions" : "additions";
+    await onSubmit(
+      {
+        path: d.path,
+        startLine: Math.min(d.range.start, d.range.end),
+        endLine: Math.max(d.range.start, d.range.end),
+        side,
+      },
+      body,
+    );
+    draftText.clear();
+    setDraft(null);
+    // In review mode the pending card is the confirmation; skip the toast.
+    if (!reviewMode) {
+      setConfirmation(`${submitLabel} ✓`);
+      setTimeout(() => setConfirmation(null), 4000);
+    }
+  };
 
   const renderPending = (comment: PendingComment): React.ReactNode => {
-      const lineLabel =
-        comment.startLine === comment.endLine
-          ? `line ${comment.startLine}`
-          : `lines ${comment.startLine}–${comment.endLine}`;
-      return (
-        <div
-          className={`${CARD} gap-1.5 border border-l-[3px] border-line-strong border-l-accent px-2.5 py-[9px]`}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-meta text-faint">
-              {comment.path} · {lineLabel}
-              {comment.side === "deletions" ? " (removed)" : ""}
-            </span>
-            {onRemovePending && (
-              <button
-                className="cursor-pointer border-none bg-transparent px-1 py-0.5 text-meta text-faint hover:text-red"
-                onClick={() => onRemovePending(comment.id)}
-                title="Remove this pending comment"
-              >
-                Remove
-              </button>
-            )}
-          </div>
-          <div className="text-label leading-[1.45] whitespace-pre-wrap text-fg [overflow-wrap:anywhere]">
-            {comment.text}
-          </div>
+    const lineLabel =
+      comment.startLine === comment.endLine
+        ? `line ${comment.startLine}`
+        : `lines ${comment.startLine}–${comment.endLine}`;
+    return (
+      <div
+        className={`${CARD} gap-1.5 border border-l-[3px] border-line-strong border-l-accent px-2.5 py-[9px]`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-meta text-faint">
+            {comment.path} · {lineLabel}
+            {comment.side === "deletions" ? " (removed)" : ""}
+          </span>
+          {onRemovePending && (
+            <button
+              className="cursor-pointer border-none bg-transparent px-1 py-0.5 text-meta text-faint hover:text-red"
+              onClick={() => onRemovePending(comment.id)}
+              title="Remove this pending comment"
+            >
+              Remove
+            </button>
+          )}
         </div>
-      );
-    };
+        <div className="text-label leading-[1.45] whitespace-pre-wrap text-fg [overflow-wrap:anywhere]">
+          {comment.text}
+        </div>
+      </div>
+    );
+  };
 
   // Stable across draft/text changes (reads the current draft from the ref), so
   // memoized rows keep their prop identity while the user selects and types.
-  const renderAnnotation = (annotation: DiffLineAnnotation<Meta>): React.ReactNode => {
-      if (annotation.metadata?.kind === "pending") {
-        return renderPending(annotation.metadata.comment);
-      }
-      const d = draftRef.current;
-      if (!d) return null;
-      const lineLabel =
-        d.range.start === d.range.end
-          ? `line ${d.range.start}`
-          : `lines ${Math.min(d.range.start, d.range.end)}–${Math.max(d.range.start, d.range.end)}`;
-      const targetLabel = `${d.path} · ${lineLabel}${d.range.side === "deletions" ? " (removed)" : ""}`;
-      return (
-        <CommentForm
-          targetLabel={targetLabel}
-          disabled={disabled}
-          disabledHint={disabledHint}
-          placeholder={placeholder}
-          submitLabel={submitLabel}
-          textStore={draftText}
-          onCancel={closeDraft}
-          onSubmit={submitDraft}
-        />
-      );
-    };
+  const renderAnnotation = (
+    annotation: DiffLineAnnotation<Meta>,
+  ): React.ReactNode => {
+    if (annotation.metadata?.kind === "pending") {
+      return renderPending(annotation.metadata.comment);
+    }
+    const d = draftRef.current;
+    if (!d) return null;
+    const lineLabel =
+      d.range.start === d.range.end
+        ? `line ${d.range.start}`
+        : `lines ${Math.min(d.range.start, d.range.end)}–${Math.max(d.range.start, d.range.end)}`;
+    const targetLabel = `${d.path} · ${lineLabel}${d.range.side === "deletions" ? " (removed)" : ""}`;
+    return (
+      <CommentForm
+        targetLabel={targetLabel}
+        disabled={disabled}
+        disabledHint={disabledHint}
+        placeholder={placeholder}
+        submitLabel={submitLabel}
+        textStore={draftText}
+        onCancel={closeDraft}
+        onSubmit={submitDraft}
+      />
+    );
+  };
 
   // Group pending comments by file once per change, so unaffected files reuse a
   // stable annotations array reference (and their memoized row bails out).
   const m = new Map<string, DiffLineAnnotation<Meta>[]>();
-for (const c of pendingComments || []) {
-      const arr = m.get(c.path) || [];
-      arr.push({
-        side: c.side === "deletions" ? "deletions" : "additions",
-        lineNumber: c.endLine,
-        metadata: { kind: "pending", comment: c },
-      });
-      m.set(c.path, arr);
-    }
-const pendingByFile = m;
+  for (const c of pendingComments || []) {
+    const arr = m.get(c.path) || [];
+    arr.push({
+      side: c.side === "deletions" ? "deletions" : "additions",
+      lineNumber: c.endLine,
+      metadata: { kind: "pending", comment: c },
+    });
+    m.set(c.path, arr);
+  }
+  const pendingByFile = m;
 
   const resolvedByFile = (() => {
     const byPath = new Map<string, PrReviewThread[]>();
@@ -811,226 +829,232 @@ const pendingByFile = m;
             // scroll to and expand a file (`el.querySelector(".diff-file-header")`).
             className={`${FILE_HEADER} ${stickyFileHeaders ? STICKY_FILE_HEADER_SURFACE : "bg-transparent"}`}
           >
-          <button
-            type="button"
-            className={`diff-file-header ${FILE_TOGGLE}`}
-            aria-expanded={isOpen}
-            onClick={() => {
-              disarm();
-              toggle(i);
-            }}
-          >
-            <IconChevronRight
-              size={16}
-              className={`shrink-0 text-faint transition-transform ${isOpen ? "rotate-90" : ""}`}
-            />
-            <span className="flex size-5 shrink-0 items-center justify-center text-dim">
-              {fileExt(base) ? (
-                <ExtBadge name={base} size={14} />
-              ) : (
-                <IconFile size={17} />
-              )}
-            </span>
-            <span className="flex min-w-0 items-center gap-2 overflow-hidden text-label">
-              <span className="shrink-0 overflow-hidden text-ellipsis whitespace-nowrap font-semibold text-fg">
-                {base}
-              </span>
-              {dir && (
-                <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-faint">
-                  {dir}
-                </span>
-              )}
-            </span>
-          </button>
-          {editable && !isEditing && (
-            <Tooltip label="Edit file in place">
-              <button
-                type="button"
-                className={`${INLINE_ACTION} ${REVEAL} cursor-pointer p-[3px] text-faint hover:bg-hover hover:text-fg phone:pointer-events-auto phone:opacity-100`}
-                aria-label="Edit this file in place"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void startEdit(file, i);
-                }}
-              >
-                <IconPencil size={16} />
-              </button>
-            </Tooltip>
-          )}
-          <Tooltip label={copied === file.name ? "Copied" : "Copy path"}>
-            <Button
-              variant="ghost"
-              size="sm"
-              className={`phone:hidden ${copied === file.name ? "text-green" : "text-faint"}`}
-              aria-label={`Copy path ${file.name}`}
-              icon={
-                copied === file.name ? (
-                  <IconCheck size={18} />
-                ) : (
-                  <IconCopy size={18} />
-                )
-              }
-              onClick={() => copyPath(file.name)}
-            />
-          </Tooltip>
-          {pend.length > 0 && (
-            <span className="inline-flex shrink-0 items-center gap-[3px] font-sans text-meta text-faint before:text-meta before:content-['💬']">
-              {pend.length}
-            </span>
-          )}
-          {isEditing && (
-            <span
-              className="ml-auto inline-flex shrink-0 items-center gap-1.5"
-              onClick={(e) => e.stopPropagation()}
+            <button
+              type="button"
+              className={`diff-file-header ${FILE_TOGGLE}`}
+              aria-expanded={isOpen}
+              onClick={() => {
+                disarm();
+                toggle(i);
+              }}
             >
-              {editError && (
-                <span className="max-w-[260px] overflow-hidden text-ellipsis whitespace-nowrap text-label text-red">
-                  {editError}
-                </span>
-              )}
-              <Button
-                variant="soft"
-                size="sm"
-                className="min-h-0 px-2.5 py-[3px] text-xs font-normal"
-                onClick={cancelEdit}
-                disabled={savingEdit}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                className="min-h-0 px-2.5 py-[3px] text-xs font-medium shadow-none"
-                onClick={saveEdit}
-                disabled={savingEdit}
-              >
-                {savingEdit ? "Saving…" : "Save"}
-              </Button>
-            </span>
-          )}
-          {onDiscard && (
-            <Tooltip
-              label={
-                discarding === file.name
-                  ? "Discarding…"
-                  : armed === file.name
-                    ? "Click again to discard"
-                    : "Discard changes"
-              }
-            >
-              <button
-                type="button"
-                data-discard
-                className={`${ROW_ACTION} right-2 p-0.5 ${
-                  discarding === file.name
-                    ? `${REVEALED} cursor-default text-faint`
-                    : armed === file.name
-                      ? `${REVEALED} cursor-pointer text-red`
-                      : `${REVEAL} cursor-pointer text-faint hover:bg-hover hover:text-red`
-                }`}
-                disabled={discarding === file.name}
-                aria-label="Discard this file's changes (reset to base)"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDiscard(file);
-                }}
-              >
-                <IconUndo size={20} />
-              </button>
-            </Tooltip>
-          )}
-          {/* Change counts stay pinned right, before the review state and menu. */}
-          {showFileStats && (
-            <span
-              className={`ml-auto flex shrink-0 gap-1.5 text-meta ${
-                isEditing ? "hidden" : ""
-              } ${
-                onDiscard
-                  ? "group-hover:invisible [[data-discard]:focus-visible~&]:invisible"
-                  : ""
-              } ${armed === file.name || discarding === file.name ? "invisible" : ""}`}
-            >
-              {s.add > 0 && <span className={DIFF_ADD}>+{s.add}</span>}
-              {s.del > 0 && <span className={DIFF_DEL}>−{s.del}</span>}
-            </span>
-          )}
-          {viewedEnabled && (
-            <label
-              className={`inline-flex shrink-0 cursor-pointer items-center gap-[5px] pl-1 font-sans text-label select-none ${
-                isViewed ? "text-dim" : "text-faint"
-              }`}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <Checkbox
-                checked={isViewed}
-                onCheckedChange={() => toggleViewed(file, i)}
+              <IconChevronRight
+                size={16}
+                className={`shrink-0 text-faint transition-transform ${isOpen ? "rotate-90" : ""}`}
               />
-              Reviewed
-            </label>
-          )}
-          {fileActions && (
-            <Menu.Root>
-              <Tooltip label="File actions">
-                <Menu.Trigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      aria-label={`File actions for ${file.name}`}
-                      icon={<IconDotsHorizontal size={18} />}
-                    />
-                  }
-                />
-              </Tooltip>
-              <Menu.Popup align="end" className="min-w-[230px]">
-                {fileUrl && (
-                  <>
-                    <Menu.Item
-                      onClick={() =>
-                        window.open(fileUrl, "_blank", "noopener,noreferrer")
-                      }
-                    >
-                      <IconArrowUpRight size={18} className={MENU_ICON} />
-                      <span className="min-w-0 flex-1 truncate">
-                        Open file on {fileActions.providerName}
-                      </span>
-                    </Menu.Item>
-                    <Menu.Item
-                      onClick={() => copyMenuValue(fileUrl, "File link copied")}
-                    >
-                      <IconLink size={18} className={MENU_ICON} />
-                      <span className="min-w-0 flex-1 truncate">
-                        Copy link to file
-                      </span>
-                    </Menu.Item>
-                    <Menu.Separator />
-                  </>
+              <span className="flex size-5 shrink-0 items-center justify-center text-dim">
+                {fileExt(base) ? (
+                  <ExtBadge name={base} size={14} />
+                ) : (
+                  <IconFile size={17} />
                 )}
-                <Menu.Item
-                  onClick={() => copyMenuValue(file.name, "File path copied")}
+              </span>
+              <span className="flex min-w-0 items-center gap-2 overflow-hidden text-label">
+                <span className="shrink-0 overflow-hidden text-ellipsis whitespace-nowrap font-semibold text-fg">
+                  {base}
+                </span>
+                {dir && (
+                  <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-faint">
+                    {dir}
+                  </span>
+                )}
+              </span>
+            </button>
+            {editable && !isEditing && (
+              <Tooltip label="Edit file in place">
+                <button
+                  type="button"
+                  className={`${INLINE_ACTION} ${REVEAL} cursor-pointer p-[3px] text-faint hover:bg-hover hover:text-fg phone:pointer-events-auto phone:opacity-100`}
+                  aria-label="Edit this file in place"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void startEdit(file, i);
+                  }}
                 >
-                  <IconCopy size={18} className={MENU_ICON} />
-                  <span className="min-w-0 flex-1 truncate">Copy full path</span>
-                </Menu.Item>
-                <Menu.Item
-                  onClick={() => copyMenuValue(base, "Filename copied")}
+                  <IconPencil size={16} />
+                </button>
+              </Tooltip>
+            )}
+            <Tooltip label={copied === file.name ? "Copied" : "Copy path"}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className={`phone:hidden ${copied === file.name ? "text-green" : "text-faint"}`}
+                aria-label={`Copy path ${file.name}`}
+                icon={
+                  copied === file.name ? (
+                    <IconCheck size={18} />
+                  ) : (
+                    <IconCopy size={18} />
+                  )
+                }
+                onClick={() => copyPath(file.name)}
+              />
+            </Tooltip>
+            {pend.length > 0 && (
+              <span className="inline-flex shrink-0 items-center gap-[3px] font-sans text-meta text-faint before:text-meta before:content-['💬']">
+                {pend.length}
+              </span>
+            )}
+            {isEditing && (
+              <span
+                className="ml-auto inline-flex shrink-0 items-center gap-1.5"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {editError && (
+                  <span className="max-w-[260px] overflow-hidden text-ellipsis whitespace-nowrap text-label text-red">
+                    {editError}
+                  </span>
+                )}
+                <Button
+                  variant="soft"
+                  size="sm"
+                  className="min-h-0 px-2.5 py-[3px] text-xs font-normal"
+                  onClick={cancelEdit}
+                  disabled={savingEdit}
                 >
-                  <IconCopy size={18} className={MENU_ICON} />
-                  <span className="min-w-0 flex-1 truncate">Copy filename</span>
-                </Menu.Item>
-                {fileActions.loadContents &&
-                  file.type !== "deleted" &&
-                  !IMAGE_EXT.test(file.name) && (
-                  <Menu.Item onClick={() => void copyFileContents(file)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="min-h-0 px-2.5 py-[3px] text-xs font-medium shadow-none"
+                  onClick={saveEdit}
+                  disabled={savingEdit}
+                >
+                  {savingEdit ? "Saving…" : "Save"}
+                </Button>
+              </span>
+            )}
+            {onDiscard && (
+              <Tooltip
+                label={
+                  discarding === file.name
+                    ? "Discarding…"
+                    : armed === file.name
+                      ? "Click again to discard"
+                      : "Discard changes"
+                }
+              >
+                <button
+                  type="button"
+                  data-discard
+                  className={`${ROW_ACTION} right-2 p-0.5 ${
+                    discarding === file.name
+                      ? `${REVEALED} cursor-default text-faint`
+                      : armed === file.name
+                        ? `${REVEALED} cursor-pointer text-red`
+                        : `${REVEAL} cursor-pointer text-faint hover:bg-hover hover:text-red`
+                  }`}
+                  disabled={discarding === file.name}
+                  aria-label="Discard this file's changes (reset to base)"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDiscard(file);
+                  }}
+                >
+                  <IconUndo size={20} />
+                </button>
+              </Tooltip>
+            )}
+            {/* Change counts stay pinned right, before the review state and menu. */}
+            {showFileStats && (
+              <span
+                className={`ml-auto flex shrink-0 gap-1.5 text-meta ${
+                  isEditing ? "hidden" : ""
+                } ${
+                  onDiscard
+                    ? "group-hover:invisible [[data-discard]:focus-visible~&]:invisible"
+                    : ""
+                } ${armed === file.name || discarding === file.name ? "invisible" : ""}`}
+              >
+                {s.add > 0 && <span className={DIFF_ADD}>+{s.add}</span>}
+                {s.del > 0 && <span className={DIFF_DEL}>−{s.del}</span>}
+              </span>
+            )}
+            {viewedEnabled && (
+              <label
+                className={`inline-flex shrink-0 cursor-pointer items-center gap-[5px] pl-1 font-sans text-label select-none ${
+                  isViewed ? "text-dim" : "text-faint"
+                }`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Checkbox
+                  checked={isViewed}
+                  onCheckedChange={() => toggleViewed(file, i)}
+                />
+                Reviewed
+              </label>
+            )}
+            {fileActions && (
+              <Menu.Root>
+                <Tooltip label="File actions">
+                  <Menu.Trigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`File actions for ${file.name}`}
+                        icon={<IconDotsHorizontal size={18} />}
+                      />
+                    }
+                  />
+                </Tooltip>
+                <Menu.Popup align="end" className="min-w-[230px]">
+                  {fileUrl && (
+                    <>
+                      <Menu.Item
+                        onClick={() =>
+                          window.open(fileUrl, "_blank", "noopener,noreferrer")
+                        }
+                      >
+                        <IconArrowUpRight size={18} className={MENU_ICON} />
+                        <span className="min-w-0 flex-1 truncate">
+                          Open file on {fileActions.providerName}
+                        </span>
+                      </Menu.Item>
+                      <Menu.Item
+                        onClick={() =>
+                          copyMenuValue(fileUrl, "File link copied")
+                        }
+                      >
+                        <IconLink size={18} className={MENU_ICON} />
+                        <span className="min-w-0 flex-1 truncate">
+                          Copy link to file
+                        </span>
+                      </Menu.Item>
+                      <Menu.Separator />
+                    </>
+                  )}
+                  <Menu.Item
+                    onClick={() => copyMenuValue(file.name, "File path copied")}
+                  >
                     <IconCopy size={18} className={MENU_ICON} />
                     <span className="min-w-0 flex-1 truncate">
-                      Copy file contents
+                      Copy full path
                     </span>
                   </Menu.Item>
-                )}
-              </Menu.Popup>
-            </Menu.Root>
-          )}
+                  <Menu.Item
+                    onClick={() => copyMenuValue(base, "Filename copied")}
+                  >
+                    <IconCopy size={18} className={MENU_ICON} />
+                    <span className="min-w-0 flex-1 truncate">
+                      Copy filename
+                    </span>
+                  </Menu.Item>
+                  {fileActions.loadContents &&
+                    file.type !== "deleted" &&
+                    !IMAGE_EXT.test(file.name) && (
+                      <Menu.Item onClick={() => void copyFileContents(file)}>
+                        <IconCopy size={18} className={MENU_ICON} />
+                        <span className="min-w-0 flex-1 truncate">
+                          Copy file contents
+                        </span>
+                      </Menu.Item>
+                    )}
+                </Menu.Popup>
+              </Menu.Root>
+            )}
           </div>
         </div>
         {(isOpen || resolved.length > 0) && (
@@ -1174,14 +1198,14 @@ const pendingByFile = m;
                     {group.indices.length}
                   </span>
                   {showFileStats && (
-                  <span className="ml-auto flex gap-2 text-meta">
+                    <span className="ml-auto flex gap-2 text-meta">
                       {totals.add > 0 && (
                         <span className={DIFF_ADD}>+{totals.add}</span>
                       )}
                       {totals.del > 0 && (
                         <span className={DIFF_DEL}>−{totals.del}</span>
                       )}
-                  </span>
+                    </span>
                   )}
                 </button>
                 {!collapsed && (
@@ -1199,8 +1223,8 @@ const pendingByFile = m;
         {disabled
           ? disabledHint || "Commenting is unavailable right now."
           : reviewMode
-          ? "Click a line number (drag for a range) to add a comment. They stay pending until you finish the review."
-          : "Click a line number (drag for a range) to comment."}
+            ? "Click a line number (drag for a range) to add a comment. They stay pending until you finish the review."
+            : "Click a line number (drag for a range) to comment."}
       </div>
     </div>
   );
@@ -1469,22 +1493,22 @@ const FileDiffRow = function FileDiffRow({
   createEditor?: (options: EditorOptions<Meta>) => DiffsEditor<Meta>;
   loadDiffFiles?: (fd: FileDiffMetadata) => Promise<FileDiffLoadedFiles>;
 }) {
-  const options = (({
-      ...BASE_OPTIONS,
-      diffStyle,
-      overflow: wrapLines ? ("wrap" as const) : ("scroll" as const),
-      lineDiffType: structuralHighlighting
-        ? ("word-alt" as const)
-        : ("none" as const),
-      theme: theme === "light" ? "pierre-light" : "pierre-dark",
-      themeType: theme,
-      // Line selection drives commenting; while editing, clicks place the
-      // caret instead.
-      enableLineSelection: !editing,
-      ...(loadDiffFiles ? { loadDiffFiles } : {}),
-      onLineSelected: (range: SelectedLineRange | null) =>
-        onSelect(fileIndex, file.name, range),
-    }));
+  const options = {
+    ...BASE_OPTIONS,
+    diffStyle,
+    overflow: wrapLines ? ("wrap" as const) : ("scroll" as const),
+    lineDiffType: structuralHighlighting
+      ? ("word-alt" as const)
+      : ("none" as const),
+    theme: theme === "light" ? "pierre-light" : "pierre-dark",
+    themeType: theme,
+    // Line selection drives commenting; while editing, clicks place the
+    // caret instead.
+    enableLineSelection: !editing,
+    ...(loadDiffFiles ? { loadDiffFiles } : {}),
+    onLineSelected: (range: SelectedLineRange | null) =>
+      onSelect(fileIndex, file.name, range),
+  };
 
   const fileDiff = (
     <FileDiff<Meta>

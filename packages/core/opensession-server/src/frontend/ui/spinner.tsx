@@ -20,25 +20,25 @@ import { cn } from "./cn";
 export type SpinnerSize = "sm" | "md" | "lg";
 
 const sizes: Record<SpinnerSize, string> = {
-	sm: "size-3 border",
-	md: "size-4 border-2",
-	lg: "size-5 border-2",
+  sm: "size-3 border",
+  md: "size-4 border-2",
+  lg: "size-5 border-2",
 };
 
 export function Spinner({
-	size = "sm",
-	className,
-	...props
+  size = "sm",
+  className,
+  ...props
 }: React.ComponentPropsWithoutRef<"span"> & { size?: SpinnerSize }) {
-	return (
-		<span
-			aria-hidden
-			className={cn(
-				"inline-block shrink-0 animate-spin rounded-full border-current/25 border-t-current",
-				sizes[size],
-				className,
-			)}
-			{...props}
-		/>
-	);
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "inline-block shrink-0 animate-spin rounded-full border-current/25 border-t-current",
+        sizes[size],
+        className,
+      )}
+      {...props}
+    />
+  );
 }

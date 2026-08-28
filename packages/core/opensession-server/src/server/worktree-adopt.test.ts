@@ -1,5 +1,12 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync, utimesSync } from "fs";
+import {
+  mkdtempSync,
+  writeFileSync,
+  rmSync,
+  existsSync,
+  readFileSync,
+  utimesSync,
+} from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { $ } from "bun";
@@ -75,7 +82,9 @@ describe("createWorktree branch-collision adoption", () => {
 
     const wtPath = await createWorktree("orphan-branch", "scratch");
     expect(existsSync(join(wtPath, ".git"))).toBe(true);
-    const head = (await $`git -C ${wtPath} branch --show-current`.text()).trim();
+    const head = (
+      await $`git -C ${wtPath} branch --show-current`.text()
+    ).trim();
     expect(head).toBe("orphan-branch");
   });
 
@@ -98,7 +107,9 @@ describe("createWorktree branch-collision adoption", () => {
   test("plain create still works (no collision)", async () => {
     const { createWorktree } = await import("./worktree");
     const wtPath = await createWorktree("fresh-branch", "scratch");
-    const head = (await $`git -C ${wtPath} branch --show-current`.text()).trim();
+    const head = (
+      await $`git -C ${wtPath} branch --show-current`.text()
+    ).trim();
     expect(head).toBe("fresh-branch");
   });
 });
@@ -145,7 +156,12 @@ describe("worktree revival", () => {
   test("ignores a stale tracking ref when the remote branch is gone", async () => {
     const { reviveWorktree } = await import("./worktree");
     await git(repoDir, "branch", "stale-remote", "origin/main");
-    await git(repoDir, "update-ref", "refs/remotes/origin/stale-remote", "refs/heads/stale-remote");
+    await git(
+      repoDir,
+      "update-ref",
+      "refs/remotes/origin/stale-remote",
+      "refs/heads/stale-remote",
+    );
     await git(repoDir, "branch", "-D", "stale-remote");
 
     const wtPath = await reviveWorktree("stale-remote", "scratch");
@@ -163,7 +179,9 @@ describe("worktree revival", () => {
     await expect(reviveWorktree("owned-branch", "scratch")).rejects.toThrow(
       new RegExp(`already checked out at ${ownerPath}`),
     );
-    expect(existsSync(join(root, "worktrees", "scratch-owned-branch"))).toBe(false);
+    expect(existsSync(join(root, "worktrees", "scratch-owned-branch"))).toBe(
+      false,
+    );
   });
 });
 
@@ -174,15 +192,21 @@ describe("review worktree reuse", () => {
     await git(repoDir, "push", "origin", "review-head");
     await git(repoDir, "checkout", "main");
 
-    const wtPath = await createReviewWorktreeForPrHead("review-head", "scratch", "main");
+    const wtPath = await createReviewWorktreeForPrHead(
+      "review-head",
+      "scratch",
+      "main",
+    );
     await git(wtPath, "switch", "-C", "review-head", "origin/review-head");
     writeFileSync(join(wtPath, "a.txt"), "dirty review checkout\n");
-    expect((await $`git -C ${wtPath} branch --show-current`.text()).trim()).toBe("review-head");
+    expect(
+      (await $`git -C ${wtPath} branch --show-current`.text()).trim(),
+    ).toBe("review-head");
 
     await createReviewWorktreeForPrHead("review-head", "scratch", "main");
-    expect((await $`git -C ${wtPath} branch --show-current`.text()).trim()).toBe(
-      "review-head-os-review",
-    );
+    expect(
+      (await $`git -C ${wtPath} branch --show-current`.text()).trim(),
+    ).toBe("review-head-os-review");
     expect(await Bun.file(join(wtPath, "a.txt")).text()).toBe("hello\n");
   });
 
@@ -193,8 +217,14 @@ describe("review worktree reuse", () => {
     await git(repoDir, "push", "origin", "review-stale-lock");
     await git(repoDir, "checkout", "main");
 
-    const wtPath = await createReviewWorktreeForPrHead("review-stale-lock", "scratch", "main");
-    const gitdir = readFileSync(join(wtPath, ".git"), "utf8").replace(/^gitdir:\s*/, "").trim();
+    const wtPath = await createReviewWorktreeForPrHead(
+      "review-stale-lock",
+      "scratch",
+      "main",
+    );
+    const gitdir = readFileSync(join(wtPath, ".git"), "utf8")
+      .replace(/^gitdir:\s*/, "")
+      .trim();
     const lockPath = join(gitdir, "index.lock");
     writeFileSync(lockPath, "");
     const staleAt = new Date(Date.now() - 10 * 60_000);
@@ -207,12 +237,24 @@ describe("review worktree reuse", () => {
   test("recreates a half-initialized review checkout left by a killed Git process", async () => {
     const { createReviewWorktreeForPrHead } = await import("./worktree");
     await git(repoDir, "checkout", "main");
-    await git(repoDir, "checkout", "-b", "review-half-initialized", "origin/main");
+    await git(
+      repoDir,
+      "checkout",
+      "-b",
+      "review-half-initialized",
+      "origin/main",
+    );
     await git(repoDir, "push", "origin", "review-half-initialized");
     await git(repoDir, "checkout", "main");
 
-    const wtPath = await createReviewWorktreeForPrHead("review-half-initialized", "scratch", "main");
-    const gitdir = readFileSync(join(wtPath, ".git"), "utf8").replace(/^gitdir:\s*/, "").trim();
+    const wtPath = await createReviewWorktreeForPrHead(
+      "review-half-initialized",
+      "scratch",
+      "main",
+    );
+    const gitdir = readFileSync(join(wtPath, ".git"), "utf8")
+      .replace(/^gitdir:\s*/, "")
+      .trim();
     await git(wtPath, "read-tree", "--empty");
     await git(repoDir, "checkout", "review-half-initialized");
     writeFileSync(join(repoDir, "a.txt"), "updated\n");
@@ -226,15 +268,21 @@ describe("review worktree reuse", () => {
     const staleAt = new Date(Date.now() - 10 * 60_000);
     utimesSync(lockPath, staleAt, staleAt);
 
-    await createReviewWorktreeForPrHead("review-half-initialized", "scratch", "main");
+    await createReviewWorktreeForPrHead(
+      "review-half-initialized",
+      "scratch",
+      "main",
+    );
 
-    expect((await $`git -C ${wtPath} status --porcelain`.text()).trim()).toBe("");
-    expect((await $`git -C ${wtPath} branch --show-current`.text()).trim()).toBe(
-      "review-half-initialized-os-review",
+    expect((await $`git -C ${wtPath} status --porcelain`.text()).trim()).toBe(
+      "",
     );
+    expect(
+      (await $`git -C ${wtPath} branch --show-current`.text()).trim(),
+    ).toBe("review-half-initialized-os-review");
     expect(await Bun.file(join(wtPath, "a.txt")).text()).toBe("updated\n");
-    expect((await $`git -C ${repoDir} worktree list --porcelain`.text())).not.toContain(
-      `worktree ${wtPath}\nlocked`,
-    );
+    expect(
+      await $`git -C ${repoDir} worktree list --porcelain`.text(),
+    ).not.toContain(`worktree ${wtPath}\nlocked`);
   });
 });

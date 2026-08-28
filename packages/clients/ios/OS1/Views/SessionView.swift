@@ -1067,10 +1067,6 @@ struct SessionView: View {
         .padding(12)
         .frame(maxWidth: contentMaxWidth, alignment: .leading)
         .background(OS1VisualStyle.yellow.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(OS1VisualStyle.yellow.opacity(0.28), lineWidth: 1)
-        }
         .padding(.horizontal, 12)
         .padding(.top, 6)
         .accessibilityElement(children: .combine)
@@ -1444,10 +1440,9 @@ struct SessionView: View {
             showingEmptyContent ? .top : .bottom,
             for: .sizeChanges
         )
-        // Keep the composer anchored above an open keyboard while the reader
-        // scrolls. Interactive dismissal drags both down and can park the
-        // composer partly outside the viewport.
-        .scrollKeepsKeyboardPresentedCompat()
+        // Let the transcript track a downward swipe so the keyboard can be
+        // dismissed without leaving the conversation.
+        .scrollDismissesKeyboardCompat()
         .scrollPosition($scrollPosition)
     }
 

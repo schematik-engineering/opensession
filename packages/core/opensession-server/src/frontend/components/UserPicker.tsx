@@ -117,10 +117,8 @@ export function useAuthStatus(): AuthStatus | null {
 /** Sign out of the GitHub web session and return to the sign-in screen. */
 export async function signOut(): Promise<void> {
   await (async () => {
-await fetch(`${BASE_PATH}/api/auth/logout`, { method: "POST" });
-})().catch(async () => {
-
-});
+    await fetch(`${BASE_PATH}/api/auth/logout`, { method: "POST" });
+  })().catch(async () => {});
   window.location.reload();
 }
 
@@ -129,16 +127,16 @@ await fetch(`${BASE_PATH}/api/auth/logout`, { method: "POST" });
  * vendored beside the app so the sign-in gate never depends on a public CDN.
  */
 function AuthBackdrop() {
-	const [theme, setTheme] = useState(effectiveTheme);
-	useEffect(() => onThemeChanged(() => setTheme(effectiveTheme())), []);
-	const name = theme === "dark" ? "onboarding-bg-dark" : "onboarding-bg";
-	return (
-		<div
-			aria-hidden="true"
-			className="pointer-events-none absolute inset-0 select-none bg-surface bg-cover bg-center"
-			style={{ backgroundImage: `url(${BASE_PATH}/${name}.webp)` }}
-		/>
-	);
+  const [theme, setTheme] = useState(effectiveTheme);
+  useEffect(() => onThemeChanged(() => setTheme(effectiveTheme())), []);
+  const name = theme === "dark" ? "onboarding-bg-dark" : "onboarding-bg";
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 select-none bg-surface bg-cover bg-center"
+      style={{ backgroundImage: `url(${BASE_PATH}/${name}.webp)` }}
+    />
+  );
 }
 
 /**
@@ -163,69 +161,69 @@ function AuthBackdrop() {
  * and it is named on the button.
  */
 function AuthCard({
-	title,
-	children,
+  title,
+  children,
 }: {
-	title: string;
-	children?: React.ReactNode;
+  title: string;
+  children?: React.ReactNode;
 }) {
-	return (
-		// Before sign-in there is no sidebar or header, so the desktop shell has
-		// none of the rows it normally makes draggable. The backdrop is the handle
-		// here; the card opts back out so its controls stay clickable. The durable
-		// shell capability keeps this working if WCO geometry disappears.
-		<div className="relative flex h-screen items-center justify-center overflow-hidden p-6 [html.wco_&]:[-webkit-app-region:drag] [html.wco_&]:[app-region:drag] [html.desktop-shell_&]:[-webkit-app-region:drag] [html.desktop-shell_&]:[app-region:drag]">
-			<AuthBackdrop />
-			<div className="relative w-[400px] max-w-full rounded-3xl bg-popup-glass p-8 text-center shadow-(--auth-card-edge) [backdrop-filter:var(--popup-blur)] phone:p-6 [html.wco_&]:[-webkit-app-region:no-drag] [html.wco_&]:[app-region:no-drag] [html.desktop-shell_&]:[-webkit-app-region:no-drag] [html.desktop-shell_&]:[app-region:no-drag]">
-				<AuthMark />
-				{/* Medium, not semibold: at 19px on the card's own paper the heavier
+  return (
+    // Before sign-in there is no sidebar or header, so the desktop shell has
+    // none of the rows it normally makes draggable. The backdrop is the handle
+    // here; the card opts back out so its controls stay clickable. The durable
+    // shell capability keeps this working if WCO geometry disappears.
+    <div className="relative flex h-screen items-center justify-center overflow-hidden p-6 [html.wco_&]:[-webkit-app-region:drag] [html.wco_&]:[app-region:drag] [html.desktop-shell_&]:[-webkit-app-region:drag] [html.desktop-shell_&]:[app-region:drag]">
+      <AuthBackdrop />
+      <div className="relative w-[400px] max-w-full rounded-3xl bg-popup-glass p-8 text-center shadow-(--auth-card-edge) [backdrop-filter:var(--popup-blur)] phone:p-6 [html.wco_&]:[-webkit-app-region:no-drag] [html.wco_&]:[app-region:no-drag] [html.desktop-shell_&]:[-webkit-app-region:no-drag] [html.desktop-shell_&]:[app-region:no-drag]">
+        <AuthMark />
+        {/* Medium, not semibold: at 19px on the card's own paper the heavier
 				    step read as a slab rather than a heading. */}
-				<h1 className="m-0 text-section-title font-title text-fg">{title}</h1>
-				{children}
-			</div>
-		</div>
-	);
+        <h1 className="m-0 text-section-title font-title text-fg">{title}</h1>
+        {children}
+      </div>
+    </div>
+  );
 }
 
 /** The card's mark: the organization's configured icon when one exists (its
  *  URL arrives pre-auth on /api/auth/status), else the bundled app mark. A
  *  configured icon that fails to load falls back rather than leaving a hole. */
 function AuthMark() {
-	const fallback = `${BASE_PATH}/mac-app-icon.png?v=7`;
-	const configured = useAuthStatus()?.organizationIconUrl || null;
-	const [failedSrc, setFailedSrc] = useState<string | null>(null);
-	const custom = configured !== null && configured !== failedSrc;
-	const src = custom ? configured : fallback;
-	return (
-		<img
-			src={src}
-			alt=""
-			width={56}
-			height={56}
-			// The bundled mark is drawn to the tile's edge; an uploaded org icon is
-			// a full-bleed square (Settings → General crops it to one), so it rounds
-			// like it does in the OrganizationSwitcher.
-			className={cn(
-				"mx-auto mb-5 block size-14",
-				custom ? "rounded-control object-cover" : "",
-			)}
-			onError={() => {
-				if (custom) setFailedSrc(src);
-			}}
-		/>
-	);
+  const fallback = `${BASE_PATH}/mac-app-icon.png?v=7`;
+  const configured = useAuthStatus()?.organizationIconUrl || null;
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const custom = configured !== null && configured !== failedSrc;
+  const src = custom ? configured : fallback;
+  return (
+    <img
+      src={src}
+      alt=""
+      width={56}
+      height={56}
+      // The bundled mark is drawn to the tile's edge; an uploaded org icon is
+      // a full-bleed square (Settings → General crops it to one), so it rounds
+      // like it does in the OrganizationSwitcher.
+      className={cn(
+        "mx-auto mb-5 block size-14",
+        custom ? "rounded-control object-cover" : "",
+      )}
+      onError={() => {
+        if (custom) setFailedSrc(src);
+      }}
+    />
+  );
 }
 
 /** The sentence under an AuthCard's title. */
 function AuthCopy({ children }: { children: React.ReactNode }) {
-	return (
-		// `last:mb-0` for the cards whose sentence IS the card (the expired
-		// notice): the margin is air before whatever follows, and with nothing
-		// following it just lands the card off-centre.
-		<p className="mx-auto mt-2 mb-6 max-w-[32ch] text-supporting leading-normal text-dim last:mb-0">
-			{children}
-		</p>
-	);
+  return (
+    // `last:mb-0` for the cards whose sentence IS the card (the expired
+    // notice): the margin is air before whatever follows, and with nothing
+    // following it just lands the card off-centre.
+    <p className="mx-auto mt-2 mb-6 max-w-[32ch] text-supporting leading-normal text-dim last:mb-0">
+      {children}
+    </p>
+  );
 }
 
 /**
@@ -240,79 +238,87 @@ export function UserGate({ children }: { children: React.ReactNode }) {
   const user = useCurrentUser();
   const roster = usePeople();
   TEAM.splice(0, TEAM.length, ...roster.map(({ name }) => name));
-	const [auth, setAuth] = useState<AuthStatus | null>(null);
-	const [authFailed, setAuthFailed] = useState(false);
-	const loadAuth = () => {
-		setAuthFailed(false);
-		fetch(`${BASE_PATH}/api/auth/status`)
-			.then((r) => {
-				if (!r.ok) throw new Error(`Authentication status failed: ${r.status}`);
-				return r.json();
-			})
-			.then(async (body: AuthStatus | null) => {
-				if (!body) throw new Error("Authentication status was empty");
-				if (body.required && body.authenticated && body.name) {
-					const user = body.name.split(" ")[0];
-					setStoredUser(user);
-				} else if (!body.required && getCurrentUser() === "Anonymous") {
-					// A fresh local instance has nobody to choose between. Wait for the
-					// roster so a configured team still gets its picker, then enter an
-					// empty or single-person instance directly into first-mile setup.
-					await ensurePeople();
-					const people = getPeople();
-					if (people.length <= 1) setStoredUser(people[0]?.name ?? "Local User");
-				}
-				setAuth(body);
-				// Publish readiness after localStorage carries the verified or local
-				// name so deferred per-user stores hydrate the right account.
-				setAuthStatusCache(body);
-			})
-			.catch(() => setAuthFailed(true));
-	};
+  const [auth, setAuth] = useState<AuthStatus | null>(null);
+  const [authFailed, setAuthFailed] = useState(false);
+  const loadAuth = () => {
+    setAuthFailed(false);
+    fetch(`${BASE_PATH}/api/auth/status`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`Authentication status failed: ${r.status}`);
+        return r.json();
+      })
+      .then(async (body: AuthStatus | null) => {
+        if (!body) throw new Error("Authentication status was empty");
+        if (body.required && body.authenticated && body.name) {
+          const user = body.name.split(" ")[0];
+          setStoredUser(user);
+        } else if (!body.required && getCurrentUser() === "Anonymous") {
+          // A fresh local instance has nobody to choose between. Wait for the
+          // roster so a configured team still gets its picker, then enter an
+          // empty or single-person instance directly into first-mile setup.
+          await ensurePeople();
+          const people = getPeople();
+          if (people.length <= 1)
+            setStoredUser(people[0]?.name ?? "Local User");
+        }
+        setAuth(body);
+        // Publish readiness after localStorage carries the verified or local
+        // name so deferred per-user stores hydrate the right account.
+        setAuthStatusCache(body);
+      })
+      .catch(() => setAuthFailed(true));
+  };
 
   useEffect(() => {
-		loadAuth();
+    loadAuth();
   }, []);
 
-	// A refused WebSocket upgrade can reveal the gate is up before this
-	// component's own status resolves (the optimistic paint below) or after it
-	// resolved to no-gate (the gate was enabled under an open tab). Honor that
-	// signal so the sign-in card, not a "reconnecting" overlay, stands in for a
-	// browser the server will no longer accept.
-	const liveAuth = useAuthStatus();
-	if (authGatesOut(liveAuth) && !(auth?.required && auth.authenticated)) {
-		return (
-			<GithubSignIn
-				reconnect={liveAuth!.reconnectRequired === true}
-				login={liveAuth!.login}
-				onSignedIn={(status) => {
-					setAuth(status);
-					setAuthStatusCache(status);
-				}}
-			/>
-		);
-	}
+  // A refused WebSocket upgrade can reveal the gate is up before this
+  // component's own status resolves (the optimistic paint below) or after it
+  // resolved to no-gate (the gate was enabled under an open tab). Honor that
+  // signal so the sign-in card, not a "reconnecting" overlay, stands in for a
+  // browser the server will no longer accept.
+  const liveAuth = useAuthStatus();
+  if (authGatesOut(liveAuth) && !(auth?.required && auth.authenticated)) {
+    return (
+      <GithubSignIn
+        reconnect={liveAuth!.reconnectRequired === true}
+        login={liveAuth!.login}
+        onSignedIn={(status) => {
+          setAuth(status);
+          setAuthStatusCache(status);
+        }}
+      />
+    );
+  }
 
-	// Returning visitors already have a local identity. Let the app paint while
-	// the server verifies its HttpOnly session, as it did before this check grew
-	// a blocking loading screen. The server still enforces auth on every route.
-	if (!auth && !authFailed && user !== "Anonymous") return <>{children}</>;
+  // Returning visitors already have a local identity. Let the app paint while
+  // the server verifies its HttpOnly session, as it did before this check grew
+  // a blocking loading screen. The server still enforces auth on every route.
+  if (!auth && !authFailed && user !== "Anonymous") return <>{children}</>;
 
-	if (!auth) {
-		if (authFailed) {
-			return (
-				<AuthCard title="Couldn't check sign-in">
-					<AuthCopy>The server didn't answer. It may still be starting up.</AuthCopy>
-					<Button variant="primary" size="lg" className="min-h-10 w-full" onClick={loadAuth}>
-						Try again
-					</Button>
-				</AuthCard>
-			);
-		}
-		// The static launch splash stays visible while this returns nothing. Only
-		// mount the sign-in scene once the server says it is actually needed.
-		return null;
-	}
+  if (!auth) {
+    if (authFailed) {
+      return (
+        <AuthCard title="Couldn't check sign-in">
+          <AuthCopy>
+            The server didn't answer. It may still be starting up.
+          </AuthCopy>
+          <Button
+            variant="primary"
+            size="lg"
+            className="min-h-10 w-full"
+            onClick={loadAuth}
+          >
+            Try again
+          </Button>
+        </AuthCard>
+      );
+    }
+    // The static launch splash stays visible while this returns nothing. Only
+    // mount the sign-in scene once the server says it is actually needed.
+    return null;
+  }
 
   // GitHub sign-in is configured: it is the only way in, and the name picker
   // below is unreachable. The two are alternatives, never steps of one flow
@@ -409,7 +415,7 @@ function GithubSignIn({
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
       await (async () => {
-const res = await fetch(`${BASE_PATH}/api/auth/device/poll`, {
+        const res = await fetch(`${BASE_PATH}/api/auth/device/poll`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ deviceCode: flow.deviceCode }),
@@ -418,18 +424,23 @@ const res = await fetch(`${BASE_PATH}/api/auth/device/poll`, {
         if (cancelled) return;
         if (body.status === "ok") {
           if (body.name) setStoredUser(body.name.split(" ")[0]);
-          onSignedIn({ required: true, authenticated: true, admin: body.admin, login: body.login, name: body.name });
+          onSignedIn({
+            required: true,
+            authenticated: true,
+            admin: body.admin,
+            login: body.login,
+            name: body.name,
+          });
           return;
         }
-        if (body.status === "slow_down") intervalMs = Math.max(body.interval, 5) * 1000;
+        if (body.status === "slow_down")
+          intervalMs = Math.max(body.interval, 5) * 1000;
         if (body.status === "error" || body.error) {
           setError(body.error || "Sign-in failed");
           setFlow(null);
           return;
         }
-})().catch(async () => {
-
-});
+      })().catch(async () => {});
       if (!cancelled) timer = setTimeout(tick, intervalMs);
     };
     timer = setTimeout(tick, intervalMs);
@@ -443,13 +454,15 @@ const res = await fetch(`${BASE_PATH}/api/auth/device/poll`, {
     setError(null);
     setStarting(true);
     await (async () => {
-const res = await fetch(`${BASE_PATH}/api/auth/device`, { method: "POST" });
+      const res = await fetch(`${BASE_PATH}/api/auth/device`, {
+        method: "POST",
+      });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
       setFlow(body);
-})().catch(async (e: any) => {
-setError(e.message);
-});
+    })().catch(async (e: any) => {
+      setError(e.message);
+    });
     setStarting(false);
   }
 
