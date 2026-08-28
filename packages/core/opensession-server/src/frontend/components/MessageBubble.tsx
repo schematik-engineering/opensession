@@ -14,7 +14,7 @@ import { useOpenAsset, useOpenAssetPaths } from "../lib/open-asset";
 import { assetPathForMediaSrc } from "../lib/asset-preview";
 import { fullTime, shortTime } from "../lib/time";
 import { UserAvatar } from "./UserAvatar";
-import { openGalleryFrom } from "./MediaLightbox";
+import { openGalleryFrom } from "./media-lightbox-controller";
 import { IconExpand, IconPencil } from "./icons";
 import { personKey } from "../lib/review-queue";
 import { AnsweredAskCard } from "./AnsweredAskCard";

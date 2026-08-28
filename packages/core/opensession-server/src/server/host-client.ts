@@ -190,6 +190,16 @@ function runHostsEnabled(): boolean {
   return localRunHostsSupported() && !existsSync(DISABLE_FILE);
 }
 
+// Deterministic test seam for fixtures whose fake engine is module-local and
+// therefore cannot cross the detached-host process boundary. Kept as a plain
+// module local so production restarts always clear it.
+let forceInProcessForTest = false;
+export function __setRunHostsInProcessForTest(enabled: boolean): boolean {
+  const previous = forceInProcessForTest;
+  forceInProcessForTest = enabled;
+  return previous;
+}
+
 /** Options for a hosted run: RunAgentOpts minus the non-serializable bits,
  *  plus the host/session context. */
 export interface HostedRunOpts {
@@ -259,6 +269,10 @@ export interface HostedRunOpts {
  */
 export async function* runAgentHosted(opts: HostedRunOpts): AsyncGenerator<StreamEvent> {
   if (opts.shouldCancel?.()) return;
+  if (forceInProcessForTest) {
+    yield* runAgentInProcess(opts);
+    return;
+  }
   if (!runHostsEnabled()) {
     if (localRunHostsSupported()) {
       throw new Error(
@@ -331,6 +345,10 @@ export async function* runAuxiliaryAgentHosted(
   opts: AuxiliaryHostedRunOpts,
 ): AsyncGenerator<StreamEvent> {
   const shouldCancel = () => Boolean(opts.signal?.aborted || opts.shouldCancel?.());
+  if (forceInProcessForTest) {
+    yield* runAgentInProcess({ ...opts, shouldCancel }, "auxiliary");
+    return;
+  }
   if (!runHostsEnabled()) {
     if (localRunHostsSupported()) {
       throw new Error(

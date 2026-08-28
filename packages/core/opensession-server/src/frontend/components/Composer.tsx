@@ -41,7 +41,7 @@ import {
 import { useSessionNameProjection } from "../hooks/useSessionNameProjection";
 import { usePeople } from "../lib/people";
 import { ImageThumbs } from "./ImageThumbs";
-import type { ImageRegionAnnotation } from "./MediaLightbox";
+import type { ImageRegionAnnotation } from "./media-lightbox-controller";
 import { FileChips } from "./FileChips";
 import { QuoteContext } from "./QuoteContext";
 import { PastedTextContext } from "./PastedTextContext";

@@ -103,21 +103,32 @@ export function prepareSnapshotEnv(label: string): SnapshotDirs {
     state: process.env.OPENSESSION_STATE_DIR,
     mcpConfig: process.env.OPENSESSION_MCP_CONFIG,
     piDetach: process.env.OPENSESSION_PI_DETACH,
+    executor: process.env.OPENSESSION_EXECUTOR,
   };
   process.env.OPENSESSION_STATE_DIR = state;
   process.env.OPENSESSION_MCP_CONFIG = mcpConfig;
   process.env.OPENSESSION_PI_DETACH = "0";
+  // Snapshot turns run the engine fake in this process. A production default
+  // that prefers the privileged executor must not make the keyless harness
+  // look for a host socket in its private temporary state directory.
+  process.env.OPENSESSION_EXECUTOR = "0";
   dirs = { root, state, sessions, automations, memory, mcpConfig };
   return dirs;
 }
 
-let prevEnv: { state?: string; mcpConfig?: string; piDetach?: string } = {};
+let prevEnv: {
+  state?: string;
+  mcpConfig?: string;
+  piDetach?: string;
+  executor?: string;
+} = {};
 
 function restoreEnv(): void {
   for (const [name, value] of [
     ["OPENSESSION_STATE_DIR", prevEnv.state],
     ["OPENSESSION_MCP_CONFIG", prevEnv.mcpConfig],
     ["OPENSESSION_PI_DETACH", prevEnv.piDetach],
+    ["OPENSESSION_EXECUTOR", prevEnv.executor],
   ] as const) {
     if (value === undefined) delete process.env[name];
     else process.env[name] = value;
@@ -180,6 +191,8 @@ export async function loadSnapshotHarness(): Promise<SnapshotHarness> {
   const memory = await import("../../agents/slack/memory");
   const memoryV2 = await import("../memory-v2/runtime");
   const prevMemoryDir = memory.__setMemoryDirForTest(d.memory);
+  const hostClient = await import("../host-client");
+  const prevRunHostsInProcess = hostClient.__setRunHostsInProcessForTest(true);
 
   const runSession = await import("../run-session");
   const agentRunner = await import("../agent-runner");
@@ -332,6 +345,7 @@ export async function loadSnapshotHarness(): Promise<SnapshotHarness> {
     },
     restore() {
       agentRunner.__setEngineForTest(null);
+      hostClient.__setRunHostsInProcessForTest(prevRunHostsInProcess);
       memory.__setMemoryDirForTest(prevMemoryDir);
       transcriptPersistence.__setEngineSessionMapPathForTest(prevMapPath);
       runJournal.__setActiveRunsPathForTest(prevJournal);

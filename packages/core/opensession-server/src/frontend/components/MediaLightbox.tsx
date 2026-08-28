@@ -7,12 +7,7 @@ import React, {
 } from "react";
 import { flushSync } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { type WorkspaceMediaItem } from "../lib/api";
-import {
-	type DiagramMedia,
-	diagramDataUrl,
-	readDiagramSvg,
-} from "../lib/diagram-media";
+import type { DiagramMedia } from "../lib/diagram-media";
 import {
 	canUseNativeIOSShare,
 	nativeShareWasCancelled,
@@ -63,6 +58,21 @@ import {
 	IconTrash,
 	IconX,
 } from "./icons";
+import {
+	type ImageRegionAnnotation,
+	type LightboxItem,
+	type LightboxRequest,
+	mediaElement,
+	openGalleryFrom,
+	registerLightboxHost,
+} from "./media-lightbox-controller";
+
+export {
+	type ImageRegionAnnotation,
+	type LightboxItem,
+	openGalleryFrom,
+	openLightbox,
+} from "./media-lightbox-controller";
 
 /**
  * Full-screen lightbox for all in-app media: workspace-media thumbnails (the
@@ -84,40 +94,6 @@ import {
  * via dangerouslySetInnerHTML and can't carry React handlers.
  */
 
-export interface ImageRegionAnnotation {
-	id: string;
-	region: ImageRegion;
-	text: string;
-}
-
-export interface LightboxItem {
-	kind: "image" | "video" | "diagram";
-	src: string;
-	/** kind "diagram" only: the live SVG to draw, so that zooming a chart to
-	 * read its labels keeps them sharp instead of magnifying pixels. `src` is
-	 * the same diagram as a file, which is all Download needs — and being a
-	 * data: URL, it also opts the link actions out (see below). */
-	diagram?: DiagramMedia;
-	walkthroughLabel?: WalkthroughMediaLabel;
-	sessionTitle?: string;
-	description?: string;
-	at?: string;
-	/** Session that owns this transcript image. Only these images can send a
-	 *  selected region back into chat. */
-	commentSessionId?: string;
-	/** Existing composer annotations, parsed from the draft that owns this image. */
-	regionAnnotations?: ImageRegionAnnotation[];
-	/** Composer attachments add or edit the comment in the draft instead of
-	 * sending a new turn immediately. `keepOpen` is Shift+Enter's add-another path. */
-	onRegionComment?: (request: {
-		region: ImageRegion;
-		text: string;
-		keepOpen: boolean;
-		existing?: ImageRegionAnnotation;
-	}) => void | Promise<void>;
-	onDeleteRegionComment?: (annotation: ImageRegionAnnotation) => void | Promise<void>;
-}
-
 interface LightboxState {
 	items: LightboxItem[];
 	index: number;
@@ -125,14 +101,6 @@ interface LightboxState {
 	origin?: HTMLElement;
 	originIndex: number;
 	useHeroTransition: boolean;
-	startCommenting?: boolean;
-}
-
-interface LightboxRequest {
-	items: LightboxItem[];
-	index: number;
-	origin?: HTMLElement;
-	/** Enter image-region comment mode as soon as the lightbox opens. */
 	startCommenting?: boolean;
 }
 
@@ -151,7 +119,6 @@ type ViewTransitionDocument = Document & {
 
 const HERO_TRANSITION_NAME = "lightbox-media";
 let nextLightboxId = 0;
-let host: ((request: LightboxRequest) => void) | null = null;
 
 const LIGHTBOX_TRANSITION_CSS = `
 html[data-lightbox-transition="opening"]::view-transition-old(root),
@@ -190,12 +157,6 @@ html[data-lightbox-transition="closing"]::view-transition-old(root) {
   to { opacity: 0; }
 }
 `;
-
-function mediaElement(origin?: Element | null): HTMLElement | undefined {
-	if (!(origin instanceof HTMLElement)) return undefined;
-	if (origin.matches("img, video")) return origin;
-	return origin.querySelector<HTMLElement>("img, video") || origin;
-}
 
 function canMorphFrom(origin?: HTMLElement): origin is HTMLElement {
 	if (!origin?.isConnected) return false;
@@ -237,87 +198,6 @@ function supportsHeroTransition(): boolean {
 	return (
 		typeof (document as ViewTransitionDocument).startViewTransition === "function" &&
 		!window.matchMedia("(prefers-reduced-motion: reduce)").matches
-	);
-}
-
-function commentSessionIdFor(element?: Element | null): string | undefined {
-	return element
-		?.closest<HTMLElement>("[data-lightbox-session-id]")
-		?.dataset.lightboxSessionId;
-}
-
-export function openLightbox(
-	items: (LightboxItem | WorkspaceMediaItem)[],
-	index: number,
-	origin?: Element | null,
-	options: { startCommenting?: boolean } = {},
-) {
-	const source = mediaElement(origin);
-	const fromDom = commentSessionIdFor(source);
-	host?.({
-		// A workspace-media item names its own session, which is the only hint a
-		// gallery outside the transcript (the Shots panel, a hover card) has: the
-		// clicked thumbnail has no transcript ancestor to read the id off.
-		items: items.map((item) => {
-			if (item.kind !== "image") return item;
-			const commentSessionId =
-				("commentSessionId" in item ? item.commentSessionId : undefined) ||
-				("sessionId" in item ? item.sessionId : undefined) ||
-				fromDom;
-			return commentSessionId ? { ...item, commentSessionId } : item;
-		}),
-		index,
-		origin: source,
-		startCommenting: options.startCommenting,
-	});
-}
-
-/** Every piece of session media currently in the DOM, in document order —
- * markdown images/videos, pasted attachments, tool-result screenshots. */
-const GALLERY_SELECTOR = "img.md-image, video.md-video, .md-mermaid > svg";
-
-/** One node as an item, or null when it cannot be shown: a diagram whose
- * markup never says how big it is has nothing to letterbox. */
-function galleryItem(node: Element): LightboxItem | null {
-	if (node.tagName === "IMG" || node.tagName === "VIDEO") {
-		const media = node as HTMLImageElement | HTMLVideoElement;
-		return {
-			kind: node.tagName === "VIDEO" ? "video" : "image",
-			src:
-				node.tagName === "IMG"
-					? (media as HTMLImageElement).currentSrc || media.src
-					: media.src,
-			commentSessionId:
-				node.tagName === "IMG" ? commentSessionIdFor(node) : undefined,
-			// Markdown alt text is the only description these carry; captioning the
-			// viewer with it beats a bare counter once you are paging through a
-			// dozen screenshots.
-			sessionTitle: (node as HTMLImageElement).alt?.trim() || undefined,
-		};
-	}
-	const diagram = readDiagramSvg(node.outerHTML);
-	return diagram
-		? { kind: "diagram", src: diagramDataUrl(diagram.svg), diagram }
-		: null;
-}
-
-/** Open the lightbox on `el`, with prev/next browsing across all session media
- * currently on screen (a conversation-wide gallery). */
-export function openGalleryFrom(el: Element) {
-	const shown = Array.from(document.querySelectorAll(GALLERY_SELECTOR)).flatMap(
-		(node) => {
-			const item = galleryItem(node);
-			return item ? [{ node, item }] : [];
-		},
-	);
-	if (shown.length === 0) return;
-	openLightbox(
-		shown.map((entry) => entry.item),
-		Math.max(
-			0,
-			shown.findIndex((entry) => entry.node === el),
-		),
-		el,
 	);
 }
 
@@ -393,9 +273,9 @@ export function MediaLightboxHost() {
 				setState(next);
 			}
 		};
-		host = open;
+		const unregister = registerLightboxHost(open);
 		return () => {
-			if (host === open) host = null;
+			unregister();
 			activeTransition.current?.skipTransition();
 			activeSourceCleanup.current?.();
 		};

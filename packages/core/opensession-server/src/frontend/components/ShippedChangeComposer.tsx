@@ -8,7 +8,7 @@ import { OptionSelect } from "../ui/select";
 import { toast } from "../ui/toast";
 import { Tooltip } from "../ui/tooltip";
 import { BrandMark } from "./BrandMark";
-import { openLightbox } from "./MediaLightbox";
+import { openLightbox } from "./media-lightbox-controller";
 import { IconPlus, IconUndo, IconX } from "./icons";
 import { Spinner } from "../ui/spinner";
 

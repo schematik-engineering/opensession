@@ -17,7 +17,7 @@ import {
 import { assetPreviewKind, isVisualAsset } from "../lib/asset-preview";
 import { useAssetViewMode } from "../lib/asset-view-mode";
 import { AssetViewToggle } from "./AssetViewToggle";
-import { openLightbox } from "./MediaLightbox";
+import { openLightbox } from "./media-lightbox-controller";
 import { fullTime } from "../lib/time";
 import { commitPrompt } from "../lib/commit-prompt";
 import { AGENT_NAME, GITHUB_BOT_LOGINS } from "../lib/brand";

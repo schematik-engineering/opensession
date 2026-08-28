@@ -25,7 +25,7 @@ import {
 	lanePickerLabel,
 	type LanePickerValue,
 } from "./MobileSheetPages";
-import { openLightbox } from "../MediaLightbox";
+import { openLightbox } from "../media-lightbox-controller";
 import { sessionPrTone } from "../../lib/pr-refs";
 import { CardFooter, CardPrChip, checksLabel, osReviewLabel } from "../SidebarRowCards";
 import { IconArrowUpRight, IconClock, IconGitMerge, IconInbox, IconLink, IconMail, IconMoon, IconPencil, IconPin, IconPullRequest } from "../icons";
