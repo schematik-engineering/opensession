@@ -11,6 +11,7 @@ const sharedPath = "packages/core/opensession-server/src/server/runtime-generati
 function closures() {
   return {
     gateway: new Set([gatewayPath, sharedPath]),
+    supervisor: new Set<string>(),
     kernel: new Set([sharedPath]),
     executor: new Set([sharedPath]),
   };
@@ -24,7 +25,11 @@ describe("generated release impact", () => {
   test("restarts the stable supervisor when its own runtime changes", () => {
     const supervisor = "packages/core/opensession-server/src/server/gateway-supervisor.ts";
     const graph = closures();
+    graph.supervisor.add(supervisor);
     expect(classifyRuntimeImpact([supervisor], graph)).toBe("supervisor-restart");
+    const proxy = "packages/core/opensession-server/src/server/gateway-tcp-proxy.ts";
+    graph.supervisor.add(proxy);
+    expect(classifyRuntimeImpact([proxy], graph)).toBe("supervisor-restart");
     expect(classifyRuntimeImpact([supervisor, sharedPath], graph)).toBe(
       "coordinated-supervisor-restart",
     );

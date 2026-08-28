@@ -12,6 +12,7 @@ export type ReleaseImpact =
 
 const ENTRIES = {
   gateway: "packages/core/opensession-server/opensession.ts",
+  supervisor: "packages/core/opensession-server/src/server/gateway-supervisor.ts",
   kernel: "packages/core/opensession-server/src/session-kernel-service.ts",
   executor: "packages/core/opensession-server/src/executor/main.ts",
 } as const;
@@ -71,13 +72,16 @@ export type RuntimeComponents = {
 
 export function classifyRuntimeComponents(
   runtimePaths: string[],
-  closures: { gateway: Set<string>; kernel: Set<string>; executor: Set<string> },
+  closures: {
+    gateway: Set<string>;
+    supervisor: Set<string>;
+    kernel: Set<string>;
+    executor: Set<string>;
+  },
 ): RuntimeComponents {
   const components: RuntimeComponents = {
     gateway: runtimePaths.length > 0,
-    supervisor: runtimePaths.includes(
-      "packages/core/opensession-server/src/server/gateway-supervisor.ts",
-    ),
+    supervisor: runtimePaths.some((path) => closures.supervisor.has(path)),
     kernel: false,
     executor: false,
   };
@@ -90,8 +94,8 @@ export function classifyRuntimeComponents(
       components.executor = true;
       continue;
     }
-    const known = path === "packages/core/opensession-server/src/server/gateway-supervisor.ts" ||
-      closures.gateway.has(path) || closures.kernel.has(path) || closures.executor.has(path);
+    const known = closures.gateway.has(path) || closures.supervisor.has(path) ||
+      closures.kernel.has(path) || closures.executor.has(path);
     components.kernel ||= closures.kernel.has(path);
     components.executor ||= closures.executor.has(path);
     if (!known) {
@@ -105,7 +109,12 @@ export function classifyRuntimeComponents(
 
 export function classifyRuntimeImpact(
   runtimePaths: string[],
-  closures: { gateway: Set<string>; kernel: Set<string>; executor: Set<string> },
+  closures: {
+    gateway: Set<string>;
+    supervisor: Set<string>;
+    kernel: Set<string>;
+    executor: Set<string>;
+  },
 ): "gateway-handoff" | "supervisor-restart" | "coordinated" | "coordinated-supervisor-restart" {
   const components = classifyRuntimeComponents(runtimePaths, closures);
   if (components.kernel || components.executor) {
@@ -158,15 +167,26 @@ export async function classifyReleaseImpact(options: {
     };
   }
 
-  const [gateway, kernel, executor] = await Promise.all([
+  const [gateway, supervisor, kernel, executor] = await Promise.all([
     combinedClosure(options.fromRoot, options.toRoot, ENTRIES.gateway),
+    combinedClosure(options.fromRoot, options.toRoot, ENTRIES.supervisor),
     combinedClosure(options.fromRoot, options.toRoot, ENTRIES.kernel),
     combinedClosure(options.fromRoot, options.toRoot, ENTRIES.executor),
   ]);
-  const closureSizes = { gateway: gateway.size, kernel: kernel.size, executor: executor.size };
-  const components = classifyRuntimeComponents(runtimePaths, { gateway, kernel, executor });
+  const closureSizes = {
+    gateway: gateway.size,
+    supervisor: supervisor.size,
+    kernel: kernel.size,
+    executor: executor.size,
+  };
+  const components = classifyRuntimeComponents(runtimePaths, {
+    gateway,
+    supervisor,
+    kernel,
+    executor,
+  });
   return {
-    impact: classifyRuntimeImpact(runtimePaths, { gateway, kernel, executor }),
+    impact: classifyRuntimeImpact(runtimePaths, { gateway, supervisor, kernel, executor }),
     paths,
     closures: closureSizes,
     components,

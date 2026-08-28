@@ -171,5 +171,9 @@ describe("activateFrontendRelease", () => {
 		expect(version).toBe("App-new.js|global-new.css|no-tw");
 		expect(activeFrontendReleaseRoot()).toBe(releaseRoot);
 		expect(JSON.parse(readFileSync(join(scratch, "frontend-current.json"), "utf8"))).toMatchObject({ sha, baseSha });
+		expect(JSON.parse(readFileSync(join(scratch, "stable-frontend.json"), "utf8"))).toMatchObject({
+			releaseRoot,
+			version,
+		});
 	});
 });

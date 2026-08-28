@@ -54,6 +54,32 @@ describe("gateway TCP proxy", () => {
     expect(echoed).toBe("through-proxy");
   });
 
+  test("serves a stable HTTP fallback while no backend is selected", async () => {
+    const metrics = createGatewayTcpProxyMetrics();
+    const body = "stable shell";
+    const proxy = startGatewayTcpProxy({
+      hostname: "127.0.0.1",
+      port: 0,
+      backendPort: () => 0,
+      retryMs: 5,
+      connectDeadlineMs: 1_000,
+      metrics,
+      fallbackHttp(request) {
+        if (!request.toString().includes("\r\n\r\n")) return null;
+        return Buffer.from(
+          `HTTP/1.1 200 OK\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n${body}`,
+        );
+      },
+    });
+    servers.push(proxy);
+
+    expect(await fetch(`http://127.0.0.1:${proxy.port}/`).then((r) => r.text()))
+      .toBe(body);
+    expect(metrics.fallbackServed).toBe(1);
+    expect(metrics.connected).toBe(0);
+    expect(metrics.pending).toBe(0);
+  });
+
   test("keeps the public listener while the selected backend changes", async () => {
     const first = backend("first");
     let backendPort = first.port!;

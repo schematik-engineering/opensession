@@ -441,17 +441,24 @@ class TranscriptVirtualizer extends React.Component<Omit<Props, "enabled">, Adap
 	private onTopApproachScroll = () => {
 		const scrollTop = this.topApproachContainer?.scrollTop;
 		if (scrollTop !== undefined) {
-			if (
-				this.topApproachScrollTop !== null &&
-				didScrollTranscriptTowardHistory(
-					this.topApproachScrollTop,
-					scrollTop,
-					this.topApproachContainer?.clientHeight ?? 0,
-					this.topApproachContainer?.scrollHeight ?? 0,
-				)
-			)
-				this.topApproachGate.request();
+			const viewportHeight = this.topApproachContainer?.clientHeight ?? 0;
+			const movedTowardHistory = didScrollTranscriptTowardHistory(
+				this.topApproachScrollTop ?? scrollTop,
+				scrollTop,
+				viewportHeight,
+				this.topApproachContainer?.scrollHeight ?? 0,
+			);
 			this.topApproachScrollTop = scrollTop;
+			if (movedTowardHistory) {
+				this.topApproachGate.request();
+				// A scrollbar/Home jump can arrive as one top-edge scroll event. Fire
+				// from that event rather than requiring a second gesture to retry the
+				// debounced proximity check.
+				if (scrollTop <= viewportHeight) {
+					this.evaluateTopApproach();
+					return;
+				}
+			}
 		}
 		if (this.topApproachTimer !== undefined) return;
 		this.topApproachTimer = window.setTimeout(() => {
@@ -481,7 +488,11 @@ class TranscriptVirtualizer extends React.Component<Omit<Props, "enabled">, Adap
 	};
 
 	private clearTopApproach() {
-		this.topApproachContainer?.removeEventListener("scroll", this.onTopApproachScroll);
+		this.topApproachContainer?.removeEventListener(
+			"scroll",
+			this.onTopApproachScroll,
+			true,
+		);
 		this.topApproachContainer?.removeEventListener("wheel", this.onTopApproachWheel);
 		this.topApproachContainer?.removeEventListener(
 			"touchstart",
@@ -511,7 +522,13 @@ class TranscriptVirtualizer extends React.Component<Omit<Props, "enabled">, Adap
 		if (!container || !callback) return;
 		this.topApproachContainer = container;
 		this.topApproachScrollTop = container.scrollTop;
-		container.addEventListener("scroll", this.onTopApproachScroll, { passive: true });
+		// Capture before React's scroll listener can synchronously rerender this
+		// adapter and replace its listener. In bubble order, a one-step scrollbar
+		// jump removed this callback before the same event ever reached it.
+		container.addEventListener("scroll", this.onTopApproachScroll, {
+			passive: true,
+			capture: true,
+		});
 		container.addEventListener("wheel", this.onTopApproachWheel, { passive: true });
 		container.addEventListener("touchstart", this.onTopApproachTouchStart, {
 			passive: true,

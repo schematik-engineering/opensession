@@ -25,7 +25,7 @@ import { makeAskHandler, restorePendingAsks } from "./src/server/asks";
 import { activeAutomationPreparationCount, automationResumeMcpForSession, ensureConfiguredAutomations, getWebhookRoutes, resumePendingAutomationRuns, setEventSessionCallback, settleResumedAutomationRun, startScheduler } from "./src/server/automations";
 import { startUsagePoller } from "./src/server/claude-accounts";
 import { startCodexUsagePoller } from "./src/server/codex-accounts";
-import { FRONTEND_SRC, IS_DEV, SPA_HEADERS, ensureFrontendBuilt, frontend, isPrebuiltFrontend, scheduleFrontendRebuild, sharedCheckoutEditors, spaEntry } from "./src/server/frontend-build";
+import { FRONTEND_SRC, IS_DEV, SPA_HEADERS, ensureFrontendBuilt, frontend, isPrebuiltFrontend, preloadPreparedFrontend, scheduleFrontendRebuild, sharedCheckoutEditors, spaEntry } from "./src/server/frontend-build";
 import { configuredIntegration } from "./src/server/config";
 import { initHumanAsks } from "./src/server/human-asks";
 import { interactiveMcpServers } from "./src/server/interactive-mcp";
@@ -143,6 +143,7 @@ function isLoopbackHostname(hostname: string): boolean {
 // with no user-visible cut-over. Coordinated candidates cannot precheck changed
 // peers because those peers start only after the old gateway is fenced.
 const precheckRuntimePeers = process.env.OPENSESSION_GATEWAY_PRECHECK_PEERS === "1";
+if (process.env.OPENSESSION_GATEWAY_ROLE === "standby") preloadPreparedFrontend();
 if (precheckRuntimePeers) await waitForRuntimePeerGeneration({ timeoutMs: 5_000 });
 // A supervised standby is allowed to preload this import graph, but it cannot
 // proceed into even the earliest shared-state, socket, Worker, timer, or

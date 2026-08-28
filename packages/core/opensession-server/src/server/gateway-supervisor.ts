@@ -16,6 +16,7 @@ import {
   startGatewayTcpProxy,
   type GatewayTcpProxyMetrics,
 } from "./gateway-tcp-proxy";
+import { stableFrontendHttpResponse } from "./stable-frontend";
 
 export const GATEWAY_CONTROL_SOCKET =
   process.env.OPENSESSION_GATEWAY_CONTROL_SOCKET ||
@@ -952,6 +953,7 @@ async function runSupervisor(): Promise<void> {
     port: PUBLIC_PORT,
     backendPort: () => supervisor.backendPort(),
     metrics: proxyMetrics,
+    fallbackHttp: (request) => stableFrontendHttpResponse(deployStateRoot(), request),
     listenFd: inheritedGatewaySocketFd(),
   });
   console.log(

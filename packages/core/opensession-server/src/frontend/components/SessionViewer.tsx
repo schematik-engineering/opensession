@@ -10,7 +10,7 @@ import React, {
 	useSyncExternalStore,
 } from "react";
 import { createPortal } from "react-dom";
-import { AnimatePresence, motion, Reorder } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import { duration, ease } from "../ui/motion";
 import { EmptyState, InlineAlert, TranscriptSkeleton } from "../ui/state";
 import { LiveTurnStore } from "../lib/live-turn-store";
@@ -35,7 +35,6 @@ import { markNotesRead } from "../lib/note-reads";
 import { clearMention, onMentionsChanged } from "../lib/mentions";
 import { QuoteSelection } from "./QuoteSelection";
 import { plainThreadUrl } from "./PlainThreadPanel";
-import { isGitHubAttribution } from "@tellahq/opensession-protocol/notices";
 import type { TranscriptIndexEntry } from "@tellahq/opensession-protocol/session";
 import type {
 	UnifiedSession,
@@ -44,16 +43,12 @@ import type {
 	SessionSlackShare,
 	TranscriptEntry,
 	WSServerMessage,
+	WSClientMessage,
 	AskQuestion,
 } from "../lib/types";
 import {
-	classifyQueuedContent,
-	isClientVisibleQueuedContent,
 	mergeTranscriptEntries,
 	orderTranscriptEntries,
-	queueAttribution,
-	summarizeInFlightContent,
-	type OptimisticTranscriptEntry,
 } from "../lib/transcript-state";
 import {
 	HISTORY_PAGE_ENTRIES,
@@ -128,6 +123,7 @@ import type { PrFocus } from "../lib/pr-focus";
 import { reviewLoopResult } from "../lib/review-loop";
 import { CONTINUE_AFTER_FAILURE_PROMPT } from "../lib/continue-run";
 import { repairPausedSession } from "../lib/api/session-safety";
+import { ApiError } from "../lib/api/request";
 import { safetyContinuationPrompt } from "../lib/session-safety";
 import {
 	cancelSlackComposer,
@@ -193,9 +189,7 @@ import {
 	markPendingBusy,
 	markPendingStarted,
 	type OptimisticPendingPrompt,
-	optimisticOutboxFallbacks,
 	reconcilePending,
-	withoutPendingTranscriptEchoes,
 } from "../lib/pending-reconcile";
 import {
 	promptOutbox,
@@ -308,6 +302,8 @@ import {
 } from "../lib/source-chip-classes";
 import { sessionWasAgentStarted } from "../lib/sidebar-placement";
 import { Button } from "../ui/button";
+import { SessionQueue } from "./SessionQueue";
+import { deriveSessionQueue, type QueueReceipt } from "../lib/session-queue";
 import { useConfirm } from "../ui/confirm";
 import {
 	TopBar,
@@ -321,25 +317,6 @@ import { cn } from "../ui/cn";
 import {
 	composerMenuIcon,
 	composerMenuItem,
-	composerQueue,
-	composerQueueAction,
-	composerQueueActionDanger,
-	composerQueueActionSteer,
-	composerQueueActions,
-	composerQueueBody,
-	composerQueueBodyTone,
-	composerQueueContent,
-	composerQueueFrom,
-	composerQueueImage,
-	composerQueueImageCount,
-	composerQueueImageThumb,
-	composerQueueItem,
-	composerQueueItemDraggable,
-	composerQueueItemSeparated,
-	composerQueueList,
-	composerQueueSendingShimmer,
-	composerQueueSendingStatus,
-	composerQueueTitle,
 } from "../lib/composer-classes";
 import { msgRow } from "../lib/msg-classes";
 import { Menu, MENU_ICON } from "../ui/menu";
@@ -430,19 +407,6 @@ import {
 	MOBILE_CONTROL_GLASS,
 } from "../lib/app-header-classes";
 
-type QueueReceipt = {
-	id?: string;
-	content: string;
-	user?: string;
-	images?: string[];
-	files?: unknown;
-	contextSessions?: string[];
-	editable?: boolean;
-	editing?: boolean;
-	/** Steer receipts only: when the engine accepted the fold-in (epoch ms). */
-	steeredAt?: number;
-};
-
 interface Props {
 	session: UnifiedSession;
 	/** Verified workspace role from the ordinary auth bootstrap. */
@@ -460,7 +424,7 @@ interface Props {
 	/** Called after a successful archive (not unarchive), with whether archiving
 	    gracefully stopped an in-flight owned turn — so the parent can toast. */
 	onArchived?: (stoppedRun: boolean) => void;
-	send: (msg: any) => void;
+	send: (msg: WSClientMessage) => void;
 	setTyping: (sessionId: string, active: boolean) => void;
 	addHandler: (handler: (msg: WSServerMessage) => void) => () => void;
 	connected: boolean;
@@ -933,13 +897,21 @@ export function SessionViewer({
 			setShippedSlackReconnectRequired(false);
 			if (result.share) setShippedShare(result.share);
 			else toast("This post was already sent");
-		} catch (error: any) {
+		} catch (error) {
 			setShippedChangeStatus("idle");
-			if (error?.status === 403 && /Reconnect Slack/.test(error?.message || "")) {
+			if (
+				error instanceof ApiError &&
+				error.status === 403 &&
+				/Reconnect Slack/.test(error.message)
+			) {
 				setShippedSlackReconnectRequired(true);
 				toast("Reconnect Slack to add image access");
 			} else {
-				toast(error?.message || "Couldn't share the shipped update");
+				toast(
+					error instanceof Error
+						? error.message
+						: "Couldn't share the shipped update",
+				);
 			}
 		}
 	}, [mergedPr, session.id]);
@@ -951,8 +923,12 @@ export function SessionViewer({
 			await undoShippedChange(session.id, at);
 			setShippedShare(null);
 			toast("Removed from Slack");
-		} catch (error: any) {
-			toast(error?.message || "Couldn't undo the Slack message");
+		} catch (error) {
+			toast(
+				error instanceof Error
+					? error.message
+					: "Couldn't undo the Slack message",
+			);
 		}
 	}, [session.id]);
 	const reconnectShippedSlack = useCallback(async () => {
@@ -960,8 +936,8 @@ export function SessionViewer({
 			await reconnectSlack();
 			setShippedSlackReconnectRequired(false);
 			toast("Approve image access in Slack, then send again");
-		} catch (error: any) {
-			toast(error?.message || "Couldn't reconnect Slack");
+		} catch (error) {
+			toast(error instanceof Error ? error.message : "Couldn't reconnect Slack");
 		}
 	}, []);
 	const promotedPr =
@@ -4063,13 +4039,17 @@ export function SessionViewer({
 				channelId: result.channel.id,
 				ts: result.ts,
 			});
-		} catch (error: any) {
+		} catch (error) {
 			setSlackComposerStatus("idle");
-			if (error?.status === 403 && /Reconnect Slack/.test(error?.message || "")) {
+			if (
+				error instanceof ApiError &&
+				error.status === 403 &&
+				/Reconnect Slack/.test(error.message)
+			) {
 				setSlackComposerReconnect(true);
 				toast("Reconnect Slack to add image access");
 			} else {
-				toast(error?.message || "Couldn't send to Slack");
+				toast(error instanceof Error ? error.message : "Couldn't send to Slack");
 			}
 		}
 	}, [session.id, slackComposer]);
@@ -4082,8 +4062,12 @@ export function SessionViewer({
 			await undoSlackComposer(session.id, { channel: sent.channelId, ts: sent.ts });
 			setSlackComposerSent(null);
 			toast("Removed from Slack");
-		} catch (error: any) {
-			toast(error?.message || "Couldn't undo the Slack message");
+		} catch (error) {
+			toast(
+				error instanceof Error
+					? error.message
+					: "Couldn't undo the Slack message",
+			);
 		}
 	}, [session.id]);
 	const cancelComposedSlackMessage = useCallback(async () => {
@@ -4091,8 +4075,12 @@ export function SessionViewer({
 		try {
 			await cancelSlackComposer(session.id, slackComposer.id);
 			setSlackComposer(null);
-		} catch (error: any) {
-			toast(error?.message || "Couldn't close the Slack composer");
+		} catch (error) {
+			toast(
+				error instanceof Error
+					? error.message
+					: "Couldn't close the Slack composer",
+			);
 		}
 	}, [session.id, slackComposer]);
 	// Exact engine-state forks use Claude's SDK forkSession. Other backends can
@@ -4482,10 +4470,6 @@ export function SessionViewer({
 		);
 	}, [noEngine, session.id]);
 
-	function queueHasFiles(item: QueueReceipt): boolean {
-		return Array.isArray(item.files) && item.files.length > 0;
-	}
-
 	function discardOutbox(item: PromptOutboxItem) {
 		setPending((current) =>
 			current.filter((entry) => entry.id !== `outbox-${item.clientId}`),
@@ -4504,62 +4488,6 @@ export function SessionViewer({
 			text: item.content,
 		}));
 		discardOutbox(item);
-	}
-
-	/** What removing a queued row means, said in its own terms: a person's
-	 *  message is deleted, routed traffic is dismissed. */
-	function queueDeleteLabel(
-		isReview: boolean,
-		isWorker: boolean,
-		isSessionMessage: boolean,
-	): string {
-		if (isReview) return "Dismiss review feedback";
-		if (isWorker) return "Dismiss worker report";
-		if (isSessionMessage) return "Dismiss session message";
-		return "Delete queued message";
-	}
-
-	function renderQueueContent(
-		item: QueueReceipt,
-		classified: TranscriptEntry,
-		opts: { github?: boolean; tone?: keyof typeof composerQueueBodyTone } = {},
-	) {
-		const firstImage = item.images?.[0];
-		const extraImages = Math.max(0, (item.images?.length ?? 0) - 1);
-		const isReview = classified.notice?.kind === "review-handoff";
-		// Who or what this is from, when it isn't the driver typing: a teammate's
-		// name, or a notice's title — but only when that title is a LABEL. A
-		// title-only notice (a workflow nudge, a runner line) is its own body, and
-		// printing it twice is just noise.
-		const from = isReview ? null : queueAttribution(classified, currentUser);
-		const body = isReview
-			? `${classified.notice!.title} · Runs after this turn`
-			: classified.content;
-		return (
-			<div className={composerQueueContent}>
-				{isReview && <IconPullRequest size={18} className="flex-none text-faint" />}
-				{firstImage && (
-					<div className={composerQueueImage}>
-						<img className={composerQueueImageThumb} src={firstImage} alt="" />
-						{extraImages > 0 && (
-							<span className={composerQueueImageCount}>+{extraImages}</span>
-						)}
-					</div>
-				)}
-				<div
-					className={cn(
-						composerQueueBody,
-						composerQueueBodyTone[opts.tone ?? "default"],
-					)}
-				>
-					{from && <span className={composerQueueFrom}>{from}</span>}
-					{opts.github && !isReview && (
-						<span className={composerQueueFrom}>GitHub</span>
-					)}
-					{body}
-				</div>
-			</div>
-		);
 	}
 
 	function editQueuedInComposer(q: QueueReceipt, steering = false) {
@@ -4619,98 +4547,31 @@ export function SessionViewer({
 		}
 	}
 
-	// Only deliberately queued sends live above the composer. Idle sends and
-	// steers are conversation messages immediately; both reconcile through the
-	// same transcript path. Workspace setup still holds everything in the flap.
-	const failedOutboxIds = new Set(
-		outboxItems
-			.filter((item) => item.state === "failed")
-			.map((item) => `outbox-${item.clientId}`),
-	);
-	const reconciliationNow = Date.now();
-	const deliveryEchoes = [...queued, ...steered];
-	const pendingReconciliation = reconcilePending(
+	const {
+		pendingQueue,
+		pendingBubbles,
+		optimisticTranscriptEntries,
+		pendingTranscriptDeliveryIds,
+		durableOutbox,
+		shownQueued,
+		queuedClassified,
+		queueCount,
+		queueTitle,
+	} = deriveSessionQueue({
+		queued,
+		steered,
 		pending,
-		entries,
-		deliveryEchoes,
-		reconciliationNow,
-	);
-	const visiblePending = pending.filter(
-		(item) =>
-			!failedOutboxIds.has(item.id) &&
-			!pendingReconciliation.landed.has(item.id) &&
-			!pendingReconciliation.expired.has(item.id),
-	);
-	// React pending state, transcript frames, queue echoes and the REST outbox
-	// settle on independent clocks. If the local row drops first, keep a pristine
-	// idle outbox item on the same optimistic surface instead of flashing its
-	// transport-only "Waiting to send" state between two copies of the bubble.
-	const fallbackCandidates = optimisticOutboxFallbacks(
+		pendingDeliveryIds,
 		outboxItems,
-		new Set(pending.map((item) => item.id)),
 		landedOutboxIds,
-	);
-	const fallbackReconciliation = reconcilePending(
-		fallbackCandidates,
 		entries,
-		deliveryEchoes,
-		reconciliationNow,
-	);
-	const fallbackPending = fallbackCandidates.filter(
-		(item) =>
-			!fallbackReconciliation.landed.has(item.id) &&
-			!fallbackReconciliation.expired.has(item.id),
-	);
-	const pendingQueue = [
-		...visiblePending.filter(
-			(p) => p.busyMode === "queue" || settingUpWorkspace,
-		),
-		...(settingUpWorkspace ? fallbackPending : []),
-	];
-	const pendingBubbles = [
-		...visiblePending.filter(
-			(p) => p.busyMode !== "queue" && !settingUpWorkspace,
-		),
-		...(settingUpWorkspace ? [] : fallbackPending),
-	];
-	const optimisticTranscriptEntries: OptimisticTranscriptEntry[] =
-		pendingBubbles.length === 0
-			? EMPTY_TRANSCRIPT_ENTRIES
-			: pendingBubbles.map((pending) => ({
-					id: pending.id,
-					type: "user",
-					content: pending.content,
-					timestamp: new Date(pending.sentAt).toISOString(),
-					optimisticAfterEntryId: pending.transcriptAfterEntryId,
-					optimisticAfterSeq: pending.transcriptAfterSeq,
-					// Preserve attribution across the optimistic-to-durable handoff.
-					// Without this, MessageBubble falls back to the session owner first.
-					sender: pending.user,
-					...(pending.images?.length ? { images: pending.images } : {}),
-				}));
-	const pendingTranscriptDeliveryIds = [
-		...pendingDeliveryIds,
-		...pendingBubbles
-			.filter((pending) => pending.busyMode === "steer")
-			.map((pending) => pending.id),
-	];
-	// Retried, failed and authoritatively busy prompts keep the explicit outbox
-	// surface. A pristine idle item is already represented by the fallback above.
-	const fallbackIds = new Set(fallbackCandidates.map((item) => item.id));
-	const durableOutbox = outboxItems.filter(
-		(item) =>
-			item.state === "failed" ||
-			(!fallbackIds.has(`outbox-${item.clientId}`) &&
-				!pending.some((entry) => entry.id === `outbox-${item.clientId}`) &&
-				!landedOutboxIds.has(`outbox-${item.clientId}`)),
-	);
+		settingUpWorkspace,
+		now: Date.now(),
+	});
 	const hasLiveConversation =
 		pendingBubbles.length > 0 || liveTurnStore.hasText() || isBusy || !!ask;
-	// recordRunOutcome normally writes a system chip into the transcript. Opening
-	// failures can happen before an engine transcript exists, and a wedged session
-	// mailbox can reject that best-effort append. The session list still carries
-	// the same durable error, so use it as an inline fallback instead of leaving
-	// the conversation blank while only the sidebar hover card explains why.
+	// Fall back to the durable session error if its best-effort transcript notice
+	// could not be written during startup.
 	const inlineRunFailure =
 		!safety &&
 		!isBusy &&
@@ -4722,259 +4583,42 @@ export function SessionViewer({
 		)
 			? session.lastRunError
 			: null;
-	// Server-side filtering is authoritative; this guard keeps model-routing
-	// plumbing out of the message surface during a rolling deploy. An idle send
-	// is durably queued before actor admission, so its queue echo can arrive before
-	// the REST result says whether it started or parked. Keep that receipt off the
-	// queue surface for as long as the same message is an optimistic transcript
-	// bubble. If the bubble expires, the durable row becomes visible again.
-	const shownQueued = withoutPendingTranscriptEchoes(
-		queued.filter((item) =>
-			isClientVisibleQueuedContent(item.content, item.user),
-		),
-		pendingBubbles,
-	);
-	// Classified once, read by both the counts and the rows, so the chip's
-	// tally and what each row renders as can't disagree.
-	const queuedClassified = shownQueued.map((item) =>
-		classifyQueuedContent(item.content, item.user),
-	);
-	const queuedSummary = summarizeInFlightContent(queuedClassified);
-	const reviewCount = queuedSummary.reviews;
-	const workerCount = queuedSummary.workerReports;
-	const sessionMessageCount = queuedSummary.sessionMessages;
-	const queueCount =
-		shownQueued.length + pendingQueue.length + durableOutbox.length;
-	const queuedMessageCount =
-		queuedSummary.messages + pendingQueue.length + durableOutbox.length;
-	const queueTitle = settingUpWorkspace
-		? `Setting up workspace · ${queueCount} queued`
-		: [
-				queuedMessageCount
-					? `${queuedMessageCount} ${queuedMessageCount === 1 ? "message" : "messages"} queued`
-					: null,
-				reviewCount
-					? `${reviewCount} PR ${reviewCount === 1 ? "review" : "reviews"} waiting`
-					: null,
-				workerCount
-					? `${workerCount} worker ${workerCount === 1 ? "report" : "reports"} waiting`
-					: null,
-				sessionMessageCount
-					? `${sessionMessageCount} session ${sessionMessageCount === 1 ? "message" : "messages"} waiting`
-					: null,
-			]
-				.filter(Boolean)
-				.join(" · ");
-	const attachedQueue =
-		queueCount > 0 ? (
-			<div
-				// Stacked under the agents flap, this is a middle section of the
-				// same box, so it drops its own rounded top — only the topmost
-				// flap keeps one.
-				className={cn(composerQueue, "[&:not(:first-child)]:rounded-t-none")}
-				aria-label="Queued messages"
-			>
-				<div className={composerQueueTitle}>{queueTitle}</div>
-				<Reorder.Group
-					as="div"
-					axis="y"
-					values={shownQueued}
-					onReorder={handleQueueReorder}
-					className={composerQueueList}
-				>
-				{shownQueued.map((q, i) => {
-					const c = queuedClassified[i];
-					const isGitHub = isGitHubAttribution(q.user);
-					const isReview = c.notice?.kind === "review-handoff";
-					// Agent-to-agent traffic drives the next turn, but nobody typed it,
-					// so it gets none of the composer edit or reorder gestures.
-					const isWorker = c.notice?.kind === "worker-report";
-					const isSessionMessage = c.notice?.kind === "session-notice";
-					const isDelegated = isWorker || isSessionMessage;
-					const id = q.id;
-					const key = id || `queued-${i}`;
-					const canSteer =
-						!isGitHub && !queueHasFiles(q) && !q.contextSessions?.length;
-					const canEdit =
-						!isGitHub &&
-						!isDelegated &&
-						q.editable === true &&
-						personKey(q.user || "") === personKey(currentUser);
-					// A one-item queue has nothing to reorder — leave drag off so the
-					// lone message still selects/clicks normally.
-					const canReorder = shownQueued.length > 1 && !isGitHub && !isDelegated;
-					return (
-						<Reorder.Item
-							as="div"
-							key={key}
-							value={q}
-							dragListener={canReorder}
-							onDragStart={() => {
-								draggingQueueRef.current = true;
-							}}
-							onDragEnd={commitQueueReorder}
-							whileDrag={{ scale: 1.01, zIndex: 2 }}
-							className={cn(
-								composerQueueItem,
-								i > 0 && composerQueueItemSeparated,
-								canReorder && composerQueueItemDraggable,
-							)}
-						>
-							<div className={composerQueueActions}>
-								{canEdit ? (
-										<Tooltip label="Edit in composer">
-											<button
-												type="button"
-												className={composerQueueAction}
-											onClick={() => editQueuedInComposer(q)}
-											>
-												<IconPencil size={20} />
-											</button>
-										</Tooltip>
-								) : null}
-								<Tooltip
-									label={queueDeleteLabel(isReview, isWorker, isSessionMessage)}
-								>
-									<button
-										type="button"
-										aria-label={queueDeleteLabel(
-											isReview,
-											isWorker,
-											isSessionMessage,
-										)}
-										className={cn(
-											composerQueueAction,
-											composerQueueActionDanger,
-										)}
-										onClick={() =>
-											send({
-												type: "delete_queued_prompt",
-												sessionId: session.id,
-												queueId: id,
-												queueIndex: i,
-											})
-										}
-									>
-										<IconTrash size={20} />
-									</button>
-								</Tooltip>
-								{!isGitHub && (
-									<Tooltip
-										label={
-											canSteer
-												? "Send now: add to the conversation and deliver after the current step"
-												: "Messages with files must remain queued"
-										}
-									>
-										<button
-											type="button"
-											className={cn(
-												composerQueueAction,
-												composerQueueActionSteer,
-											)}
-											aria-label="Send now"
-											disabled={!canSteer}
-											onClick={() =>
-												send({
-													type: "steer_queued_prompt",
-													sessionId: session.id,
-													queueId: id,
-													queueIndex: i,
-												})
-											}
-										>
-											<IconArrowUp size={20} />
-										</button>
-									</Tooltip>
-								)}
-							</div>
-							{renderQueueContent(q, c, {
-								github: isGitHub,
-								// github outranks human: both were equally specific in the
-								// stylesheet and github came last.
-								tone: isGitHub ? "github" : c.senderVia ? "human" : "default",
-							})}
-						</Reorder.Item>
-					);
-				})}
-				</Reorder.Group>
-
-				{/* Deliberately queued sends stay here while their server echo settles. */}
-				{pendingQueue.map((p, i) => (
-					<div
-						key={p.id}
-						className={cn(
-							composerQueueItem,
-							i > 0 && composerQueueItemSeparated,
-						)}
-					>
-						<div className={composerQueueActions}>
-							<span className={composerQueueSendingStatus} role="status">
-								{settingUpWorkspace ? (
-									"Queued"
-								) : (
-									<span className={composerQueueSendingShimmer}>Queueing</span>
-								)}
-							</span>
-						</div>
-						{renderQueueContent(p, classifyQueuedContent(p.content, p.user), {
-							tone: "sending",
-						})}
-					</div>
-				))}
-				{durableOutbox.map((item, i) => (
-					<div
-						key={item.clientId}
-						className={cn(
-							composerQueueItem,
-							item.state === "failed" && "flex-col items-stretch gap-1.5",
-							(i > 0 || pendingQueue.length > 0) && composerQueueItemSeparated,
-						)}
-					>
-						{item.state !== "failed" && (
-							<div className={composerQueueActions}>
-								<span className={composerQueueSendingStatus} role="status">
-									<span className={composerQueueSendingShimmer}>
-										{item.state === "sending" ? "Sending" : "Waiting to send"}
-									</span>
-								</span>
-							</div>
-						)}
-						{renderQueueContent(
-							{
-								id: item.clientId,
-								content: item.content,
-								user: item.user,
-								images: item.images,
-								files: item.files,
-							},
-							classifyQueuedContent(item.content, item.user),
-							{ tone: "sending" },
-						)}
-						{item.state === "failed" && (
-							<div className="flex flex-wrap items-center gap-2">
-								<span className="min-w-0 flex-1 text-meta text-red" role="alert">
-									{item.error || "This message could not be delivered."}
-								</span>
-								<Button variant="soft" size="sm" onClick={() => promptOutbox.retry(item.clientId)}>
-									Retry
-								</Button>
-								<Button variant="soft" size="sm" onClick={() => editOutboxInComposer(item)}>
-									Edit
-								</Button>
-								<Button
-									variant="danger"
-									size="sm"
-									onClick={() => discardOutbox(item)}
-								>
-									Discard
-								</Button>
-							</div>
-						)}
-					</div>
-				))}
-			</div>
-		) : null;
+	const attachedQueue = queueCount ? (
+		<SessionQueue
+			currentUser={currentUser}
+			queueTitle={queueTitle}
+			shownQueued={shownQueued}
+			queuedClassified={queuedClassified}
+			pendingQueue={pendingQueue}
+			durableOutbox={durableOutbox}
+			settingUpWorkspace={settingUpWorkspace}
+			onReorder={handleQueueReorder}
+			onReorderStart={() => {
+				draggingQueueRef.current = true;
+			}}
+			onReorderEnd={commitQueueReorder}
+			onEditQueued={editQueuedInComposer}
+			onDeleteQueued={(queueId, queueIndex) =>
+				send({
+					type: "delete_queued_prompt",
+					sessionId: session.id,
+					queueId,
+					queueIndex,
+				})
+			}
+			onSteerQueued={(queueId, queueIndex) =>
+				send({
+					type: "steer_queued_prompt",
+					sessionId: session.id,
+					queueId,
+					queueIndex,
+				})
+			}
+			onRetryOutbox={(clientId) => promptOutbox.retry(clientId)}
+			onEditOutbox={editOutboxInComposer}
+			onDiscardOutbox={discardOutbox}
+		/>
+	) : null;
 
 	function handleCancel() {
 		// Local acknowledgement first: the gesture must land visibly whether or
@@ -5029,8 +4673,12 @@ export function SessionViewer({
 			setSlackComposerReconnect(false);
 			setSlackComposerSent(null);
 			requestAnimationFrame(() => scrollToLatest("smooth"));
-		} catch (error: any) {
-			toast(error?.message || "Couldn't open the Slack composer");
+		} catch (error) {
+			toast(
+				error instanceof Error
+					? error.message
+					: "Couldn't open the Slack composer",
+			);
 		}
 	}
 
@@ -5442,8 +5090,10 @@ export function SessionViewer({
 			// Leave the overlay up through the navigation so it never flashes back to
 			// the (now-deleted) session view.
 			onBack();
-		} catch (e: any) {
-			alert(`Delete failed: ${e.message}`);
+		} catch (error) {
+			alert(
+				`Delete failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+			);
 			setDeleting(false);
 			setShowDeleteConfirm(false);
 		}
@@ -5467,8 +5117,10 @@ export function SessionViewer({
 				onArchived?.(stoppedRun);
 				onBack();
 			}
-		} catch (e: any) {
-			alert(`${next ? "Archive" : "Unarchive"} failed: ${e.message}`);
+		} catch (error) {
+			alert(
+				`${next ? "Archive" : "Unarchive"} failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+			);
 			setArchiving(false);
 		}
 	}, [

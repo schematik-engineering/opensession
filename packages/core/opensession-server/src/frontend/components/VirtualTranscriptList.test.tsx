@@ -30,6 +30,11 @@ describe("VirtualTranscriptList", () => {
 		expect(source).toContain("useAnimationFrameWithResizeObserver: true");
 		expect(source).toContain("this.measureCommittedRows(prevProps)");
 	});
+
+	test("captures history intent before scroll-driven rerenders", () => {
+		expect(source).toContain("capture: true");
+		expect(source).toContain('removeEventListener(\n\t\t\t"scroll"');
+	});
 	test("keeps the live-edge tail in the same virtual coordinate space", () => {
 		expect(virtualTranscriptRange([10, 11], 40, 3)).toEqual([10, 11, 37, 38, 39]);
 		expect(virtualTranscriptRange([0, 1], 2, 24)).toEqual([0, 1]);
