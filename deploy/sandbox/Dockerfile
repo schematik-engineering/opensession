@@ -130,7 +130,17 @@ RUN bun install --frozen-lockfile
 COPY --chown=ubuntu:ubuntu tsconfig.json ${OPENSESSION_RUNNER_ROOT}/
 COPY --chown=ubuntu:ubuntu packages/core/protocol ${OPENSESSION_RUNNER_ROOT}/packages/core/protocol
 COPY --chown=ubuntu:ubuntu packages/core/opensession-server ${OPENSESSION_RUNNER_ROOT}/packages/core/opensession-server
-COPY --chown=ubuntu:ubuntu scripts/workload-identity-client.ts ${OPENSESSION_RUNNER_ROOT}/scripts/workload-identity-client.ts
+COPY --chown=ubuntu:ubuntu scripts ${OPENSESSION_RUNNER_ROOT}/scripts
+
+# Resolve the complete runner-host module graph while the image is still being
+# built. This catches a missing repo-root runtime import before a live session
+# reaches docker exec (github credentials and the Library both use scripts/lib).
+RUN bun build \
+      ${OPENSESSION_RUNNER_ROOT}/packages/core/opensession-server/src/runner-host/host.ts \
+      --target=bun \
+      --external='*.html' \
+      --outfile=/tmp/opensession-runner-host-smoke.js \
+    && rm /tmp/opensession-runner-host-smoke.js
 
 WORKDIR /home/ubuntu
 

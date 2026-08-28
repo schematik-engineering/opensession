@@ -100,7 +100,8 @@ docker build -f deploy/sandbox/Dockerfile \
 There is no `PI_VERSION` build argument; Pi is installed from `bun.lock`.
 Rebuild after a tool pin or lockfile change and after any runtime source copied
 by the Dockerfile changes, especially the protocol package, server runner code,
-or `scripts/workload-identity-client.ts`. Sandboxed runs execute the image's
+or root `scripts/` runtime helpers. The Docker build resolves the complete
+runner-host module graph as a smoke gate. Sandboxed runs execute the image's
 copy, not the checkout's copy.
 
 ### Path parity is load-bearing for Docker bind mode
