@@ -382,6 +382,7 @@ credentials its setup page marks as required. Common operator-facing variables:
 | Feature                   | Vars                                                                                                                                                                   | Page                                                                                   |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | Slack                     | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` or `SLACK_SIGNING_SECRET`, `ALLOWED_SLACK_USER_ID`, `WORKTREE_HOOK_SECRET`, `SLACK_MENTION_INTENT_MODEL`, `SCHEDULE_WHEN_MODEL`   | [slack.md](slack.md)                                                                   |
+| Discord                   | `DISCORD_APPLICATION_ID`, `DISCORD_BOT_TOKEN_FILE`, `DISCORD_GUILD_IDS`, optional channel/user allowlists                                                              | [discord.md](discord.md)                                                               |
 | GitHub                    | App: `OPENSESSION_GITHUB_CLIENT_ID`, `OPENSESSION_GITHUB_CLIENT_SECRET`, `OPENSESSION_GITHUB_APP_SLUG`, `OPENSESSION_GITHUB_APP_KEY`; webhook: `GITHUB_WEBHOOK_SECRET` | [github.md](github.md)                                                                 |
 | Linear                    | `LINEAR_CLIENT_ID`, `LINEAR_CLIENT_SECRET`, `LINEAR_WEBHOOK_SECRET`, `LINEAR_API_KEY`                                                                                  | [linear.md](linear.md)                                                                 |
 | Plain                     | `PLAIN_API_KEY`, `PLAIN_WEBHOOK_SECRET`, `PLAIN_*_MODEL` ×2                                                                                                            | [plain.md](plain.md)                                                                   |
@@ -392,7 +393,7 @@ credentials its setup page marks as required. Common operator-facing variables:
 | AWS runs (off by default) | `AGENT_AWS_CREDS`, `AGENT_AWS_REGION`, `AGENT_AWS_MINT_USER`                                                                                                           | [integrations-misc.md](integrations-misc.md#aws-creds-for-runs-agent_aws_region)       |
 | Previews                  | `PREVIEW_HOST`                                                                                                                                                         | Caddy-fronted live previews (`packages/core/opensession-server/src/server/preview.ts`) |
 
-**Feature flags** — `ENABLE_SLACK_AGENT`, `ENABLE_LINEAR_AGENT`,
+**Feature flags** — `ENABLE_SLACK_AGENT`, `ENABLE_DISCORD_AGENT`, `ENABLE_LINEAR_AGENT`,
 `ENABLE_PLAIN_AGENT`, `ENABLE_GITHUB_AGENT`, `ENABLE_STRIPE_AGENT`,
 `ENABLE_GRAFANA_POLLER`, and `ENABLE_CODESTORAGE`. All **default OFF**; only
 the literal string `true` enables (not `1`). The env flag wins when set,
@@ -606,10 +607,11 @@ install, restart once after a backend change rather than after every save.
 
 ## 11. Next
 
-- Wire up integrations: [slack.md](slack.md), [github.md](github.md),
-  [linear.md](linear.md), [plain.md](plain.md),
-  [integrations-misc.md](integrations-misc.md). Inbound webhooks all land on
-  Public ingress — see below.
+- Wire up integrations: [slack.md](slack.md), [discord.md](discord.md),
+  [github.md](github.md), [linear.md](linear.md), [plain.md](plain.md), and
+  [integrations-misc.md](integrations-misc.md). HTTP webhooks land on Public
+  ingress; Discord uses the outbound Gateway and adds no route.
+- Subscription-backed providers: [acp-subscriptions.md](acp-subscriptions.md).
 - Sandboxed execution: [../self-hosting-sandboxes.md](../self-hosting-sandboxes.md).
 
 ## Public ingress

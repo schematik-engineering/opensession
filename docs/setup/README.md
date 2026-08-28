@@ -171,12 +171,14 @@ that touches them.
 | [ec2.md](ec2.md)                                             | provisioning a clean EC2 box, networking, SSH debugging                                                                           |
 | [../../recipes/README.md](../../recipes/README.md)           | bundled automation recipes, and what belongs in the repo                                                                          |
 | [slack.md](slack.md)                                         | Slack app, token, scopes, event intake, admin gating                                                                              |
+| [discord.md](discord.md)                                     | Discord Gateway bot, allowlists, threads, and native OpenSession sessions                                                         |
 | [github.md](github.md)                                       | GitHub App, public ingress, PR agent, deploy script                                                                               |
 | [codestorage.md](codestorage.md)                             | code.storage as an alternative git host — signing key, repos, branch reviews                                                      |
 | [linear.md](linear.md)                                       | Linear OAuth app, webhooks, the Linear agent                                                                                      |
 | [plain.md](plain.md)                                         | Plain support tickets, the triage automation                                                                                      |
 | [integrations-misc.md](integrations-misc.md)                 | Stripe, WorkOS, Grafana/Sentry/Tinybird, web push, voice                                                                          |
 | [engines.md](engines.md)                                     | the Pi engine, account pools, provider keys, run isolation                                                                        |
+| [acp-subscriptions.md](acp-subscriptions.md)                 | subscription-backed Grok and Cursor providers over official ACP                                                                   |
 | [../self-hosting-sandboxes.md](../self-hosting-sandboxes.md) | certified Docker, Daytona, Box, and Modal sandboxes; implemented E2B and Lambda adapters remain unavailable pending certification |
 | [../runners.md](../runners.md)                               | attaching a Mac/Linux/Windows box as a Runner                                                                                     |
 | [../worktrees.md](../worktrees.md)                           | how sessions map to git worktrees, and where the disk goes                                                                        |
