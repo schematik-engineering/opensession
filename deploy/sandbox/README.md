@@ -22,7 +22,9 @@ session's git worktree **bind-mounted at its identical host path**.
 Runs as uid **1000** user `ubuntu` (matches the host uid) so bind-mounted
 worktrees keep sane ownership. Default `CMD` is `sleep infinity` — the provider
 starts the container long-lived and `docker exec`s runs into it; there's no
-baked ENTRYPOINT.
+baked ENTRYPOINT. Canonical state parents such as `~/.opensession` are created
+by that user before Docker mounts provider files beneath them, so runtime state
+directories never inherit root ownership from mount materialization.
 
 ## Why path parity matters
 

@@ -150,6 +150,7 @@ WORKDIR /home/ubuntu
 # and then uid-1000 tools cannot write sibling state directories. Runs as USER ubuntu, so ownership is right by construction.
 RUN mkdir -p /home/ubuntu/.config \
              /home/ubuntu/.local/share \
+             /home/ubuntu/.opensession \
              /home/ubuntu/.opensession-sessions
 
 # The workload-identity command is a sandbox client, not an administrative
