@@ -604,6 +604,9 @@ export interface NativeSessionFile {
     by?: string;
   }>;
   usage?: SessionUsage; // cumulative token/cost accounting for this session's runs
+  /** Most recent run folded into usage. Internal recovery idempotency marker;
+   *  omitted from UnifiedSession and every client payload. */
+  usageRunId?: string;
   archived?: boolean;
   archivedAt?: string;
   archivedReason?: "manual" | "idle" | "auto" | "plain";

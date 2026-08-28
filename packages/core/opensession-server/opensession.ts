@@ -67,6 +67,7 @@ import {
   readActiveShutdownSnapshot,
   recoverableLocalHostSnapshotRecords,
   recordRecoveredRunEvent,
+  persistRecoveredRunUsage,
   restorePromptQueues,
   resumeDrainedSessions,
   settleRecoveredCreationOpening,
@@ -881,6 +882,15 @@ if (!g.__opensessionBooted) {
                   terminalEvent.type === "error" ||
                   !!terminalEvent.usageLimitExhausted;
                 const settlementErrors: unknown[] = [];
+                try {
+                  await persistRecoveredRunUsage(
+                    bksSessionId,
+                    terminalEvent,
+                    recoveredRun?.runKey,
+                  );
+                } catch (error) {
+                  settlementErrors.push(error);
+                }
                 try {
                   await recordRunOutcome(
                     bksSessionId,

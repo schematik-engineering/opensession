@@ -14,6 +14,8 @@ import {
   fetchRepos,
   cachedRepos,
   relativeTime,
+  type Goal,
+  type GoalStatus,
   type ModelOption,
   type RepoInfo,
 } from "../lib/api";
@@ -36,6 +38,7 @@ import {
 } from "../ui/settings";
 import { EmptyState, InlineAlert, LoadingState } from "../ui/state";
 import { WorkingPill } from "../ui/status";
+import { errorMessage } from "../lib/error-message";
 
 /* Goals is a tool surface hosted inside Settings, so it reads as one of its
    pages: the settings reading column, a SettingsHeader on top, the rows on a
@@ -52,33 +55,6 @@ const SECTION_LABEL = "mb-1.5 text-label font-semibold text-faint";
 /** .automation-session-link */
 const LINK = "cursor-pointer text-link no-underline hover:underline";
 
-type GoalStatus = "active" | "paused" | "done" | "failed";
-
-interface Goal {
-  id: string;
-  name: string;
-  mission: string;
-  status: GoalStatus;
-  mode: "ask" | "code";
-  repo?: string;
-  bksSessionId?: string;
-  nextWakeAt: string;
-  minWakeMinutes: number;
-  maxWakes?: number;
-  wakeCount: number;
-  lastRunAt?: string;
-  lastRunStatus?: "running" | "ok" | "error";
-  lastRunError?: string;
-  phase?: string;
-  pauseReason?: string;
-  doneReason?: string;
-  model?: string;
-  fallbackModel?: string;
-  mcpServers?: string[];
-  createdBy: string;
-  isRunning?: boolean;
-}
-
 interface Props {
   onOpenSession: (sessionId: string) => void;
   /** Selected goal id (or name) — from the route. */
@@ -88,10 +64,10 @@ interface Props {
 }
 
 const STATUS_COLOR: Record<GoalStatus, string> = {
-  active: "#1f9d55",
-  paused: "#b7791f",
-  done: "#3182ce",
-  failed: "#e03131",
+  active: "var(--green)",
+  paused: "var(--yellow)",
+  done: "var(--blue)",
+  failed: "var(--red)",
 };
 
 export function Goals({ onOpenSession, selectedId, onSelect }: Props) {
@@ -108,13 +84,13 @@ export function Goals({ onOpenSession, selectedId, onSelect }: Props) {
       .catch(() => {});
   }, []);
 
-  // Stable identity: only setters and module functions are captured, so the
-  // polling effect can list `load` without ever refiring from re-renders.
   const load = useCallback(async () => {
-    await (async () => {
+    try {
       setGoals(await fetchGoals());
-      setLoading(false);
-    })().catch(async () => {});
+    } catch (cause) {
+      setError(errorMessage(cause, "Could not load goals"));
+    }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -156,13 +132,13 @@ export function Goals({ onOpenSession, selectedId, onSelect }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [hasSelection, editMode, onSelect]);
 
-  async function act(fn: () => Promise<unknown>, refreshDelay = 400) {
-    await (async () => {
-      await fn();
+  async function act(action: () => Promise<unknown>, refreshDelay = 400) {
+    try {
+      await action();
       setTimeout(load, refreshDelay);
-    })().catch(async (e: any) => {
-      setError(e.message);
-    });
+    } catch (cause) {
+      setError(errorMessage(cause, "Could not update goal"));
+    }
   }
 
   async function handleDelete(g: Goal) {
@@ -690,17 +666,17 @@ function GoalForm({
       minWakeMinutes: Number(minWakeMinutes) || undefined,
       maxWakes: maxWakes.trim() ? Number(maxWakes) : undefined,
     };
-    await (async () => {
+    try {
       if (initial) {
         await updateGoalApi(initial.id, payload);
       } else {
         await createGoalApi({ ...payload, createdBy: getCurrentUser() });
       }
       onSaved();
-    })().catch(async (e: any) => {
-      setError(e.message);
+    } catch (cause) {
+      setError(errorMessage(cause, "Could not save goal"));
       setSaving(false);
-    });
+    }
   }
 
   const fields = (

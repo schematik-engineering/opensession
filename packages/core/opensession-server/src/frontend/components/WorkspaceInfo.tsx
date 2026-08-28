@@ -38,10 +38,12 @@ import type {
   GitStatusInfo,
   PrDetails,
   UnifiedSession,
+  WSClientMessage,
 } from "../lib/types";
 import { formatPrCommentPrompt } from "./PrPanel";
 import { renderMarkdown } from "../lib/markdown";
 import { fullTime } from "../lib/time";
+import { errorMessage } from "../lib/error-message";
 import {
   isMachinePrComment,
   isOutdatedReviewComment,
@@ -151,7 +153,7 @@ interface Props {
   onOpenSession?: (id: string, created?: UnifiedSession | null) => void;
   /** Prompt the session (the Status section's Commit action) — the WS `prompt`
 	    message. Absent in read-only mounts, where Commit is simply hidden. */
-  send?: (msg: any) => void;
+  send?: (msg: WSClientMessage) => void;
   /** Media items currently in the open session's live entries — bumps refresh
 	    the panel as new screenshots land during a run. */
   liveMediaCount: number;
@@ -694,16 +696,13 @@ function AgentReviewCard({
     if (!pr.reviewActive || reviewCancelling) return;
     setReviewCancelling(true);
     setError(null);
-    await (async () => {
+    try {
       await cancelPrReviewApi(sessionId, getCurrentUser(), repo);
       setReviewCancelRequested(true);
-    })()
-      .catch(async (error: any) => {
-        setError(error?.message || "Couldn't cancel the review");
-      })
-      .finally(async () => {
-        setReviewCancelling(false);
-      });
+    } catch (error) {
+      setError(errorMessage(error, "Couldn't cancel the review"));
+    }
+    setReviewCancelling(false);
   }
 
   async function run(action: (typeof PR_AGENT_ACTIONS)[number]) {
@@ -711,35 +710,31 @@ function AgentReviewCard({
     setBusy(action.kind);
     setError(null);
     setDone(null);
-    await (async () => {
-      const res = await triggerPrActionApi(
+    try {
+      const result = await triggerPrActionApi(
         sessionId,
         action.kind,
         getCurrentUser(),
         repo,
       );
-      if (res.ok) {
+      if (result.ok) {
         if (action.kind === "review") setReviewQueued({ at: review?.at });
-        // Auto-fix opens a live session in this workspace — jump straight into it
-        // instead of leaving a "posted on the PR" note behind. The response
-        // carries the persisted session, so it opens as a real tab right away.
-        if (res.openSession && res.bksId && onOpenSession) {
-          onOpenSession(res.bksId, res.session ?? null);
-          return;
+        if (result.openSession && result.bksId && onOpenSession) {
+          onOpenSession(result.bksId, result.session ?? null);
+        } else {
+          setDone({
+            label: action.label,
+            bksId: result.bksId,
+            session: result.session,
+          });
         }
-        setDone({
-          label: action.label,
-          bksId: res.bksId,
-          session: res.session,
-        });
-      } else setError(res.error || res.message || "Couldn't start");
-    })()
-      .catch(async (e: any) => {
-        setError(e?.message || "Couldn't start");
-      })
-      .finally(async () => {
-        setBusy(null);
-      });
+      } else {
+        setError(result.error || result.message || "Couldn't start");
+      }
+    } catch (error) {
+      setError(errorMessage(error, "Couldn't start"));
+    }
+    setBusy(null);
   }
 
   // One action on the row, all of them in the menu: the row offers whichever
@@ -1061,11 +1056,11 @@ function ReviewerChip({
     if (!name && !prev) setGhRequested([]);
     setError(null);
     onReviewChange?.(owner, next);
-    setSessionReviewerApi(owner, name, me).catch((e: any) => {
+    setSessionReviewerApi(owner, name, me).catch((error) => {
       setReq(prev);
       setGhRequested(prevGithub);
       onReviewChange?.(owner, prev);
-      setError(e?.message || "Failed to set reviewer");
+      setError(errorMessage(error, "Failed to set reviewer"));
     });
   }
 
@@ -1080,10 +1075,10 @@ function ReviewerChip({
     setReq(next);
     setError(null);
     onReviewChange?.(owner, next);
-    acceptReviewApi(owner, value, me).catch((e: any) => {
+    acceptReviewApi(owner, value, me).catch((error) => {
       setReq(prev);
       onReviewChange?.(owner, prev);
-      setError(e?.message || "Failed to update review");
+      setError(errorMessage(error, "Failed to update review"));
     });
   }
 
@@ -1286,7 +1281,7 @@ function GitStatusRows({
 }: {
   sessionId: string;
   git: GitStatusInfo | null;
-  send?: (msg: any) => void;
+  send?: (msg: WSClientMessage) => void;
 }) {
   const [prompted, setPrompted] = useState<string | null>(null);
 

@@ -1,5 +1,12 @@
 import { request } from "./request";
-import type { UnifiedSession, OsReview, PrHostCapabilities } from "../types";
+import type {
+  UnifiedSession,
+  OsReview,
+  PrDetails,
+  PrDiffResponse,
+  PrHostCapabilities,
+  ReviewGuideData,
+} from "../types";
 
 /** One open PR from the batched repo-wide list (session or not). */
 export interface OpenPr {
@@ -333,9 +340,9 @@ export async function fetchPr(
   sessionId: string,
   repo?: string,
   branch?: string,
-) {
+): Promise<PrDetails | null> {
   const qs = prTargetQs(repo, branch);
-  return request<any>(`/sessions/${encodeURIComponent(sessionId)}/pr${qs}`, {
+  return request(`/sessions/${encodeURIComponent(sessionId)}/pr${qs}`, {
     label: "Failed to fetch PR",
   });
 }
@@ -377,12 +384,11 @@ export async function fetchPrDiff(
   sessionId: string,
   repo?: string,
   branch?: string,
-) {
+): Promise<PrDiffResponse | null> {
   const qs = prTargetQs(repo, branch);
-  return request<any>(
-    `/sessions/${encodeURIComponent(sessionId)}/pr-diff${qs}`,
-    { label: "Failed to fetch PR diff" },
-  );
+  return request(`/sessions/${encodeURIComponent(sessionId)}/pr-diff${qs}`, {
+    label: "Failed to fetch PR diff",
+  });
 }
 
 export async function fetchPrCodeFlow(
@@ -402,11 +408,13 @@ export async function fetchReviewGuide(
   sessionId: string,
   repo?: string,
   branch?: string,
-) {
+): Promise<ReviewGuideData | null> {
   const qs = prTargetQs(repo, branch);
-  return request<any>(
+  return request(
     `/sessions/${encodeURIComponent(sessionId)}/review-guide${qs}`,
-    { label: "Failed to fetch review guide" },
+    {
+      label: "Failed to fetch review guide",
+    },
   );
 }
 
@@ -437,15 +445,21 @@ export async function unlinkPrApi(
 }
 
 /** Session-less PR details for the sidebar's PR preview (keyed by repo+branch). */
-export async function fetchPrPreview(repo: string, branch: string) {
-  return request<any>(
+export async function fetchPrPreview(
+  repo: string,
+  branch: string,
+): Promise<PrDetails | null> {
+  return request(
     `/pr-preview?repo=${encodeURIComponent(repo)}&branch=${encodeURIComponent(branch)}`,
     { label: "Failed to fetch PR" },
   );
 }
 
-export async function fetchPrPreviewDiff(repo: string, branch: string) {
-  return request<any>(
+export async function fetchPrPreviewDiff(
+  repo: string,
+  branch: string,
+): Promise<PrDiffResponse | null> {
+  return request(
     `/pr-preview-diff?repo=${encodeURIComponent(repo)}&branch=${encodeURIComponent(branch)}`,
     { label: "Failed to fetch PR diff" },
   );
@@ -462,8 +476,11 @@ export async function fetchPrPreviewCodeFlow(
 }
 
 /** Session-less review guide for the PR preview's Guide tab (slow on first call per head commit). */
-export async function fetchPrPreviewGuide(repo: string, branch: string) {
-  return request<any>(
+export async function fetchPrPreviewGuide(
+  repo: string,
+  branch: string,
+): Promise<ReviewGuideData | null> {
+  return request(
     `/pr-preview-guide?repo=${encodeURIComponent(repo)}&branch=${encodeURIComponent(branch)}`,
     { label: "Failed to fetch review guide" },
   );

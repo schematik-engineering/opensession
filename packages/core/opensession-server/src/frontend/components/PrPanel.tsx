@@ -14,6 +14,8 @@ import type {
   DiffFileGroup,
   PrCheck,
   PrDetails,
+  PrDiffResponse,
+  ReviewGuideData,
   CodeFlowResult,
   SessionWalkthrough,
   UnifiedSession,
@@ -235,14 +237,6 @@ interface Props {
   flushToolbarTop?: boolean;
 }
 
-interface PrDiffData {
-  number: number;
-  headRefOid: string;
-  patch: string;
-  diffVersion?: string;
-  skippedFiles?: number;
-}
-
 /** A PR manually linked to the session (mirrors session.linkedPrs entries). */
 export interface LinkedPrEntry {
   repo: string;
@@ -253,19 +247,6 @@ export interface LinkedPrEntry {
 }
 
 const NO_LINKED_PRS: LinkedPrEntry[] = [];
-
-/** One narrative section of the AI review guide (mirrors the server shape). */
-interface ReviewGuideSection {
-  title: string;
-  explanation: string;
-  files: string[];
-}
-
-export interface ReviewGuideData {
-  number: number;
-  headRefOid: string;
-  sections: ReviewGuideSection[];
-}
 
 /** Split a unified diff into per-file chunks keyed by the new-side path. */
 function splitPatchByFile(patch: string): Map<string, string> {
@@ -414,7 +395,7 @@ export function PrPanel({
   const merging = mergePhase === "running";
   const mergeScheduled = mergePhase === "scheduled";
   const [git, setGit] = useState<GitStatusInfo | null>(null);
-  const [loadedDiff, setDiff] = useState<PrDiffData | null>(null);
+  const [loadedDiff, setDiff] = useState<PrDiffResponse | null>(null);
   const diff = loadedDiff?.headRefOid === pr?.headRefOid ? loadedDiff : null;
   const diffOutOfDate = !!loadedDiff && !diff;
   const diffLoadPolicy = reviewDiffLoadPolicy(
@@ -609,7 +590,7 @@ export function PrPanel({
       let prSettled = false;
       let diffSettled = false;
       let prResult: PrDetails | null = null;
-      let diffResult: PrDiffData | null = null;
+      let diffResult: PrDiffResponse | null = null;
       const isCurrent = () =>
         generation === loadGenerationRef.current &&
         loadTargetKey === activeLoadTargetRef.current;

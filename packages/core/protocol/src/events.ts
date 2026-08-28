@@ -159,10 +159,11 @@ export interface StreamEvent {
   /** Effective model for the run (set on init/done). */
   model?: string;
   /**
-   * Cumulative token/cost accounting for the run. Set on the terminal `done`
-   * (authoritative) and on every `usage_snapshot` (live mid-run figures —
-   * always run-cumulative, so consumers fold a snapshot onto the pre-run base
-   * rather than onto the previous snapshot).
+   * Cumulative token/cost accounting for the run. Set on terminal `done` or
+   * `error` events when the provider completed billable work (authoritative),
+   * and on every `usage_snapshot` (live mid-run figures — always
+   * run-cumulative, so consumers fold a snapshot onto the pre-run base rather
+   * than onto the previous snapshot).
    */
   usage?: TurnUsage;
   /** This completed Anthropic turn unexpectedly reused almost none of its prompt. */

@@ -48,6 +48,7 @@ import { EmptyState, InlineAlert, LoadingState } from "../ui/state";
 import { WorkingPill } from "../ui/status";
 import { Switch } from "../ui/switch";
 import { formatDuration } from "../lib/time";
+import { errorMessage } from "../lib/error-message";
 
 /* The old .automation-form family, as utilities. Two of its rules reached in
    from the form to the fields inside it and have to stay descendant selectors:
@@ -222,23 +223,22 @@ export function Automations({ onOpenSession, selectedId, onSelect }: Props) {
   // Leaving/changing the selection always drops back to the read view.
   useEffect(() => setEditMode(false), [selectedId]);
 
-  // Stable identity: only refs and setters are captured, so the polling
-  // effect can list `load` without ever refiring from re-renders.
   const load = useCallback(async () => {
-    await (async () => {
+    try {
       const next = (await fetchAutomations()) as Automation[];
       setAutomations(
-        next.map((automation) =>
-          pendingToggles.current.has(automation.id)
-            ? {
-                ...automation,
-                enabled: pendingToggles.current.get(automation.id)!.enabled,
-              }
-            : automation,
-        ),
+        next.map((automation) => {
+          const pending = pendingToggles.current.get(automation.id);
+          return pending
+            ? { ...automation, enabled: pending.enabled }
+            : automation;
+        }),
       );
       setLoading(false);
-    })().catch(async () => {});
+    } catch (error) {
+      setError(errorMessage(error, "Could not load automations"));
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -290,15 +290,16 @@ export function Automations({ onOpenSession, selectedId, onSelect }: Props) {
       ),
     );
 
-    await (async () => {
+    try {
       await updateAutomationApi(a.id, { enabled });
       // A second click may have superseded this request. Only the latest intent
       // gets to reconcile the optimistic state with the server response.
       if (pendingToggles.current.get(a.id)?.request !== request) return;
       await load();
-      if (pendingToggles.current.get(a.id)?.request === request)
+      if (pendingToggles.current.get(a.id)?.request === request) {
         pendingToggles.current.delete(a.id);
-    })().catch(async (e: any) => {
+      }
+    } catch (error) {
       if (pendingToggles.current.get(a.id)?.request !== request) return;
       pendingToggles.current.delete(a.id);
       setAutomations((current) =>
@@ -308,37 +309,37 @@ export function Automations({ onOpenSession, selectedId, onSelect }: Props) {
             : automation,
         ),
       );
-      setError(e.message);
-    });
+      setError(errorMessage(error, "Could not update automation"));
+    }
   }
 
-  async function handleDelete(a: Automation) {
-    if (!confirm(`Delete automation "${a.name}"?`)) return;
-    await (async () => {
-      await deleteAutomationApi(a.id);
-      if (sel?.id === a.id) onSelect("");
-      load();
-    })().catch(async (e: any) => {
-      setError(e.message);
-    });
+  async function handleDelete(automation: Automation) {
+    if (!confirm(`Delete automation "${automation.name}"?`)) return;
+    try {
+      await deleteAutomationApi(automation.id);
+      if (sel?.id === automation.id) onSelect("");
+      void load();
+    } catch (error) {
+      setError(errorMessage(error, "Could not delete automation"));
+    }
   }
 
-  async function handleRunNow(a: Automation) {
-    await (async () => {
-      await runAutomationApi(a.id);
+  async function handleRunNow(automation: Automation) {
+    try {
+      await runAutomationApi(automation.id);
       setTimeout(load, 800);
-    })().catch(async (e: any) => {
-      setError(e.message);
-    });
+    } catch (error) {
+      setError(errorMessage(error, "Could not run automation"));
+    }
   }
 
   async function handleRetrigger(sessionId: string) {
-    await (async () => {
+    try {
       await retriggerAutomationApi(sessionId);
       setTimeout(load, 800);
-    })().catch(async (e: any) => {
-      setError(e.message);
-    });
+    } catch (error) {
+      setError(errorMessage(error, "Could not retrigger automation"));
+    }
   }
 
   return (
@@ -1251,12 +1252,12 @@ function TypeChooser({
     if (description.trim().length < 10 || drafting) return;
     setDrafting(true);
     setError(null);
-    await (async () => {
+    try {
       onPick(await draftAutomationApi(description), "classic");
-    })().catch(async (e: any) => {
-      setError(e.message);
+    } catch (error) {
+      setError(errorMessage(error, "Could not draft automation"));
       setDrafting(false);
-    });
+    }
   }
 
   return (
@@ -1353,9 +1354,9 @@ function McpPicker({
     fetchConnections()
       .then((c) =>
         setServers(
-          (c.mcpServers || []).map((s: any) => ({
-            name: s.name,
-            status: s.status,
+          (c.mcpServers || []).map((server) => ({
+            name: server.name,
+            status: server.status,
           })),
         ),
       )
@@ -2022,7 +2023,7 @@ function AutomationForm({
   async function handleSave() {
     setSaving(true);
     setError(null);
-    await (async () => {
+    try {
       const slackWatch = isWatch
         ? { channel: watchChannel.trim().toUpperCase() }
         : initial?.slackWatch
@@ -2073,10 +2074,10 @@ function AutomationForm({
         });
       }
       onSaved();
-    })().catch(async (e: any) => {
-      setError(e.message);
+    } catch (error) {
+      setError(errorMessage(error, "Could not save automation"));
       setSaving(false);
-    });
+    }
   }
 
   return (

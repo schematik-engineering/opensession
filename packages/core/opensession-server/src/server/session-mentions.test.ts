@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import { foldSessionUsage, sessionMentionsNote } from "./run-session";
+import {
+  foldRecoveredSessionUsage,
+  foldSessionUsage,
+  sessionMentionsNote,
+} from "./run-session";
 import { wrapContext, stripContext } from "./prompt-context";
 
 describe("sessionMentionsNote exclusion (no double-context)", () => {
@@ -46,15 +50,16 @@ describe("sessionMentionsNote exclusion (no double-context)", () => {
 });
 
 describe("foldSessionUsage cost accounting", () => {
+  const zeroCostTurn = {
+    costUsd: 0,
+    inputTokens: 1,
+    outputTokens: 2,
+    cacheReadTokens: 3,
+    cacheCreationTokens: 4,
+    contextTokens: 8,
+  };
+
   it("uses the provider-reported amount, including a valid zero", () => {
-    const zeroCostTurn = {
-      costUsd: 0,
-      inputTokens: 1,
-      outputTokens: 2,
-      cacheReadTokens: 3,
-      cacheCreationTokens: 4,
-      contextTokens: 8,
-    };
     const first = foldSessionUsage(
       undefined,
       zeroCostTurn,
@@ -69,6 +74,27 @@ describe("foldSessionUsage cost accounting", () => {
     expect(first.costUsd).toBe(0);
     expect(next.costUsd).toBe(0.123456);
     expect("costApproximate" in next).toBe(false);
+  });
+
+  it("adds a recovered host terminal to the pre-restart total", () => {
+    const beforeRestart = foldSessionUsage(
+      undefined,
+      { ...zeroCostTurn, costUsd: 1.25 },
+      "pi/openai/gpt-5.6-sol",
+    );
+    const recovered = foldRecoveredSessionUsage(
+      { model: "pi/openai/gpt-5.6-sol", usage: beforeRestart },
+      { usage: { ...zeroCostTurn, costUsd: 5.5 } },
+    );
+
+    expect(recovered).toMatchObject({
+      costUsd: 6.75,
+      inputTokens: 2,
+      outputTokens: 4,
+      cacheReadTokens: 6,
+      cacheCreationTokens: 8,
+      turns: 2,
+    });
   });
 });
 

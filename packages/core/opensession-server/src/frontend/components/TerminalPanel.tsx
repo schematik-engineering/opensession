@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import type { WSServerMessage } from "../lib/types";
+import type { WSClientMessage, WSServerMessage } from "../lib/types";
 import { Button } from "../ui/button";
 import { EmptyState } from "../ui/state";
 import {
@@ -45,11 +45,45 @@ function b64decode(s: string): Uint8Array {
   return out;
 }
 
-/** The pluggable terminal engine (constructors + extra Terminal options). */
+interface TerminalDisposable {
+  dispose(): void;
+}
+
+interface TerminalAddon {
+  activate: (...args: never[]) => void;
+  dispose(): void;
+  fit(): void;
+}
+
+interface TerminalInstance {
+  cols: number;
+  rows: number;
+  loadAddon(addon: TerminalAddon): void;
+  open(element: HTMLElement): void;
+  onData(handler: (data: string) => void): TerminalDisposable;
+  write(data: string | Uint8Array): void;
+  focus(): void;
+  dispose(): void;
+}
+
+interface TerminalOptions {
+  fontSize: number;
+  fontFamily: string;
+  cursorBlink: boolean;
+  scrollback: number;
+  theme: {
+    background: string;
+    foreground: string;
+    cursor: string;
+    selectionBackground: string;
+  };
+  [key: string]: unknown;
+}
+
 interface TermEngine {
-  Terminal: new (opts: object) => any;
-  FitAddon: new () => any;
-  extraOptions: object;
+  Terminal: new (options: TerminalOptions) => TerminalInstance;
+  FitAddon: new () => TerminalAddon;
+  extraOptions: Record<string, unknown>;
 }
 
 /**
@@ -68,8 +102,8 @@ function loadTerminalEngine(): Promise<TermEngine> {
       // chunk's import.meta.url can't locate the package-relative default.
       const ghostty = await g.Ghostty.load("/ghostty-vt.wasm");
       return {
-        Terminal: g.Terminal as unknown as TermEngine["Terminal"],
-        FitAddon: g.FitAddon as unknown as TermEngine["FitAddon"],
+        Terminal: g.Terminal,
+        FitAddon: g.FitAddon,
         extraOptions: { ghostty },
       };
     } catch (e) {
@@ -79,8 +113,8 @@ function loadTerminalEngine(): Promise<TermEngine> {
         import("@xterm/addon-fit"),
       ]);
       return {
-        Terminal: x.Terminal as unknown as TermEngine["Terminal"],
-        FitAddon: f.FitAddon as unknown as TermEngine["FitAddon"],
+        Terminal: x.Terminal,
+        FitAddon: f.FitAddon,
         extraOptions: {},
       };
     }
@@ -108,7 +142,7 @@ export function ShellPanel({
   visible,
 }: {
   sessionId: string;
-  send: (msg: any) => void;
+  send: (msg: WSClientMessage) => void;
   addHandler: (handler: (msg: WSServerMessage) => void) => () => void;
   /** False while another side-panel tab covers the (still-mounted) panel. */
   visible: boolean;
@@ -225,7 +259,7 @@ function ShellView({
 }: {
   sessionId: string;
   termId: string;
-  send: (msg: any) => void;
+  send: (msg: WSClientMessage) => void;
   addHandler: (handler: (msg: WSServerMessage) => void) => () => void;
   visible: boolean;
 }) {

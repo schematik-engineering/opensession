@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { BASE_PATH } from "../../lib/base";
 import { relativeTime, type MemoryScopeDto } from "../../lib/api";
+import { errorMessage } from "../../lib/error-message";
 import {
   markTileClass,
   markTileGradient,
@@ -277,56 +278,55 @@ function MemoryRow({
       return;
     }
     setBusy(true);
-    await (async () => {
+    try {
       await updateMemoryRecord(row.scoped.scope.key, row.entry.id, {
         summary: text,
       });
       setEditing(false);
       onChanged();
-    })()
-      .catch(async (error: any) => {
-        toast(error?.message || "Failed to update memory", {
-          variant: "error",
-        });
-      })
-      .finally(async () => {
-        setBusy(false);
+    } catch (error) {
+      toast(errorMessage(error, "Failed to update memory"), {
+        variant: "error",
       });
+    }
+    setBusy(false);
   }
 
   async function permanentlyDelete() {
     setBusy(true);
-    await (async () => {
+    try {
       await permanentlyDeleteMemory(row.scoped.scope.key, row.entry.id);
       toast("Memory forgotten", { variant: "success" });
       onChanged();
-    })().catch(async (error: any) => {
-      toast(error?.message || "Failed to delete memory", { variant: "error" });
+    } catch (error) {
+      toast(errorMessage(error, "Failed to delete memory"), {
+        variant: "error",
+      });
       setBusy(false);
-    });
+    }
   }
 
   async function expand() {
     setExpanded(true);
     if (details !== undefined || !row.entry.hasDetails) return;
-    await (async () => {
+    try {
       const response = await readMemoryRecord(
         row.scoped.scope.key,
         row.entry.id,
       );
       setDetails(response.entry.details || "");
-    })().catch(async (error: any) => {
-      toast(error?.message || "Failed to load memory details", {
+    } catch (error) {
+      toast(errorMessage(error, "Failed to load memory details"), {
         variant: "error",
       });
-    });
+    }
   }
 
   async function act(
     action: "pin" | "unpin" | "confirm" | "archive" | "restore",
   ) {
     setBusy(true);
-    await (async () => {
+    try {
       await mutateMemoryRecord(row.scoped.scope.key, row.entry.id, action);
       toast(
         action === "pin"
@@ -341,15 +341,12 @@ function MemoryRow({
         { variant: "success" },
       );
       onChanged();
-    })()
-      .catch(async (error: any) => {
-        toast(error?.message || `Failed to ${action} memory`, {
-          variant: "error",
-        });
-      })
-      .finally(async () => {
-        setBusy(false);
+    } catch (error) {
+      toast(errorMessage(error, `Failed to ${action} memory`), {
+        variant: "error",
       });
+    }
+    setBusy(false);
   }
 
   return (
@@ -681,7 +678,7 @@ function AddMemoryDialog({
     const text = draft.trim();
     if (!scopeKey || !text) return;
     setBusy(true);
-    await (async () => {
+    try {
       await addStructuredMemory({
         scopeKey,
         summary: text,
@@ -693,13 +690,10 @@ function AddMemoryDialog({
       toast("Memory saved", { variant: "success" });
       onOpenChange(false);
       onChanged();
-    })()
-      .catch(async (error: any) => {
-        toast(error?.message || "Failed to add memory", { variant: "error" });
-      })
-      .finally(async () => {
-        setBusy(false);
-      });
+    } catch (error) {
+      toast(errorMessage(error, "Failed to add memory"), { variant: "error" });
+    }
+    setBusy(false);
   }
 
   return (
@@ -827,7 +821,7 @@ function MergeMemoryDialog({
 
   async function merge() {
     setBusy(true);
-    await (async () => {
+    try {
       await mergeMemoryRecords({
         scopeKey,
         ids,
@@ -839,15 +833,12 @@ function MergeMemoryDialog({
       toast("Memories merged", { variant: "success" });
       onOpenChange(false);
       onChanged();
-    })()
-      .catch(async (error: any) => {
-        toast(error?.message || "Failed to merge memories", {
-          variant: "error",
-        });
-      })
-      .finally(async () => {
-        setBusy(false);
+    } catch (error) {
+      toast(errorMessage(error, "Failed to merge memories"), {
+        variant: "error",
       });
+    }
+    setBusy(false);
   }
 
   return (

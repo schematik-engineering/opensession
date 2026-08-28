@@ -139,6 +139,7 @@ import {
   recordRunOutcome,
   applyRunOutcomeProjection,
   touchNativeSession,
+  updateSessionFile,
   SESSIONS_DIR,
 } from "./session-cache";
 import { markRecapPendingIfUnwatched } from "./recap";
@@ -1021,6 +1022,56 @@ const recoveredSlackScanners = new Map<
 const recoveredFeedStarted: Set<string> = (g.__recoveredFeedStarted ??=
   new Set());
 
+/** Fold one detached host's run-cumulative usage onto the total stored before
+ * the gateway restart. The host terminal is authoritative even when every
+ * intermediate usage_snapshot fell into the restart's live-only event gap. */
+export function foldRecoveredSessionUsage(
+  session: Pick<UnifiedSession, "model" | "usage">,
+  event: Pick<StreamEvent, "model" | "usage">,
+): SessionUsage | undefined {
+  if (!event.usage) return undefined;
+  return foldSessionUsage(
+    session.usage,
+    event.usage,
+    event.model || session.model,
+  );
+}
+
+/** Persist terminal usage in the recovery settlement path. This deliberately
+ * runs separately from recordRecoveredRunEvent: recovered snapshots are live
+ * readouts only, so another gateway restart can still fold the host's complete
+ * terminal total onto the same pre-run base. `runId` makes the terminal write
+ * idempotent when another restart lands between this write and journal cleanup. */
+export async function persistRecoveredRunUsage(
+  osSessionId: string,
+  event: StreamEvent,
+  runId?: string,
+): Promise<void> {
+  const session = findSession(osSessionId);
+  const turnUsage = event.usage;
+  if (!session || session.source !== "opensession" || !turnUsage) return;
+  let usage: SessionUsage | undefined;
+  await updateSessionFile(osSessionId, (data) => {
+    if (runId && data.usageRunId === runId) {
+      usage = data.usage;
+      return data;
+    }
+    usage = foldSessionUsage(data.usage, turnUsage, event.model || data.model);
+    return {
+      ...data,
+      usage,
+      ...(runId ? { usageRunId: runId } : {}),
+      lastActivity: new Date().toISOString(),
+    };
+  });
+  if (usage)
+    broadcastToSession(osSessionId, {
+      type: "usage_update",
+      sessionId: osSessionId,
+      usage,
+    });
+}
+
 export async function recordRecoveredRunEvent(
   osSessionId: string,
   event: StreamEvent,
@@ -1087,6 +1138,16 @@ export async function recordRecoveredRunEvent(
       sessionId: osSessionId,
       isRunning: true,
     });
+  }
+  if (event.type === "usage_snapshot") {
+    const usage = foldRecoveredSessionUsage(session, event);
+    if (usage)
+      broadcastToSession(osSessionId, {
+        type: "usage_update",
+        sessionId: osSessionId,
+        usage,
+      });
+    return;
   }
   if (event.type === "text_chunk") {
     broadcastToSession(osSessionId, {
@@ -3184,6 +3245,18 @@ async function runSessionPromptInner(
           });
           return;
         }
+        if (event.usage) {
+          latestUsage = foldSessionUsage(
+            usageBase,
+            event.usage,
+            event.model || effectiveModel,
+          );
+          broadcastToSession(sessionId, {
+            type: "usage_update",
+            sessionId,
+            usage: latestUsage,
+          });
+        }
         endedWithError = true;
         runFailure = event.content || "Run failed";
         // The transcript chip is written by recordRunOutcome below — this is
@@ -3233,7 +3306,12 @@ async function runSessionPromptInner(
       ...engineSessionPatch(effectiveProvider, finalSessionId),
       lastEngineProvider: effectiveProvider,
       ...(effectiveModel ? { lastEngineModel: effectiveModel } : {}),
-      ...(latestUsage ? { usage: latestUsage } : {}),
+      ...(latestUsage
+        ? {
+            usage: latestUsage,
+            ...(startToken ? { usageRunId: startToken } : {}),
+          }
+        : {}),
       ...(headBranch && headBranch !== session.branch
         ? { branch: headBranch }
         : {}),

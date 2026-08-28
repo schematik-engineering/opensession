@@ -2933,6 +2933,7 @@ async function* runPiAttempt(
         content: `pi: ${message}`,
         provider: PROVIDER,
         model,
+        ...(sawUsage ? { usage: { ...usageTotal } } : {}),
         ...(usageLimit ? { usageLimitExhausted: true } : {}),
       };
     } else if (lastStopReason === "error" || lastStopReason === "aborted") {
@@ -2946,6 +2947,7 @@ async function* runPiAttempt(
         content: `pi: ${message}`,
         provider: PROVIDER,
         model,
+        ...(sawUsage ? { usage: { ...usageTotal } } : {}),
         ...(usageLimit ? { usageLimitExhausted: true } : {}),
       };
     } else {
@@ -3016,6 +3018,7 @@ async function* runPiAttempt(
       content: `pi: ${message}`,
       provider: PROVIDER,
       model,
+      ...(sawUsage ? { usage: { ...usageTotal } } : {}),
       ...(usageLimit ? { usageLimitExhausted: true } : {}),
     };
   } finally {
