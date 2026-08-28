@@ -68,13 +68,25 @@ export class AcpTerminalManager {
     for (const key of Object.keys(env))
       if (env[key] === undefined) delete env[key];
 
-    const child = spawn(params.command, params.args || [], {
-      cwd,
-      env,
-      detached: true,
-      stdio: ["pipe", "pipe", "pipe"],
-      shell: false,
-    });
+    // ACP models the executable and argv separately, but Grok Build currently
+    // sends a complete shell command in `command` with no `args` (for example
+    // `/usr/bin/bash -lc pwd`). Treat that compatibility shape as a terminal
+    // command line. Requests with an argv stay shell-free, preserving the
+    // protocol's exact-exec behavior for conforming agents such as Cursor.
+    const requestedArgs = params.args || [];
+    const combinedCommand =
+      requestedArgs.length === 0 && /\s/.test(params.command.trim());
+    const child = spawn(
+      combinedCommand ? "/bin/sh" : params.command,
+      combinedCommand ? ["-lc", params.command] : requestedArgs,
+      {
+        cwd,
+        env,
+        detached: true,
+        stdio: ["pipe", "pipe", "pipe"],
+        shell: false,
+      },
+    );
     child.stdin.end();
     const terminalId = crypto.randomUUID();
     let settle!: (status: schema.TerminalExitStatus) => void;
@@ -94,13 +106,20 @@ export class AcpTerminalManager {
     };
     child.stdout.on("data", (chunk: Buffer) => appendOutput(state, chunk));
     child.stderr.on("data", (chunk: Buffer) => appendOutput(state, chunk));
-    child.once("error", (error) =>
-      appendOutput(state, Buffer.from(String(error))),
-    );
-    child.once("exit", (code, signal) => {
-      state.exitStatus = { exitCode: code, signal };
-      settle(state.exitStatus);
+    let settled = false;
+    const finish = (status: schema.TerminalExitStatus) => {
+      if (settled) return;
+      settled = true;
+      state.exitStatus = status;
+      settle(status);
+    };
+    child.once("error", (error) => {
+      appendOutput(state, Buffer.from(String(error)));
+      // A spawn failure has no `exit` event. Resolve the ACP waiter with the
+      // conventional command-not-found status instead of hanging the turn.
+      finish({ exitCode: 127, signal: null });
     });
+    child.once("exit", (code, signal) => finish({ exitCode: code, signal }));
     this.terminals.set(terminalId, state);
     return { terminalId };
   }

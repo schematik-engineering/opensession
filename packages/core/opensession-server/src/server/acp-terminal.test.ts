@@ -70,6 +70,51 @@ describe("ACP terminal containment", () => {
     await manager.close();
   });
 
+  test("runs Grok's combined shell-command compatibility shape", async () => {
+    const { workspace, manager } = fixture();
+    const created = await manager.createTerminal({
+      sessionId: "test-session",
+      command: "/usr/bin/bash -lc 'printf combined-command-ok'",
+      cwd: workspace,
+      env: [],
+      outputByteLimit: 1_000,
+    });
+    const status = await manager.waitForTerminalExit({
+      sessionId: "test-session",
+      terminalId: created.terminalId,
+    });
+    const output = await manager.terminalOutput({
+      sessionId: "test-session",
+      terminalId: created.terminalId,
+    });
+    expect(status.exitCode).toBe(0);
+    expect(output.output).toBe("combined-command-ok");
+    await manager.close();
+  });
+
+  test("settles a missing executable instead of hanging the ACP waiter", async () => {
+    const { workspace, manager } = fixture();
+    const created = await manager.createTerminal({
+      sessionId: "test-session",
+      command: join(workspace, "missing-executable"),
+      args: [],
+      cwd: workspace,
+      env: [],
+      outputByteLimit: 1_000,
+    });
+    const status = await manager.waitForTerminalExit({
+      sessionId: "test-session",
+      terminalId: created.terminalId,
+    });
+    const output = await manager.terminalOutput({
+      sessionId: "test-session",
+      terminalId: created.terminalId,
+    });
+    expect(status.exitCode).toBe(127);
+    expect(output.output).toContain("ENOENT");
+    await manager.close();
+  });
+
   test("caps output and kills a released process group", async () => {
     const { workspace, manager } = fixture();
     const created = await manager.createTerminal({
