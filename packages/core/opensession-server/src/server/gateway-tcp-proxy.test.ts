@@ -6,6 +6,14 @@ import {
 
 const servers: Array<{ stop(closeActiveConnections?: boolean): void }> = [];
 
+async function until(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("condition was not reached");
+    await Bun.sleep(5);
+  }
+}
+
 afterEach(() => {
   for (const server of servers.splice(0)) server.stop(true);
 });
@@ -137,5 +145,67 @@ describe("gateway TCP proxy", () => {
     expect(metrics.connected).toBe(2);
     expect(metrics.retries).toBeGreaterThan(0);
     expect(metrics.maxConnectWaitMs).toBeGreaterThan(0);
+  });
+
+  test("backs off without dialing while no backend is selected", async () => {
+    let backendPort = 0;
+    const metrics = createGatewayTcpProxyMetrics();
+    const proxy = startGatewayTcpProxy({
+      hostname: "127.0.0.1",
+      port: 0,
+      backendPort: () => backendPort,
+      retryMs: 5,
+      maxRetryMs: 20,
+      connectDeadlineMs: 1_000,
+      metrics,
+    });
+    servers.push(proxy);
+
+    const waiting = fetch(`http://127.0.0.1:${proxy.port}/`).then((response) => response.text());
+    await until(() => metrics.unavailableRetries >= 4);
+    const available = backend("ready");
+    backendPort = available.port!;
+
+    expect(await waiting).toBe("ready");
+    expect(metrics.unavailableRetries).toBeLessThan(9);
+    expect(metrics.connected).toBe(1);
+  });
+
+  test("bounds parked backend traffic while still serving the stable shell", async () => {
+    const metrics = createGatewayTcpProxyMetrics();
+    const proxy = startGatewayTcpProxy({
+      hostname: "127.0.0.1",
+      port: 0,
+      backendPort: () => 0,
+      retryMs: 5,
+      connectDeadlineMs: 1_000,
+      maxPendingConnections: 1,
+      metrics,
+      fallbackHttp(request) {
+        if (!request.toString().startsWith("GET / HTTP/")) return null;
+        return Buffer.from(
+          "HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\nstable",
+        );
+      },
+    });
+    servers.push(proxy);
+
+    const heldAbort = new AbortController();
+    const held = fetch(`http://127.0.0.1:${proxy.port}/api/held`, {
+      signal: heldAbort.signal,
+    }).catch(() => null);
+    await until(() => metrics.pending === 1);
+
+    expect(await fetch(`http://127.0.0.1:${proxy.port}/`).then((response) => response.text()))
+      .toBe("stable");
+    void fetch(`http://127.0.0.1:${proxy.port}/api/rejected`, {
+      signal: AbortSignal.timeout(500),
+    }).catch(() => null);
+    await until(() => metrics.rejected === 1);
+    expect(metrics.pending).toBe(1);
+    expect(metrics.fallbackServed).toBe(1);
+
+    heldAbort.abort();
+    await held;
   });
 });

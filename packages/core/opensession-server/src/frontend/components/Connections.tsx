@@ -46,6 +46,8 @@ import { UserAvatar } from "./UserAvatar";
 import { docTitle, DEFAULT_DOC_TITLE } from "../lib/brand";
 import { ProjectsSection } from "./ProjectsSection";
 import { GithubPrivateKeyField } from "./GithubPrivateKeyField";
+import { request } from "../lib/api/request";
+import { errorMessage } from "../lib/error-message";
 
 interface McpConnection {
   name: string;
@@ -116,145 +118,157 @@ function ConnectionsSkeleton() {
   );
 }
 
+interface McpOauthStatus {
+  shared?: { connectedBy?: string };
+  users: string[];
+  capable?: boolean;
+  manualToken?: boolean;
+}
+
 export function Connections() {
   const [data, setData] = useState<ConnectionsData | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
-  // Paste-a-token connect for providers that gate OAuth client registration
-  // (Vercel approves only its own list of AI clients).
   const [tokenConnect, setTokenConnect] = useState<McpConnection | null>(null);
 
-  // Stable identity: only setters are captured.
   const load = useCallback(async (force = false) => {
     if (force) setRefreshing(true);
-    await (async () => {
-const res = await fetch(`${BASE_PATH}/api/connections${force ? "?refresh=1" : ""}`);
-      if (res.ok) setData(await res.json());
-})().catch(async () => {
-
-});
+    try {
+      const next = await request<ConnectionsData>(
+        `/connections${force ? "?refresh=1" : ""}`,
+        { label: "Could not load connections" },
+      );
+      setData(next);
+    } catch {
+      // Keep the last successful snapshot; connection rows expose their own state.
+    }
     setRefreshing(false);
   }, []);
 
   useEffect(() => {
     document.title = docTitle("Connections");
-    load();
+    void load();
     return () => {
       document.title = DEFAULT_DOC_TITLE;
     };
   }, [load]);
 
-  // OAuth grants per HTTP server (mcp-oauth.ts): shared + per-user badges.
-  const [oauthByName, setOauthByName] = useState<
-    Record<
-      string,
-      {
-        shared?: { connectedBy?: string };
-        users: string[];
-        capable?: boolean;
-        manualToken?: boolean;
-      }
-    >
-  >({});
+  const [oauthByName, setOauthByName] = useState<Record<string, McpOauthStatus>>(
+    {},
+  );
   const loadOauth = useCallback(async (servers: McpConnection[]) => {
     const entries = await Promise.all(
-      servers
-        .map(async (s) => {
-          try {
-            const res = await fetch(
-              `${BASE_PATH}/api/connections/mcp/${encodeURIComponent(s.name)}/oauth`,
-            );
-            return res.ok ? ([s.name, await res.json()] as const) : null;
-          } catch {
-            return null;
-          }
-        }),
+      servers.map(async (server) => {
+        try {
+          const status = await request<McpOauthStatus>(
+            `/connections/mcp/${encodeURIComponent(server.name)}/oauth`,
+            { label: `Could not load ${server.name} OAuth status` },
+          );
+          return [server.name, status] as const;
+        } catch {
+          return null;
+        }
+      }),
     );
-    setOauthByName(Object.fromEntries(entries.filter(Boolean) as any));
+    const connected = entries.filter(
+      (entry): entry is readonly [string, McpOauthStatus] => entry !== null,
+    );
+    setOauthByName(Object.fromEntries(connected));
   }, []);
   useEffect(() => {
     if (data?.mcpServers) void loadOauth(data.mcpServers);
   }, [data, loadOauth]);
 
-  // Start a browser OAuth flow (workspace-wide or the signed-in user's own
-  // account) and open the consent in a new tab; re-poll status for a while
-  // so the badge appears once they approve.
-  async function handleOauthConnect(s: McpConnection, scope: "shared" | "me") {
-    await (async () => {
-const res = await fetch(
-        `${BASE_PATH}/api/connections/mcp/${encodeURIComponent(s.name)}/oauth/start`,
+  async function handleOauthConnect(
+    server: McpConnection,
+    scope: "shared" | "me",
+  ) {
+    try {
+      const { url } = await request<{ url: string }>(
+        `/connections/mcp/${encodeURIComponent(server.name)}/oauth/start`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ scope }),
+          body: { scope },
+          label: `Could not connect ${server.name}`,
         },
       );
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
-      window.open(body.url, "_blank", "noopener");
+      window.open(url, "_blank", "noopener");
       let polls = 0;
-      const t = setInterval(() => {
+      const timer = setInterval(() => {
         polls += 1;
-        if (polls > 24 || !data?.mcpServers) return clearInterval(t);
+        if (polls > 24 || !data?.mcpServers) {
+          clearInterval(timer);
+          return;
+        }
         void loadOauth(data.mcpServers);
       }, 5000);
-})().catch(async (e: any) => {
-setRemoveError(e.message);
-});
+    } catch (cause) {
+      setRemoveError(errorMessage(cause, `Could not connect ${server.name}`));
+    }
   }
 
-  async function handleOauthDisconnect(s: McpConnection, scope: "shared" | "me") {
-    await (async () => {
-const res = await fetch(
-        `${BASE_PATH}/api/connections/mcp/${encodeURIComponent(s.name)}/oauth${scope === "me" ? "?scope=me" : ""}`,
-        { method: "DELETE" },
+  async function handleOauthDisconnect(
+    server: McpConnection,
+    scope: "shared" | "me",
+  ) {
+    try {
+      await request(
+        `/connections/mcp/${encodeURIComponent(server.name)}/oauth${
+          scope === "me" ? "?scope=me" : ""
+        }`,
+        {
+          method: "DELETE",
+          label: `Could not disconnect ${server.name}`,
+        },
       );
-      if (!res.ok) throw new Error((await res.json()).error || `Failed: ${res.status}`);
       if (data?.mcpServers) void loadOauth(data.mcpServers);
-})().catch(async (e: any) => {
-setRemoveError(e.message);
-});
+    } catch (cause) {
+      setRemoveError(errorMessage(cause, `Could not disconnect ${server.name}`));
+    }
   }
 
   async function handleRemove(name: string) {
-    if (!confirm(`Remove MCP server "${name}"? New sessions will no longer get its tools.`)) return;
-    await (async () => {
-const res = await fetch(`${BASE_PATH}/api/connections/mcp/${encodeURIComponent(name)}`, {
+    if (
+      !confirm(
+        `Remove MCP server "${name}"? New sessions will no longer get its tools.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await request(`/connections/mcp/${encodeURIComponent(name)}`, {
         method: "DELETE",
+        label: `Could not remove ${name}`,
       });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
-      load(true);
-})().catch(async (e: any) => {
-setRemoveError(e.message);
-});
+      void load(true);
+    } catch (cause) {
+      setRemoveError(errorMessage(cause, `Could not remove ${name}`));
+    }
   }
 
-  async function handleRestrict(s: McpConnection) {
-    const current = (s.allowedUsers || []).join(", ");
+  async function handleRestrict(server: McpConnection) {
+    const current = (server.allowedUsers || []).join(", ");
     const answer = prompt(
-      `Restrict "${s.name}" to these people (comma-separated configured names, e.g. "Alice, Bob").\n` +
-        `Leave blank to make it available to everyone.`,
+      `Restrict "${server.name}" to these people (comma-separated configured names, e.g. "Alice, Bob").\n` +
+        "Leave blank to make it available to everyone.",
       current,
     );
-    if (answer === null) return; // cancelled
+    if (answer === null) return;
     const allowedUsers = answer
       .split(",")
-      .map((u) => u.trim())
+      .map((user) => user.trim())
       .filter(Boolean);
-    await (async () => {
-const res = await fetch(`${BASE_PATH}/api/connections/mcp/${encodeURIComponent(s.name)}`, {
+    try {
+      await request(`/connections/mcp/${encodeURIComponent(server.name)}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ allowedUsers }),
+        body: { allowedUsers },
+        label: `Could not update ${server.name}`,
       });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
-      load(true);
-})().catch(async (e: any) => {
-setRemoveError(e.message);
-});
+      void load(true);
+    } catch (cause) {
+      setRemoveError(errorMessage(cause, `Could not update ${server.name}`));
+    }
   }
 
   return (
@@ -1043,59 +1057,61 @@ export function GithubAccounts({
     notifyContentSizeChange();
   }, [data, flow, flowState, error]);
 
-  // Stable identity: only setters are captured.
   const load = useCallback(async () => {
-    await (async () => {
-const res = await fetch(`${BASE_PATH}/api/connections/github`);
-      if (res.ok) setData(await res.json());
-})().catch(async () => {
-
-});
+    try {
+      setData(
+        await request<GithubAuthData>("/connections/github", {
+          label: "Could not load GitHub accounts",
+        }),
+      );
+    } catch {
+      // Keep the last successful account snapshot during transient refreshes.
+    }
   }, []);
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
-  // Poll the device flow until GitHub reports authorized / expired.
   useEffect(() => {
     if (!flow) return;
     let cancelled = false;
     let intervalMs = Math.max(flow.interval, 5) * 1000;
     let timer: ReturnType<typeof setTimeout>;
     const tick = async () => {
-      await (async () => {
-const res = await fetch(`${BASE_PATH}/api/connections/github/device/poll`, {
+      try {
+        const result = await request<
+          | { status: "pending" }
+          | { status: "slow_down"; interval: number }
+          | { status: "ok"; authEnabled?: boolean }
+          | { status: "error"; error: string }
+        >("/connections/github/device/poll", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ deviceCode: flow.deviceCode }),
+          body: { deviceCode: flow.deviceCode },
+          label: "Could not check GitHub authorization",
         });
-        const body = await res.json();
         if (cancelled) return;
-        if (body.status === "ok") {
+        if (result.status === "ok") {
           setFlow(null);
           setFlowState("idle");
-          // authEnabled: this connect flipped the workspace into sign-in mode and
-          // the browser now holds the session cookie. A full reload re-runs the
-          // app's auth bootstrap so every panel reflects operator mode, rather
-          // than patching one card's state.
-          if (body.authEnabled) {
+          if (result.authEnabled) {
             window.location.reload();
             return;
           }
-          load();
+          void load();
           return;
         }
-        if (body.status === "slow_down") intervalMs = Math.max(body.interval, 5) * 1000;
-        if (body.status === "error") {
-          setError(body.error);
+        if (result.status === "slow_down") {
+          intervalMs = Math.max(result.interval, 5) * 1000;
+        } else if (result.status === "error") {
+          setError(result.error);
           setFlow(null);
           setFlowState("idle");
           return;
         }
-})().catch(async () => {
-
-});
+      } catch {
+        // Authorization polling tolerates transient network failures.
+      }
       if (!cancelled) timer = setTimeout(tick, intervalMs);
     };
     timer = setTimeout(tick, intervalMs);
@@ -1108,16 +1124,17 @@ const res = await fetch(`${BASE_PATH}/api/connections/github/device/poll`, {
   async function startConnect() {
     setError(null);
     setFlowState("starting");
-    await (async () => {
-const res = await fetch(`${BASE_PATH}/api/connections/github/device`, { method: "POST" });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
-      setFlow(body);
+    try {
+      const nextFlow = await request<DeviceFlow>("/connections/github/device", {
+        method: "POST",
+        label: "Could not start GitHub authorization",
+      });
+      setFlow(nextFlow);
       setFlowState("waiting");
-})().catch(async (e: any) => {
-setError(e.message);
+    } catch (cause) {
+      setError(errorMessage(cause, "Could not start GitHub authorization"));
       setFlowState("idle");
-});
+    }
   }
 
   function cancelConnect() {
@@ -1159,34 +1176,24 @@ setError(e.message);
     const slug = appSlug.trim();
     const secret = appSecret.trim();
     const privateKey = appPrivateKey.trim();
-    // The secret is required: the device-flow token expires and is refreshed
-    // with it, so without one the connection would stop after ~8h.
     if (!clientId || !slug || !secret) return;
     setError(null);
     setSavingApp(true);
-    await (async () => {
-const res = await fetch(`${BASE_PATH}/api/connections/github/app`, {
+    try {
+      await request("/connections/github/app", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // App setup records connect-time sign-in intent for either owner. The
-        // private key is optional but lets the bot/agent and checks-read mint
-        // installation tokens.
-        body: JSON.stringify({ clientId, slug, secret, appOrg, privateKey }),
+        body: { clientId, slug, secret, appOrg, privateKey },
+        label: "Could not save GitHub App",
       });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
       setAppClientId("");
       setAppSlug("");
       setAppSecret("");
       setAppPrivateKey("");
-      // getConfig() re-reads on the file change, so the reload shows the App as
-      // configured and switches the card to its device-flow connect.
-      load();
-})().catch(async (e: any) => {
-setError(e.message);
-}).finally(async () => {
-setSavingApp(false);
-});
+      void load();
+    } catch (cause) {
+      setError(errorMessage(cause, "Could not save GitHub App"));
+    }
+    setSavingApp(false);
   }
 
   async function removeApp() {
@@ -1194,51 +1201,50 @@ setSavingApp(false);
       !confirm(
         "Remove the GitHub App configuration? You'll need to set up an app again before you can connect GitHub.",
       )
-    )
+    ) {
       return;
+    }
     setError(null);
-    await (async () => {
-const res = await fetch(`${BASE_PATH}/api/connections/github/app`, {
+    try {
+      await request("/connections/github/app", {
         method: "DELETE",
+        label: "Could not remove GitHub App",
       });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
-      load();
-})().catch(async (e: any) => {
-setError(e.message);
-});
+      void load();
+    } catch (cause) {
+      setError(errorMessage(cause, "Could not remove GitHub App"));
+    }
   }
 
-  // Switching the wizard owner back to "You" clears the captured org owner.
-  // The subsequent personal App setup arms its own connect-time sign-in intent.
   async function clearOrgIntent() {
-    await (async () => {
-const res = await fetch(`${BASE_PATH}/api/connections/github/app`, {
+    try {
+      await request("/connections/github/app", {
         method: "DELETE",
+        label: "Could not clear GitHub organization setup",
       });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error || `Failed: ${res.status}`);
-      }
-      load();
-})().catch(async (e: any) => {
-setError(e.message);
-});
+      void load();
+    } catch (cause) {
+      setError(errorMessage(cause, "Could not clear GitHub organization setup"));
+    }
   }
 
   async function disconnect(login: string) {
-    if (!confirm(`Disconnect @${login}? Your GitHub actions will be unavailable until you reconnect.`)) return;
-    await (async () => {
-const res = await fetch(
-        `${BASE_PATH}/api/connections/github/account/${encodeURIComponent(login)}`,
-        { method: "DELETE" },
+    if (
+      !confirm(
+        `Disconnect @${login}? Your GitHub actions will be unavailable until you reconnect.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await request(
+        `/connections/github/account/${encodeURIComponent(login)}`,
+        { method: "DELETE", label: `Could not disconnect @${login}` },
       );
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
-      load();
-})().catch(async (e: any) => {
-setError(e.message);
-});
+      void load();
+    } catch (cause) {
+      setError(errorMessage(cause, `Could not disconnect @${login}`));
+    }
   }
 
   if (!data) return loadingFallback;

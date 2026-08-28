@@ -10,7 +10,9 @@ export type GatewayTcpProxy = {
 type ClientState = {
   closed: boolean;
   pending: boolean;
+  admitted: boolean;
   acceptedAt: number;
+  retryAttempt: number;
   peer?: RelaySocket;
   retry?: ReturnType<typeof setTimeout>;
   requestChunks: Buffer[];
@@ -22,6 +24,8 @@ export type GatewayTcpProxyMetrics = {
   accepted: number;
   connected: number;
   retries: number;
+  unavailableRetries: number;
+  rejected: number;
   timedOut: number;
   closed: number;
   pending: number;
@@ -35,6 +39,8 @@ export function createGatewayTcpProxyMetrics(): GatewayTcpProxyMetrics {
     accepted: 0,
     connected: 0,
     retries: 0,
+    unavailableRetries: 0,
+    rejected: 0,
     timedOut: 0,
     closed: 0,
     pending: 0,
@@ -49,12 +55,22 @@ export interface GatewayTcpProxyOptions {
   port: number;
   backendPort(): number;
   retryMs?: number;
+  maxRetryMs?: number;
   connectDeadlineMs?: number;
+  maxPendingConnections?: number;
   metrics?: GatewayTcpProxyMetrics;
   /** Optional stable HTTP response before a replaceable backend is connected. */
   fallbackHttp?(request: Buffer): Buffer | null;
   /** systemd socket-activation descriptor. PID 1 retains the listening socket. */
   listenFd?: number;
+}
+
+function validBackendPort(port: number): boolean {
+  return Number.isInteger(port) && port > 0 && port <= 65_535;
+}
+
+function retryDelay(initialMs: number, maximumMs: number, attempt: number): number {
+  return Math.min(maximumMs, initialMs * 2 ** Math.min(attempt, 10));
 }
 
 /**
@@ -66,13 +82,17 @@ export interface GatewayTcpProxyOptions {
 function startInheritedGatewayTcpProxy(
   options: GatewayTcpProxyOptions & { listenFd: number },
 ): GatewayTcpProxy {
-  const retryMs = options.retryMs ?? 25;
-  const connectDeadlineMs = options.connectDeadlineMs ?? 30_000;
+  const retryMs = Math.max(1, options.retryMs ?? 25);
+  const maxRetryMs = Math.max(retryMs, options.maxRetryMs ?? 250);
+  const connectDeadlineMs = Math.max(1, options.connectDeadlineMs ?? 30_000);
+  const maxPendingConnections = Math.max(1, options.maxPendingConnections ?? 2_048);
   const metrics = options.metrics ?? createGatewayTcpProxyMetrics();
   const pending = new Set<{
     client: Socket;
     timer?: ReturnType<typeof setTimeout>;
     acceptedAt: number;
+    retryAttempt: number;
+    admitted: boolean;
     chunks: Buffer[];
     bytes: number;
     served: boolean;
@@ -80,9 +100,12 @@ function startInheritedGatewayTcpProxy(
   const active = new Set<Socket>();
 
   const server = createServer({ pauseOnConnect: true }, (client) => {
+    const admitted = metrics.pending < maxPendingConnections;
     const state = {
       client,
       acceptedAt: Date.now(),
+      retryAttempt: 0,
+      admitted,
       chunks: [],
       bytes: 0,
       served: false,
@@ -90,14 +113,18 @@ function startInheritedGatewayTcpProxy(
       client: Socket;
       timer?: ReturnType<typeof setTimeout>;
       acceptedAt: number;
+      retryAttempt: number;
+      admitted: boolean;
       chunks: Buffer[];
       bytes: number;
       served: boolean;
     };
-    pending.add(state);
+    if (admitted) {
+      pending.add(state);
+      metrics.pending++;
+    }
     metrics.accepted++;
-    metrics.pending++;
-    const deadline = Date.now() + connectDeadlineMs;
+    const deadline = state.acceptedAt + connectDeadlineMs;
     const onData = (chunk: Buffer) => {
       if (state.served) return;
       state.chunks.push(chunk);
@@ -121,22 +148,40 @@ function startInheritedGatewayTcpProxy(
     };
     client.on("data", onData);
     client.resume();
-    const connect = () => {
+
+    const rejectOverload = () => {
+      if (client.destroyed || state.served) return;
+      state.served = true;
+      metrics.rejected++;
+      metrics.closed++;
+      client.destroy();
+    };
+    const schedule = (backendUnavailable: boolean) => {
       if (client.destroyed || state.served) return;
       if (Date.now() >= deadline) {
-        pending.delete(state);
-        metrics.pending--;
+        if (pending.delete(state)) metrics.pending--;
         metrics.timedOut++;
         client.destroy();
         return;
       }
-      const upstream = createConnection({ host: "127.0.0.1", port: options.backendPort() });
+      metrics.retries++;
+      if (backendUnavailable) metrics.unavailableRetries++;
+      const delay = retryDelay(retryMs, maxRetryMs, state.retryAttempt++);
+      state.timer = setTimeout(connect, delay);
+      state.timer.unref?.();
+    };
+    const connect = () => {
+      state.timer = undefined;
+      if (client.destroyed || state.served) return;
+      const port = options.backendPort();
+      if (!validBackendPort(port)) {
+        schedule(true);
+        return;
+      }
+      const upstream = createConnection({ host: "127.0.0.1", port });
       const retry = () => {
         upstream.destroy();
-        if (client.destroyed || state.served) return;
-        metrics.retries++;
-        state.timer = setTimeout(connect, retryMs);
-        state.timer.unref?.();
+        schedule(false);
       };
       upstream.once("error", retry);
       upstream.once("connect", () => {
@@ -145,8 +190,7 @@ function startInheritedGatewayTcpProxy(
           upstream.destroy();
           return;
         }
-        pending.delete(state);
-        metrics.pending--;
+        if (pending.delete(state)) metrics.pending--;
         metrics.connected++;
         metrics.active++;
         metrics.maxConnectWaitMs = Math.max(
@@ -181,10 +225,10 @@ function startInheritedGatewayTcpProxy(
       }
       if (state.timer) clearTimeout(state.timer);
     });
-    state.timer = setTimeout(() => {
-      state.timer = undefined;
-      connect();
-    }, options.fallbackHttp ? 2 : 0);
+    state.timer = setTimeout(
+      admitted ? connect : rejectOverload,
+      options.fallbackHttp ? (admitted ? 2 : 10) : 0,
+    );
     state.timer.unref?.();
   });
   server.listen({ fd: options.listenFd });
@@ -210,8 +254,10 @@ export function startGatewayTcpProxy(
       options as GatewayTcpProxyOptions & { listenFd: number },
     );
   }
-  const retryMs = options.retryMs ?? 25;
-  const connectDeadlineMs = options.connectDeadlineMs ?? 30_000;
+  const retryMs = Math.max(1, options.retryMs ?? 25);
+  const maxRetryMs = Math.max(retryMs, options.maxRetryMs ?? 250);
+  const connectDeadlineMs = Math.max(1, options.connectDeadlineMs ?? 30_000);
+  const maxPendingConnections = Math.max(1, options.maxPendingConnections ?? 2_048);
   const clients = new WeakMap<RelaySocket, ClientState>();
   const peers = new WeakMap<RelaySocket, RelaySocket>();
   const metrics = options.metrics ?? createGatewayTcpProxyMetrics();
@@ -244,30 +290,43 @@ export function startGatewayTcpProxy(
     if (written < length) source.pause();
   };
 
-  const connect = (client: RelaySocket, deadline: number) => {
+  const scheduleRetry = (
+    client: RelaySocket,
+    state: ClientState,
+    backendUnavailable: boolean,
+  ) => {
+    if (state.closed || state.peer || state.retry || state.fallbackServed) return;
+    if (Date.now() >= state.acceptedAt + connectDeadlineMs) {
+      metrics.timedOut++;
+      if (state.pending) {
+        state.pending = false;
+        metrics.pending--;
+      }
+      try { client.end(); } catch {}
+      return;
+    }
+    metrics.retries++;
+    if (backendUnavailable) metrics.unavailableRetries++;
+    const delay = retryDelay(retryMs, maxRetryMs, state.retryAttempt++);
+    state.retry = setTimeout(() => {
+      state.retry = undefined;
+      connect(client);
+    }, delay);
+    state.retry.unref?.();
+  };
+
+  const connect = (client: RelaySocket) => {
     const state = clients.get(client);
     if (!state || state.closed || state.peer || state.fallbackServed) return;
-    const retry = () => {
-      if (state.closed || state.peer || state.retry || state.fallbackServed) return;
-      if (Date.now() >= deadline) {
-        metrics.timedOut++;
-        if (state.pending) {
-          state.pending = false;
-          metrics.pending--;
-        }
-        try { client.end(); } catch {}
-        return;
-      }
-      metrics.retries++;
-      state.retry = setTimeout(() => {
-        state.retry = undefined;
-        connect(client, deadline);
-      }, retryMs);
-      state.retry.unref?.();
-    };
+    const port = options.backendPort();
+    if (!validBackendPort(port)) {
+      scheduleRetry(client, state, true);
+      return;
+    }
+    const retry = () => scheduleRetry(client, state, false);
     Bun.connect({
       hostname: "127.0.0.1",
-      port: options.backendPort(),
+      port,
       socket: {
         open(upstream) {
           if (state.closed || state.fallbackServed) {
@@ -328,21 +387,29 @@ export function startGatewayTcpProxy(
     port: options.port,
     socket: {
       open(client) {
+        const admitted = metrics.pending < maxPendingConnections;
         const state: ClientState = {
           closed: false,
-          pending: true,
+          pending: admitted,
+          admitted,
           acceptedAt: Date.now(),
+          retryAttempt: 0,
           requestChunks: [],
           requestBytes: 0,
           fallbackServed: false,
         };
         clients.set(client, state);
         metrics.accepted++;
-        metrics.pending++;
+        if (admitted) metrics.pending++;
         state.retry = setTimeout(() => {
           state.retry = undefined;
-          connect(client, Date.now() + connectDeadlineMs);
-        }, options.fallbackHttp ? 2 : 0);
+          if (state.admitted) {
+            connect(client);
+          } else if (!state.closed && !state.fallbackServed) {
+            metrics.rejected++;
+            client.end();
+          }
+        }, options.fallbackHttp ? (admitted ? 2 : 10) : 0);
         state.retry.unref?.();
       },
       data(client, data) {

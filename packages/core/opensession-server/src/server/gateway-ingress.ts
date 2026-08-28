@@ -6,7 +6,7 @@ import {
   startGatewayTcpProxy,
 } from "./gateway-tcp-proxy";
 import { readGatewayBackendPort } from "./gateway-routing";
-import { stableFrontendHttpResponse } from "./stable-frontend";
+import { createStableFrontendResponder } from "./stable-frontend";
 
 export function inheritedIngressSocketFd(
   env: Record<string, string | undefined> = process.env,
@@ -22,11 +22,18 @@ export async function runGatewayIngress(): Promise<void> {
     join(process.env.HOME || "", ".opensession/deploy");
   const port = Number(process.env.PORT || 3850);
   const metrics = createGatewayTcpProxyMetrics();
+  const backendPort = () => readGatewayBackendPort(state);
+  const stableFrontend = createStableFrontendResponder(state, {
+    liveStatus: () => ({
+      backendSelected: backendPort() > 0,
+      proxy: { ...metrics },
+    }),
+  });
   const proxy = startGatewayTcpProxy({
     hostname: process.env.HOST || "127.0.0.1",
     port,
-    backendPort: () => readGatewayBackendPort(state),
-    fallbackHttp: (request) => stableFrontendHttpResponse(state, request),
+    backendPort,
+    fallbackHttp: stableFrontend,
     metrics,
     listenFd: inheritedIngressSocketFd(),
   });

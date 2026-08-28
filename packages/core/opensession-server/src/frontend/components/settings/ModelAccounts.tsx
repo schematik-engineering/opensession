@@ -1,4 +1,3 @@
-import { BASE_PATH } from "../../lib/base";
 import React, {
 	useCallback,
 	useEffect,
@@ -9,6 +8,8 @@ import React, {
 } from "react";
 import { usePeople } from "../../lib/people";
 import { providerAccountLabel } from "../../lib/provider-account";
+import { request } from "../../lib/api/request";
+import { errorMessage } from "../../lib/error-message";
 import { UserAvatar } from "../UserAvatar";
 import {
 	claudeLimits,
@@ -111,20 +112,17 @@ interface CodexUsageBucket {
 
 // ── Shared bits ────────────────────────────────────────────────────────────
 
-/** Who an account belongs to: the shared pool, or one person's own
- *  subscription. Both account lists render this same row control. */
-/** Cancel an in-flight OAuth login when its effect tears down. Reads the
- * latest pending id at teardown time, which is the point. */
 function abortPendingOAuth(pending: { current: { id?: string; done: boolean } }) {
 	const { id, done } = pending.current;
 	if (!done && id) {
-		fetch(
-			`${BASE_PATH}/api/claude-accounts/oauth-login/${encodeURIComponent(id)}`,
-			{ method: "DELETE" },
-		).catch(() => {});
+		void request(
+			`/claude-accounts/oauth-login/${encodeURIComponent(id)}`,
+			{ method: "DELETE", label: "Could not cancel Claude sign-in" },
+		).catch(() => undefined);
 	}
 }
 
+/** Choose the shared pool or one person's subscription. */
 function OwnerSelect({
 	value,
 	onChange,
@@ -434,20 +432,21 @@ function useClaudeAccounts() {
 	const [refreshing, setRefreshing] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	// Stable identity: only setters are captured, so the polling effect can
-	// list `load` without ever refiring from re-renders.
 	const load = useCallback(async (forceUsage = false) => {
 		if (forceUsage) setRefreshing(true);
-		await (async () => {
-const res = forceUsage
-				? await fetch(`${BASE_PATH}/api/claude-accounts/refresh`, { method: "POST" })
-				: await fetch(`${BASE_PATH}/api/claude-accounts`);
-			if (!res.ok) throw new Error(`Could not load Anthropic accounts (${res.status})`);
-			setAccounts((await res.json()).accounts);
-})().catch(async (cause: any) => {
-setError(cause.message || "Could not load Anthropic accounts");
+		try {
+			const { accounts } = await request<{ accounts: ClaudeAccountInfo[] }>(
+				forceUsage ? "/claude-accounts/refresh" : "/claude-accounts",
+				{
+					method: forceUsage ? "POST" : "GET",
+					label: "Could not load Anthropic accounts",
+				},
+			);
+			setAccounts(accounts);
+		} catch (cause) {
+			setError(errorMessage(cause, "Could not load Anthropic accounts"));
 			setAccounts((current) => current ?? []);
-});
+		}
 		setRefreshing(false);
 	}, []);
 
@@ -458,37 +457,36 @@ setError(cause.message || "Could not load Anthropic accounts");
 	}, [load]);
 
 	async function remove(account: ClaudeAccountInfo) {
-		if (!confirm(`Remove Claude account "${providerAccountLabel(account)}"? Runs will stop using this account.`)) return;
-		await (async () => {
-const res = await fetch(
-				`${BASE_PATH}/api/claude-accounts/${encodeURIComponent(account.id)}`,
-				{ method: "DELETE" },
+		if (
+			!confirm(
+				`Remove Claude account "${providerAccountLabel(account)}"? Runs will stop using this account.`,
+			)
+		) {
+			return;
+		}
+		try {
+			await request(
+				`/claude-accounts/${encodeURIComponent(account.id)}`,
+				{ method: "DELETE", label: "Could not remove Anthropic account" },
 			);
-			const body = await res.json();
-			if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
 			void load();
-})().catch(async (cause: any) => {
-setError(cause.message);
-});
+		} catch (cause) {
+			setError(errorMessage(cause, "Could not remove Anthropic account"));
+		}
 	}
 
 	async function setOwner(account: ClaudeAccountInfo, owner: string) {
 		if (owner === (account.owner || "")) return;
-		await (async () => {
-const res = await fetch(
-				`${BASE_PATH}/api/claude-accounts/${encodeURIComponent(account.id)}`,
-				{
-					method: "PUT",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ owner }),
-				},
-			);
-			const body = await res.json();
-			if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
+		try {
+			await request(`/claude-accounts/${encodeURIComponent(account.id)}`, {
+				method: "PUT",
+				body: { owner },
+				label: "Could not update Anthropic account",
+			});
 			void load();
-})().catch(async (cause: any) => {
-setError(cause.message);
-});
+		} catch (cause) {
+			setError(errorMessage(cause, "Could not update Anthropic account"));
+		}
 	}
 
 	async function setCredentialsPath(account: ClaudeAccountInfo) {
@@ -500,21 +498,18 @@ setError(cause.message);
 			current,
 		);
 		if (credentialsPath === null) return;
-		await (async () => {
-const res = await fetch(
-				`${BASE_PATH}/api/claude-accounts/${encodeURIComponent(account.id)}`,
-				{
-					method: "PUT",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ owner: account.owner || "", credentialsPath }),
-				},
-			);
-			const body = await res.json();
-			if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
+		try {
+			await request(`/claude-accounts/${encodeURIComponent(account.id)}`, {
+				method: "PUT",
+				body: { owner: account.owner || "", credentialsPath },
+				label: "Could not update Anthropic usage credentials",
+			});
 			void load(true);
-})().catch(async (cause: any) => {
-setError(cause.message);
-});
+		} catch (cause) {
+			setError(
+				errorMessage(cause, "Could not update Anthropic usage credentials"),
+			);
+		}
 	}
 
 	return {
@@ -787,16 +782,19 @@ function useCodexAccounts() {
 
 	const load = useCallback(async (forceUsage = false) => {
 		if (forceUsage) setRefreshing(true);
-		await (async () => {
-const res = forceUsage
-				? await fetch(`${BASE_PATH}/api/codex-accounts/refresh`, { method: "POST" })
-				: await fetch(`${BASE_PATH}/api/codex-accounts`);
-			if (!res.ok) throw new Error(`Could not load OpenAI accounts (${res.status})`);
-			setAccounts((await res.json()).accounts);
-})().catch(async (cause: any) => {
-setError(cause.message || "Could not load OpenAI accounts");
+		try {
+			const { accounts } = await request<{ accounts: CodexAccountInfo[] }>(
+				forceUsage ? "/codex-accounts/refresh" : "/codex-accounts",
+				{
+					method: forceUsage ? "POST" : "GET",
+					label: "Could not load OpenAI accounts",
+				},
+			);
+			setAccounts(accounts);
+		} catch (cause) {
+			setError(errorMessage(cause, "Could not load OpenAI accounts"));
 			setAccounts((current) => current ?? []);
-});
+		}
 		setRefreshing(false);
 	}, []);
 
@@ -808,36 +806,35 @@ setError(cause.message || "Could not load OpenAI accounts");
 
 	async function setOwner(account: CodexAccountInfo, owner: string) {
 		if (owner === (account.owner || "")) return;
-		await (async () => {
-const res = await fetch(
-				`${BASE_PATH}/api/codex-accounts/${encodeURIComponent(account.id)}`,
-				{
-					method: "PUT",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ owner }),
-				},
-			);
-			const body = await res.json();
-			if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
+		try {
+			await request(`/codex-accounts/${encodeURIComponent(account.id)}`, {
+				method: "PUT",
+				body: { owner },
+				label: "Could not update OpenAI account",
+			});
 			void load();
-})().catch(async (cause: any) => {
-setError(cause.message);
-});
+		} catch (cause) {
+			setError(errorMessage(cause, "Could not update OpenAI account"));
+		}
 	}
 
 	async function remove(account: CodexAccountInfo) {
-		if (!confirm(`Remove Codex account "${providerAccountLabel(account)}"? Runs will stop using it.`)) return;
-		await (async () => {
-const res = await fetch(
-				`${BASE_PATH}/api/codex-accounts/${encodeURIComponent(account.id)}`,
-				{ method: "DELETE" },
-			);
-			const body = await res.json();
-			if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
+		if (
+			!confirm(
+				`Remove Codex account "${providerAccountLabel(account)}"? Runs will stop using it.`,
+			)
+		) {
+			return;
+		}
+		try {
+			await request(`/codex-accounts/${encodeURIComponent(account.id)}`, {
+				method: "DELETE",
+				label: "Could not remove OpenAI account",
+			});
 			void load();
-})().catch(async (cause: any) => {
-setError(cause.message);
-});
+		} catch (cause) {
+			setError(errorMessage(cause, "Could not remove OpenAI account"));
+		}
 	}
 
 	return { accounts, error, load, refreshing, remove, setError, setOwner };
@@ -1236,20 +1233,22 @@ function AddClaudeAccountForm({
 	useEffect(() => {
 		if (!account) return;
 		let cancelled = false;
-		void (async () => {
-			await (async () => {
-const res = await fetch(`${BASE_PATH}/api/claude-accounts/oauth-login`, {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ accountId: account.id }),
-				});
-				const body = await res.json();
-				if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
-				if (!cancelled) setLogin(body);
-})().catch(async (cause: any) => {
-if (!cancelled) setError(cause.message);
-});
-		})();
+		void request<{ id: string; url: string }>(
+			"/claude-accounts/oauth-login",
+			{
+				method: "POST",
+				body: { accountId: account.id },
+				label: "Could not start Claude sign-in",
+			},
+		).then(
+			(nextLogin) => {
+				if (!cancelled) setLogin(nextLogin);
+			},
+			(cause: unknown) => {
+				if (!cancelled)
+					setError(errorMessage(cause, "Could not start Claude sign-in"));
+			},
+		);
 		return () => {
 			cancelled = true;
 			abortPendingOAuth(pending);
@@ -1259,23 +1258,21 @@ if (!cancelled) setError(cause.message);
 	async function handleAddToken() {
 		setSaving(true);
 		setError(null);
-		await (async () => {
-const res = await fetch(`${BASE_PATH}/api/claude-accounts`, {
+		try {
+			const added = await request<ClaudeAccountInfo>("/claude-accounts", {
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
+				body: {
 					name: name.trim(),
 					token: token.replace(/\s+/g, ""),
 					...(owner.trim() ? { owner: owner.trim() } : {}),
-				}),
+				},
+				label: "Could not add Anthropic account",
 			});
-			const body = await res.json();
-			if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
-			setAccount(body);
+			setAccount(added);
 			onAccountAdded();
-})().catch(async (cause: any) => {
-setError(cause.message);
-});
+		} catch (cause) {
+			setError(errorMessage(cause, "Could not add Anthropic account"));
+		}
 		setSaving(false);
 	}
 
@@ -1283,22 +1280,20 @@ setError(cause.message);
 		if (!login) return;
 		setSaving(true);
 		setError(null);
-		await (async () => {
-const res = await fetch(
-				`${BASE_PATH}/api/claude-accounts/oauth-login/${encodeURIComponent(login.id)}`,
+		try {
+			const result = await request<{ account?: ClaudeAccountInfo }>(
+				`/claude-accounts/oauth-login/${encodeURIComponent(login.id)}`,
 				{
 					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ code }),
+					body: { code },
+					label: "Could not connect Anthropic usage tracking",
 				},
 			);
-			const body = await res.json();
-			if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
 			pending.current.done = true;
 			toast(
 				`Usage tracking connected for ${
-					body.account
-						? providerAccountLabel(body.account)
+					result.account
+						? providerAccountLabel(result.account)
 						: account
 							? providerAccountLabel(account)
 							: "Claude"
@@ -1306,10 +1301,12 @@ const res = await fetch(
 			);
 			onAccountAdded();
 			onDone();
-})().catch(async (cause: any) => {
-setError(cause.message);
+		} catch (cause) {
+			setError(
+				errorMessage(cause, "Could not connect Anthropic usage tracking"),
+			);
 			setSaving(false);
-});
+		}
 	}
 
 	if (account) {
@@ -1429,16 +1426,7 @@ setError(cause.message);
 	);
 }
 
-/**
- * "Connect usage" attaches PKCE OAuth to an existing setup-token account.
- * The server hands us an authorize URL; the user signs in on any device and pastes
- * back the code Anthropic
- * displays (`…#…`), which the server exchanges and stores.
- *
- * Renders as an expansion directly beneath the triggering account row inside
- * the SettingCard (CardList draws the divider) — row-triggered content must
- * uncollapse in place, never teleport to the top of the section.
- */
+/** Connect PKCE usage credentials without replacing a setup token. */
 function ClaudeSignInForm({
 	account,
 	onClose,
@@ -1455,20 +1443,22 @@ function ClaudeSignInForm({
 
 	useEffect(() => {
 		let cancelled = false;
-		(async () => {
-			await (async () => {
-const res = await fetch(`${BASE_PATH}/api/claude-accounts/oauth-login`, {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ accountId: account.id }),
-				});
-				const body = await res.json();
-				if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
-				if (!cancelled) setLogin(body);
-})().catch(async (e: any) => {
-if (!cancelled) setError(e.message);
-});
-		})();
+		void request<{ id: string; url: string }>(
+			"/claude-accounts/oauth-login",
+			{
+				method: "POST",
+				body: { accountId: account.id },
+				label: "Could not start Claude sign-in",
+			},
+		).then(
+			(nextLogin) => {
+				if (!cancelled) setLogin(nextLogin);
+			},
+			(cause: unknown) => {
+				if (!cancelled)
+					setError(errorMessage(cause, "Could not start Claude sign-in"));
+			},
+		);
 		return () => {
 			cancelled = true;
 		};
@@ -1476,9 +1466,10 @@ if (!cancelled) setError(e.message);
 
 	function handleClose() {
 		if (login) {
-			fetch(`${BASE_PATH}/api/claude-accounts/oauth-login/${encodeURIComponent(login.id)}`, {
-				method: "DELETE",
-			}).catch(() => {});
+			void request(
+				`/claude-accounts/oauth-login/${encodeURIComponent(login.id)}`,
+				{ method: "DELETE", label: "Could not cancel Claude sign-in" },
+			).catch(() => undefined);
 		}
 		onClose();
 	}
@@ -1487,23 +1478,23 @@ if (!cancelled) setError(e.message);
 		if (!login) return;
 		setBusy(true);
 		setError(null);
-		await (async () => {
-const res = await fetch(
-				`${BASE_PATH}/api/claude-accounts/oauth-login/${encodeURIComponent(login.id)}`,
+		try {
+			await request(
+				`/claude-accounts/oauth-login/${encodeURIComponent(login.id)}`,
 				{
 					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ code }),
+					body: { code },
+					label: "Could not connect Anthropic usage tracking",
 				},
 			);
-			const body = await res.json();
-			if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
 			toast(`Usage tracking connected for ${providerAccountLabel(account)}`);
 			onDone();
-})().catch(async (e: any) => {
-setError(e.message);
+		} catch (cause) {
+			setError(
+				errorMessage(cause, "Could not connect Anthropic usage tracking"),
+			);
 			setBusy(false);
-});
+		}
 	}
 
 	return (
@@ -1587,90 +1578,86 @@ function AddCodexAccountForm({ onAdded }: { onAdded: () => void }) {
 	const [oauthCode, setOauthCode] = useState("");
 	const [pendingDone, setPendingDone] = useState(false);
 
-	// Abandoning a half-finished sign-in has to release it server-side, and the
-	// dialog can now be dismissed by Escape or the backdrop as well as by
-	// Cancel. The Effect Event gives unmount cleanup the latest committed login.
 	const cleanupPendingLogin = useEffectEvent(() => {
 		if (pendingDone) return;
-		const loginId =
+		const deviceLoginId =
 			login && (login.state === "starting" || login.state === "awaiting_code")
 				? login.id
-				: undefined;
-		if (loginId)
-			fetch(`${BASE_PATH}/api/codex-accounts/device-login/${encodeURIComponent(loginId)}`, {
-				method: "DELETE",
-			}).catch(() => {});
-		if (oauth?.id)
-			fetch(`${BASE_PATH}/api/codex-accounts/oauth-login/${encodeURIComponent(oauth.id)}`, {
-				method: "DELETE",
-			}).catch(() => {});
+				: null;
+		if (deviceLoginId) {
+			void request(
+				`/codex-accounts/device-login/${encodeURIComponent(deviceLoginId)}`,
+				{ method: "DELETE", label: "Could not cancel ChatGPT sign-in" },
+			).catch(() => undefined);
+		}
+		if (oauth) {
+			void request(
+				`/codex-accounts/oauth-login/${encodeURIComponent(oauth.id)}`,
+				{ method: "DELETE", label: "Could not cancel ChatGPT sign-in" },
+			).catch(() => undefined);
+		}
 	});
 	useEffect(() => () => cleanupPendingLogin(), []);
 
-	// Poll an in-flight device sign-in until it lands (or fails). The tick
-	// reads the live login/onAdded through an effect event; the effect only
-	// re-arms when the login identity or its phase changes.
 	const pollDeviceLoginTick = useEffectEvent(async () => {
-		await (async () => {
-const res = await fetch(
-				`${BASE_PATH}/api/codex-accounts/device-login/${encodeURIComponent(login?.id ?? "")}`
+		if (!login?.id) return;
+		try {
+			const next = await request<CodexDeviceLogin>(
+				`/codex-accounts/device-login/${encodeURIComponent(login.id)}`,
+				{ label: "Could not refresh ChatGPT sign-in" },
 			);
-			if (!res.ok) return;
-			const next: CodexDeviceLogin = await res.json();
 			setLogin(next);
 			if (next.state === "done") {
 				setPendingDone(true);
 				onAdded();
 			}
-})().catch(async () => {
-
-});
+		} catch {
+			// Keep polling. A transient refresh failure does not end the device flow.
+		}
 	});
 	const loginId = login?.id;
 	const loginState = login?.state;
 	useEffect(() => {
 		if (!loginId || loginState === "done" || loginState === "error") return;
-		const t = setInterval(() => void pollDeviceLoginTick(), 2000);
-		return () => clearInterval(t);
+		const timer = setInterval(() => void pollDeviceLoginTick(), 2000);
+		return () => clearInterval(timer);
 	}, [loginId, loginState]);
 
 	async function handleStartDeviceLogin() {
 		setSaving(true);
 		setError(null);
-		await (async () => {
-const res = await fetch(`${BASE_PATH}/api/codex-accounts/device-login`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					...(owner.trim() ? { owner: owner.trim() } : {}),
-				}),
-			});
-			const body = await res.json();
-			if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
-			setLogin(body);
-})().catch(async (e: any) => {
-setError(e.message);
-});
+		try {
+			const next = await request<CodexDeviceLogin>(
+				"/codex-accounts/device-login",
+				{
+					method: "POST",
+					body: owner.trim() ? { owner: owner.trim() } : {},
+					label: "Could not start ChatGPT device sign-in",
+				},
+			);
+			setLogin(next);
+		} catch (cause) {
+			setError(errorMessage(cause, "Could not start ChatGPT device sign-in"));
+		}
 		setSaving(false);
 	}
 
 	async function handleStartOauth() {
 		setSaving(true);
 		setError(null);
-		await (async () => {
-const res = await fetch(`${BASE_PATH}/api/codex-accounts/oauth-login`, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
-					...(owner.trim() ? { owner: owner.trim() } : {}),
-				}),
-			});
-			const body = await res.json();
-			if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
-			setOauth(body);
-})().catch(async (e: any) => {
-setError(e.message);
-});
+		try {
+			const next = await request<{ id: string; url: string }>(
+				"/codex-accounts/oauth-login",
+				{
+					method: "POST",
+					body: owner.trim() ? { owner: owner.trim() } : {},
+					label: "Could not start ChatGPT sign-in",
+				},
+			);
+			setOauth(next);
+		} catch (cause) {
+			setError(errorMessage(cause, "Could not start ChatGPT sign-in"));
+		}
 		setSaving(false);
 	}
 
@@ -1678,49 +1665,44 @@ setError(e.message);
 		if (!oauth) return;
 		setSaving(true);
 		setError(null);
-		await fetch(
-			`${BASE_PATH}/api/codex-accounts/oauth-login/${encodeURIComponent(oauth.id)}`,
-			{
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ code: oauthCode }),
-			},
-		)
-			.then(async (res) => {
-				const body = await res.json();
-				if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
-				toast(`Codex account ${providerAccountLabel(body.account)} added to the pool`);
-				setPendingDone(true);
-				onAdded();
-			})
-			.catch((error: any) => {
-				setError(error.message);
-				setSaving(false);
-			});
+		try {
+			const { account } = await request<{ account: CodexAccountInfo }>(
+				`/codex-accounts/oauth-login/${encodeURIComponent(oauth.id)}`,
+				{
+					method: "POST",
+					body: { code: oauthCode },
+					label: "Could not complete ChatGPT sign-in",
+				},
+			);
+			toast(`Codex account ${providerAccountLabel(account)} added to the pool`);
+			setPendingDone(true);
+			onAdded();
+		} catch (cause) {
+			setError(errorMessage(cause, "Could not complete ChatGPT sign-in"));
+			setSaving(false);
+		}
 	}
 
 	async function handleAdd() {
 		setSaving(true);
 		setError(null);
-		await (async () => {
-			const res = await fetch(`${BASE_PATH}/api/codex-accounts`, {
+		try {
+			await request("/codex-accounts", {
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({
+				body: {
 					...(kind === "api_key" ? { name: name.trim() } : {}),
 					kind,
 					value: value.trim(),
 					...(owner.trim() ? { owner: owner.trim() } : {}),
-				}),
+				},
+				label: "Could not add OpenAI account",
 			});
-			const body = await res.json();
-			if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
 			setPendingDone(true);
 			onAdded();
-		})().catch((error: any) => {
-			setError(error.message);
+		} catch (cause) {
+			setError(errorMessage(cause, "Could not add OpenAI account"));
 			setSaving(false);
-		});
+		}
 	}
 
 	const loginPending = login && (login.state === "starting" || login.state === "awaiting_code");

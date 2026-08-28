@@ -87,11 +87,19 @@ executor_ready() {
     && printf '%s' "$ready" | grep -Fq "\"generation\":\"$generation\""
 }
 
-supervisor_generation() {
-  local pid
-  pid="$(systemctl show -p MainPID --value opensession.service 2>/dev/null || true)"
-  [ -n "$pid" ] || return 1
+service_generation() {
+  local service="$1" pid
+  pid="$(systemctl show -p MainPID --value "$service" 2>/dev/null || true)"
+  [ -n "$pid" ] && [ "$pid" != "0" ] || return 1
   cat "/proc/$pid/cwd/.opensession-release" 2>/dev/null
+}
+
+supervisor_generation() {
+  service_generation opensession.service
+}
+
+ingress_generation() {
+  service_generation opensession-ingress.service
 }
 
 drain_gateway_for_supervisor_restart() {
@@ -203,6 +211,23 @@ RESTART_EXECUTOR=1
 RESTART_KERNEL=1
 RESTART_GATEWAY=1
 RESTART_INGRESS=0
+
+# The ingress deliberately keeps its original immutable cwd through ordinary
+# runtime rollouts. A privileged rollout must still replace it when its own
+# source closure changed. Compare against the release the live process actually
+# loaded, not PREVIOUS_HEAD: a root deploy interrupted after pointer cut-over
+# can be resumed with current already naming the target.
+INGRESS_GENERATION="$(ingress_generation || true)"
+if [ -z "$INGRESS_GENERATION" ] \
+  || ! run_as_service_user git -C "$SOURCE_DIR" cat-file -e "${INGRESS_GENERATION}^{commit}" 2>/dev/null \
+  || ! run_as_service_user git -C "$SOURCE_DIR" diff --quiet \
+    "$INGRESS_GENERATION" "$TARGET_COMMIT" -- \
+    packages/core/opensession-server/src/server/gateway-ingress.ts \
+    packages/core/opensession-server/src/server/gateway-routing.ts \
+    packages/core/opensession-server/src/server/gateway-tcp-proxy.ts \
+    packages/core/opensession-server/src/server/stable-frontend.ts; then
+  RESTART_INGRESS=1
+fi
 
 # Render every service against the stable current pointer, never the WIP tree
 # or a versioned release path. The pointer changes atomically at cut-over.

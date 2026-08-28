@@ -226,6 +226,9 @@ type ReviewLine = {
 	state: string;
 	tone: string;
 	human: boolean;
+	/** This person was asked to review, here or on GitHub. The reviewer picker
+	 *  hangs on this row; a row that merely commented is a fact, not a slot. */
+	requested: boolean;
 };
 
 function reviewLines(
@@ -257,6 +260,7 @@ function reviewLines(
 			state: request?.accepted ? "Signed off" : "Review asked",
 			tone: request?.accepted ? "text-green" : "text-dim",
 			human: true,
+			requested: true,
 		});
 	}
 	for (const key of prReviewRequested || []) {
@@ -268,6 +272,7 @@ function reviewLines(
 			state: "Awaiting review",
 			tone: "text-dim",
 			human: true,
+			requested: true,
 		});
 	}
 
@@ -294,6 +299,7 @@ function reviewLines(
 				state: meta.label,
 				tone: meta.tone === "muted" ? "text-dim" : `text-${meta.tone}`,
 				human: !reviewer.isTeam && !isBotAuthor(reviewer.login),
+				requested: reviewer.state === "PENDING",
 			});
 			// Merged onto a request row: keep the request's name, take GitHub's
 			// verdict once there is one to take.
@@ -303,6 +309,7 @@ function reviewLines(
 				line.login = line.login || reviewer.login;
 			}
 			line.human ||= !reviewer.isTeam && !isBotAuthor(reviewer.login);
+			line.requested ||= reviewer.state === "PENDING";
 		}
 	}
 	return lines;
@@ -690,6 +697,16 @@ export function WorkspaceSummaryBody({
 					)),
 		)
 		.slice(0, REVIEWERS_SHOWN);
+	// The picker belongs to the request, not to whoever reviewed first. A bot
+	// or teammate that merely commented is a status to read; hanging the menu
+	// on that row would leave no way to ask someone for a review.
+	const pickerIndex = humanReviewers.findIndex(
+		(reviewer) => reviewer.requested,
+	);
+	const pickerReviewer = pickerIndex >= 0 ? humanReviewers[pickerIndex] : null;
+	const passiveReviewers = humanReviewers.filter(
+		(_, index) => index !== pickerIndex,
+	);
 
 	// A capture is shown, not listed: `contact-dark.png` names a file without
 	// saying what is in it. A report or a data file is the other way round, and
@@ -1162,20 +1179,20 @@ setFixBusy(false);
 				</button>
 			))}
 
-			{humanReviewers.length > 0 && (
+			{pickerReviewer && (
 				<Menu.Root>
 					<Menu.Trigger className={WS_SUMMARY_ROW} disabled={reviewBusy}>
 						<span className={WS_SUMMARY_RAIL}>
 							<UserAvatar
-								name={humanReviewers[0].name}
-								login={humanReviewers[0].login}
+								name={pickerReviewer.name}
+								login={pickerReviewer.login}
 								size={16}
 								edge={false}
 							/>
 						</span>
-						<span className={WS_SUMMARY_LABEL}>{humanReviewers[0].name}</span>
-						<span className={cn(WS_SUMMARY_STATE, humanReviewers[0].tone)}>
-							{humanReviewers[0].state}
+						<span className={WS_SUMMARY_LABEL}>{pickerReviewer.name}</span>
+						<span className={cn(WS_SUMMARY_STATE, pickerReviewer.tone)}>
+							{pickerReviewer.state}
 						</span>
 						<IconChevronDown size={14} className="shrink-0 text-faint" />
 					</Menu.Trigger>
@@ -1215,7 +1232,7 @@ setFixBusy(false);
 					</Menu.Popup>
 				</Menu.Root>
 			)}
-			{humanReviewers.slice(1).map((reviewer) => (
+			{passiveReviewers.map((reviewer) => (
 				<button
 					key={reviewer.key}
 					className={WS_SUMMARY_ROW}
@@ -1229,7 +1246,7 @@ setFixBusy(false);
 					<span className={cn(WS_SUMMARY_STATE, reviewer.tone)}>{reviewer.state}</span>
 				</button>
 			))}
-			{humanReviewers.length === 0 && (
+			{!pickerReviewer && (
 				<Menu.Root>
 					<Menu.Trigger
 						className={WS_SUMMARY_ROW}
@@ -1238,7 +1255,9 @@ setFixBusy(false);
 						<span className={WS_SUMMARY_RAIL}>
 							<IconPeople size={20} className={WS_SUMMARY_ICON} />
 						</span>
-						<span className={WS_SUMMARY_LABEL}>No reviewers</span>
+						<span className={WS_SUMMARY_LABEL}>
+							{passiveReviewers.length > 0 ? "Ask for review" : "No reviewers"}
+						</span>
 						<span className={cn(WS_SUMMARY_ACTION, "inline-flex items-center gap-0.5")}>
 							Add
 							<IconChevronDown size={14} />

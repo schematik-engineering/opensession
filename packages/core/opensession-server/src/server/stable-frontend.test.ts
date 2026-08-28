@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  createStableFrontendResponder,
   publishStableFrontendSnapshot,
   stableFrontendHttpResponse,
 } from "./stable-frontend";
@@ -25,7 +26,7 @@ function fixture() {
     version: "App-hash.js|styles.css",
     indexHtml: '<!doctype html><script src="/App-hash.js"></script>',
   });
-  return { state };
+  return { state, releaseRoot };
 }
 
 function request(path: string, accept = "text/html", userAgent = "OS1 test browser"): Buffer {
@@ -53,11 +54,52 @@ describe("stable frontend ingress", () => {
     expect(body(asset!)).toBe("window.loaded = true;");
   });
 
-  test("owns liveness but leaves APIs and unsafe paths to the fenced backend", () => {
+  test("serves HEAD metadata without reading an asset body into the response", () => {
     const { state } = fixture();
-    expect(body(stableFrontendHttpResponse(state, request("/live", "*/*"))!)).toContain(
-      '"phase":"handoff"',
+    const result = stableFrontendHttpResponse(
+      state,
+      Buffer.from("HEAD /App-hash.js HTTP/1.1\r\nHost: os.test\r\nAccept: */*\r\n\r\n"),
     );
+    expect(result?.toString()).toContain("Content-Length: 21");
+    expect(body(result!)).toBe("");
+  });
+
+  test("refreshes an atomically published shell and drops the previous asset cache", () => {
+    const { state } = fixture();
+    const respond = createStableFrontendResponder(state, { snapshotTtlMs: 0 });
+    expect(body(respond(request("/workspace/demo"))!)).toContain("App-hash.js");
+
+    const sha = "b".repeat(40);
+    const releaseRoot = join(state, "releases", sha);
+    mkdirSync(join(releaseRoot, ".frontend-dist"), { recursive: true });
+    writeFileSync(join(releaseRoot, ".opensession-release"), `${sha}\n`);
+    writeFileSync(join(releaseRoot, ".frontend-dist", "App-next.js"), "window.next = true;");
+    publishStableFrontendSnapshot(state, {
+      releaseRoot,
+      version: "App-next.js|styles.css",
+      indexHtml: '<!doctype html><script src="/App-next.js"></script>',
+    });
+
+    expect(body(respond(request("/workspace/demo"))!)).toContain("App-next.js");
+    expect(respond(request("/App-hash.js", "*/*"))).toBeNull();
+    expect(body(respond(request("/App-next.js", "*/*"))!)).toBe("window.next = true;");
+  });
+
+  test("owns liveness, publishes ingress telemetry, and leaves APIs to the backend", () => {
+    const { state } = fixture();
+    const respond = createStableFrontendResponder(state, {
+      liveStatus: () => ({
+        backendSelected: true,
+        proxy: { pending: 2, rejected: 1 },
+      }),
+    });
+    expect(JSON.parse(body(respond(request("/live", "*/*"))!))).toMatchObject({
+      ok: true,
+      phase: "handoff",
+      backendReady: false,
+      backendSelected: true,
+      proxy: { pending: 2, rejected: 1 },
+    });
     expect(stableFrontendHttpResponse(state, request("/ready", "*/*"))).toBeNull();
     expect(stableFrontendHttpResponse(state, request("/api/sessions", "application/json"))).toBeNull();
     expect(stableFrontendHttpResponse(state, request("/../secret.js", "*/*"))).toBeNull();

@@ -91,8 +91,13 @@ Each deploy also writes its generated dependency-impact manifest and runs a
 continuous HTTP/WebSocket canary. Sequential requests wait for a 15-second quiet
 window and collapse to the newest explicitly requested commit. Root deployment
 refuses already-current, stale, non-main, and ordinary unprivileged targets.
-Ingress metrics track accepted, fallback-served, queued, retried and timed-out
-connections plus maximum backend wait, so handoff latency and loss are directly
-observable. Root rollouts use the same coordinated transaction. Supervisor
-source changes only replace the control process; ingress and its accepted
-connections remain untouched.
+The stable `/live` response exposes ingress metrics for accepted,
+fallback-served, queued, retried, overload-rejected, and timed-out connections
+plus maximum backend wait, so handoff latency and loss are directly observable. Backend parking is bounded to 2,048 connections. When
+no generation is selected, retries use capped exponential backoff and do not
+open doomed loopback sockets; an overload still gets a short chance to receive
+the stable shell before backend-only traffic is rejected. The rendered shell and
+immutable assets use a release-aware 64 MiB LRU, avoiding repeated synchronous
+snapshot parsing and asset reads during reload bursts. Root rollouts use the same
+coordinated transaction. Supervisor source changes only replace the control
+process; ingress and its accepted connections remain untouched.

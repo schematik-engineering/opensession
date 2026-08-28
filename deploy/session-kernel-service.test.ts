@@ -172,6 +172,9 @@ describe("session kernel service deployment", () => {
     const gatewayUnit = await Bun.file(resolve(repoRoot, "opensession.service")).text();
     expect(rootDeploy).toContain("promoting dedicated stable ingress");
     expect(rootDeploy).toContain("systemctl enable --now opensession-ingress.service");
+    expect(rootDeploy).toContain('INGRESS_GENERATION="$(ingress_generation || true)"');
+    expect(rootDeploy).toContain('"$INGRESS_GENERATION" "$TARGET_COMMIT" --');
+    expect(rootDeploy).toContain("gateway-tcp-proxy.ts");
     expect(ingressUnit).toContain("gateway-ingress.ts");
     expect(gatewayUnit).toContain('Environment="OPENSESSION_EXTERNAL_INGRESS=1"');
     expect(gatewayUnit).not.toContain("Sockets=opensession.socket");

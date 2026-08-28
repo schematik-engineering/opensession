@@ -47,6 +47,16 @@ test("an assigned reviewer can be changed or cleared from the summary", () => {
 	expect(summarySource).toContain("onReviewChange?.(owner, previous)");
 });
 
+test("submitted review facts stay separate from the reviewer picker", () => {
+	expect(summarySource).toContain('requested: reviewer.state === "PENDING"');
+	expect(summarySource).toContain("const pickerReviewer =");
+	expect(summarySource).toContain("{passiveReviewers.map((reviewer) => (");
+	expect(summarySource).toContain("{!pickerReviewer && (");
+	expect(summarySource).toContain(
+		'passiveReviewers.length > 0 ? "Ask for review"',
+	);
+});
+
 test("popup review heading keeps a small gap after a lone PR band", () => {
 	expect(summarySource).toContain('"[&>.ws-summary-band:last-child]:mb-0"');
 	expect(summarySource).toContain(
