@@ -206,8 +206,8 @@ jobs:
             const text = kind === "launchd"
               ? `${renderPlist()}\n${renderLauncher()}`
               : await renderUnit();
-            if (!text.includes("opensession.ts") && !text.includes("opensession server")) {
-              throw new Error("no service command");
+            if (!text.includes("gateway-supervisor")) {
+              throw new Error("service does not launch the stable gateway supervisor");
             }
             const user = text.match(/^User=(.*)$/m)?.[1];
             if (user === "unknown") throw new Error("User=unknown would fail 217/USER");
