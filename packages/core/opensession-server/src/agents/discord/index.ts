@@ -403,6 +403,14 @@ export class DiscordAgent implements AgentModule {
       !!message.mentions?.some((user) => user.id === this.bot?.id) ||
       (!!this.bot?.id && message.content?.includes(`<@${this.bot.id}>`));
     if (!linked && !mentioned) return;
+    // A mention in an ordinary guild channel is the conversational equivalent
+    // of opening a new OpenSession: always create a fresh Discord thread even
+    // when `/os ask` previously linked the parent channel. Mentions and plain
+    // replies inside an already-linked thread continue that thread's session.
+    const startFreshThread =
+      !!message.guild_id &&
+      mentioned &&
+      !(await this.isThreadChannel(message.channel_id));
 
     this.inflightEvents.add(message.id);
     let outputChannel = message.channel_id;
@@ -412,7 +420,7 @@ export class DiscordAgent implements AgentModule {
       if (!prompt && !message.attachments?.length) {
         prompt = "Please inspect the attached context and help.";
       }
-      if (message.guild_id && !linked) {
+      if (startFreshThread) {
         try {
           const thread = await this.requireRest().startThread(
             message.channel_id,
@@ -824,6 +832,17 @@ export class DiscordAgent implements AgentModule {
     const channel = await this.requireRest().channel(id);
     this.channelCache.set(id, channel);
     return channel;
+  }
+
+  private async isThreadChannel(id: string): Promise<boolean> {
+    try {
+      // Announcement, public, and private threads respectively.
+      return [10, 11, 12].includes((await this.cachedChannel(id)).type);
+    } catch {
+      // A failed lookup must not drop an otherwise valid mention. Treat it as
+      // a parent channel; startThread has its own safe fallback below.
+      return false;
+    }
   }
 
   private stripMention(content: string): string {

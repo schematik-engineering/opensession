@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import type { SessionControl } from "../../server/session-control";
@@ -34,7 +41,7 @@ function config(overrides: Partial<DiscordConfig> = {}): DiscordConfig {
     token: "test-token",
     guildIds: ["1542925450790305904"],
     channelIds: [],
-    userIds: [],
+    userIds: ["1542925450790305909"],
     defaultModel: "grok/grok-4.6",
     sandbox: "docker",
     responseTimeoutMs: 30_000,
@@ -43,7 +50,7 @@ function config(overrides: Partial<DiscordConfig> = {}): DiscordConfig {
 }
 
 describe("Discord config and state", () => {
-  test("requires an explicit guild allowlist and reads a mode-0600 token file", () => {
+  test("requires an explicit guild allowlist and a private token file", () => {
     const dir = tempDir();
     const tokenFile = join(dir, "bot-token");
     writeFileSync(tokenFile, "secret-value\n", { mode: 0o600 });
@@ -57,6 +64,11 @@ describe("Discord config and state", () => {
 
     delete process.env.DISCORD_GUILD_IDS;
     expect(() => loadDiscordConfig()).toThrow("fails closed");
+
+    process.env.DISCORD_GUILD_IDS = "1542925450790305904";
+    process.env.DISCORD_USER_IDS = "1542925450790305905";
+    chmodSync(tokenFile, 0o644);
+    expect(() => loadDiscordConfig()).toThrow("private regular file");
   });
 
   test("persists channel linkage, gateway resume state, and dedup", () => {
@@ -210,13 +222,86 @@ describe("Discord Gateway", () => {
     });
     gateway.stop();
   });
+
+  test("reconnects with resume and treats authentication close codes as fatal", async () => {
+    const sockets = [new FakeSocket(), new FakeSocket()];
+    let socketIndex = 0;
+    let checkpoint: any = {};
+    const gateway = new DiscordGateway({
+      token: "secret",
+      intents: 37_377,
+      gatewayUrl: "wss://gateway.discord.gg",
+      checkpoint: () => checkpoint,
+      saveCheckpoint: (value) => {
+        checkpoint = value;
+      },
+      onDispatch: () => {},
+      webSocketFactory: () => sockets[socketIndex++] as unknown as WebSocket,
+      random: () => 0,
+    });
+    gateway.start();
+    sockets[0].message({ op: 10, d: { heartbeat_interval: 60_000 } });
+    await Bun.sleep(1);
+    sockets[0].message({
+      op: 0,
+      s: 12,
+      t: "READY",
+      d: { session_id: "gw-session", resume_gateway_url: "wss://resume" },
+    });
+    await Bun.sleep(1);
+    sockets[0].close(4000, "reconnect");
+    await Bun.sleep(1_100);
+    expect(socketIndex).toBe(2);
+    sockets[1].message({ op: 10, d: { heartbeat_interval: 60_000 } });
+    await Bun.sleep(1);
+    expect(JSON.parse(sockets[1].sent[0])).toEqual({
+      op: 6,
+      d: { token: "secret", session_id: "gw-session", seq: 12 },
+    });
+    sockets[1].message({ op: 0, s: 13, t: "RESUMED", d: {} });
+    await Bun.sleep(1);
+    expect(gateway.health()).toMatchObject({ ready: true, resumed: true });
+    gateway.stop();
+
+    const fatalSocket = new FakeSocket();
+    const fatal = new DiscordGateway({
+      token: "secret",
+      intents: 37_377,
+      gatewayUrl: "wss://gateway.discord.gg",
+      checkpoint: () => ({}),
+      saveCheckpoint: () => {},
+      onDispatch: () => {},
+      webSocketFactory: () => fatalSocket as unknown as WebSocket,
+    });
+    fatal.start();
+    fatalSocket.close(4004, "authentication failed");
+    expect(fatal.health()).toMatchObject({
+      status: "fatal",
+      ready: false,
+    });
+    fatal.stop();
+  });
 });
 
 describe("Discord agent", () => {
-  test("turns an allowed mention into one Docker-backed native session and deduplicates it", async () => {
+  test("starts a fresh thread on mention, attributes teammate replies, and deduplicates", async () => {
     const state = new DiscordStateStore(join(tempDir(), "state.json"));
     const edits: string[] = [];
     const creates: any[] = [];
+    const deliveries: Array<{ prompt: string; user?: string }> = [];
+    const cfg = config({
+      userIds: ["1542925450790305909", "1542925450790305916"],
+    });
+    const parentChannel = "1542925450790305908";
+    const threadChannel = "1542925450790305906";
+    state.setConversation(`guild:${cfg.guildIds[0]}:channel:${parentChannel}`, {
+      sessionId: "old-slash-session",
+      mode: "ask",
+      model: "cursor/auto",
+      userId: cfg.userIds[0],
+      updatedAt: new Date().toISOString(),
+    });
+    let completedTurns = 0;
     let dispatch: (name: string, data: any) => void = () => {};
     const control: SessionControl = {
       listSessions: () => [],
@@ -227,19 +312,23 @@ describe("Discord agent", () => {
           title: "Discord request",
           model: "grok/grok-4.6",
         }) as any,
-      transcriptTail: async () => [
-        {
-          id: "answer",
-          type: "assistant",
-          content: "GROK_DISCORD_OK",
+      transcriptTail: async () =>
+        Array.from({ length: completedTurns }, (_, index) => ({
+          id: `answer-${index + 1}`,
+          type: "assistant" as const,
+          content: index === 0 ? "GROK_DISCORD_OK" : "TEAMMATE_REPLY_OK",
           timestamp: new Date().toISOString(),
-        },
-      ],
+        })),
       answerQuestion: () => false,
-      deliverToSession: async () => ({ status: "started", message: "started" }),
+      deliverToSession: async (_id, prompt, user) => {
+        deliveries.push({ prompt, user });
+        completedTurns += 1;
+        return { status: "started", message: "started" };
+      },
       cancelSession: () => true,
       createSession: async (input) => {
         creates.push(input);
+        completedTurns += 1;
         return {
           id: "os-discord-1",
           createdBy: String(input.user),
@@ -249,15 +338,17 @@ describe("Discord agent", () => {
     };
     const rest = {
       currentBot: async () => ({
-        id: config().applicationId,
+        id: cfg.applicationId,
         username: "OpenSession",
       }),
-      currentGuilds: async () => [
-        { id: config().guildIds[0], name: "Schematik" },
-      ],
+      currentGuilds: async () => [{ id: cfg.guildIds[0], name: "Schematik" }],
       syncGuildCommand: async () => ({}),
       gatewayBot: async () => ({ url: "wss://gateway.discord.gg", shards: 1 }),
-      startThread: async () => ({ id: "1542925450790305906", type: 11 }),
+      channel: async (id: string) => ({
+        id,
+        type: id === threadChannel ? 11 : 0,
+      }),
+      startThread: async () => ({ id: threadChannel, type: 11 }),
       sendMessage: async (channelId: string, content: string) => ({
         id: "status",
         channel_id: channelId,
@@ -269,11 +360,11 @@ describe("Discord agent", () => {
         content: string,
       ) => {
         edits.push(content);
-        return { id: "status", channel_id: "1542925450790305906", content };
+        return { id: "status", channel_id: threadChannel, content };
       },
     };
     const agent = new DiscordAgent({
-      loadConfig: config,
+      loadConfig: () => cfg,
       state,
       control: () => control,
       rest: () => rest as unknown as DiscordRest,
@@ -289,13 +380,11 @@ describe("Discord agent", () => {
     await agent.startup();
     const event = {
       id: "1542925450790305907",
-      channel_id: "1542925450790305908",
-      guild_id: config().guildIds[0],
-      content: `<@${config().applicationId}> use Grok`,
+      channel_id: parentChannel,
+      guild_id: cfg.guildIds[0],
+      content: `<@${cfg.applicationId}> use Grok`,
       author: { id: "1542925450790305909", username: "jack" },
-      mentions: [
-        { id: config().applicationId, username: "OpenSession", bot: true },
-      ],
+      mentions: [{ id: cfg.applicationId, username: "OpenSession", bot: true }],
       attachments: [],
     };
     dispatch("MESSAGE_CREATE", event);
@@ -311,10 +400,258 @@ describe("Discord agent", () => {
       requestId: `discord:${event.id}:create`,
     });
     expect(edits.at(-1)).toContain("GROK_DISCORD_OK");
+    expect(
+      state.conversation(`guild:${cfg.guildIds[0]}:channel:${parentChannel}`)
+        ?.sessionId,
+    ).toBe("old-slash-session");
+    expect(
+      state.conversation(`guild:${cfg.guildIds[0]}:channel:${threadChannel}`)
+        ?.sessionId,
+    ).toBe("os-discord-1");
+
+    const teammateReply = {
+      id: "1542925450790305917",
+      channel_id: threadChannel,
+      guild_id: cfg.guildIds[0],
+      content: "please continue",
+      author: {
+        id: "1542925450790305916",
+        username: "alex",
+        global_name: "Alex",
+      },
+      mentions: [],
+      attachments: [],
+    };
+    dispatch("MESSAGE_CREATE", teammateReply);
+    for (let i = 0; i < 100 && !state.wasProcessed(teammateReply.id); i++)
+      await Bun.sleep(10);
+    expect(state.wasProcessed(teammateReply.id)).toBe(true);
+    expect(creates).toHaveLength(1);
+    expect(deliveries).toEqual([{ prompt: "please continue", user: "Alex" }]);
+    expect(edits.at(-1)).toContain("TEAMMATE_REPLY_OK");
 
     dispatch("MESSAGE_CREATE", event);
     await Bun.sleep(20);
     expect(creates).toHaveLength(1);
+    await agent.shutdown();
+  });
+
+  test("rejects wrong users, guilds, and channels before session control", async () => {
+    const state = new DiscordStateStore(join(tempDir(), "state.json"));
+    const callbacks: any[] = [];
+    let creates = 0;
+    let dispatch: (name: string, data: any) => void = () => {};
+    const cfg = config({
+      channelIds: ["1542925450790305910"],
+      userIds: ["1542925450790305909"],
+    });
+    const control: SessionControl = {
+      listSessions: () => [],
+      getSession: () => undefined,
+      transcriptTail: async () => [],
+      answerQuestion: () => false,
+      deliverToSession: async () => ({ status: "started", message: "started" }),
+      cancelSession: () => false,
+      createSession: async () => {
+        creates += 1;
+        return {
+          id: "must-not-create",
+          createdBy: "test",
+          createdAt: new Date().toISOString(),
+        };
+      },
+    };
+    const rest = {
+      currentBot: async () => ({
+        id: cfg.applicationId,
+        username: "OpenSession",
+      }),
+      currentGuilds: async () => [{ id: cfg.guildIds[0], name: "Schematik" }],
+      syncGuildCommand: async () => ({}),
+      gatewayBot: async () => ({ url: "wss://gateway.discord.gg", shards: 1 }),
+      channel: async (id: string) => ({ id, type: 0, parent_id: null }),
+      interactionCallback: async (...args: any[]) => {
+        callbacks.push(args);
+      },
+    };
+    const agent = new DiscordAgent({
+      loadConfig: () => cfg,
+      state,
+      control: () => control,
+      rest: () => rest as unknown as DiscordRest,
+      gateway: (options) => {
+        dispatch = (name, data) => void options.onDispatch(name, data);
+        return {
+          start() {},
+          stop() {},
+          health: () => ({ status: "ready", ready: true }),
+        } as unknown as DiscordGateway;
+      },
+    });
+    await agent.startup();
+
+    const message = {
+      id: "1542925450790305911",
+      channel_id: cfg.channelIds[0],
+      guild_id: cfg.guildIds[0],
+      content: `<@${cfg.applicationId}> do not run`,
+      author: { id: cfg.userIds[0], username: "jack" },
+      mentions: [{ id: cfg.applicationId, username: "OpenSession", bot: true }],
+      attachments: [],
+    };
+    dispatch("MESSAGE_CREATE", {
+      ...message,
+      id: "1542925450790305912",
+      guild_id: "1542925450790305999",
+    });
+    dispatch("MESSAGE_CREATE", {
+      ...message,
+      id: "1542925450790305913",
+      channel_id: "1542925450790305998",
+    });
+    dispatch("MESSAGE_CREATE", {
+      ...message,
+      id: "1542925450790305914",
+      author: { id: "1542925450790305997", username: "intruder" },
+    });
+    await Bun.sleep(30);
+    expect(creates).toBe(0);
+
+    dispatch("INTERACTION_CREATE", {
+      id: "1542925450790305915",
+      token: "interaction-token",
+      type: 2,
+      guild_id: cfg.guildIds[0],
+      channel_id: cfg.channelIds[0],
+      member: {
+        user: { id: "1542925450790305997", username: "intruder" },
+      },
+      data: { name: "os", options: [{ type: 1, name: "status" }] },
+    });
+    for (let i = 0; i < 100 && !callbacks.length; i++) await Bun.sleep(5);
+    expect(callbacks).toHaveLength(1);
+    expect(callbacks[0][2]).toMatchObject({
+      type: 4,
+      data: { flags: 64 },
+    });
+    expect(callbacks[0][2].data.content).toContain("not enabled for you");
+    expect(creates).toBe(0);
+    await agent.shutdown();
+  });
+
+  test("runs status, model, stop, and new slash commands on one durable link", async () => {
+    const state = new DiscordStateStore(join(tempDir(), "state.json"));
+    const cfg = config();
+    const channelId = "1542925450790305910";
+    const key = `guild:${cfg.guildIds[0]}:channel:${channelId}`;
+    state.setConversation(key, {
+      sessionId: "os-discord-command",
+      mode: "ask",
+      model: "grok/grok-4.6",
+      userId: cfg.userIds[0],
+      updatedAt: new Date().toISOString(),
+    });
+    const callbacks: any[] = [];
+    const deliveries: string[] = [];
+    const cancellations: string[] = [];
+    let dispatch: (name: string, data: any) => void = () => {};
+    const control: SessionControl = {
+      listSessions: () => [],
+      getSession: (id) =>
+        ({
+          id,
+          state: "idle",
+          title: "Discord command session",
+          model: state.conversation(key)?.model,
+        }) as any,
+      transcriptTail: async () => [],
+      answerQuestion: () => false,
+      deliverToSession: async (_id, prompt) => {
+        deliveries.push(prompt);
+        return { status: "started", message: "started" };
+      },
+      cancelSession: (id) => {
+        cancellations.push(id);
+        return true;
+      },
+      createSession: async () => ({
+        id: "not-used",
+        createdBy: "test",
+        createdAt: new Date().toISOString(),
+      }),
+    };
+    const rest = {
+      currentBot: async () => ({
+        id: cfg.applicationId,
+        username: "OpenSession",
+      }),
+      currentGuilds: async () => [{ id: cfg.guildIds[0], name: "Schematik" }],
+      syncGuildCommand: async () => ({}),
+      gatewayBot: async () => ({ url: "wss://gateway.discord.gg", shards: 1 }),
+      interactionCallback: async (...args: any[]) => {
+        callbacks.push(args);
+      },
+    };
+    const agent = new DiscordAgent({
+      loadConfig: () => cfg,
+      state,
+      control: () => control,
+      rest: () => rest as unknown as DiscordRest,
+      gateway: (options) => {
+        dispatch = (name, data) => void options.onDispatch(name, data);
+        return {
+          start() {},
+          stop() {},
+          health: () => ({ status: "ready", ready: true }),
+        } as unknown as DiscordGateway;
+      },
+    });
+    await agent.startup();
+
+    const runCommand = async (
+      id: string,
+      name: string,
+      options: Array<Record<string, unknown>> = [],
+    ) => {
+      dispatch("INTERACTION_CREATE", {
+        id,
+        token: `token-${id}`,
+        type: 2,
+        guild_id: cfg.guildIds[0],
+        channel_id: channelId,
+        member: { user: { id: cfg.userIds[0], username: "jack" } },
+        data: {
+          name: "os",
+          options: [{ type: 1, name, options }],
+        },
+      });
+      for (let i = 0; i < 100 && !state.wasProcessed(id); i++)
+        await Bun.sleep(5);
+      expect(state.wasProcessed(id)).toBe(true);
+      return callbacks.at(-1)?.[2];
+    };
+
+    expect(
+      (await runCommand("1542925450790305920", "status")).data.content,
+    ).toContain("Discord command session");
+    expect(
+      (
+        await runCommand("1542925450790305921", "model", [
+          { type: 3, name: "model", value: "cursor/auto" },
+        ])
+      ).data.content,
+    ).toContain("cursor/auto");
+    expect(deliveries).toEqual(["/model cursor/auto"]);
+    expect(state.conversation(key)?.model).toBe("cursor/auto");
+    expect((await runCommand("1542925450790305922", "stop")).data.content).toBe(
+      "Stop requested.",
+    );
+    expect(cancellations).toEqual(["os-discord-command"]);
+    expect(
+      (await runCommand("1542925450790305923", "new")).data.content,
+    ).toContain("unlinked");
+    expect(state.conversation(key)).toBeUndefined();
+    expect(callbacks.every((row) => row[2].data.flags === 64)).toBe(true);
     await agent.shutdown();
   });
 });

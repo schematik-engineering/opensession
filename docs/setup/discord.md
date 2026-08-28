@@ -46,6 +46,9 @@ DISCORD_GUILD_IDS=123456789012345678
 DISCORD_DEFAULT_MODEL=grok/grok-4.6
 ```
 
+`DISCORD_GUILD_IDS` is required and startup fails closed without it. The token
+file must be a private regular file (mode `0600` or stricter).
+
 Optional boundaries:
 
 | Variable                      | Effect                                                                                                                                            |
@@ -66,14 +69,18 @@ specs, transcripts, logs, or command arguments.
 
 ## User surface
 
-- Mention the bot in a guild text channel to create a linked public thread and
-  a Docker-backed OpenSession.
-- Reply in that thread to continue the same transcript. If the model asks a
-  question, the reply answers the pending OpenSession question.
+- The primary interaction is conversational: mention the bot in a guild text
+  channel to create a fresh linked public thread and Docker-backed OpenSession.
+  A prior `/os ask` link on the parent channel is never reused by a new mention.
+- Anyone permitted by the guild/channel/user boundaries can reply in that
+  thread to continue the same transcript. Each turn is attributed to that
+  Discord user's display name. If the model asks a question, the reply answers
+  the pending OpenSession question.
 - `/os ask` starts or continues the channel's session.
 - `/os model` switches between the configured Grok and Cursor subscription
   models.
-- `/os status`, `/os stop`, and `/os new` inspect, cancel, or unlink it.
+- `/os status`, `/os stop`, and `/os new` are optional controls to inspect,
+  cancel, or unlink it.
 - Direct messages are supported only for explicitly allowlisted user IDs.
 
 All outbound messages suppress parsed mentions and are split below Discord's

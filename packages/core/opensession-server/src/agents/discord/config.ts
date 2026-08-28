@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, statSync } from "fs";
 import { configuredIntegration } from "../../server/config";
 import { stateDir } from "../../server/paths";
 
@@ -64,6 +64,14 @@ export function loadDiscordConfig(): DiscordConfig {
     stringValue(cfg.botTokenFile) ||
     stateDir("discord/bot-token");
   const tokenFromEnv = stringValue(process.env.DISCORD_BOT_TOKEN);
+  if (!tokenFromEnv && existsSync(tokenFile)) {
+    const metadata = statSync(tokenFile);
+    if (!metadata.isFile() || (metadata.mode & 0o077) !== 0) {
+      throw new Error(
+        `Discord bot token file ${tokenFile} must be a private regular file (mode 0600 or stricter)`,
+      );
+    }
+  }
   const token = tokenFromEnv
     ? tokenFromEnv
     : existsSync(tokenFile)
