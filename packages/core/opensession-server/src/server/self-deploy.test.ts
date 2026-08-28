@@ -216,6 +216,7 @@ describe("deploy/self-deploy.sh", () => {
 		expect(script).toContain("already deployed or superseded");
 		expect(script).toContain("into newest requested target");
 		expect(script).toContain("refusing an automatic queued retry");
+		expect(script).toContain('if [ -f "$RESULT_FILE" ]');
 	});
 
 	test("the server launches through the fixed privileged helper", async () => {
