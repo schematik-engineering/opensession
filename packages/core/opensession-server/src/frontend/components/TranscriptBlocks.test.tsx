@@ -1043,7 +1043,7 @@ describe("TranscriptBlocks turn work and tool call preferences", () => {
       <TranscriptBlocks live entries={entries} />,
     );
     expect(running).toContain('aria-expanded="true"');
-    expect(running).toContain("reasoning-shimmer_3s_ease_0.5s_infinite");
+    expect(running).toContain('data-text-shimmer=""');
 
     const proseReasoning = renderToStaticMarkup(
       <TranscriptBlocks
@@ -1074,11 +1074,11 @@ describe("TranscriptBlocks turn work and tool call preferences", () => {
         ]}
       />,
     );
-    expect(proseReasoning).toContain(">Thinking</div>");
+    expect(proseReasoning.match(/>Thinking<\/span>/g)).toHaveLength(2);
     expect(proseReasoning).toContain(
       "I should inspect the current state first.",
     );
-    expect(proseReasoning).toContain("reasoning-shimmer_3s_ease_0.5s_infinite");
+    expect(proseReasoning).toContain('data-text-shimmer=""');
     setTurnPrefs(null);
   });
 });

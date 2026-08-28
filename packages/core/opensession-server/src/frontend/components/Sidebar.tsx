@@ -190,6 +190,7 @@ import { RowCardPopup } from "./SidebarRowCards";
 import { pointerCanHover } from "../lib/pointer";
 import { RepoTile, repoLabel } from "./RepoTile";
 import { useIsPhone } from "../hooks/useIsPhone";
+import { useNavigation } from "../hooks/useNavigation";
 import { useShortcutKeys } from "../hooks/useShortcutBindings";
 import { blockingOverlayOpen } from "../lib/blocking-overlay";
 import { matchesShortcut } from "../lib/shortcuts";
@@ -358,40 +359,20 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
     workspaces,
     selectedId,
     prsActive,
-    onOpenPrs,
     feedActive,
-    onOpenFeed,
     connected,
-    onOpenSettings,
     tasksActive,
-    onOpenTasks,
     taskCount = 0,
-    onOpenAutomation,
-    onOpenPrItem,
     selectedWorkspaceId = null,
     plainActive,
-    onOpenPlain,
     supportTinderActive,
-    onOpenSupportTinder,
     reportsActive,
-    onOpenReports,
     analyticsActive,
-    onOpenAnalytics,
-    onSelect,
-    onOpenReview,
-    onOpenTicket,
-    onOpenFeedItem,
-    onNewSession,
-    onNewSessionInRepo,
     showDraftRow,
     draftRowActive,
-    onOpenDraft,
-    onOpenWorkspace,
     onRenameWorkspace,
     onDeleteWorkspace,
-    onOpenArchived,
     archivedActive,
-    onOpenCatchUp,
     catchUpActive,
     onNextChatAvailableChange,
     onArchive,
@@ -404,6 +385,10 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
   },
   ref,
 ) {
+  const navigation = useNavigation();
+  const openSidebarSession = (session: UnifiedSession) => {
+    navigation.openSession(session.id);
+  };
   const isPhone = useIsPhone();
   const [search, setSearch] = useState("");
   // The compact People list has one real-time boundary: an idle run leaves it
@@ -1489,7 +1474,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
         selected={prRowSelected(item)}
         pinned={pins.includes(pinKey)}
         onTogglePin={() => setPins(togglePin(pinKey))}
-        onOpen={() => onOpenPrItem(item)}
+        onOpen={() => navigation.openPrItem(item)}
         onClose={() => void closePrRow(item)}
         closing={closingPrUrls.has(item.pr.url)}
       />
@@ -1615,7 +1600,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
         idx >= 0
           ? (rest[Math.min(idx, rest.length - 1)] ?? null)
           : (rest[0] ?? null);
-      if (next) onSelect(next.sessions[0]);
+      if (next) openSidebarSession(next.sessions[0]);
     }
     setHide(row.key);
   }
@@ -1652,7 +1637,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
         session,
         sibling
           ? () => {
-              onSelect(sibling);
+              openSidebarSession(sibling);
               return true;
             }
           : null,
@@ -1984,8 +1969,9 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
       reads,
     );
     if (unreadSession) {
-      if (row.workspace) onOpenWorkspace(row.workspace.id, unreadSession.id);
-      else onSelect(unreadSession);
+      if (row.workspace)
+        navigation.openWorkspace(row.workspace.id, unreadSession.id);
+      else openSidebarSession(unreadSession);
       return;
     }
     // Only open Review when there is something to inspect: a PR, or a branch or
@@ -1993,10 +1979,11 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
     const reviewable =
       row.workspace?.prNumber !== undefined ||
       row.sessions.some((s) => sessionHasPr(s) || sessionHasWorkspace(s));
-    if (review && reviewable && mainSession) onOpenReview(mainSession);
-    else if (row.workspace) onOpenWorkspace(row.workspace.id);
+    if (review && reviewable && mainSession)
+      navigation.openSessionReview(mainSession);
+    else if (row.workspace) navigation.openWorkspace(row.workspace.id);
     // Pre-migration grouped rows have no workspace record to restore through.
-    else if (mainSession) onSelect(mainSession);
+    else if (mainSession) openSidebarSession(mainSession);
   }
   function wsRowTouchEnd(row: WsRow, e: React.TouchEvent, review = false) {
     const hadOrigin = wsPressOrigin.current !== null;
@@ -2209,7 +2196,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
       label: SIDEBAR_TOOL_LABELS.feed,
       icon: <IconFeed />,
       active: feedActive,
-      onClick: onOpenFeed,
+      onClick: navigation.openFeed,
       title: "What the team has been shipping",
     },
     {
@@ -2217,7 +2204,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
       label: SIDEBAR_TOOL_LABELS.prs,
       icon: <IconPullRequest className="translate-x-px -translate-y-px" />,
       active: prsActive,
-      onClick: onOpenPrs,
+      onClick: navigation.openPrs,
       title: "Pull request worktrees",
     },
     {
@@ -2225,7 +2212,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
       label: SIDEBAR_TOOL_LABELS.tasks,
       icon: <IconListCircles />,
       active: tasksActive,
-      onClick: onOpenTasks,
+      onClick: navigation.openTasks,
       title: "Your open tasks",
       count: taskCount,
     },
@@ -2234,7 +2221,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
       label: SIDEBAR_TOOL_LABELS.plain,
       icon: <IconMail />,
       active: plainActive,
-      onClick: onOpenPlain,
+      onClick: navigation.openPlain,
       title: "Support tickets waiting in Plain",
     },
     {
@@ -2242,7 +2229,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
       label: SIDEBAR_TOOL_LABELS.catchup,
       icon: <IconStack />,
       active: catchUpActive,
-      onClick: onOpenCatchUp,
+      onClick: navigation.openCatchUp,
       title: "Swipe through your unread workspaces",
       count: catchUpCount,
     },
@@ -2251,7 +2238,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
       label: SIDEBAR_TOOL_LABELS.supporttinder,
       icon: <IconInbox />,
       active: supportTinderActive,
-      onClick: onOpenSupportTinder,
+      onClick: navigation.openSupportTinder,
       title: "Swipe through the Plain Todo queue",
     },
     {
@@ -2261,7 +2248,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
       active: reportsActive,
       // Called with no target: the row opens the list of reports, while an
       // automation's own report row below passes the one it names.
-      onClick: () => onOpenReports(),
+      onClick: () => navigation.openReports(),
       title: "Recurring automation reports",
     },
     {
@@ -2269,7 +2256,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
       label: SIDEBAR_TOOL_LABELS.analytics,
       icon: <IconChart />,
       active: analyticsActive,
-      onClick: onOpenAnalytics,
+      onClick: navigation.openAnalytics,
       title: "Sessions, tokens, models & PRs over time",
     },
   ];
@@ -2353,7 +2340,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
         archivedActive && "bg-selected text-fg",
       )}
       data-selected={archivedActive || undefined}
-      onClick={onOpenArchived}
+      onClick={navigation.openArchived}
       title="View archived sessions"
     >
       <span className={SIDEBAR_RAIL}>
@@ -3007,7 +2994,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
         <ActiveSubagentRows
           items={subagents}
           selectedId={selectedId}
-          onSelect={onSelect}
+          onSelect={openSidebarSession}
         />
       </React.Fragment>
     );
@@ -3060,7 +3047,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
         active={supportThreadActive(t)}
         pinned={pins.includes(pinKey)}
         onTogglePin={() => setPins(togglePin(pinKey))}
-        onOpen={() => onOpenTicket(t)}
+        onOpen={() => navigation.openTicket(t)}
         onMarkDone={() => markSupportRowDone(t.id)}
         onSetStatus={
           linked ? (status) => onSetStatus([linked], status) : undefined
@@ -3820,12 +3807,12 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
                       }
                       onClick={(e) => {
                         e.stopPropagation();
-                        onNewSessionInRepo(repo);
+                        navigation.openNewSessionInRepo(repo);
                       }}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.stopPropagation();
-                          onNewSessionInRepo(repo);
+                          navigation.openNewSessionInRepo(repo);
                         }
                       }}
                     >
@@ -4028,7 +4015,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
           active={feedItemActive(feed, item)}
           pinned={pins.includes(pinKey)}
           onTogglePin={() => setPins(togglePin(pinKey))}
-          onOpen={() => onOpenFeedItem(feed, item)}
+          onOpen={() => navigation.openFeedItem(feed, item)}
           onSetStatus={
             linked ? (status) => onSetStatus([linked], status) : undefined
           }
@@ -4215,7 +4202,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
         <div className="phone:hidden">
           <OrganizationSwitcher
             connected={connected}
-            onOpenSettings={onOpenSettings}
+            onOpenSettings={navigation.openSettings}
           />
         </div>
         {visibleTools.map((tool) => {
@@ -4573,7 +4560,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
                     : SIDEBAR_HEADER_BTN_DESKTOP,
                   "inline-flex items-center justify-center text-dim hover:bg-hover hover:text-fg",
                 )}
-                onClick={onNewSession}
+                onClick={navigation.openNewWorkspace}
               >
                 <IconPlus size={22} />
               </button>
@@ -4718,7 +4705,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
                 }}
                 onStartSessionRename={startSessionRename}
                 onToast={onToast}
-                onOpenReview={onOpenReview}
+                onOpenReview={navigation.openSessionReview}
                 onHide={(row, hidden) =>
                   hidden ? clearHides([row.key]) : hideRow(row)
                 }
@@ -4790,7 +4777,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
                 {draftRow && (
                   <DraftRow
                     active={!!draftRowActive}
-                    onClick={() => onOpenDraft?.()}
+                    onClick={() => navigation.openDraft()}
                   />
                 )}
                 {workspaceListEmpty &&
@@ -4821,14 +4808,14 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
                           variant="soft"
                           size="md"
                           className="rounded-full px-4"
-                          onClick={onNewSession}
+                          onClick={navigation.openNewWorkspace}
                         >
                           New session
                         </Button>
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={onOpenArchived}
+                          onClick={navigation.openArchived}
                         >
                           Archived
                         </Button>
@@ -5008,7 +4995,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
                             s.startedBy.toLowerCase() ===
                               currentUser.toLowerCase()
                           }
-                          onClick={() => onSelect(s)}
+                          onClick={() => openSidebarSession(s)}
                           onArchive={(current) => archiveWithNext(s, current)}
                           pinned={pin.pinned}
                           onTogglePin={pin.toggle}
@@ -5050,7 +5037,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
                           active={feedItemActive(feed, item)}
                           pinned
                           onTogglePin={() => setPins(togglePin(pinKey))}
-                          onOpen={() => onOpenFeedItem(feed, item)}
+                          onOpen={() => navigation.openFeedItem(feed, item)}
                           onSetStatus={
                             linked
                               ? (status) => onSetStatus([linked], status)
@@ -5428,7 +5415,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
                             title="Automation settings"
                             onClick={(e) => {
                               e.stopPropagation();
-                              onOpenAutomation(group.label);
+                              navigation.openAutomation(group.label);
                             }}
                           >
                             <IconSliders size={20} />
@@ -5458,7 +5445,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
                                     group.label,
                                   );
                                   if (overview?.latestReport)
-                                    onOpenReports({
+                                    navigation.openReports({
                                       automationId: overview.id,
                                       reportId: overview.latestReport.id,
                                     });
@@ -5497,7 +5484,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
                                     s.startedBy.toLowerCase() ===
                                       currentUser.toLowerCase()
                                   }
-                                  onClick={() => onSelect(s)}
+                                  onClick={() => openSidebarSession(s)}
                                   onArchive={(current) =>
                                     archiveWithNext(s, current)
                                   }
@@ -5633,7 +5620,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
                                   mine={false}
                                   showOwner={false}
                                   alwaysShowAddToSidebar
-                                  onClick={() => onSelect(session)}
+                                  onClick={() => openSidebarSession(session)}
                                   onArchive={(current) =>
                                     archiveWithNext(session, current)
                                   }
@@ -5682,8 +5669,8 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
             <SetupWidget
               placement="phone"
               hasCreatedSession={sessions.length > 0}
-              onOpenSettings={onOpenSettings}
-              onNewSession={onNewSession}
+              onOpenSettings={navigation.openSettings}
+              onNewSession={navigation.openNewWorkspace}
             />
           )}
 
@@ -5711,7 +5698,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
                     }}
                     onOpen={(session) => {
                       closeWsHover();
-                      onSelect(session);
+                      openSidebarSession(session);
                     }}
                   />
                 </div>
@@ -5756,7 +5743,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
                   onSnooze={(until) =>
                     until ? setSnooze(row.key, until) : clearSnooze(row.key)
                   }
-                  onOpen={(session) => onSelect(session)}
+                  onOpen={(session) => openSidebarSession(session)}
                   onRename={() => {
                     if (ws) {
                       setWorkspaceDraft(ws.name);
@@ -5832,8 +5819,8 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
         <SetupWidget
           placement="desktop"
           hasCreatedSession={sessions.length > 0}
-          onOpenSettings={onOpenSettings}
-          onNewSession={onNewSession}
+          onOpenSettings={navigation.openSettings}
+          onNewSession={navigation.openNewWorkspace}
         />
       )}
       <SidebarCustomizeDialog

@@ -17,9 +17,10 @@ test("every new-session palette opener primes the phone keyboard", async () => {
   // already-open palette after an asynchronous create failure.
   expect(app).not.toMatch(/\bsetPaletteState\s*\(\s*\{/);
 
-  const repoOpenStart = app.indexOf("onNewSessionInRepo={(repo)");
-  const repoOpenEnd = app.indexOf("showDraftRow=", repoOpenStart);
+  const repoOpenStart = app.indexOf("const openNewSessionInRepo = (repo:");
+  const repoOpenEnd = app.indexOf("const openDraft =", repoOpenStart);
   const repoOpen = app.slice(repoOpenStart, repoOpenEnd);
   expect(repoOpenStart).toBeGreaterThan(-1);
   expect(repoOpen).toContain("setPalette(");
+  expect(app).toContain("openNewSessionInRepo,");
 });

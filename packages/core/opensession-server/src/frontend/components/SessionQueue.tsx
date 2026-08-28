@@ -32,6 +32,7 @@ import {
 } from "../lib/composer-classes";
 import { Button } from "../ui/button";
 import { cn } from "../ui/cn";
+import { TextShimmer } from "../ui/text-shimmer";
 import { Tooltip } from "../ui/tooltip";
 import { IconArrowUp, IconPencil, IconPullRequest, IconTrash } from "./icons";
 
@@ -239,7 +240,9 @@ export function SessionQueue({
               {settingUpWorkspace ? (
                 "Queued"
               ) : (
-                <span className={composerQueueSendingShimmer}>Queueing</span>
+                <TextShimmer className={composerQueueSendingShimmer}>
+                  Queueing
+                </TextShimmer>
               )}
             </span>
           </div>
@@ -265,9 +268,9 @@ export function SessionQueue({
           {item.state !== "failed" && (
             <div className={composerQueueActions}>
               <span className={composerQueueSendingStatus} role="status">
-                <span className={composerQueueSendingShimmer}>
+                <TextShimmer className={composerQueueSendingShimmer}>
                   {item.state === "sending" ? "Sending" : "Waiting to send"}
-                </span>
+                </TextShimmer>
               </span>
             </div>
           )}

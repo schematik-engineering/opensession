@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import type { WSClientMessage, WSServerMessage } from "../lib/types";
+import { useSessionSocket } from "../hooks/useSessionSocket";
 import { Button } from "../ui/button";
 import { EmptyState } from "../ui/state";
 import {
@@ -137,13 +137,9 @@ const MAX_SHELL_TABS = 8;
 
 export function ShellPanel({
   sessionId,
-  send,
-  addHandler,
   visible,
 }: {
   sessionId: string;
-  send: (msg: WSClientMessage) => void;
-  addHandler: (handler: (msg: WSServerMessage) => void) => () => void;
   /** False while another side-panel tab covers the (still-mounted) panel. */
   visible: boolean;
 }) {
@@ -240,8 +236,6 @@ export function ShellPanel({
             key={t.id}
             sessionId={sessionId}
             termId={t.id}
-            send={send}
-            addHandler={addHandler}
             visible={visible && t.id === activeId}
           />
         ))
@@ -253,16 +247,13 @@ export function ShellPanel({
 function ShellView({
   sessionId,
   termId,
-  send,
-  addHandler,
   visible,
 }: {
   sessionId: string;
   termId: string;
-  send: (msg: WSClientMessage) => void;
-  addHandler: (handler: (msg: WSServerMessage) => void) => () => void;
   visible: boolean;
 }) {
+  const { send, addHandler } = useSessionSocket();
   const hostRef = useRef<HTMLDivElement>(null);
   const showRef = useRef<() => void>(() => {});
 

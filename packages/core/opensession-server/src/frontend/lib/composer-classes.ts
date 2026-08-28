@@ -326,16 +326,12 @@ export const composerQueueSendingStatus =
   "inline-flex h-8 shrink-0 items-center px-2 text-label font-medium text-faint";
 /** The label carries its own motion instead of standing next to a spinner: a
  *  highlight crosses the word, which reads as "not settled yet" without adding
- *  a second moving thing to a row that already sits in a list. The letters are
- *  painted with a gradient twice the box wide (`bg-clip-text` over transparent
- *  text) and the keyframe slides it; the crest is `--text-dim`, one step up
- *  from the resting `--text-faint` in both themes. Settled states ("Queued")
- *  do not take it. */
+ *  a second moving thing to a row that already sits in a list. TextShimmer
+ *  keeps the letters at `--text-faint` while its masked copy supplies a
+ *  `--text-dim` crest. Settled states ("Queued") do not take it. */
 export const composerQueueSendingShimmer =
-  "bg-clip-text text-transparent [-webkit-background-clip:text] " +
-  "[background-image:linear-gradient(100deg,var(--text-faint)_38%,var(--text-dim)_50%,var(--text-faint)_62%)] " +
-  "[background-size:200%_100%] [background-repeat:no-repeat] " +
-  "animate-[text-shimmer_1.8s_linear_infinite]";
+  "text-faint [--text-shimmer-highlight:var(--text-dim)] " +
+  "[--text-shimmer-duration:1.8s] [--text-shimmer-easing:linear]";
 export const composerQueueContent = "flex min-w-0 flex-1 items-center gap-2";
 /** The thumbnail keeps its size — shrunk to the 19px line box it stops being a
  *  recognizable preview, and the `+N` badge below is nearly as tall as the

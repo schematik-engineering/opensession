@@ -10,6 +10,7 @@ import {
 } from "../lib/msg-classes";
 import { useOpenAssetPaths } from "../lib/open-asset";
 import { cn } from "../ui/cn";
+import { TextShimmer } from "../ui/text-shimmer";
 import { liveReasoningHeading } from "../lib/reasoning-display";
 import { MarkdownBody, useMarkdownRepo } from "./MarkdownBody";
 import { TranscriptBlocks } from "./TranscriptBlocks";
@@ -70,9 +71,9 @@ function StreamingMessage({
   if (reasoningHeading) {
     return (
       <div className={cn(msgRow, msgStreamingRow, "mb-2")} role="status">
-        <span className={cn(msgReasoningTitle, msgReasoningShimmer)}>
+        <TextShimmer className={cn(msgReasoningTitle, msgReasoningShimmer)}>
           {reasoningHeading}
-        </span>
+        </TextShimmer>
       </div>
     );
   }

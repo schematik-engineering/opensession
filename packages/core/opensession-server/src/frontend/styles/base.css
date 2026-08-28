@@ -849,12 +849,10 @@ html[data-accent="green"] {
                         that actually translates.
      animate-[composer-agents-pulse_…]  (ComposerAgents) keeping the existing
                         explicit choice to stop it.
-     animate-[text-shimmer_…]  (composerQueueSendingShimmer) the crest that
-                        crosses "Queueing"/"Sending". The word itself says
-                        what is happening, so a still label loses nothing.
-     animate-[reasoning-shimmer_…]  (msgReasoningShimmer) the quiet wash over
-                        the active reasoning heading. The heading remains
-                        readable at rest, so motion is decoration.
+     text-shimmer-window / text-shimmer-copy  (TextShimmer) the crest that
+                        crosses queue and reasoning activity labels. The words
+                        themselves say what is happening, so a still label
+                        loses nothing.
      [animation-name:pixel-snake-trail]  (PixelSpinner) the decorative pixel
                         loader — a wave that travels across the block. However
                         fun, it is the single most motion-heavy thing in the
@@ -3013,30 +3011,26 @@ html[data-theme="light"] span.commit-ref:hover {
   }
 }
 
-/* A highlight travelling across a word, for a status label that is its own
-   loading indicator ("Queueing", "Sending"). The gradient is twice the box
-   wide, so sliding the position from 100% to 0% walks the crest left to
-   right across the letters. Referenced from `composerQueueSendingShimmer`
-   in lib/composer-classes. */
-@keyframes text-shimmer {
+/* TextShimmer moves a masked window and its duplicate text in opposite
+   directions. The transforms cancel for the glyphs, keeping them registered
+   with the base label while the mask crosses it on compositor layers. Unlike
+   animating a clipped gradient's background-position, this needs no repaint on
+   each frame. Timing and highlight color remain caller-controlled. */
+@keyframes text-shimmer-window {
   from {
-    background-position: 100% center;
+    transform: translateX(-100%);
   }
   to {
-    background-position: 0% center;
+    transform: translateX(100%);
   }
 }
 
-/* Match ChatGPT's thinking-label sweep: a half-width band starts fully before
-   the text and travels fully past it. The long path and eased three-second
-   cycle leave the heading readable between passes instead of keeping a bright
-   crest on the glyphs continuously. Referenced by `msgReasoningShimmer`. */
-@keyframes reasoning-shimmer {
+@keyframes text-shimmer-copy {
   from {
-    background-position: -100% 0;
+    transform: translateX(100%);
   }
   to {
-    background-position: 250% 0;
+    transform: translateX(-100%);
   }
 }
 
