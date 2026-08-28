@@ -107,7 +107,10 @@ export function configuredPublicIngress(): ReturnType<typeof configuredIngress> 
   };
 }
 
-export function normalizeIngressOrigin(value: string): string {
+export function normalizeIngressOrigin(
+  value: string,
+  options: { allowPathPrefix?: boolean } = {},
+): string {
   const trimmed = value.trim();
   if (!trimmed) throw new Error("Public ingress URL is required");
   if (trimmed.length > 2048 || /[\r\n\0]/.test(trimmed)) {
@@ -123,8 +126,15 @@ export function normalizeIngressOrigin(value: string): string {
   if (parsed.port || parsed.username || parsed.password) {
     throw new Error("Public ingress URL must use the default HTTPS port and no credentials");
   }
-  if (parsed.pathname !== "/" || parsed.search || parsed.hash) {
-    throw new Error("Public ingress URL must not include a path, query, or fragment");
+  if (parsed.search || parsed.hash) {
+    throw new Error("Public ingress URL must not include a query or fragment");
+  }
+  const pathPrefix = parsed.pathname.replace(/\/+$/, "");
+  if (pathPrefix && !options.allowPathPrefix) {
+    throw new Error("Public ingress URL must not include a path");
+  }
+  if (pathPrefix && !/^\/(?:[A-Za-z0-9._~-]+\/)*[A-Za-z0-9._~-]+$/.test(pathPrefix)) {
+    throw new Error("Public ingress path must use simple URL-safe path segments");
   }
   const host = parsed.hostname.toLowerCase().replace(/\.$/, "");
   if (
@@ -143,14 +153,17 @@ export function normalizeIngressOrigin(value: string): string {
   if (host === appHost) {
     throw new Error("Public ingress must use a different hostname from the private app");
   }
-  return parsed.origin;
+  return `${parsed.origin}${pathPrefix}`;
 }
 
 /** Custom-domain setup asks for a domain, not URL syntax. HTTPS is fixed by
  * the ingress contract and Caddy provisions it, so adding a scheme is busywork. */
 export function normalizeCustomIngressOrigin(value: string): string {
   const trimmed = value.trim();
-  return normalizeIngressOrigin(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+  return normalizeIngressOrigin(
+    trimmed.includes("://") ? trimmed : `https://${trimmed}`,
+    { allowPathPrefix: true },
+  );
 }
 
 /** Select the local interface that carries traffic to the public internet.
@@ -466,10 +479,12 @@ export async function savePublicIngress(input: {
   cloudflareTunnelId?: string;
   publicIp?: string;
 }): Promise<void> {
-  const publicBaseUrl = normalizeIngressOrigin(input.publicBaseUrl);
   if (!(["cloudflare", "custom"] as string[]).includes(input.exposure)) {
     throw new Error("Unknown exposure method");
   }
+  const publicBaseUrl = normalizeIngressOrigin(input.publicBaseUrl, {
+    allowPathPrefix: input.exposure === "custom",
+  });
   const cloudflareTunnelId = (input.cloudflareTunnelId || "").trim();
   if (input.exposure === "cloudflare" && !/^[0-9a-f-]{36}$/i.test(cloudflareTunnelId)) {
     throw new Error("Cloudflare tunnel ID must be a UUID");

@@ -67,12 +67,18 @@ describe("public ingress settings", () => {
     expect(() => normalizeIngressOrigin("http://ingress.example.test")).toThrow("must use HTTPS");
     expect(() => normalizeIngressOrigin("https://app.example.test")).toThrow("different hostname");
     expect(() => normalizeIngressOrigin("https://127.0.0.1")).toThrow("public internet");
+    expect(() => normalizeIngressOrigin("https://ingress.example.test/opensession"))
+      .toThrow("must not include a path");
   });
 
   test("custom domains do not require URL syntax", () => {
     fixture();
     expect(normalizeCustomIngressOrigin("ingress.example.test")).toBe("https://ingress.example.test");
     expect(normalizeCustomIngressOrigin("https://ingress.example.test/")).toBe("https://ingress.example.test");
+    expect(normalizeCustomIngressOrigin("ingress.example.test/opensession/"))
+      .toBe("https://ingress.example.test/opensession");
+    expect(() => normalizeCustomIngressOrigin("ingress.example.test/open session"))
+      .toThrow("simple URL-safe path segments");
     expect(() => normalizeCustomIngressOrigin("http://ingress.example.test")).toThrow("must use HTTPS");
   });
 
@@ -139,6 +145,23 @@ describe("public ingress settings", () => {
     expect(process.env.OPENSESSION_INGRESS_BASE).toBe("https://ingress.example.test");
     process.env.OPENSESSION_INGRESS_BASE = "https://old-ingress.example.test";
     expect(configuredPublicIngress().publicBaseUrl).toBe("https://ingress.example.test");
+  });
+
+  test("persists a namespaced custom callback base but rejects one for a managed tunnel", async () => {
+    const { path, envPath } = fixture();
+    await savePublicIngress({
+      publicBaseUrl: "https://hooks.example.test/opensession/",
+      exposure: "custom",
+    });
+    expect(JSON.parse(readFileSync(path, "utf8")).ingress.publicBaseUrl)
+      .toBe("https://hooks.example.test/opensession");
+    expect(readFileSync(envPath, "utf8"))
+      .toContain("OPENSESSION_INGRESS_BASE=https://hooks.example.test/opensession");
+    await expect(savePublicIngress({
+      publicBaseUrl: "https://hooks.example.test/opensession",
+      exposure: "cloudflare",
+      cloudflareTunnelId: "11111111-2222-3333-4444-555555555555",
+    })).rejects.toThrow("must not include a path");
   });
 
   test("saves a public address override for direct HTTPS", async () => {
