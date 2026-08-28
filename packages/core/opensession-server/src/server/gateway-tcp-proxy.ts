@@ -54,7 +54,11 @@ function validBackendPort(port: number): boolean {
   return Number.isInteger(port) && port > 0 && port <= 65_535;
 }
 
-function retryDelay(initialMs: number, maximumMs: number, attempt: number): number {
+function retryDelay(
+  initialMs: number,
+  maximumMs: number,
+  attempt: number,
+): number {
   return Math.min(maximumMs, initialMs * 2 ** Math.min(attempt, 10));
 }
 
@@ -86,7 +90,10 @@ export function startGatewayTcpProxy(
   const retryMs = Math.max(1, options.retryMs ?? 25);
   const maxRetryMs = Math.max(retryMs, options.maxRetryMs ?? 250);
   const connectDeadlineMs = Math.max(1, options.connectDeadlineMs ?? 30_000);
-  const maxPendingConnections = Math.max(1, options.maxPendingConnections ?? 2_048);
+  const maxPendingConnections = Math.max(
+    1,
+    options.maxPendingConnections ?? 2_048,
+  );
   const metrics = options.metrics ?? createGatewayTcpProxyMetrics();
   const pending = new Set<ParkedConnection>();
   const active = new Set<Socket>();
@@ -160,7 +167,8 @@ export function startGatewayTcpProxy(
         active.add(client);
         active.add(upstream);
         client.removeListener("data", onData);
-        if (state.bytes > 0) upstream.write(Buffer.concat(state.chunks, state.bytes));
+        if (state.bytes > 0)
+          upstream.write(Buffer.concat(state.chunks, state.bytes));
         state.chunks = [];
         state.bytes = 0;
         client.pipe(upstream);
