@@ -140,9 +140,7 @@ test("sidebar Changes shares Review's code display options", () => {
   expect(codeDisplaySource).toContain("{showFileListSetting && (");
   expect(prPanelSource).toContain("<DiffSourceSetting");
   expect(diffPanelSource).toContain("<DiffSourceSetting");
-  expect(viewerSource).toContain(
-    'if (next === "pull-request") onOpenReview?.()',
-  );
+  expect(viewerSource).toContain('if (next === "pull-request") openReview?.()');
   expect(diffPanelSource).toContain("showGroupsStatus={false}");
   expect(diffPanelSource).toContain('aria-label="Organizing files"');
   expect(diffPanelSource).toContain(
