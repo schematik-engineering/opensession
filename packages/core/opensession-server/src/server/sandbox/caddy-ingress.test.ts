@@ -14,6 +14,15 @@ describe("public Caddy ingress", () => {
     expect(snippet).not.toContain("3850");
   });
 
+  test("strips a custom public namespace before proxying to the fail-closed gateway", () => {
+    const snippet = caddyIngressSnippet("https://hooks.example.com/opensession");
+    expect(snippet).toContain("hooks.example.com {");
+    expect(snippet).toContain("handle_path /opensession/* {");
+    expect(snippet).toContain("reverse_proxy 127.0.0.1:3860");
+    expect(upsertCaddyIngress(snippet, "https://hooks.example.com/opensession"))
+      .toBe(snippet);
+  });
+
   test("discovers a host already routing to the unified gateway", () => {
     expect(
       ingressHostsFromCaddy({

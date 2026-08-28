@@ -17,7 +17,8 @@ function normalizeOrigin(value: string | undefined): string | undefined {
   try {
     const url = new URL(value);
     if (url.protocol !== "https:" && url.protocol !== "wss:") return undefined;
-    return `https://${url.host}`;
+    const pathPrefix = url.pathname.replace(/\/+$/, "");
+    return `https://${url.host}${pathPrefix}`;
   } catch {
     return undefined;
   }
@@ -54,10 +55,11 @@ export function ingressHostsFromCaddy(config: unknown): string[] {
 const MANAGED_START = "# BEGIN OPENSESSION SANDBOX INGRESS";
 const MANAGED_END = "# END OPENSESSION SANDBOX INGRESS";
 
-function managedRoutes(indent = "    ", bindAddress?: string): string {
+function managedRoutes(indent = "    ", bindAddress?: string, pathPrefix = ""): string {
   const bind = bindAddress ? `${indent}bind ${bindAddress}\n` : "";
+  const handler = pathPrefix ? `handle_path ${pathPrefix}/*` : "handle";
   return `${indent}${MANAGED_START}
-${bind}${indent}handle {
+${bind}${indent}${handler} {
 ${indent}    reverse_proxy 127.0.0.1:3860
 ${indent}}
 ${indent}${MANAGED_END}`;
@@ -143,7 +145,9 @@ export function upsertCaddyIngress(
   origin: string,
   bindAddress?: string,
 ): string {
-  const host = new URL(origin).host;
+  const parsedOrigin = new URL(origin);
+  const host = parsedOrigin.host;
+  const pathPrefix = parsedOrigin.pathname.replace(/\/+$/, "");
   const managed = new RegExp(
     `^[ \\t]*${MANAGED_START}[\\s\\S]*?^[ \\t]*${MANAGED_END}[ \\t]*(?:\\r?\\n)?`,
     "gm",
@@ -158,12 +162,14 @@ export function upsertCaddyIngress(
   }
   const range = matches[0]!;
   const site = stripKnownSandboxRoutes(next.slice(range.opening + 1, range.closing));
-  return `${next.slice(0, range.opening + 1)}\n${managedRoutes("    ", bindAddress)}\n${site.replace(/^\s*\n/, "")}${next.slice(range.closing)}`;
+  return `${next.slice(0, range.opening + 1)}\n${managedRoutes("    ", bindAddress, pathPrefix)}\n${site.replace(/^\s*\n/, "")}${next.slice(range.closing)}`;
 }
 
 export function caddyIngressSnippet(origin: string, bindAddress?: string): string {
-  const host = new URL(origin).host;
-  return `${host} {\n${managedRoutes("    ", bindAddress)}\n}`;
+  const parsedOrigin = new URL(origin);
+  const host = parsedOrigin.host;
+  const pathPrefix = parsedOrigin.pathname.replace(/\/+$/, "");
+  return `${host} {\n${managedRoutes("    ", bindAddress, pathPrefix)}\n}`;
 }
 
 async function health(origin: string | undefined): Promise<"ready" | "unreachable" | "not_configured"> {

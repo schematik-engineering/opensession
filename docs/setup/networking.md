@@ -312,9 +312,12 @@ public routes use OAuth state, path secrets, or short-lived tokens as
 appropriate. Routes that require credentials reject missing credentials;
 `/ingress-health` is intentionally public.
 
-Configure the canonical origin in **Settings → Domains and ingress → Public callbacks** or directly. It
-must be a public HTTPS origin on a hostname different from the private app,
-with no path, credentials, or custom port:
+Configure the canonical base in **Settings → Domains and ingress → Public callbacks** or directly. It
+must use public HTTPS on a hostname different from the private app, with no
+credentials or custom port. Most installs use the hostname alone. A Custom
+exposure may add a simple path prefix when the callback hostname is shared;
+the generated Caddy configuration strips that prefix before requests reach the
+fail-closed listener:
 
 ```json
 {
@@ -322,11 +325,15 @@ with no path, credentials, or custom port:
     "publicBaseUrl": "https://sessions.tailnet.example.com"
   },
   "ingress": {
-    "publicBaseUrl": "https://ingress.example.com",
+    "publicBaseUrl": "https://ingress.example.com/opensession",
     "exposure": "custom"
   }
 }
 ```
+
+Managed Cloudflare Tunnel exposure still requires a host-only base because it
+owns the callback hostname's DNS record. Path prefixes are for Custom exposure,
+where an existing reverse proxy or the generated Caddy route owns dispatch.
 
 `OPENSESSION_INGRESS_BASE` overrides the configured ingress URL. Setup guides,
 webhook URLs, remote Sandbox callbacks, and the workload-identity issuer all
