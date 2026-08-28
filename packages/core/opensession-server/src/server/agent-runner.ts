@@ -45,6 +45,12 @@ import {
   activePiRunCount,
 } from "./pi-runner";
 import {
+  activeAcpRunCount,
+  cancelAcpRun,
+  isAcpSessionBusy,
+  runAcp,
+} from "./acp-runner";
+import {
   providerFor,
   nextFallbackModel,
   modelLabel,
@@ -388,12 +394,16 @@ async function* runOnModel(
     return;
   }
   const route = routeModel(requested, { interactive: isInteractiveRun(opts) });
+  if (route.engine === "grok" || route.engine === "cursor") {
+    yield* runAcp(opts, route.model);
+    return;
+  }
   yield* runPi(opts, route.model);
 }
 
-/** Pi owns every live engine session transcript. */
-export function transcriptProviderFor(_engineModel: string): "pi" {
-  return "pi";
+/** Store-only providers persist through the same owned transcript bridge. */
+export function transcriptProviderFor(engineModel: string) {
+  return providerFor(engineModel);
 }
 
 /** Whether the per-model default engine applies to this run. Automations and
@@ -545,6 +555,12 @@ async function* runAgentInner(opts: RunAgentOpts): AsyncGenerator<StreamEvent> {
   const wantsBestCodex = requestedModel?.id === BEST_AVAILABLE_CODEX_MODEL;
   const primaryModel =
     workspacePreset?.model || resolveConcreteModel(opts.model);
+  if (["grok", "cursor"].includes(providerFor(primaryModel))) {
+    // Subscription-backed ACP providers fail closed on their own account.
+    // Never turn a SuperGrok/Cursor exhaustion into separately billed API use.
+    yield* runOnModel(opts, primaryModel);
+    return;
+  }
   const preferredFallback = /^(?:claude|codex)\//.test(primaryModel)
     ? "none"
     : wantsBestCodex
@@ -843,11 +859,15 @@ async function* runAgentInner(opts: RunAgentOpts): AsyncGenerator<StreamEvent> {
 /** Provider family inside Pi. A provider change starts a fresh Pi session and
  * bridges the previous transcript; a same-provider fallback can resume. */
 export function engineFamily(model: string): string {
+  const provider = providerFor(model);
+  if (provider === "grok" || provider === "cursor") return `acp-${provider}`;
   const routed = toPiModel(model) || model;
   return `pi-${routed.match(/^pi\/([^/]+)\//)?.[1] || providerFor(routed)}`;
 }
 
-function familyLabel(_family: string): "pi" {
+function familyLabel(family: string): "pi" | "grok" | "cursor" {
+  if (family === "acp-grok") return "grok";
+  if (family === "acp-cursor") return "cursor";
   return "pi";
 }
 
@@ -1020,6 +1040,7 @@ export function isAgentLiveEngineBusy(
       legacyPendingStarts()?.has(id) ||
       activeSessionRunTokens.has(id) ||
       isPiSessionBusy(id) ||
+      isAcpSessionBusy(id) ||
       hostRunBusy(id)
     )
       return true;
@@ -1051,7 +1072,7 @@ export function isAgentSessionBusy(
  * not count external CLI/tmux runs — we can't drain those.)
  */
 export function activeAgentRunCount(): number {
-  return activePiRunCount() + hostRunCount();
+  return activePiRunCount() + activeAcpRunCount() + hostRunCount();
 }
 
 /** Of those, how many execute on a DETACHED engine server that survives a
@@ -1189,6 +1210,7 @@ function agentRunTokenControlled(runToken: string): boolean {
   return (
     agentRunTokenLatched(runToken) ||
     isPiSessionBusy(runToken) ||
+    isAcpSessionBusy(runToken) ||
     hostRunBusy(runToken)
   );
 }
@@ -1237,7 +1259,9 @@ export async function cancelAgentRunTokenAndWait(
       return true;
     }
     if (
-      (isPiSessionBusy(runToken) || hostRunBusy(runToken)) &&
+      (isPiSessionBusy(runToken) ||
+        isAcpSessionBusy(runToken) ||
+        hostRunBusy(runToken)) &&
       (await cancelAgentRun(runToken))
     )
       return true;
@@ -1266,6 +1290,7 @@ export async function cancelAgentRun(
   for (const id of ids) {
     if (!id) continue;
     if (cancelPiRun(id)) cancelled = true;
+    if (cancelAcpRun(id)) cancelled = true;
     if (hostCancel(id)) cancelled = true;
   }
   const wanted = new Set(ids.filter((id): id is string => !!id));

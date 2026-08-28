@@ -25,7 +25,7 @@ import { resolveWorkspaceModelPreset } from "./workspace-model-presets";
 // "claude" and "codex" are LEGACY provider tags: the CLI-era engines and the
 // removed direct-SDK engines stored them on sessions (and readers still key
 // engine-id slots on them), but routing never produces them anymore.
-export type Provider = "claude" | "codex" | "pi";
+export type Provider = "claude" | "codex" | "pi" | "grok" | "cursor";
 
 /** Every engine id that can lead a model id, as a routing prefix — including
  *  the removed direct engines' claude/ and codex/, which legacy stored ids
@@ -33,11 +33,11 @@ export type Provider = "claude" | "codex" | "pi";
  *  single place the id grammar's engine axis is spelled out, so an engine
  *  prefix can't silently lose efforts, preset lookup, tiering or account-pool
  *  detection. */
-const ENGINE_PREFIX_RE = /^(?:pi|claude|codex)\//;
+const ENGINE_PREFIX_RE = /^(?:pi|claude|codex|grok|cursor)\//;
 
 /** `<engine>/<upstream vendor>/…` — captures the vendor segment of a routed
  *  id, whichever engine carries it. */
-const ENGINE_UPSTREAM_RE = /^(?:pi|claude|codex)\/([^/]+)\//;
+const ENGINE_UPSTREAM_RE = /^(?:pi|claude|codex|grok|cursor)\/([^/]+)\//;
 
 export interface ModelInfo {
   id: string;
@@ -235,7 +235,52 @@ export const KNOWN_MODELS: ModelInfo[] = [
     label: "GPT-5.3 Codex Spark",
     aliases: ["spark"],
   },
+  {
+    id: "grok/grok-4.6",
+    provider: "grok",
+    label: "Grok 4.6 · SuperGrok",
+    aliases: ["supergrok", "grok"],
+  },
+  {
+    id: "grok/grok-4.5",
+    provider: "grok",
+    label: "Grok 4.5 · SuperGrok",
+    aliases: [],
+  },
+  {
+    id: "cursor/auto",
+    provider: "cursor",
+    label: "Auto · Cursor",
+    aliases: ["cursor"],
+  },
+  ...[
+    "grok-4.6",
+    "composer-2.5",
+    "claude-opus-5",
+    "gpt-5.6-sol",
+    "claude-sonnet-5",
+    "gemini-3.7-flash",
+  ].map((id) => ({
+    id: `cursor/${id}`,
+    provider: "cursor" as const,
+    label: `${prettifyAcpModelSlug(id)} · Cursor`,
+    aliases: [],
+  })),
 ];
+
+function prettifyAcpModelSlug(id: string): string {
+  if (id === "composer-2.5") return "Composer 2.5";
+  if (id.startsWith("grok-")) return `Grok ${id.slice(5)}`;
+  if (id.startsWith("gpt-")) return `GPT-${id.slice(4)}`;
+  if (id.startsWith("claude-"))
+    return id
+      .slice(7)
+      .split("-")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+  if (id.startsWith("gemini-")) return `Gemini ${id.slice(7)}`;
+  return id;
+}
 
 // ── The Dial ──────────────────────────────────────────────────────────────
 //
@@ -649,9 +694,11 @@ export function directModelLabel(id: string): string {
   return `${engine} · ${piModelLabel(id)}`;
 }
 
-/** Models selectable for new turns. Every advertised id routes to Pi. */
+/** Models selectable for new turns across the configured engine adapters. */
 export function selectableModels(): { id: string; label: string }[] {
-  const list = KNOWN_MODELS.filter((m) => m.provider === "pi");
+  const list = KNOWN_MODELS.filter((m) =>
+    ["pi", "grok", "cursor"].includes(m.provider),
+  );
   return list.map((m) => ({ id: m.id, label: m.label }));
 }
 
@@ -984,6 +1031,8 @@ const RETIRED_CODEX_REROUTE: Record<string, string> = {
 export function toPiModel(model?: string | null): string | undefined {
   let requested = (model || "").trim().toLowerCase();
   if (!requested) return model ?? undefined;
+  if (requested.startsWith("grok/") || requested.startsWith("cursor/"))
+    return undefined;
   if (requested.startsWith("claude/") || requested.startsWith("codex/")) {
     requested = requested.slice(requested.indexOf("/") + 1);
   }
@@ -1020,16 +1069,26 @@ export function toPiModel(model?: string | null): string | undefined {
   return undefined;
 }
 
-/** Pi is the only execution engine. */
+/** Normalize a model for the explicitly selected engine. */
 export function toEngineModel(
   model: string | null | undefined,
-  _engine: Provider,
+  engine: Provider,
 ): string | undefined {
+  if (engine === "grok" || engine === "cursor") {
+    const requested = (model || "").trim().toLowerCase();
+    if (!requested) return undefined;
+    return requested.startsWith(`${engine}/`)
+      ? requested
+      : `${engine}/${requested}`;
+  }
   return toPiModel(model);
 }
 
 export function explicitEngineFor(model?: string | null): Provider | null {
-  return (model || "").trim().toLowerCase().startsWith("pi/") ? "pi" : null;
+  const prefix = (model || "").trim().toLowerCase().split("/", 1)[0];
+  return prefix === "pi" || prefix === "grok" || prefix === "cursor"
+    ? prefix
+    : null;
 }
 
 const PRESET_HEADS = ["dial/", "orchestrator/", "workspace-preset/"];
@@ -1047,15 +1106,20 @@ export function modelEngineKey(model?: string | null): string {
   return pickerBaseId((model || "").trim());
 }
 
-export function modelSupportsSteer(_model?: string | null): boolean {
-  return true;
+export function modelSupportsSteer(model?: string | null): boolean {
+  const provider = providerFor(model);
+  return provider !== "grok" && provider !== "cursor";
 }
 
 export function routeModel(
   model: string | null | undefined,
   _opts?: { interactive?: boolean },
-): { engine: "pi"; model: string } {
+): { engine: Provider; model: string } {
   const requested = (model || "").trim();
+  const provider = providerFor(requested);
+  if (provider === "grok" || provider === "cursor") {
+    return { engine: provider, model: requested.toLowerCase() };
+  }
   return {
     engine: "pi",
     model: toPiModel(requested) || toPiModel(getDefaultModel())!,
@@ -1086,9 +1150,14 @@ export function accountProviderForModel(
   return undefined;
 }
 
-/** Default model for new interactive sessions, always routed to Pi. */
+/** Default model for new interactive sessions, retaining explicit ACP engines. */
 export function interactiveDefaultModel(): string {
   const configured = loadInteractiveOverride() || getDefaultModel();
+  if (
+    providerFor(configured) === "grok" ||
+    providerFor(configured) === "cursor"
+  )
+    return configured;
   if (modelPreset(configured)) {
     return configured.startsWith("pi/") ? configured : `pi/${configured}`;
   }
@@ -1254,6 +1323,17 @@ export function resolveModel(input: string): ModelInfo | null {
       ? { id: routed, provider: "pi", label: piModelLabel(routed), aliases: [] }
       : null;
   }
+  if (value.startsWith("grok/") || value.startsWith("cursor/")) {
+    const provider = value.startsWith("grok/") ? "grok" : "cursor";
+    return value.split("/").at(-1)
+      ? {
+          id: value,
+          provider,
+          label: `${prettifyAcpModelSlug(value.slice(value.indexOf("/") + 1))} · ${provider === "grok" ? "SuperGrok" : "Cursor"}`,
+          aliases: [],
+        }
+      : null;
+  }
   if (value.startsWith("claude-"))
     return { id: value, provider: "claude", label: value, aliases: [] };
   if (value.startsWith("gpt-") || value.startsWith("codex-")) {
@@ -1272,7 +1352,10 @@ export function resolveModel(input: string): ModelInfo | null {
 }
 
 /** Execution provider for a session model. */
-export function providerFor(_model?: string | null): Provider {
+export function providerFor(model?: string | null): Provider {
+  const normalized = (model || "").trim().toLowerCase();
+  if (normalized.startsWith("grok/")) return "grok";
+  if (normalized.startsWith("cursor/")) return "cursor";
   return "pi";
 }
 

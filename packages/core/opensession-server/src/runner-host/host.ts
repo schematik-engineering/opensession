@@ -29,6 +29,10 @@ if (!specPath) {
 }
 const hostDir = dirname(resolve(specPath));
 const projectedGithubAuthPath = process.env.OPENSESSION_GITHUB_RUN_AUTH_FILE;
+const projectedAcpAuthPaths = [
+  `${hostDir}/acp-auth.json`,
+  `${hostDir}/acp-agent-id`,
+];
 const cleanupProjectedGithubAuth = () => {
   if (
     projectedGithubAuthPath &&
@@ -41,6 +45,13 @@ const cleanupProjectedGithubAuth = () => {
 };
 // Covers validation/import failures as well as the ordinary terminal path.
 process.once("exit", cleanupProjectedGithubAuth);
+process.once("exit", () => {
+  for (const path of projectedAcpAuthPaths) {
+    try {
+      unlinkSync(path);
+    } catch {}
+  }
+});
 // Publish process identity before reading the cancellation marker. A stopper
 // can now close the startup race without broad process-name matching.
 writeFileSync(
@@ -55,6 +66,11 @@ writeFileSync(
 );
 if (existsSync(`${hostDir}/cancelled`)) {
   cleanupProjectedGithubAuth();
+  for (const path of projectedAcpAuthPaths) {
+    try {
+      unlinkSync(path);
+    } catch {}
+  }
   console.log(`[run-host] ${hostDir}: cancelled before startup`);
   process.exit(0);
 }

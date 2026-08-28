@@ -67,7 +67,9 @@ export async function handleModelsRoutes(
     // Slack/Linear/Plain agent loops still run them on the SDK), just not
     // selectable here. Guard: with no engine configured, fall back to the
     // full registry so the picker is never empty.
-    const engineModels = KNOWN_MODELS.filter((m) => m.provider === "pi");
+    const engineModels = KNOWN_MODELS.filter((m) =>
+      ["pi", "grok", "cursor"].includes(m.provider),
+    );
     const engineConfigured = engineModels.length > 0;
     const visibleModels = (engineConfigured ? engineModels : KNOWN_MODELS)
       .filter(

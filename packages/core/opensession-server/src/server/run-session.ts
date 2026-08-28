@@ -1322,7 +1322,7 @@ export function attachSessionWatchersToEngineTranscript(
   // "pi" and "pi" resolve to no transcript path (both keep their turns
   // in the owned store); those sessions stream through run events only, so
   // this attaches nothing for them.
-  provider: "claude" | "codex" | "pi",
+  provider: "claude" | "codex" | "pi" | "grok" | "cursor",
   cwd: string,
   engineSessionId: string,
   attempt = 0,

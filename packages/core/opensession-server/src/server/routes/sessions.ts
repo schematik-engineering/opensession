@@ -208,9 +208,22 @@ export type SessionListRow = Omit<
  * carries the answer and the detail route carries the ids.
  */
 export function sessionRan(
-  s: Pick<UnifiedSession, "claudeSessionId" | "codexThreadId" | "piSessionId">,
+  s: Pick<
+    UnifiedSession,
+    | "claudeSessionId"
+    | "codexThreadId"
+    | "piSessionId"
+    | "grokSessionId"
+    | "cursorSessionId"
+  >,
 ): boolean {
-  return !!(s.claudeSessionId || s.codexThreadId || s.piSessionId);
+  return !!(
+    s.claudeSessionId ||
+    s.codexThreadId ||
+    s.piSessionId ||
+    s.grokSessionId ||
+    s.cursorSessionId
+  );
 }
 
 /** Translate the web create sentinel into the control path's explicit flag. */

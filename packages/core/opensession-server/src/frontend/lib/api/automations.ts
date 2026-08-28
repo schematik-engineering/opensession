@@ -4,7 +4,7 @@ import { ApiError, BASE, request } from "./request";
 
 export interface ModelOption {
   id: string;
-  provider: "claude" | "codex" | "pi";
+  provider: "claude" | "codex" | "pi" | "grok" | "cursor";
   label: string;
   aliases: string[];
   efforts: string[];
@@ -301,7 +301,7 @@ export async function fetchConnections(): Promise<{
 export interface SandboxModelFamilyInfo {
   id: string;
   label: string;
-  match: { provider: "claude" | "codex" | "pi" };
+  match: { provider: "claude" | "codex" | "pi" | "grok" | "cursor" };
   sandboxable: boolean;
   hint?: string;
 }

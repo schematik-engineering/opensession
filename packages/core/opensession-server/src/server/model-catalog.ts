@@ -1,6 +1,7 @@
 import { listAccountsPublic } from "./claude-accounts";
 import { listCodexAccountsPublic } from "./codex-accounts";
 import { modelProviders } from "./model-providers";
+import { configuredAcpProviders } from "./acp-config";
 import {
   KNOWN_MODELS,
   interactiveDefaultModel,
@@ -24,11 +25,14 @@ export function configuredModelProviders(): Set<string> {
     ...Object.entries(modelProviders())
       .filter(([, provider]) => !!provider.apiKey)
       .map(([provider]) => provider),
+    ...configuredAcpProviders(),
   ]);
 }
 
 /** Upstream provider needed to run one selectable model. */
 export function modelUpstreamProvider(model: string): string | undefined {
+  if (model.startsWith("grok/")) return "grok";
+  if (model.startsWith("cursor/")) return "cursor";
   return toPiModel(model)?.match(/^pi\/([^/]+)\//)?.[1];
 }
 
@@ -117,8 +121,8 @@ export function configuredInteractiveDefaultModel(
   return chooseConfiguredDefaultModel(
     interactiveDefaultModel(),
     configuredProviders,
-    KNOWN_MODELS.filter((model) => model.provider === "pi").map(
-      (model) => model.id,
-    ),
+    KNOWN_MODELS.filter((model) =>
+      ["pi", "grok", "cursor"].includes(model.provider),
+    ).map((model) => model.id),
   );
 }

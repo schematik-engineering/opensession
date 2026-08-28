@@ -1,5 +1,5 @@
-/** Pi-only model id helpers shared by every model picker. */
-export const ENGINE_IDS = ["pi"] as const;
+/** Engine-aware model id helpers shared by every model picker. */
+export const ENGINE_IDS = ["pi", "grok", "cursor"] as const;
 export type EngineId = (typeof ENGINE_IDS)[number];
 
 export interface EngineOption {
@@ -12,7 +12,9 @@ const PRESET_HEADS = ["dial/", "orchestrator/", "workspace-preset/"];
 const isPresetId = (id: string) =>
   PRESET_HEADS.some((head) => id.startsWith(head));
 
-export function modelEngine(_id: string): EngineId {
+export function modelEngine(id: string): EngineId {
+  if (id.startsWith("grok/")) return "grok";
+  if (id.startsWith("cursor/")) return "cursor";
   return "pi";
 }
 
@@ -22,6 +24,8 @@ export function baseModelId(id: string): string {
 }
 
 export function modelVendor(id: string): string | null {
+  if (id.startsWith("grok/")) return "grok";
+  if (id.startsWith("cursor/")) return "cursor";
   const rest = id.startsWith("pi/") ? id.slice(3) : id;
   if (isPresetId(rest)) return null;
   const slash = rest.indexOf("/");
@@ -40,6 +44,7 @@ export function isAnthropicModel(
 
 export function engineModelId(_engine: EngineId, id: string): string | null {
   if (!id) return null;
+  if (id.startsWith("grok/") || id.startsWith("cursor/")) return id;
   if (id.startsWith("pi/")) return id;
   if (isPresetId(id)) return `pi/${id}`;
   if (id.startsWith("claude-")) return `pi/anthropic/${id}`;
@@ -53,6 +58,7 @@ export function piModelId(id: string): string | null {
 }
 
 export function modelEngineKey(id: string): string {
+  if (id.startsWith("grok/") || id.startsWith("cursor/")) return id;
   const rest = id.startsWith("pi/") ? id.slice(3) : id;
   if (isPresetId(rest)) return rest;
   const slash = rest.indexOf("/");

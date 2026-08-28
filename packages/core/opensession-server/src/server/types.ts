@@ -230,9 +230,13 @@ export interface UnifiedSession {
    *  run on a pi/* model. Own slot, no legacy mirror — nothing pre-pi ever
    *  read a pi id, so there is no compat ride to keep. */
   piSessionId?: string;
+  /** Provider-native ACP session ids. Kept separate so a model switch can
+   * return to either subscription-backed agent without losing its history. */
+  grokSessionId?: string;
+  cursorSessionId?: string;
   /** Provider whose engine last drove a run — lets the next run detect an
    *  in-place cross-provider switch and bridge context. */
-  lastEngineProvider?: "claude" | "codex" | "pi";
+  lastEngineProvider?: "claude" | "codex" | "pi" | "grok" | "cursor";
   /** Model that last actually drove a run. Anthropic and OpenAI models both
    *  report provider "pi", so provider alone can't detect a family
    *  switch (which lands on another server as a fresh engine session and
@@ -592,10 +596,12 @@ export interface NativeSessionFile {
   accountId?: string; // pinned Claude/Codex provider account; unset = auto pool
   codexThreadId?: string; // codex thread id once the session has run on a codex model
   piSessionId?: string; // pi engine session id (uuid) once the session has run on a pi/* model
+  grokSessionId?: string; // Grok ACP session id
+  cursorSessionId?: string; // Cursor ACP session id
   /** Provider whose engine last actually drove a run in this session. Lets the
    *  next run detect an in-place cross-provider switch (Claude↔Codex) and hand
    *  the incoming engine a transcript bridge so context carries over. */
-  lastEngineProvider?: "claude" | "codex" | "pi";
+  lastEngineProvider?: "claude" | "codex" | "pi" | "grok" | "cursor";
   lastEngineModel?: string; // model that last drove a run (family-switch detection)
   modelHistory?: Array<{
     model: string;

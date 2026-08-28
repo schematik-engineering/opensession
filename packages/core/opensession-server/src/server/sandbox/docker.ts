@@ -110,6 +110,8 @@
  */
 
 import {
+  chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -163,6 +165,7 @@ import { authedRemoteUrl } from "../codestorage/auth";
 import { parseCsRemote } from "../codestorage/remote";
 import { redactUrl } from "../shared/redact";
 import { createWorkloadIdentityEnv } from "../workload-identity";
+import { acpAgentIdSource, acpAuthSource, isAcpProvider } from "../acp-config";
 import {
   REPOS,
   getRepo,
@@ -1155,6 +1158,26 @@ function makeDockerLauncher(
       // written to `dir` — respawns included) and point the host at the run-ws
       // + rpc-ws routes instead of socket paths.
       const spec = readJsonSafe<RunHostSpec>(`${dir}/${HOST_SPEC_NAME}`);
+      const acpProvider = providerFor(spec?.model);
+      const projectedAcpPaths: string[] = [];
+      if (isAcpProvider(acpProvider)) {
+        const authSource = acpAuthSource(acpProvider);
+        if (!existsSync(authSource))
+          throw new HostLaunchNotDispatchedError(
+            `${acpProvider} subscription authentication is not configured`,
+          );
+        const authDestination = `${dir}/acp-auth.json`;
+        copyFileSync(authSource, authDestination);
+        chmodSync(authDestination, 0o600);
+        projectedAcpPaths.push(authDestination);
+        const agentIdSource = acpAgentIdSource(acpProvider);
+        if (agentIdSource && existsSync(agentIdSource)) {
+          const agentIdDestination = `${dir}/acp-agent-id`;
+          copyFileSync(agentIdSource, agentIdDestination);
+          chmodSync(agentIdDestination, 0o600);
+          projectedAcpPaths.push(agentIdDestination);
+        }
+      }
       const workloadIdentityEnv = createWorkloadIdentityEnv({
         sandboxId: container,
         provider: "docker",
@@ -1200,6 +1223,11 @@ function makeDockerLauncher(
       onDispatching?.();
       const r = await docker(args);
       if (r.exitCode !== 0) {
+        for (const path of projectedAcpPaths) {
+          try {
+            unlinkSync(path);
+          } catch {}
+        }
         if (spec?.wsToken) unregisterRunWsHost(hostId);
         throw new HostLaunchNotDispatchedError(
           `docker exec (run host) failed: ${r.stderr.trim().slice(0, 400)}`,
