@@ -63,7 +63,14 @@ struct QueueMessagePresentation: Equatable {
 
         if let legacyWorkerFailure {
             label = "Worker report"
-            body = legacyWorkerFailure.rest
+            // Keep the native client aligned with protocol/notices.ts: the
+            // legacy server prefix used a lowercase "worker", while the
+            // current sentinel-backed notice is displayed as a sentence.
+            body = legacyWorkerFailure.rest.replacingOccurrences(
+                of: "^worker\\b",
+                with: "Worker",
+                options: [.regularExpression, .caseInsensitive]
+            )
             return
         }
 
