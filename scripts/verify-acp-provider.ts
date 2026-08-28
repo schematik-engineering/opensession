@@ -33,8 +33,10 @@ for await (const event of runAcp(
 }
 const terminal = events.at(-1);
 console.log(JSON.stringify({ provider, model, events }));
-if (
-  terminal?.type !== "done" ||
-  !String(terminal.result || "").includes(expected)
-)
-  process.exit(1);
+const verified =
+  terminal?.type === "done" && String(terminal.result || "").includes(expected);
+
+// Runtime imports intentionally keep config watchers alive in the server and
+// runner-host. This operator-only one-shot probe must terminate after its
+// terminal event instead of waiting on those long-lived handles.
+process.exit(verified ? 0 : 1);
