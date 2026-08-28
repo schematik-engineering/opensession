@@ -39,9 +39,8 @@ generated import-closure manifest then chooses one of three flows:
 - Gateway only: preload candidate, drain old child, observe exit, atomically
   move `current`, activate, then require `/ready`.
 - Protocol, executor, or SessionKernel changes: park the preloaded candidate,
-  replace only peers whose generated import closures changed while the
-  supervisor keeps the public listener bound, then activate after each peer
-  reports its selected generation.
+  replace both protocol peers behind stable ingress, then activate after the
+  gateway, kernel, and executor all report the target generation.
 - Supervisor, service-unit, or privileged deploy machinery changes: use the
   root rollout. The systemd-owned socket remains bound while the supervisor is
   replaced.
@@ -78,10 +77,9 @@ handoff and can perform a coordinated rollback if later health probes fail.
 
 For dependency and protocol releases, `prepare-coordinated` preloads the target,
 drains the old gateway, atomically promotes `current`, and leaves the candidate
-behind its activation barrier. The deploy controller restarts changed peers in
-parallel while stable ingress serves reloads and parks backend connections. A peer
-whose closure did not change keeps running at its previous generation. Only
-after both peers report their selected generations does `activate-coordinated`
+behind its activation barrier. The deploy controller restarts both peers in
+parallel while stable ingress serves reloads and parks backend connections.
+Only after both peers report the target generation does `activate-coordinated`
 release the candidate. The controller commits after the external health gate;
 until then it can park the target for a fail-closed peer rollback. Every phase is
 atomically journaled in `gateway-handoff.json`, allowing a restarted supervisor

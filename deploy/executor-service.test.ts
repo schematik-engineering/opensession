@@ -5,6 +5,8 @@ const repoRoot = resolve(import.meta.dir, "..");
 
 describe("executor deployment", () => {
   test("keeps the executor independent from the gateway lifecycle", async () => {
+    const main = await Bun.file(resolve(repoRoot, "packages/core/opensession-server/src/executor/main.ts")).text();
+    expect(main).toContain('component: "executor"');
     const executor = await Bun.file(
       resolve(repoRoot, "opensession-executor.service"),
     ).text();

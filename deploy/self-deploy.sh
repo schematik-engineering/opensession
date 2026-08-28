@@ -680,12 +680,11 @@ do_deploy() {
         2>/dev/null || echo coordinated
     )"
     log "generated release impact: $release_impact ($impact_manifest)"
-    if [ -s "$impact_manifest" ]; then
-      grep -Eq '"kernel"[[:space:]]*:[[:space:]]*true' "$impact_manifest" \
-        || restart_kernel=0
-      grep -Eq '"executor"[[:space:]]*:[[:space:]]*true' "$impact_manifest" \
-        || restart_executor_peer=0
-    fi
+    # Coordinated releases refresh both protocol peers. Selective peer versions
+    # made an unchanged executor retain an older generation; the next gateway
+    # handoff then fenced itself on a mixed generation and caused the 2026-08-28
+    # outage. Keep component data for observability, but preserve one release
+    # across the live gateway/kernel/executor protocol boundary.
   fi
   if [ "$release_impact" = "root" ]; then
     log "ERROR: release changes root-owned lifecycle artifacts; use deploy/deploy.sh"
@@ -771,9 +770,7 @@ do_deploy() {
   if [ -S /run/opensession-gateway/control.sock ]; then
     write_marker
     local supervisor_controller="$release_dir/packages/core/opensession-server/src/server/gateway-supervisor.ts"
-    local kernel_generation="$current" executor_generation="$current"
-    [ "$restart_kernel" = "1" ] && kernel_generation="$target_sha"
-    [ "$restart_executor_peer" = "1" ] && executor_generation="$target_sha"
+    local kernel_generation="$target_sha" executor_generation="$target_sha"
     if "$BUN_BIN" "$supervisor_controller" prepare-coordinated \
       "$release_dir" "$target_sha" "$kernel_generation" "$executor_generation"; then
       if [ "$restart_kernel" = "1" ]; then record_kernel_schema_floor; fi

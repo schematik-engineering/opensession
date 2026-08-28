@@ -257,6 +257,9 @@ describe("deploy/self-deploy.sh", () => {
 		expect(script).toContain("DEPLOY_COALESCE_MAX_SECS:-60");
 		expect(script).toContain('quiet_deadline=$((now + DEPLOY_COALESCE_SECS))');
 		expect(script).toContain('restart_kernel=1 restart_executor_peer=1');
+		expect(script).not.toContain('restart_kernel=0');
+		expect(script).not.toContain('restart_executor_peer=0');
+		expect(script).toContain('kernel_generation="$target_sha" executor_generation="$target_sha"');
 		expect(script).toContain('refresh_protocol_peers "$restart_executor_peer" "$restart_kernel"');
 		expect(script).toContain('"$release_dir" "$target_sha" "$kernel_generation" "$executor_generation"');
 		expect(script).toContain('candidate gateway handoff failed before cut-over; previous gateway remains healthy');

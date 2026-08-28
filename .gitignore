@@ -105,6 +105,10 @@ deploy/sandbox/microvm/.cache-busybox-source.tar.bz2
 !.agents/skills/bro/**
 !.agents/skills/react-devtools/
 !.agents/skills/react-devtools/**
+!.agents/skills/vercel-react-best-practices/
+!.agents/skills/vercel-react-best-practices/**
+!.agents/skills/vercel-composition-patterns/
+!.agents/skills/vercel-composition-patterns/**
 .claude/skills
 skills-lock.json
 .css-shots/

@@ -85,7 +85,14 @@ describe("searchSkills", () => {
   test("lists the skills opensession ships for every repo", () => {
     // Every session gets these whatever it is working on, so the menu must
     // offer them with no worktree at all.
-    for (const name of ["simplify", "deslop", "control-ui", "poteto-mode"]) {
+    for (const name of [
+      "simplify",
+      "deslop",
+      "control-ui",
+      "poteto-mode",
+      "vercel-react-best-practices",
+      "vercel-composition-patterns",
+    ]) {
       const shipped = searchSkills(undefined, name).filter((s) => s.name === name);
       expect(shipped.map((s) => s.source)).toEqual(["user"]);
     }

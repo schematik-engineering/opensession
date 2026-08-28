@@ -24,7 +24,11 @@ export async function runExecutor(): Promise<void> {
   if (readyFile) {
     writeFileSync(
       readyFile,
-      `${JSON.stringify({ pid: process.pid, generation: runtimeGeneration() })}\n`,
+      `${JSON.stringify({
+        pid: process.pid,
+        generation: runtimeGeneration(),
+        component: "executor",
+      })}\n`,
       { mode: 0o600 },
     );
   }
