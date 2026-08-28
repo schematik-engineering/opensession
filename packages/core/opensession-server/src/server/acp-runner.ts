@@ -509,6 +509,12 @@ export async function* runAcp(
   let connection: ClientSideConnection;
   let engineSessionId = opts.sessionId;
   let acceptUpdates = false;
+  // Some ACP agents (Grok Build today) omit messageId on streamed chunks. A
+  // provider-native session spans many OpenSession turns, so an engine-only
+  // fallback would upsert every later reply over the first turn's transcript
+  // row. Scope the fallback to this immutable run while keeping all chunks in
+  // one turn coalesced onto the same row.
+  const turnBlockScope = opts.startToken || crypto.randomUUID();
   const assistantText = new Map<string, string>();
   const thoughtText = new Map<string, string>();
   let finalText = "";
@@ -542,7 +548,7 @@ export async function* runAcp(
       if (content?.type !== "text" || typeof content.text !== "string") return;
       const id = String(
         (update as any).messageId ||
-          `${kind === "agent_thought_chunk" ? "thought" : "message"}-${engineSessionId}`,
+          `${kind === "agent_thought_chunk" ? "thought" : "message"}-${engineSessionId}-${turnBlockScope}`,
       );
       const target =
         kind === "agent_thought_chunk" ? thoughtText : assistantText;

@@ -188,6 +188,43 @@ describe("ACP runner", () => {
     ).toEqual([]);
   });
 
+  test("scopes missing ACP message ids to one turn instead of overwriting a resumed reply", async () => {
+    const osSessionId = "os-grok-idless-resume";
+    stageAuth();
+    const first = await collect(
+      runAcp(
+        opts("normal without message ids", undefined, osSessionId),
+        "grok/grok-4.6",
+      ),
+    );
+    const engineSessionId = first[0]?.sessionId;
+    const firstBlockIds = [
+      ...new Set(
+        first
+          .filter((event) => event.type === "text_chunk")
+          .map((event) => event.blockId),
+      ),
+    ];
+    expect(firstBlockIds).toHaveLength(1);
+
+    stageAuth();
+    const second = await collect(
+      runAcp(
+        opts("normal without message ids", engineSessionId, osSessionId),
+        "grok/grok-4.6",
+      ),
+    );
+    const secondBlockIds = [
+      ...new Set(
+        second
+          .filter((event) => event.type === "text_chunk")
+          .map((event) => event.blockId),
+      ),
+    ];
+    expect(secondBlockIds).toHaveLength(1);
+    expect(secondBlockIds[0]).not.toBe(firstBlockIds[0]);
+  });
+
   test("maps Cursor's curated model name to its dynamic configuration value", async () => {
     stageAuth();
     const runOpts = { ...opts("normal"), model: "cursor/grok-4.6" };
