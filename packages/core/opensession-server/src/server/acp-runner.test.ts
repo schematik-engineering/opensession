@@ -242,6 +242,14 @@ describe("ACP runner", () => {
     const first = await collect(runAcp(firstOpts, "cursor/grok-4.6"));
     const engineSessionId = first[0]?.sessionId;
     expect(engineSessionId).toBe("cursor-session-new");
+    expect(
+      existsSync(
+        join(
+          acpProviderStateDir(osSessionId, "cursor"),
+          `${engineSessionId}.state`,
+        ),
+      ),
+    ).toBe(true);
     stageAuth();
     const secondOpts = {
       ...opts("normal", engineSessionId, osSessionId),
