@@ -120,6 +120,24 @@ describe("gateway activation preload barrier", () => {
     })).rejects.toThrow("Invalid runtime peer generation");
   });
 
+  test("does not require an executor peer when simple mode disables it", async () => {
+    const kernel = "a".repeat(40);
+    let readExecutor = false;
+    await expect(waitForRuntimePeerGeneration({
+      env: {
+        OPENSESSION_EXECUTOR: "0",
+        OPENSESSION_KERNEL_GENERATION: kernel,
+        OPENSESSION_EXECUTOR_GENERATION: kernel,
+      },
+      fetchReady: async () => Response.json({ generation: kernel }),
+      readReadyFile: () => {
+        readExecutor = true;
+        throw new Error("disabled executor must not be read");
+      },
+    })).resolves.toBeUndefined();
+    expect(readExecutor).toBe(false);
+  });
+
   test("holds an OS lease until explicit release", async () => {
     let ended = false;
     let finish!: (code: number) => void;

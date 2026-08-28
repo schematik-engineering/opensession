@@ -151,8 +151,8 @@ jobs:
                 opensession.service opensession-session-kernel.service \
                 --no-pager || true
             elif command -v launchctl >/dev/null; then
-              launchctl print "gui/$(id -u)/com.opensession.server" || true
-              launchctl print "gui/$(id -u)/com.opensession.session-kernel" || true
+              launchctl print "gui/$(id -u)/dev.opensession.server" || true
+              launchctl print "gui/$(id -u)/dev.opensession.session-kernel" || true
             fi
             exit 1
           fi

@@ -141,11 +141,12 @@ export async function waitForRuntimePeerGeneration(options: {
   )?.trim();
   const expectedKernel = (env.OPENSESSION_KERNEL_GENERATION ?? fallback)?.trim();
   const expectedExecutor = (env.OPENSESSION_EXECUTOR_GENERATION ?? fallback)?.trim();
+  const executorDisabled = env.OPENSESSION_EXECUTOR === "0";
   if (
     (!expectedKernel || expectedKernel === "development") &&
-    (!expectedExecutor || expectedExecutor === "development")
+    (executorDisabled || !expectedExecutor || expectedExecutor === "development")
   ) return;
-  for (const expected of [expectedKernel, expectedExecutor]) {
+  for (const expected of [expectedKernel, ...(executorDisabled ? [] : [expectedExecutor])]) {
     if (!expected || !/^[0-9a-f]{40,64}$/.test(expected)) {
       throw new Error("Invalid runtime peer generation");
     }
@@ -166,19 +167,25 @@ export async function waitForRuntimePeerGeneration(options: {
       const [kernel, executorText] = await Promise.all([
         fetchReady(kernelUrl).then(async (response) =>
           response.ok ? await response.json() as { generation?: string } : null),
-        Promise.resolve().then(() => readReadyFile(executorReadyFile)),
+        executorDisabled
+          ? Promise.resolve(undefined)
+          : Promise.resolve().then(() => readReadyFile(executorReadyFile)),
       ]);
-      const executor = JSON.parse(executorText) as { generation?: string };
+      const executor = executorText
+        ? JSON.parse(executorText) as { generation?: string }
+        : undefined;
       if (
         kernel?.generation === expectedKernel &&
-        executor.generation === expectedExecutor
+        (executorDisabled || executor?.generation === expectedExecutor)
       ) return;
     } catch {}
     await sleep(100);
   }
   throw new Error(
-    `Runtime peers did not reach kernel ${expectedKernel!.slice(0, 10)} / ` +
-    `executor ${expectedExecutor!.slice(0, 10)}`,
+    executorDisabled
+      ? `Runtime peer did not reach kernel ${expectedKernel!.slice(0, 10)}`
+      : `Runtime peers did not reach kernel ${expectedKernel!.slice(0, 10)} / ` +
+        `executor ${expectedExecutor!.slice(0, 10)}`,
   );
 }
 

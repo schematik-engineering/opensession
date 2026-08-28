@@ -253,22 +253,25 @@ function servicePath(bunDir: string): string {
 }
 
 /**
- * How the service starts the server, and the dir to head the PATH with.
+ * How the service starts the stable gateway supervisor, and the dir to head
+ * the PATH with.
  *
- * Compiled-binary install: the binary is the server behind `server`, and the
- * unit runs it through the shim symlink (BIN_DIR/opensession) so `opensession
- * update` can repoint it without re-rendering the unit. The sharp sidecar
- * resolves via the binary's realpath, not PATH.
+ * Compiled-binary install: the binary exposes the supervisor behind
+ * `gateway-supervisor`, and the unit runs it through the shim symlink
+ * (BIN_DIR/opensession) so `opensession update` can repoint it without
+ * re-rendering the unit. The sharp sidecar resolves via the binary's realpath,
+ * not PATH.
  *
- * Source install: `bun run packages/core/opensession-server/opensession.ts`
- * from the checkout.
+ * Source install: run gateway-supervisor.ts from the checkout. Starting the
+ * application entry directly would race the systemd socket that the
+ * supervisor is meant to inherit and fail with EADDRINUSE.
  */
 function serverExec(): { cmd: string; binDir: string } {
   if (isCompiledBinary())
-    return { cmd: `${SHIM_PATH} server`, binDir: BIN_DIR };
+    return { cmd: `${SHIM_PATH} gateway-supervisor`, binDir: BIN_DIR };
   const bun = bunPath();
   return {
-    cmd: `${bun} run packages/core/opensession-server/opensession.ts`,
+    cmd: `${bun} run packages/core/opensession-server/src/server/gateway-supervisor.ts`,
     binDir: bun.replace(/\/bun$/, ""),
   };
 }
@@ -670,6 +673,7 @@ export function renderPlist(): string {
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key><string>${xml(servicePath(exec.binDir))}</string>
+    <key>HOME</key><string>${xml(HOME)}</string>
     <key>NODE_ENV</key><string>production</string>
   </dict>
   <key>RunAtLoad</key><true/>

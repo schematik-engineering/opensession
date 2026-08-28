@@ -11,6 +11,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import {
   discoverRuntimePeerGenerations,
+  currentReleaseRoot,
   GatewaySupervisor,
   inheritedGatewaySocketFd,
   type ManagedGateway,
@@ -50,6 +51,12 @@ function controlledGateway(pid: number, releaseRoot: string, standby = false) {
 }
 
 describe("gateway supervisor", () => {
+  test("boots from the installed worktree before immutable deploy state exists", () => {
+    const state = mkdtempSync(join(tmpdir(), "gateway-empty-state-"));
+    const checkout = mkdtempSync(join(tmpdir(), "gateway-checkout-"));
+    expect(currentReleaseRoot(state, checkout)).toBe(realpathSync(checkout));
+  });
+
   test("accepts only systemd descriptors addressed to this supervisor", () => {
     expect(inheritedGatewaySocketFd({ LISTEN_PID: "42", LISTEN_FDS: "1" }, 42)).toBe(3);
     expect(inheritedGatewaySocketFd({ LISTEN_PID: "41", LISTEN_FDS: "1" }, 42)).toBeUndefined();

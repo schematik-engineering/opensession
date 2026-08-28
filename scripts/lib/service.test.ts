@@ -63,7 +63,7 @@ describe.skipIf(!onServiceHost)("systemd unit", () => {
     expect(unit).toContain(`WorkingDirectory=${serviceWorkdir()}`);
     expect(
       unit.match(
-        /^ExecStart=(\S+) run packages\/core\/opensession-server\/opensession\.ts$/m,
+        /^ExecStart=(\S+) run packages\/core\/opensession-server\/src\/server\/gateway-supervisor\.ts$/m,
       )?.[1],
     ).toMatch(/bun$/);
     expect(unit).not.toContain("opensession-executor.service");
@@ -89,7 +89,7 @@ describe.skipIf(!onServiceHost)("systemd unit", () => {
     expect(unit).toContain("Slice=opensession-control.slice");
     expect(
       unit.match(
-        /^ExecStart=(\S+) run packages\/core\/opensession-server\/opensession\.ts$/m,
+        /^ExecStart=(\S+) run packages\/core\/opensession-server\/src\/server\/gateway-supervisor\.ts$/m,
       )?.[1],
     ).toMatch(/bun$/);
   });
@@ -160,6 +160,7 @@ describe.skipIf(!onServiceHost)("launchd plist", () => {
       expect(plist).toContain(`<key>${key}</key>`);
     }
     expect(plist).toContain(`<string>${LAUNCHD_LABEL}</string>`);
+    expect(plist).toContain(`<key>HOME</key><string>${HOME}</string>`);
   });
 
   test("execs the named launcher, not /bin/bash (macOS background-item identity)", () => {
@@ -172,7 +173,7 @@ describe.skipIf(!onServiceHost)("launchd plist", () => {
     expect(LAUNCHD_LAUNCHER.endsWith("/OpenSession")).toBe(true);
   });
 
-  test("launcher sources the env file and execs bun (launchd has no EnvironmentFile)", () => {
+  test("launcher sources the env file and execs the gateway supervisor", () => {
     const launcher = renderLauncher();
     // Without sourcing the env file the server boots looking healthy but with
     // no integration flags and no secrets — inert, and hard to diagnose.
@@ -180,7 +181,7 @@ describe.skipIf(!onServiceHost)("launchd plist", () => {
     expect(launcher).toContain(ENV_PATH);
     expect(launcher).toContain("set -a");
     expect(launcher).toMatch(
-      /exec \S*bun run packages\/core\/opensession-server\/opensession\.ts/,
+      /exec \S*bun run packages\/core\/opensession-server\/src\/server\/gateway-supervisor\.ts/,
     );
   });
 

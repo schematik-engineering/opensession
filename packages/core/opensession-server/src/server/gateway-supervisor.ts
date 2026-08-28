@@ -3,6 +3,7 @@
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -10,17 +11,25 @@ import {
   unlinkSync,
   writeFileSync,
 } from "fs";
-import { join, resolve } from "path";
+import { dirname, join, resolve } from "path";
 import {
   createGatewayTcpProxyMetrics,
   startGatewayTcpProxy,
   type GatewayTcpProxyMetrics,
 } from "./gateway-tcp-proxy";
 import { stableFrontendHttpResponse } from "./stable-frontend";
+import { isCompiledBinary } from "../runner-host/exe";
+
+const GATEWAY_ENTRY = "packages/core/opensession-server/opensession.ts";
 
 export const GATEWAY_CONTROL_SOCKET =
   process.env.OPENSESSION_GATEWAY_CONTROL_SOCKET ||
-  "/run/opensession-gateway/control.sock";
+  join(
+    process.env.RUNTIME_DIRECTORY ||
+      process.env.OPENSESSION_DEPLOY_STATE ||
+      join(process.env.HOME || "", ".opensession/deploy"),
+    "control.sock",
+  );
 
 const PUBLIC_HOST = process.env.HOST || "127.0.0.1";
 const PUBLIC_PORT = Number(process.env.PORT || 3850);
@@ -659,14 +668,16 @@ export function spawnGateway(
   nonce?: string,
   peerGenerations?: PeerGenerations,
   precheckPeers = false,
-  entry = "packages/core/opensession-server/opensession.ts",
+  entry = GATEWAY_ENTRY,
 ): ManagedGateway {
   const preloaded = deferred();
   const backendPort = allocateBackendPort();
   const generation = releaseGeneration(releaseRoot);
   let expectedNonce = nonce;
   const child = Bun.spawn(
-    [process.execPath, "run", entry],
+    isCompiledBinary() && entry === GATEWAY_ENTRY
+      ? [process.execPath, "server"]
+      : [process.execPath, "run", entry],
     {
       cwd: releaseRoot,
       env: {
@@ -790,8 +801,12 @@ function deployStateRoot(): string {
     join(process.env.HOME || "", ".opensession/deploy");
 }
 
-function currentReleaseRoot(): string {
-  return realpathSync(join(deployStateRoot(), "current"));
+export function currentReleaseRoot(
+  state = deployStateRoot(),
+  fallback = process.cwd(),
+): string {
+  const current = join(state, "current");
+  return realpathSync(existsSync(current) ? current : fallback);
 }
 
 export function writeGatewayHandoffTransaction(
@@ -820,6 +835,7 @@ export function readGatewayHandoffTransaction(
 }
 
 function serveControl(supervisor: GatewaySupervisor): ReturnType<typeof Bun.listen> {
+  mkdirSync(dirname(GATEWAY_CONTROL_SOCKET), { recursive: true, mode: 0o700 });
   if (existsSync(GATEWAY_CONTROL_SOCKET)) unlinkSync(GATEWAY_CONTROL_SOCKET);
   const listener = Bun.listen({
     unix: GATEWAY_CONTROL_SOCKET,
@@ -926,7 +942,10 @@ async function runSupervisor(): Promise<void> {
   // Peer generations can intentionally differ after a selective rollout. Never
   // guess from `current`: a guessed generation caused a two-minute crash loop
   // after an executor was correctly retained on its previous release.
-  const peerGenerations = await discoverRuntimePeerGenerations();
+  const generation = releaseGeneration(releaseRoot);
+  const peerGenerations = process.env.OPENSESSION_EXECUTOR === "0"
+    ? { kernel: generation, executor: generation }
+    : await discoverRuntimePeerGenerations();
   const active = spawnGateway(releaseRoot, "active", undefined, peerGenerations);
   const proxyMetrics = createGatewayTcpProxyMetrics();
   let publicListener: ReturnType<typeof startGatewayTcpProxy> | undefined;
@@ -981,7 +1000,9 @@ async function runSupervisor(): Promise<void> {
   await new Promise<void>(() => {});
 }
 
-if (import.meta.main) {
+export async function runGatewaySupervisor(
+  args: string[] = process.argv.slice(2),
+): Promise<void> {
   if ([
     "handoff",
     "prepare-coordinated",
@@ -991,10 +1012,10 @@ if (import.meta.main) {
     "commit-coordinated",
     "drain-supervisor",
     "status",
-  ].includes(process.argv[2] || "")) {
-    const action = process.argv[2];
-    const releaseRoot = resolve(process.argv[3] || "");
-    const sha = process.argv[4] || "";
+  ].includes(args[0] || "")) {
+    const action = args[0];
+    const releaseRoot = resolve(args[1] || "");
+    const sha = args[2] || "";
     const request: HandoffRequest | CoordinatedRequest = action === "handoff"
       ? { type: "handoff", releaseRoot, sha }
       : action === "prepare-coordinated"
@@ -1002,8 +1023,8 @@ if (import.meta.main) {
             type: "prepare_coordinated",
             releaseRoot,
             sha,
-            kernelGeneration: process.argv[5] || undefined,
-            executorGeneration: process.argv[6] || undefined,
+            kernelGeneration: args[3] || undefined,
+            executorGeneration: args[4] || undefined,
           }
         : action === "activate-coordinated"
           ? { type: "activate_coordinated" }
@@ -1022,3 +1043,5 @@ if (import.meta.main) {
   }
   await runSupervisor();
 }
+
+if (import.meta.main) await runGatewaySupervisor();
