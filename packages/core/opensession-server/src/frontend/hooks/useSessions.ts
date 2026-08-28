@@ -1,11 +1,13 @@
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useRef,
   useState,
 } from "react";
 import type { UnifiedSession } from "../lib/types";
+import type { SessionSocket } from "./useSessionSocket";
 import { fetchSessionsSnapshot } from "../lib/api";
 import {
   mergeSessionSlices,
@@ -177,10 +179,12 @@ export function useSessions({
   loadArchived = false,
   pollInterval = LIVE_POLL_FALLBACK_MS,
   liveQuery = LIVE_QUERY,
+  socket,
 }: {
   loadArchived?: boolean;
   pollInterval?: number;
   liveQuery?: string;
+  socket?: Pick<SessionSocket, "addHandler"> & { connected: boolean };
 } = {}) {
   const [live, setLive] = useState<UnifiedSession[]>([]);
   // When the live list last came back. Settles a local unarchive: a poll that
@@ -549,6 +553,30 @@ export function useSessions({
     }, 250);
   };
 
+  const onInvalidated = useEffectEvent(() => refreshInvalidated());
+  const addHandler = socket?.addHandler;
+  useEffect(() => {
+    if (!addHandler) return;
+    return addHandler((message) => {
+      if (message.type === "sessions_invalidated") onInvalidated();
+    });
+  }, [addHandler]);
+
+  // A disconnected socket may miss list invalidations. The first connection
+  // races the initial list load and needs no extra fetch; later reconnects do.
+  const webSocketConnectedOnceRef = useRef(false);
+  const onReconnected = useEffectEvent(() => {
+    refresh();
+  });
+  const socketConnected = socket?.connected ?? false;
+  useEffect(() => {
+    if (!socketConnected) return;
+    if (webSocketConnectedOnceRef.current) onReconnected();
+    else webSocketConnectedOnceRef.current = true;
+    // Refresh only when connectivity changes. Changes to refresh's captured
+    // archived state are not reconnects and must not re-arm this effect.
+  }, [socketConnected]);
+
   // Drop a just-created session straight into the list so the UI can render it
   // immediately (e.g. the tab-strip + creating a new session) instead of showing a
   // loading state until the next poll. The next poll replaces it with the
@@ -669,7 +697,6 @@ export function useSessions({
     archivedLoaded: archivedIndex !== null,
     refreshArchived: pollArchived,
     refresh,
-    refreshInvalidated,
     inject,
     unstick,
     patch,

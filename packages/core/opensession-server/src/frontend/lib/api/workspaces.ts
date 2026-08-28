@@ -81,8 +81,8 @@ export async function fetchWorkspaces(): Promise<Workspace[]> {
     const next = data?.workspaces ?? [];
     // Workspace invalidations can overlap or repeat (PR attachment, focus,
     // settings broadcasts). Preserve the array identity for an unchanged
-    // response so App's setState bails instead of reconciling every route and
-    // sidebar row after parsing the same 500+ KB payload again.
+    // response so workspace-list state can bail instead of reconciling every
+    // route and sidebar row after parsing the same 500+ KB payload again.
     const snapshot = JSON.stringify({
       workspaces: next,
       defaultModelSettings: data?.defaultModelSettings,

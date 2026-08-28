@@ -9,8 +9,50 @@ import {
   sidebarSessionsQuery,
 } from "./useSessions";
 
+const appSource = await Bun.file(new URL("../App.tsx", import.meta.url)).text();
+const hookSource = await Bun.file(
+  new URL("useSessions.ts", import.meta.url),
+).text();
+
 test("uses a slow safety poll behind WebSocket invalidations", () => {
   expect(LIVE_POLL_FALLBACK_MS).toBe(60_000);
+});
+
+describe("session feed socket ownership", () => {
+  test("keeps invalidation and reconnect transport concerns in useSessions", () => {
+    expect(hookSource).toContain(
+      'socket?: Pick<SessionSocket, "addHandler"> & { connected: boolean }',
+    );
+    expect(hookSource).toContain(
+      'if (message.type === "sessions_invalidated") onInvalidated()',
+    );
+    expect(hookSource).toContain(
+      "const onInvalidated = useEffectEvent(() => refreshInvalidated())",
+    );
+    expect(hookSource).toContain("}, [addHandler]);");
+    expect(hookSource).toContain("}, [socketConnected]);");
+    expect(hookSource).not.toContain("    refreshInvalidated,\n    inject,");
+  });
+
+  test("passes the main socket into useSessions before feed consumers", () => {
+    const socket = appSource.indexOf("const mainSocket = useWebSocket()");
+    const sessions = appSource.indexOf("useSessions({");
+
+    expect(socket).toBeGreaterThan(-1);
+    expect(socket).toBeLessThan(sessions);
+    expect(appSource).toContain("socket: mainSocket");
+    expect(appSource).not.toContain("refreshInvalidated");
+    expect(appSource).not.toContain("webSocketConnectedOnceRef");
+    expect(appSource).not.toContain("sessions_invalidated");
+  });
+
+  test("preserves session-list rendering and retry wiring", () => {
+    expect(appSource).toContain("sessionsError={sessionsError}");
+    expect(appSource).toContain("sessionsLoading={loading}");
+    expect(appSource).toContain("onRetrySessions={() => void refresh()}");
+    expect(appSource).toContain("loaded={archivedLoaded}");
+    expect(appSource).toContain("onShowArchived={refreshArchived}");
+  });
 });
 
 function session(archived: boolean): UnifiedSession {
