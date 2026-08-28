@@ -78,6 +78,40 @@ final class TranscriptGroupingTests: XCTestCase {
         XCTAssertEqual(answer.id, "a2")
     }
 
+    func testBackgroundWakeKeepsEarlierOutputVisible() {
+        append([
+            TranscriptEntry(id: "u1", type: "user", content: "ship it"),
+            toolUse("t1", name: "Bash"),
+            TranscriptEntry(
+                id: "status",
+                type: "assistant",
+                content: "Implemented. Deployment is running."
+            ),
+            TranscriptEntry(
+                id: "wake",
+                type: "user",
+                content: "",
+                turnBoundary: true
+            ),
+            toolUse("t2", name: "Bash"),
+            TranscriptEntry(id: "final", type: "assistant", content: "Deployment verified."),
+        ])
+
+        let messageIDs = viewModel.displayBlocks.compactMap { block -> String? in
+            guard case .message(let entry) = block else { return nil }
+            return entry.id
+        }
+        XCTAssertEqual(messageIDs, ["u1", "status", "final"])
+        XCTAssertEqual(
+            viewModel.displayBlocks.filter {
+                if case .work = $0 { return true }
+                return false
+            }.count,
+            2
+        )
+        XCTAssertFalse(viewModel.displayBlocks.contains { $0.id == "wake" })
+    }
+
     func testTurnWithoutToolsDoesNotFold() {
         append([
             TranscriptEntry(id: "u1", type: "user", content: "hi"),
@@ -94,6 +128,22 @@ final class TranscriptGroupingTests: XCTestCase {
         let entry = try JSONDecoder().decode(TranscriptEntry.self, from: data)
         XCTAssertEqual(entry.videos, ["/media?path=demo.mp4"])
         XCTAssertEqual(entry.media.label, "1 video")
+    }
+
+    func testTranscriptEntryDecodesSourceMessageIds() throws {
+        let data = Data(
+            #"{"id":"batch","type":"user","sourceMessageIds":["one","two"]}"#.utf8
+        )
+        let entry = try JSONDecoder().decode(TranscriptEntry.self, from: data)
+        XCTAssertEqual(entry.sourceMessageIds, ["one", "two"])
+    }
+
+    func testTranscriptEntryDecodesTurnBoundary() throws {
+        let data = Data(
+            #"{"id":"wake","type":"user","content":"","turnBoundary":true}"#.utf8
+        )
+        let entry = try JSONDecoder().decode(TranscriptEntry.self, from: data)
+        XCTAssertEqual(entry.turnBoundary, true)
     }
 
     func testFoldProjectsOnlyExplicitlyFeaturedMediaAndDeduplicatesIt() {

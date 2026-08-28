@@ -200,37 +200,44 @@ export async function startTranscriptWatch(
       options.sinceChangeSeq >= 0
         ? Math.floor(options.sinceChangeSeq)
         : undefined;
-    const lastChangeSeq = await store.getLastChangeSeq(sessionId);
-    const lastResetChangeSeq = await store.getLastResetChangeSeq(sessionId);
     let resumed = false;
-    if (
-      requested !== undefined &&
-      requested >= lastResetChangeSeq &&
-      requested <= lastChangeSeq
-    ) {
-      const changes = await store.readChangesSince(
-        sessionId,
-        requested,
-        RESUME_LIMIT + 1
-      );
-      if (changes.entries.length <= RESUME_LIMIT) {
-        cursor = requested;
-        if (changes.entries.length) {
-          cursor = Math.max(
-            cursor,
-            ...changes.entries.map((entry) => entry.changeSeq)
-          );
-          send({
-            type: "transcript_append",
-            sessionId,
-            entries: prepareEntries(changes.entries),
-            firstSeq: changes.firstSeq,
-            lastSeq: changes.lastSeq,
-            lastChangeSeq: cursor,
-            v2: true,
-          });
+    if (requested !== undefined) {
+      // A fresh conversation has no resume cursor. Do not put two actor RPCs
+      // in front of its snapshot only to discover that fact: sendSnapshot
+      // captures the one baseline it needs. Under actor-mailbox pressure these
+      // redundant round trips were a visible part of conversation-open delay.
+      const [lastChangeSeq, lastResetChangeSeq] = await Promise.all([
+        store.getLastChangeSeq(sessionId),
+        store.getLastResetChangeSeq(sessionId),
+      ]);
+      if (
+        requested >= lastResetChangeSeq &&
+        requested <= lastChangeSeq
+      ) {
+        const changes = await store.readChangesSince(
+          sessionId,
+          requested,
+          RESUME_LIMIT + 1
+        );
+        if (changes.entries.length <= RESUME_LIMIT) {
+          cursor = requested;
+          if (changes.entries.length) {
+            cursor = Math.max(
+              cursor,
+              ...changes.entries.map((entry) => entry.changeSeq)
+            );
+            send({
+              type: "transcript_append",
+              sessionId,
+              entries: prepareEntries(changes.entries),
+              firstSeq: changes.firstSeq,
+              lastSeq: changes.lastSeq,
+              lastChangeSeq: cursor,
+              v2: true,
+            });
+          }
+          resumed = true;
         }
-        resumed = true;
       }
     }
 

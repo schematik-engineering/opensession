@@ -36,7 +36,7 @@ export const AUTO_CONTINUE_FABRICATED_PROMPT =
 /**
  * In-runner retry nudge for a turn whose FINAL model completion came back
  * completely empty — zero content blocks, stopReason "stop" (2026-08-21
- * os-01a02486: stealth/ox-alpha via OpenRouter ended a 10-minute turn on
+ * os-01a02486: GLM-5.3's pre-release OpenRouter route ended a 10-minute turn on
  * `content: []` with all-zero usage; pi settled it as a clean turn and the
  * user had to ask "done?"). pi-runner sends this once via session.prompt();
  * the fence keeps it out of the rendered transcript.

@@ -27,7 +27,6 @@ import {
 import { emojiContextAt, emojiMentionSuggestions } from "../lib/emoji";
 import { caretPoint } from "../lib/caret-coords";
 import { PHONE_QUERY } from "../lib/breakpoints";
-import { selectedSkillCommand } from "../lib/skill-command";
 
 /**
  * Find the active "@"-mention being typed at the caret. Returns the index of
@@ -144,6 +143,11 @@ interface FileMentions {
 export function useFileMentions({ value, onChange, textareaRef, mentionFetch, paletteFetch, skillsFetch, actions = [] }: Options): FileMentions {
   const [mention, setMention] = useState<TriggerContext | null>(null);
   const [suggestions, setSuggestions] = useState<MentionSuggestion[]>([]);
+  // The trigger that produced the rows currently on screen. Skill lookup is
+  // asynchronous, so a narrowed query briefly keeps the previous rows rather
+  // than unmounting and remounting the whole popup. Selection stays disabled
+  // until the new query's rows arrive.
+  const suggestionsFor = useRef<TriggerContext | null>(null);
   const [activeIdx, setActiveIdx] = useState(0);
   const popupId = useId();
   const people = usePeople();
@@ -196,6 +200,7 @@ export function useFileMentions({ value, onChange, textareaRef, mentionFetch, pa
   // make each of those a real state change, so a host as large as the
   // new-session palette re-rendered three extra times per character typed.
   function clearSuggestions() {
+    suggestionsFor.current = null;
     setSuggestions((prev) => (prev.length ? NO_SUGGESTIONS : prev));
   }
 
@@ -249,6 +254,7 @@ export function useFileMentions({ value, onChange, textareaRef, mentionFetch, pa
     }
     const seq = ++fetchSeq.current;
     if (mention.kind === "emoji") {
+      suggestionsFor.current = mention;
       setSuggestions(emojiMentionSuggestions(mention.query));
       setActiveIdx(0);
       return;
@@ -259,22 +265,33 @@ export function useFileMentions({ value, onChange, textareaRef, mentionFetch, pa
           actionMentionSuggestions(mention.query, actionsRef.current),
         )
       : [];
-    // Never let Enter select rows belonging to the previous query. The local
-    // directory rows are safe immediately; fetched rows merge underneath.
-    setSuggestions(local);
     setActiveIdx(0);
     if (mention.kind === "skill") {
+      // Keep a skill menu mounted while its next local lookup resolves. Clearing
+      // it here made every typed character flash the popup off and back on.
+      // suggestionsFor keeps stale rows inert during that short handoff.
+      if (suggestionsFor.current?.kind !== "skill") clearSuggestions();
       const fetcher = skillsFetchRef.current;
       if (!fetcher) return;
       void fetcher(mention.query).then((items) => {
-        if (seq === fetchSeq.current) setSuggestions(items);
-      }).catch(() => {});
+        if (seq !== fetchSeq.current) return;
+        suggestionsFor.current = mention;
+        setActiveIdx(0);
+        setSuggestions(items);
+      }).catch(() => {
+        if (seq === fetchSeq.current) clearSuggestions();
+      });
       return;
     }
+    // Local people/actions already belong to this query, so Enter can use them
+    // immediately while the fetched rows merge underneath.
+    suggestionsFor.current = mention;
+    setSuggestions(local);
     let paletteItems: FileMention[] = [];
     let fileItems: FileMention[] = [];
     const publish = () => {
       if (seq !== fetchSeq.current) return;
+      suggestionsFor.current = mention;
       setSuggestions(mergeMentionSuggestions(local, paletteItems, fileItems));
     };
     const paletteFetcher = paletteFetchRef.current;
@@ -303,10 +320,9 @@ export function useFileMentions({ value, onChange, textareaRef, mentionFetch, pa
   const open = !!mention && suggestions.length > 0;
 
   // The popup renders in a portal with fixed viewport coordinates so an
-  // overflow:hidden ancestor cannot clip it. Inline triggers anchor to the
-  // character that opened them: the command palette belongs beside the `@`,
-  // and emoji suggestions belong beside their shortcode. Slash commands still
-  // align to the field because `/` only opens at its first character.
+  // overflow:hidden ancestor cannot clip it. Every inline trigger anchors to
+  // its character. Slash commands start at the field's left edge, but still
+  // belong under the slash itself rather than under a tall textarea.
   useLayoutEffect(() => {
     if (!open) {
       setPos(null);
@@ -317,19 +333,24 @@ export function useFileMentions({ value, onChange, textareaRef, mentionFetch, pa
       if (!el) return;
       const rect = el.getBoundingClientRect();
       const POPUP_MAX = 420;
-      const caret =
-        mention?.kind === "emoji" || mention?.kind === "file"
-          ? caretPoint(textareaRef.current, mention.start)
-          : null;
+      const field = textareaRef.current;
+      const caret = mention ? caretPoint(field, mention.start) : null;
       if (caret) {
         const GUTTER = window.matchMedia(PHONE_QUERY).matches ? 16 : 8;
+        const fieldRect = field?.getBoundingClientRect();
         const width =
           mention?.kind === "emoji"
             ? 240
-            : Math.min(520, rect.width, window.innerWidth - GUTTER * 2);
+            : Math.min(
+                520,
+                mention?.kind === "skill" && fieldRect ? fieldRect.width : rect.width,
+                window.innerWidth - GUTTER * 2,
+              );
+        const targetLeft =
+          mention?.kind === "skill" && fieldRect ? fieldRect.left : caret.left - 8;
         const left = Math.max(
           GUTTER,
-          Math.min(caret.left - 8, window.innerWidth - width - GUTTER),
+          Math.min(targetLeft, window.innerWidth - width - GUTTER),
         );
         const spaceAbove = caret.top;
         const spaceBelow = window.innerHeight - caret.bottom;
@@ -373,7 +394,7 @@ export function useFileMentions({ value, onChange, textareaRef, mentionFetch, pa
       window.removeEventListener("resize", measure);
       window.removeEventListener("scroll", measure, true);
     };
-  }, [open, suggestions.length, mention?.kind, mention?.start, value, textareaRef]);
+  }, [open, suggestions.length, mention, value, textareaRef]);
 
   useEffect(() => {
     if (!open) return;
@@ -383,7 +404,7 @@ export function useFileMentions({ value, onChange, textareaRef, mentionFetch, pa
   }, [activeIdx, open]);
 
   function applySuggestion(item: MentionSuggestion) {
-    if (!mention) return;
+    if (!mention || !sameTrigger(suggestionsFor.current, mention)) return;
     const el = textareaRef.current;
     const caret = el?.selectionStart ?? value.length;
     const before = value.slice(0, mention.start);
@@ -400,9 +421,7 @@ export function useFileMentions({ value, onChange, textareaRef, mentionFetch, pa
     // decode. No trailing space: emoji usually end a sentence.
     const insert = mention.kind === "emoji"
       ? item.insert
-      : mention.kind === "skill"
-        ? `${selectedSkillCommand(item.insert)} `
-        : `@${item.insert} `;
+      : `${mention.kind === "skill" ? "/" : "@"}${item.insert} `;
     const next = before + insert + after;
     const nextCaret = before.length + insert.length;
     setMention(null);

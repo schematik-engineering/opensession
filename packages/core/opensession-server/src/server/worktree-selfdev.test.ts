@@ -11,6 +11,7 @@ import {
   isSharedCheckoutDir,
   prepareAttachedWorktree,
   sharedCheckoutForNewSessions,
+  sharedCheckoutForSessionCreate,
   withGitLock,
   worktreePathFor,
 } from "./worktree";
@@ -103,6 +104,20 @@ describe("configuredSelfDev parsing", () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+describe("personal new-session checkout choice", () => {
+  test("overrides either repository default and rejects unknown values", () => {
+    withConfig({});
+    const shared = getRepo("self");
+    const isolated = getRepo("lib");
+
+    expect(sharedCheckoutForSessionCreate(shared, "default")).toBe(true);
+    expect(sharedCheckoutForSessionCreate(shared, "worktree")).toBe(false);
+    expect(sharedCheckoutForSessionCreate(isolated, "default")).toBe(false);
+    expect(sharedCheckoutForSessionCreate(isolated, "checkout")).toBe(true);
+    expect(sharedCheckoutForSessionCreate(shared, "surprise")).toBe(true);
   });
 });
 

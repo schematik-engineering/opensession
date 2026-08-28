@@ -52,8 +52,10 @@ import { handleRunnerWsUpgrade } from "./src/server/runner-ws";
 import { handleSandboxPortalRelayUpgrade } from "./src/server/sandbox-portal-relay";
 import { handleWorkloadIdentityRequest } from "./src/server/workload-identity";
 import {
+	enrichSessionRuntime,
 	findSession,
 	findSessionAsync,
+	getCachedSessions,
 	invalidateSessionsCache,
 	reconcileRecoverableSafetyFences,
 	recordRunOutcome,
@@ -100,6 +102,11 @@ import { hydrateScheduledPromptTimers } from "./src/server/scheduled-prompts";
 import { beginShutdown } from "./src/server/shutdown-state";
 import { setServiceReadiness } from "./src/server/service-readiness";
 import {
+	acquireGatewayActivationLease,
+	waitForGatewayActivationIfStandby,
+	waitForRuntimePeerGeneration,
+} from "./src/server/gateway-activation";
+import {
 	reconcileSessionKernelOwnership,
 	sessionKernel,
 	startSessionKernelActor,
@@ -115,14 +122,42 @@ import {
 	type RouteContext,
 } from "./src/server/routes";
 
-const PORT = parseInt(process.env.PORT || "3850");
-const HOST = process.env.HOST || "127.0.0.1";
+// Under the stable supervisor, PORT/HOST remain the public address while the
+// child binds the private backend override. Direct and dev launches keep the
+// original PORT/HOST behavior.
+const PORT = parseInt(
+	process.env.OPENSESSION_GATEWAY_BACKEND_PORT || process.env.PORT || "3850",
+);
+const HOST = process.env.OPENSESSION_GATEWAY_BACKEND_HOST ||
+	process.env.HOST || "127.0.0.1";
 const HOME = homeDir();
 const SESSIONS_DIR = OPENSESSION_SESSIONS_DIR;
 
 function isLoopbackHostname(hostname: string): boolean {
 	const normalized = hostname.replace(/^\[|\]$/g, "").toLowerCase();
 	return normalized === "127.0.0.1" || normalized === "::1" || normalized === "localhost";
+}
+
+// Gateway-only candidates validate the already-running peer generations before
+// the supervisor drains the active child. A mismatch then rejects the candidate
+// with no user-visible cut-over. Coordinated candidates cannot precheck changed
+// peers because those peers start only after the old gateway is fenced.
+const precheckRuntimePeers = process.env.OPENSESSION_GATEWAY_PRECHECK_PEERS === "1";
+if (precheckRuntimePeers) await waitForRuntimePeerGeneration({ timeoutMs: 5_000 });
+// A supervised standby is allowed to preload this import graph, but it cannot
+// proceed into even the earliest shared-state, socket, Worker, timer, or
+// integration effect until its parent explicitly activates the exact nonce.
+await waitForGatewayActivationIfStandby();
+if (!precheckRuntimePeers) await waitForRuntimePeerGeneration();
+// The OS lock is the final ownership fence. A supervisor crash or stale parent
+// can leave an old child serving, but no replacement may cross into effects
+// until that process has exited and released this lease.
+const gatewayOwnership = globalThis as typeof globalThis & {
+	__opensessionGatewayActivationLease?: Awaited<ReturnType<typeof acquireGatewayActivationLease>>;
+};
+if (!gatewayOwnership.__opensessionGatewayActivationLease) {
+	gatewayOwnership.__opensessionGatewayActivationLease =
+		await acquireGatewayActivationLease();
 }
 
 // A dev instance (OPENSESSION_DEV=1, src/server/dev-mode.ts) sharing the live
@@ -185,7 +220,10 @@ if (!g.__opensessionBooted && !isDevInstance()) {
 	await hydratePersistedQueueState();
 }
 
-console.log(`Starting Open Session server on ${HOST}:${PORT}...`);
+const gatewayProcessLabel = process.env.OPENSESSION_GATEWAY_BACKEND_PORT
+	? "gateway backend"
+	: "server";
+console.log(`Starting Open Session ${gatewayProcessLabel} on ${HOST}:${PORT}...`);
 
 // The SPA bundle, before anything can ask for it. frontend-build.ts used to
 // compile it at import instead, which meant any script or test that reached a
@@ -558,7 +596,7 @@ const server: import("bun").Server<WSClientData> = hotServe({
 				: false,
 });
 
-console.log(`Open Session running at http://${HOST}:${PORT}/`);
+console.log(`Open Session ${gatewayProcessLabel} running at http://${HOST}:${PORT}/`);
 
 
 // --- Agent loading and webhook server ---
@@ -710,9 +748,10 @@ if (!g.__opensessionBooted) {
 	// (analytics.ts — gh fetches + composed summaries are disk-cached too)
 	startAnalyticsPrewarm();
 
-	// Remove worktrees whose work is merged / PR closed, sweep removal husks
-	// (worktree-reaper.ts — in-process port of the cleanup-closed-worktrees cron)
-	startWorktreeReaper(getAllSessions);
+	// Remove worktrees whose work is merged / PR closed, sweep removal husks.
+	// Re-enrich the cached rows on every pass: stored session rows do not carry
+	// live Pi/actor run state, and reaping an old-but-running session is destructive.
+	startWorktreeReaper(() => enrichSessionRuntime(getCachedSessions()));
 
 	// Portal processes survive a coordinator restart by design. Reconcile their
 	// durable owner records immediately and keep reaping deleted-session husks.
@@ -952,10 +991,10 @@ if (!g.__opensessionBooted) {
 			console.error("[session-kernel] recovery gate failed; restarting fail-closed:", error);
 			setTimeout(() => process.exit(1), 1_000).unref?.();
 		});
-		// 1.5s: enough for boot-time state (agents, watchers, session-control
-		// registry) to settle before we start resuming, without adding dead air to
-		// every restart. Paired with the shorter drain above for faster recovery.
-		}, 1500);
+		// Yield once so the listener and boot-time registries finish installing,
+		// then recover immediately. The old fixed 1.5s delay had no ownership or
+		// readiness prerequisite and only extended every handoff.
+		}, 0);
 	} else {
 		setServiceReadiness("ready");
 	}
@@ -1017,6 +1056,9 @@ if (!g.__opensessionBooted) {
 	// not lost work. Must stay below the unit's TimeoutStopSec (80s), or
 	// systemd SIGKILLs the process mid-drain.
 	const DRAIN_TIMEOUT_MS = parseInt(process.env.SHUTDOWN_DRAIN_MS || "10000");
+	const HANDOFF_DRAIN_TIMEOUT_MS = parseInt(
+		process.env.HANDOFF_SHUTDOWN_DRAIN_MS || "1000",
+	);
 	let shuttingDown = false;
 	const gracefulShutdown = async (signal: string) => {
 		if (shuttingDown) return;
@@ -1026,14 +1068,19 @@ if (!g.__opensessionBooted) {
 		// here on (the next boot delivers them) instead of starting turns that
 		// race the drain deadline.
 		beginShutdown();
-		stopSessionKernelRuntime();
-		stopSessionOwnershipWatchdog();
 		// With poisoned timers (see run-ws.ts tripwire)
 		// every `await sleep` and Promise.race timeout below would wedge forever
 		// and systemd would SIGKILL us at TimeoutStopSec (observed: an 80s
 		// "restart"). Nothing timer-driven can drain anyway, so skip straight to
 		// snapshot → stop → exit; the journal resumes/reattaches runs on boot.
 		const timersDead = !!(globalThis as any).__timersPoisonedAt;
+		// Announce and yield before any shutdown bookkeeping. The session snapshot
+		// and runtime teardown can block the event loop for seconds under load,
+		// which used to make a real restart look like unexplained UI slowness.
+		broadcastToAll({ type: "server_restarting" });
+		if (!timersDead) await new Promise((r) => setTimeout(r, 50));
+		stopSessionKernelRuntime();
+		stopSessionOwnershipWatchdog();
 		console.log(
 			`[shutdown] ${signal} — stopping intake and draining in-flight runs…` +
 				(timersDead ? " (timers poisoned: skipping every timed wait)" : ""),
@@ -1044,9 +1091,6 @@ if (!g.__opensessionBooted) {
 		// instances skip it (nothing resumes them, and a snapshot must never
 		// make the production boot try to wake dev sessions).
 		if (!devInstance) snapshotActiveSessions();
-		// Tell connected UIs we're going down so they can show a "restarting" modal
-		// and auto-refresh once the new instance is up (instead of silently queuing
-		// messages that would be lost). Brief pause to let the frames flush.
 		// Best-effort attribution: a session-triggered `systemctl restart` shows
 		// up as an in-flight run in this checkout (sharedCheckoutEditors). The
 		// marker file lets the NEXT boot's hello frame name the culprit in the
@@ -1061,8 +1105,10 @@ if (!g.__opensessionBooted) {
 				);
 			}
 		} catch {}
-		broadcastToAll({ type: "server_restarting", ...(restartBy ? { by: restartBy } : {}) });
-		if (!timersDead) await new Promise((r) => setTimeout(r, 150));
+		// Update the already-visible notice when attribution is available, then
+		// yield once more so that frame flushes before agent teardown.
+		if (restartBy) broadcastToAll({ type: "server_restarting", by: restartBy });
+		if (!timersDead) await new Promise((r) => setTimeout(r, 100));
 		// Stop agents from accepting new work (Slack socket, webhook intake, …).
 		// BOUNDED: an agent shutdown that awaits a flaky network call (e.g. the
 		// Slack socket close during a Slack outage) used to hang here for the
@@ -1097,7 +1143,10 @@ if (!g.__opensessionBooted) {
 				activeAutomationPreparationCount(),
 				Math.max(0, activeAgentRunCount() - activeDetachedAgentRunCount()),
 			);
-		const deadline = timersDead ? 0 : Date.now() + DRAIN_TIMEOUT_MS;
+		const drainTimeoutMs = signal === "SIGUSR2"
+			? HANDOFF_DRAIN_TIMEOUT_MS
+			: DRAIN_TIMEOUT_MS;
+		const deadline = timersDead ? 0 : Date.now() + drainTimeoutMs;
 		let n = undrainable();
 		while (n > 0 && Date.now() < deadline) {
 			console.log(`[shutdown] waiting on ${n} in-flight run(s)…`);
@@ -1106,7 +1155,7 @@ if (!g.__opensessionBooted) {
 		}
 		if (n > 0) {
 			console.log(
-				`[shutdown] ${n} run(s) still active after ${DRAIN_TIMEOUT_MS}ms — the journal will resume them on restart`,
+				`[shutdown] ${n} run(s) still active after ${drainTimeoutMs}ms — the journal will resume them on restart`,
 			);
 		} else {
 			console.log("[shutdown] all in-flight runs drained cleanly");
@@ -1127,6 +1176,7 @@ if (!g.__opensessionBooted) {
 	};
 	process.on("SIGTERM", () => void gracefulShutdown("SIGTERM"));
 	process.on("SIGINT", () => void gracefulShutdown("SIGINT"));
+	process.on("SIGUSR2", () => void gracefulShutdown("SIGUSR2"));
 	// The run-ws timer-poison tripwire calls this when timer death is confirmed:
 	// same snapshot+exit path as a signal, and the
 	// timersDead branch above keeps it free of timed waits. systemd's

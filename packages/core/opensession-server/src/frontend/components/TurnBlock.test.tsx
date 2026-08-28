@@ -149,6 +149,22 @@ describe("grouped tool run row", () => {
 		expect(html).not.toContain("Verify the worker");
 	});
 
+	test("keeps ListAgents inside routine steps", () => {
+		const items = [
+			toolUse("before", "read", { path: "src/App.tsx" }),
+			toolUse("agents", "ListAgents", {}),
+			toolUse("after", "bash", { command: "bun test" }),
+		];
+		const toolResults = new Map([
+			["use-agents", result("agents", { isError: true })],
+		]);
+		const html = render(items, toolResults);
+
+		expect(html.match(/data-tool-run="true"/g)).toHaveLength(1);
+		expect(html).toContain("3 steps");
+		expect(html).toContain("Read · ListAgents · Bash");
+	});
+
 	test("groups consecutive MCP calls as routine work", () => {
 		const items = [
 			toolUse("send-a", "opensession-sessions_send_to_session", {
@@ -214,7 +230,9 @@ describe("grouped tool run row", () => {
 		);
 
 		expect(html).toContain(">Error<");
-		expect(html).toContain("text-faint opacity-70");
+		// The expanded detail names the failure. A trailing × looked like a close
+		// button and repeated the same state on the summary row.
+		expect(html).not.toContain('d="M17.25 6.75L6.75 17.25"');
 		expect(html).not.toContain("text-red/70");
 		expect(html).not.toContain("text-red/80");
 		expect(html).not.toContain("border-red/25");

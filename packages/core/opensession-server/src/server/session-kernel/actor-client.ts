@@ -189,6 +189,12 @@ export class SessionKernelActorClient {
     effectKinds: string[],
     now = Date.now(),
     limit = 100,
+    additionalOutboxGroups: Array<{
+      effectKinds: string[];
+      limit: number;
+    }> = [],
+    activeOutbox: Array<{ id: number; sessionId: string }> = [],
+    activeOutboxRecheckAt = now,
   ): Promise<{ timers: DurableTimer[]; outbox: DurableOutboxItem[] }> {
     const response = await this.request({
       t: "runtime_work",
@@ -197,6 +203,9 @@ export class SessionKernelActorClient {
       timerKinds,
       effectKinds,
       limit,
+      additionalOutboxGroups,
+      activeOutbox,
+      activeOutboxRecheckAt,
     });
     if (response.t !== "runtime_work_result")
       throw new Error("Invalid kernel runtime work response");

@@ -292,6 +292,14 @@ export async function warmWorkspaceNamesAsync(): Promise<void> {
   }
 }
 
+/** Read-only name projection for bulk consumers. Resolve it once per list
+ * response: workspaceName() intentionally re-resolves the active state root on
+ * every call for test/dev root changes, which is wasteful across thousands of
+ * rows in production. */
+export function workspaceNameSnapshot(): ReadonlyMap<string, string> {
+  return workspaceNameMap();
+}
+
 /** The workspace's display name, or null when there is no such workspace. */
 export function workspaceName(id: string): string | null {
   if (!safeId(id)) return null;

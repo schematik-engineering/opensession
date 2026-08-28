@@ -49,30 +49,52 @@ function save(registry: Record<string, ReviewRequest>): void {
 	writeJsonAtomic(REGISTRY_PATH, registry);
 }
 
-export function getReviewRequest(id: string): ReviewRequest | undefined {
-	return load()[id];
+function requestIds(id: string, aliasIds: readonly string[]): string[] {
+	return [...new Set([id, ...aliasIds])];
 }
 
-/** Set (a reviewer) or clear (null) the review request for a session id. */
-export function setReviewRequest(id: string, req: ReviewRequest | null): void {
+export function getReviewRequest(
+	id: string,
+	aliasIds: readonly string[] = [],
+): ReviewRequest | undefined {
+	const registry = load();
+	return requestIds(id, aliasIds)
+		.map((candidate) => registry[candidate])
+		.find((request) => request !== undefined);
+}
+
+/** Set (a reviewer) or clear (null) the review request for a session. Historical
+ * aliases are removed at the same time so an old key cannot revive a cleared
+ * request when the unified session list is rebuilt. */
+export function setReviewRequest(
+	id: string,
+	req: ReviewRequest | null,
+	aliasIds: readonly string[] = [],
+): void {
 	const registry = { ...load() };
+	for (const candidate of requestIds(id, aliasIds)) delete registry[candidate];
 	if (req) registry[id] = req;
-	else delete registry[id];
 	save(registry);
 }
 
 /** Mark the current request accepted (reviewer signed off) or reopen it (null),
- * preserving the original `to`/`by`/`at`. No-op if there's no request for `id`. */
+ * preserving the original `to`/`by`/`at`. No-op if the session and its aliases
+ * have no request. The write also migrates an alias-keyed request to `id`. */
 export function setReviewAccepted(
 	id: string,
 	accepted: { by: string; at: string } | null,
+	aliasIds: readonly string[] = [],
 ): void {
 	const registry = { ...load() };
-	const existing = registry[id];
+	const ids = requestIds(id, aliasIds);
+	const existing = ids
+		.map((candidate) => registry[candidate])
+		.find((request) => request !== undefined);
 	if (!existing) return;
 	const next: ReviewRequest = { ...existing };
 	if (accepted) next.accepted = accepted;
 	else delete next.accepted;
+	for (const candidate of ids) delete registry[candidate];
 	registry[id] = next;
 	save(registry);
 }

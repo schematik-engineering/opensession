@@ -15,7 +15,7 @@
 
 import { existsSync } from "fs";
 import { parseTranscriptAsync } from "./jsonl-parser";
-import { getRecentCommitsForSessions } from "./recent-commits";
+import { createRecentCommitMatcher } from "./recent-commits";
 import { mergedSessionTranscriptAsync } from "./sessions";
 import type { TranscriptEntry, UnifiedSession } from "./types";
 
@@ -122,6 +122,10 @@ export async function buildWorkspaceOverview(
   let prompt: WorkspaceOverview["prompt"] = null;
   let lastMessage: WorkspaceOverview["lastMessage"] = null;
   const media: WorkspaceMediaItem[] = [];
+  // The loop already reads every explicit member transcript. Match commits
+  // against those entries as they pass instead of launching a fleet-wide actor
+  // sweep from this request.
+  const commitMatcher = await createRecentCommitMatcher();
 
   for (const session of ordered) {
     // Async: this loops over EVERY session in the workspace — back-to-back sync
@@ -131,6 +135,7 @@ export async function buildWorkspaceOverview(
     // overview for every session written since the store landed.
     const entries = await mergedSessionTranscriptAsync(session);
     if (entries.length === 0) continue;
+    commitMatcher.observe(session.id, entries);
     if (!prompt) {
       const first = entries.find(isOpeningPrompt);
       if (first)
@@ -171,9 +176,7 @@ export async function buildWorkspaceOverview(
   }
 
   media.sort((a, b) => (b.at || "").localeCompare(a.at || ""));
-  const commits = await getRecentCommitsForSessions(
-    new Set(sessions.map((session) => session.id)),
-  );
+  const commits = commitMatcher.commits();
   return {
     prompt,
     lastMessage,

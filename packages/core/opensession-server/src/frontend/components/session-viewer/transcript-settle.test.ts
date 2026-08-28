@@ -13,14 +13,21 @@ test("fresh transcript ranges reaffirm a cached reader's live edge", () => {
 	);
 });
 
-test("opening transcripts never hide rendered rows behind slow hydration", () => {
+test("setup and loading surfaces leave before transcript rows mount", () => {
+	expect(viewer).toContain('<AnimatePresence initial={false} mode="wait">');
+	expect(viewer).not.toContain('<AnimatePresence initial={false} mode="popLayout">');
+});
+
+test("indexed transcripts stay hidden until the complete outline settles", () => {
 	expect(settledCallback).toContain("if (!transcriptOutlineReady) return");
 	expect(settledCallback).toContain("setOpenSettlePending(false)");
 	expect(viewer).toContain("setTranscriptOutlineReady(!v2)");
 	expect(viewer).toContain("setTranscriptOutlineReady(true)");
-	expect(viewer).toContain("const OPEN_SETTLE_MAX_MS = 350");
-	expect(viewer).toContain("() => setOpenSettlePending(false)");
-	expect(viewer).toContain("OPEN_SETTLE_MAX_MS,");
+	expect(viewer).toContain("const LEGACY_OPEN_SETTLE_MAX_MS = 350");
+	expect(viewer).toContain(
+		"if (!transcriptRendered || transcriptIndexExpected) return",
+	);
+	expect(viewer).toContain("LEGACY_OPEN_SETTLE_MAX_MS,");
 	expect(viewer).toContain(
 		'"w-full shrink-0 motion-safe:transition-opacity motion-safe:duration-150"',
 	);

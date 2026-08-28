@@ -1,4 +1,4 @@
-const PSTACK_COMMAND_RE = /^\/(?:skill:)?pstack(?:\s|$)/i;
+const PSTACK_COMMAND_RE = /^\/(?:skill:)?(?:pstack|poteto-mode)(?:\s|$)/i;
 
 /** An opening prompt that enables sticky pstack mode for the new session. */
 export function enablesPstackMode(text: string): boolean {
@@ -7,9 +7,12 @@ export function enablesPstackMode(text: string): boolean {
 	return !["off", "disable", "stop"].includes(input.toLowerCase());
 }
 
-/** Text after /pstack or /skill:pstack. Empty means a status request. */
+/** Text after either mode command. Empty means a status request. */
 export function pstackCommandInput(text: string): string {
-	return text.trim().replace(/^\/(?:skill:)?pstack\b\s*/i, "").trim();
+	return text
+		.trim()
+		.replace(/^\/(?:skill:)?(?:pstack|poteto-mode)\b\s*/i, "")
+		.trim();
 }
 
 export function isPstackCommand(text: string): boolean {
@@ -23,7 +26,7 @@ export function isPstackCommand(text: string): boolean {
  */
 export const PSTACK_MODE_NOTE = `## Pstack mode
 
-Pstack mode is enabled for this session. Apply it to every nontrivial turn until the user sends /pstack off.
+Pstack mode is enabled for this session. Apply it to every nontrivial turn until the user sends /pstack off or /poteto-mode off.
 
 - Inspect current state and partial work first. Choose the matching investigation, bug-fix, feature, refactor, performance, prototype, review, or shipping playbook.
 - Name the authoritative data shape or invariant before editing. Prefer subtraction, one clear owner, typed boundaries, and the smallest coherent change.

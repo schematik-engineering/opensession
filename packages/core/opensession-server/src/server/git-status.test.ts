@@ -3,7 +3,7 @@ import { $ } from "bun";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gitFailureMessage, gitPull, gitPush, porcelainPaths } from "./git-status";
+import { getGitStatus, gitFailureMessage, gitPull, gitPush, porcelainPaths } from "./git-status";
 import type { WorkspaceExec } from "./sandbox/workspace-exec";
 
 const roots: string[] = [];
@@ -33,6 +33,33 @@ async function makeRepo(): Promise<{ repo: string; origin: string }> {
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+describe("getGitStatus", () => {
+  test("uses a published branch even when a plain push did not configure tracking", async () => {
+    const { repo } = await makeRepo();
+    writeFileSync(join(repo, "feature.txt"), "feature\n");
+    await git(repo, "add", "feature.txt");
+    await git(repo, "commit", "-m", "Feature change");
+    await git(repo, "push", "origin", "feature");
+
+    expect(await git(repo, "config", "--get", "branch.feature.remote").catch(() => "")).toBe("");
+    expect(await getGitStatus(repo, "main")).toMatchObject({
+      branch: "feature",
+      hasUpstream: true,
+      ahead: 0,
+      behind: 0,
+    });
+
+    writeFileSync(join(repo, "feature.txt"), "feature two\n");
+    await git(repo, "add", "feature.txt");
+    await git(repo, "commit", "-m", "Follow-up");
+    expect(await getGitStatus(repo, "main")).toMatchObject({
+      hasUpstream: true,
+      ahead: 1,
+      behind: 0,
+    });
+  });
 });
 
 describe("gitPull from base", () => {

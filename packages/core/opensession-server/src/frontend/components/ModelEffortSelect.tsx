@@ -114,7 +114,7 @@ export { baseModelId, engineModelId, modelEngine, piModelId } from "../lib/model
 export function friendlyModelSlug(slug: string): string {
 	if (slug === "gpt-oss-120b") return "GPT OSS 120B";
 	if (slug === "gemma-4-31b") return "Gemma 4 31B";
-	if (slug === "stealth/ox-alpha") return "Ox Alpha";
+	if (slug === "z-ai/glm-5.3" || slug === "stealth/ox-alpha") return "GLM-5.3";
 	const glm = slug.match(/^(zai-)?glm-?(\d+(?:\.\d+)*)(?:-(.+))?$/i);
 	if (glm) {
 		const prefix = glm[1] ? "Z.ai " : "";
@@ -297,7 +297,7 @@ type ModelMenuOption = {
 	engine: string;
 	/** Picker section override from the registry ("dial" = The Dial). */
 	group?: string;
-	/** One-line subtitle rendered under the label (dial presets). */
+	/** One-line description rendered with the preset label. */
 	description?: string;
 };
 
@@ -658,9 +658,11 @@ export function ModelEffortSelect({
 						/>
 					</span>
 					{optionDescription ? (
-						<span className="flex min-w-0 flex-1 flex-col">
-							<span className="truncate">{optionLabel}</span>
-							<span className="truncate text-xs text-faint">{optionDescription}</span>
+						<span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+							<span className="shrink-0">{optionLabel}</span>
+							<span className="min-w-0 flex-1 truncate text-xs text-faint">
+								{optionDescription}
+							</span>
 						</span>
 					) : (
 						<span className="min-w-0 truncate">{optionLabel}</span>

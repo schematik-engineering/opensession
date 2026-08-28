@@ -24,7 +24,7 @@ export function SettingRow({
 	desc,
 	control,
 }: {
-	title: string;
+	title: React.ReactNode;
 	desc?: React.ReactNode;
 	control: React.ReactNode;
 }) {

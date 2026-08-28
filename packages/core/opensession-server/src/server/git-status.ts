@@ -31,7 +31,7 @@ async function gitText(dir: string, args: string[], exec?: WorkspaceExec): Promi
 
 export interface GitStatusInfo {
   branch: string | null;
-  /** Branch has an upstream (has been pushed at least once). */
+  /** Branch has a published remote counterpart, configured or inferred. */
   hasUpstream: boolean;
   /** Commits ahead of / behind the upstream tracking ref. */
   ahead: number;
@@ -172,13 +172,35 @@ export async function getGitStatus(
     behind = b || 0;
     ahead = a || 0;
   } catch {
-    // No upstream — every local commit past the base is effectively unpushed.
-    try {
-      ahead =
-        parseInt(
-          (await gitText(dir, ["rev-list", "--count", `origin/${baseBranch}..HEAD`], exec)).trim()
-        ) || 0;
-    } catch {}
+    // A plain `git push origin <branch>` publishes the branch without writing
+    // branch.<name>.remote/merge. Treat its remote-tracking ref as the upstream
+    // anyway; comparing against the base would mislabel every feature commit as
+    // unpushed even when origin/<branch> is exactly at HEAD.
+    if (branch) {
+      try {
+        const counts = (
+          await gitText(dir, [
+            "rev-list",
+            "--left-right",
+            "--count",
+            `origin/${branch}...HEAD`,
+          ], exec)
+        ).trim();
+        const [b, a] = counts.split(/\s+/).map((n) => parseInt(n) || 0);
+        hasUpstream = true;
+        behind = b || 0;
+        ahead = a || 0;
+      } catch {}
+    }
+    // No configured or inferred upstream: commits past the base are local-only.
+    if (!hasUpstream) {
+      try {
+        ahead =
+          parseInt(
+            (await gitText(dir, ["rev-list", "--count", `origin/${baseBranch}..HEAD`], exec)).trim()
+          ) || 0;
+      } catch {}
+    }
   }
 
   let behindBase = 0;

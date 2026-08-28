@@ -27,6 +27,9 @@ export interface SidebarPlacementContext {
 	personFilter: string;
 	snoozed: boolean;
 	inStatusScope: boolean;
+	/** A personal lane is an explicit request to keep this row in the ordinary
+	    sidebar list, even when it would otherwise file into a review band. */
+	claimed?: boolean;
 }
 
 export interface PlacedSidebarRow<T extends WsRow = WsRow> {
@@ -137,6 +140,11 @@ export function classifySidebarPlacement(
 	context: SidebarPlacementContext,
 ): SidebarPlacement {
 	if (context.snoozed) return "snoozed";
+	// “Keep in sidebar” writes a personal lane. That direct instruction wins
+	// over derived review placement, so keeping a teammate's workspace puts it
+	// in Active rather than merely moving it between team and review sections.
+	if (context.claimed)
+		return context.inStatusScope ? "status" : "outside";
 
 	const me = context.currentUser.toLowerCase();
 	const githubAsksMe =

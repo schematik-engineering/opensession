@@ -2,9 +2,10 @@
  * Workflow agent executor — the real WorkflowExecutor behind workflow-runner.
  *
  * Each `agent()` call inside a workflow script becomes one lightweight
- * pi run (journal kind "workflow", cwd = the session's worktree) driven
- * to completion here. Deliberately minimal RunAgentOpts: no mcpServers, no
- * inProcessMcp, no deniedTools — kind "workflow" is interactive-trusted (the
+ * pi run in a detached workload host (journal kind "workflow", cwd = the
+ * session's worktree) driven to completion here. Deliberately minimal
+ * RunAgentOpts: no inProcessMcp or deniedTools. Kind "workflow" is
+ * interactive-trusted (the
  * opensession-workflows MCP that launches these is interactive-only).
  *
  * Read agents (the default) run in mode "ask", which already withholds write
@@ -25,7 +26,8 @@
  */
 
 import { $ } from "bun";
-import { cancelAgentRun, runAgent, type RunAgentOpts, type StreamEvent } from "./agent-runner";
+import { cancelAgentRun, type RunAgentOpts, type StreamEvent } from "./agent-runner";
+import { runAuxiliaryAgentHosted } from "./host-client";
 import {
 	automaticFallbackModel,
 	getDefaultModel,
@@ -45,15 +47,15 @@ import {
 	type WorkflowMergeResult,
 } from "./workflow-types";
 
-// ── runAgent seam (tests inject a fake; never spin real engine runs) ─────────
+// ── Agent seam (production detaches; tests inject a fake) ───────────────────
 
 type RunAgentFn = (opts: RunAgentOpts) => AsyncGenerator<StreamEvent>;
 
-let runAgentImpl: RunAgentFn = runAgent;
+let runAgentImpl: RunAgentFn | null = null;
 
-/** Test seam: swap the runAgent implementation (null restores the real one). */
+/** Test seam: workflows use detached hosts unless a test supplies a fake. */
 export function _setRunAgentForTests(fn: RunAgentFn | null): void {
-	runAgentImpl = fn ?? runAgent;
+	runAgentImpl = fn;
 }
 
 // ── worktree seam (tests point it at a throwaway git repo in tmp) ────────────
@@ -107,6 +109,7 @@ export async function runAgentCollect(
 	opts: RunAgentOpts,
 	signal?: AbortSignal,
 	onEngineSession?: (engineSessionId: string) => void,
+	runner: RunAgentFn | null = runAgentImpl,
 ): Promise<RunAgentCollectResult> {
 	let text = "";
 	let model: string | undefined;
@@ -117,8 +120,9 @@ export async function runAgentCollect(
 
 	// Already cancelled: never start the engine run at all.
 	if (signal?.aborted) return { text, error: "cancelled" };
+	if (!runner) throw new Error("Workflow agent runner is not configured");
 
-	const it = runAgentImpl(opts)[Symbol.asyncIterator]();
+	const it = runner(opts)[Symbol.asyncIterator]();
 	const aborted: Promise<"aborted"> | null = signal
 		? new Promise((resolve) => {
 				if (signal.aborted) resolve("aborted");
@@ -468,6 +472,47 @@ function agentEffort(model: string, requested?: string): string | undefined {
 	return modelEfforts(model).includes(want as SessionEffort) ? want : undefined;
 }
 
+function detachedWorkflowRunner(
+	ctx: WorkflowExecCtx,
+	signal: AbortSignal,
+): RunAgentFn {
+	return (opts) => runAuxiliaryAgentHosted({
+		osSessionId: ctx.sessionId,
+		prompt: opts.prompt,
+		sessionId: opts.sessionId,
+		cwd: opts.cwd,
+		mode: opts.mode,
+		mcpGrantUser: opts.mcpGrantUser,
+		model: opts.model,
+		images: opts.images,
+		forkSession: opts.forkSession,
+		resumeSessionAt: opts.resumeSessionAt,
+		mcpServers: opts.mcpServers,
+		reposNote: opts.reposNote,
+		deniedTools: opts.deniedTools,
+		confirmTools: opts.confirmTools,
+		aws: opts.aws,
+		claudeCliEnv: opts.claudeCliEnv,
+		codexCliEnv: opts.codexCliEnv,
+		author: opts.author,
+		user: opts.user,
+		fallbackModel: opts.fallbackModel,
+		accountAffinityKey: opts.accountAffinityKey,
+		effort: opts.effort,
+		fastMode: opts.fastMode,
+		accountId: opts.accountId,
+		accountStrict: opts.accountStrict,
+		usageCredits: opts.usageCredits,
+		prReviewer: opts.prReviewer,
+		journalKind: opts.journal?.kind || "workflow",
+		// Workflow snapshots already own the worker's visible output. Direct
+		// in-process workers had no transcript owner mapping, so preserve that
+		// behavior instead of projecting subagent chatter into the parent session.
+		transcriptTarget: "none",
+		signal,
+	});
+}
+
 export const workflowExecutor: WorkflowExecutor = {
 	async execute(req: WorkflowAgentRequest, ctx: WorkflowExecCtx): Promise<WorkflowAgentOutcome> {
 		const requestedModel = req.opts.model || ctx.defaultModel || getDefaultModel();
@@ -532,6 +577,7 @@ export const workflowExecutor: WorkflowExecutor = {
 				engineSessionId = id;
 				ctx.onEngineSession?.(id);
 			};
+			const runner = runAgentImpl ?? detachedWorkflowRunner(ctx, inner.signal);
 
 			/** Everything a write agent adds on top of a finished run: commit its
 			 *  work, diffstat it, and drop the worktree when it changed nothing. */
@@ -578,7 +624,12 @@ export const workflowExecutor: WorkflowExecutor = {
 			};
 
 			if (req.opts.schema === undefined) {
-				const res = await runAgentCollect({ ...baseOpts, prompt }, inner.signal, onEngineSession);
+				const res = await runAgentCollect(
+					{ ...baseOpts, prompt },
+					inner.signal,
+					onEngineSession,
+					runner,
+				);
 				if (res.error) {
 					return await withWriteResult({
 						ok: false,
@@ -620,6 +671,7 @@ export const workflowExecutor: WorkflowExecutor = {
 					{ ...baseOpts, prompt: attemptPrompt, sessionId: engineSessionId },
 					inner.signal,
 					onEngineSession,
+					runner,
 				);
 				engineSessionId = res.engineSessionId || engineSessionId;
 				tokens = addTokens(tokens, res.tokens);

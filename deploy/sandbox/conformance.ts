@@ -2,7 +2,7 @@
  * Sandbox provider CONFORMANCE suite (the sandbox rollout plan, Phase 3.3) —
  * the verify.ts checks parameterized over providers. Run MANUALLY:
  *
- *   bun run deploy/sandbox/conformance.ts [docker-socket] [docker-ws] [daytona] [e2b] [box] [modal] [microvm] [lambda-microvm]
+ *   bun run deploy/sandbox/conformance.ts [docker-socket] [docker-ws] [daytona] [e2b] [box] [modal] [lambda-microvm]
  *
  * (no args = the full matrix). Per entry: ensure/reuse, exec argv+stderr
  * semantics, workspace git (bind worktree for docker, in-sandbox volume-style
@@ -150,8 +150,6 @@ const modalTokenSecret: string =
   liveCfg?.modal?.tokenSecret || process.env.MODAL_TOKEN_SECRET || "";
 const modalProfileAvailable = existsSync(process.env.MODAL_CONFIG_PATH || `${HOME}/.modal.toml`);
 const lambdaMicrovmImage: string = liveCfg?.awsLambdaMicrovm?.imageIdentifier || "";
-const microvmCallbackBase: string =
-  process.env.SBX_CONF_MICROVM_BASE || liveCfg?.callbackBaseUrl || "";
 
 // ── account pool gate (real model runs) ───────────────────────────────────────
 
@@ -339,7 +337,6 @@ interface Entry {
     | "e2b"
     | "box"
     | "modal"
-    | "microvm"
     | "lambda-microvm";
   /** null = run it; string = print SKIPPED reason. */
   skip: string | null;
@@ -463,24 +460,6 @@ const entries: Entry[] = [
     repoId: PUB_REPO_ID,
     branch: PUB_BRANCH,
     expectPort: "url",
-    remote: true,
-  },
-  {
-    name: "microvm",
-    providerId: "microvm",
-    skip: !liveCfg?.firecrackerMicrovm?.enabled
-      ? "SKIPPED: local Firecracker is not enabled in ~/.opensession-sandbox.json"
-      : !microvmCallbackBase
-        ? "SKIPPED: no private callback URL (set callbackBaseUrl or SBX_CONF_MICROVM_BASE)"
-        : null,
-    config: {
-      provider: "microvm",
-      callbackBaseUrl: microvmCallbackBase,
-      firecrackerMicrovm: liveCfg?.firecrackerMicrovm || {},
-    },
-    repoId: PUB_REPO_ID,
-    branch: PUB_BRANCH,
-    expectPort: "none",
     remote: true,
   },
   {

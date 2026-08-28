@@ -303,7 +303,9 @@ Pure SwiftUI with SwiftStreamingMarkdown for CommonMark/GFM rendering. See
   unread session count on the iPhone Home Screen and Dock icon without enabling
   alert banners or sounds.
 - **Connection care** — client-initiated pings every 10s and reconnects when
-  no inbound frame arrives for 30s. The server never initiates pings. The UI
+  no inbound frame arrives for 30s. The server never initiates pings. An
+  announced server restart uses a 250ms retry cadence until the replacement
+  handshake arrives; ordinary outages retain the calmer 2s backoff. The UI
   shows a reconnect banner and keeps an optimistic local echo of prompts until
   the server's copy arrives.
 - **Settings** — native SwiftUI Tools, Personal, and Workspace administration,

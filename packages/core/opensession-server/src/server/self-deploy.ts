@@ -187,6 +187,30 @@ async function git(cwd: string, args: string[]): Promise<{ code: number; out: st
 }
 
 const FRONTEND_PREFIX = "packages/core/opensession-server/src/frontend/";
+const ROOT_DEPLOY_PATHS = new Set([
+	"deploy/deploy.sh",
+	"deploy/self-deploy.sh",
+	"deploy/release-checkout.sh",
+	"deploy/install-executor-credential.sh",
+	"deploy/install-session-kernel-credential.sh",
+	"deploy/install-run-host-helper.sh",
+	"deploy/install-resource-control.sh",
+	"deploy/opensession-run-host",
+	"opensession.service",
+	"opensession.socket",
+	"opensession-executor.service",
+	"opensession-session-kernel.service",
+]);
+
+/** Files the unprivileged self-deploy path cannot install. Letting one of these
+ * fall through to an ordinary source restart reports a healthy deployment while
+ * the root-owned live artifact remains on the previous release. */
+export function requiresRootDeploy(paths: string[]): boolean {
+	return paths.some(
+		(path) =>
+			ROOT_DEPLOY_PATHS.has(path) || path.startsWith("deploy/systemd/"),
+	);
+}
 
 /** Strict allowlist: if any runtime path outside the web frontend changes, use
  * the health-gated service rollout. Documentation may ride with a UI commit. */
@@ -377,7 +401,7 @@ export function createSelfDeployMcpServer(ctx: SelfDeployToolContext) {
 	const tools = [
 		tool(
 			"deploy_self",
-			"Deploy THIS Open Session instance to an immutable git release. Deployment may be autonomous and is shared across sessions. Concurrent standard deploy requests queue and coalesce to the newest fast-forward target; requests already covered by that release become successful no-ops. A strictly frontend-only diff is bundled in the prepared target release, atomically promoted, and announced to clients without restarting any service. Any server, protocol, dependency, or other runtime change automatically uses the standard health-gated gateway/kernel/executor restart path. /api/rebuild-frontend only rebuilds the already pinned source and is not a promotion path. This tool DOES NOT install changed root-owned artifacts. If the target changes the live deploy controllers, opensession*.service, credential installers, the fixed run-host helper/installer, or root-deploy-managed systemd units/drop-ins, use the documented full root deploy instead. Diverged targets are refused; the shared WIP checkout is only a git object source and is never changed.",
+			"Deploy THIS Open Session instance to an immutable git release. Deployment may be autonomous and is shared across sessions. Concurrent standard deploy requests queue and coalesce to the newest fast-forward target; requests already covered by that release become successful no-ops. A strictly frontend-only diff is bundled in the prepared target release, atomically promoted, and announced to clients without restarting any service. A strictly gateway-only source diff uses the single-active preload handoff; protocol peers, dependencies, and other runtime changes use the coordinated health-gated gateway/kernel/executor restart path. /api/rebuild-frontend only rebuilds the already pinned source and is not a promotion path. This tool DOES NOT install changed root-owned artifacts. If the target changes the live deploy controllers, opensession*.service, credential installers, the fixed run-host helper/installer, or root-deploy-managed systemd units/drop-ins, use the documented full root deploy instead. Diverged targets are refused; the shared WIP checkout is only a git object source and is never changed.",
 			{
 				sha: z
 					.string()
@@ -456,11 +480,24 @@ export function createSelfDeployMcpServer(ctx: SelfDeployToolContext) {
 						}
 					}
 					if (currentSha && currentSha !== targetSha) {
-						const changed = await git(checkout, ["diff", "--name-only", "-z", currentSha, targetSha, "--"]);
+						const changed = await git(checkout, [
+							"diff",
+							"--no-renames",
+							"--name-only",
+							"-z",
+							currentSha,
+							targetSha,
+							"--",
+						]);
 						if (changed.code !== 0) {
 							return text(`Refusing: cannot classify target diff: ${changed.err.slice(0, 300)}`);
 						}
 						const paths = changed.out.split("\0").filter(Boolean);
+						if (requiresRootDeploy(paths)) {
+							return text(
+								`Refusing unprivileged self-deploy for ${targetSha.slice(0, 10)}: the target changes root-owned deploy or service artifacts. Run the documented full root deploy for this release.`,
+							);
+						}
 						if (isFrontendOnlyRelease(paths)) {
 							const promoted = await promoteFrontendRelease(targetSha, currentSha, ctx.user);
 							return text(
@@ -474,7 +511,7 @@ export function createSelfDeployMcpServer(ctx: SelfDeployToolContext) {
 					return text(
 						`Deploy launched${ctx.user ? ` by ${ctx.user}` : ""}: unit ${unit} → immutable release ${targetSha.slice(0, 10)}.\n` +
 							`Result will land in ${stateDir}/last-result.json (log: ${stateDir}/self-deploy.log).\n` +
-							`This instance will RESTART shortly — your session survives via the detached engine + reattach. Check deploy_status in a couple of minutes; an unhealthy release switches back automatically, and the watchdog covers wedges for 15 min.`,
+							`This instance will promote through either the single-active gateway handoff or the coordinated restart selected by the release classifier. Your session survives via the detached engine + reattach. Check deploy_status shortly; an unhealthy release switches back automatically, and the watchdog covers wedges for 15 min.`,
 					);
 				} catch (e: any) {
 					return text(`deploy_self failed to launch: ${e?.message || String(e)}`);

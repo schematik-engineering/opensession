@@ -621,7 +621,13 @@ export async function steerQueuedPrompt(
 		try {
 			await storeAppendUserLineEarly(
 				sessionId,
-				transcriptLineUser(item.content, promptEntryId, undefined, images),
+				transcriptLineUser(
+					item.content,
+					promptEntryId,
+					undefined,
+					images,
+					[item.id],
+				),
 				{ required: true },
 			);
 		} catch (error) {
@@ -693,7 +699,13 @@ export async function steerQueuedPrompt(
 	if (!promoted) return false;
 	await storeAppendUserLineEarly(
 		sessionId,
-		transcriptLineUser(attributed, promptEntryId, undefined, images),
+		transcriptLineUser(
+			attributed,
+			promptEntryId,
+			undefined,
+			images,
+			[item.id],
+		),
 		{ required: true },
 	);
 	watchExternalRunAndDrain(sessionId);
@@ -1348,6 +1360,7 @@ async function drainQueueInner(sessionId: string): Promise<void> {
 		// A queued Slack-thread reply carries its origin thread — the turn's answer
 		// mirrors back there. Last one wins if a batch somehow spans threads.
 		const slackReplyTo = [...batch].reverse().find((m) => m.slackReplyTo)?.slackReplyTo;
+		const sourceMessageIds = batch.flatMap((item) => item.id ? [item.id] : []);
 		try {
 			await runSessionPrompt(
 				sessionId,
@@ -1358,6 +1371,7 @@ async function drainQueueInner(sessionId: string): Promise<void> {
 				contextSessions.length ? contextSessions : undefined,
 				slackReplyTo,
 				promptEntryId,
+				sourceMessageIds,
 			);
 		} catch (e) {
 			// The batch was already spliced out and persisted away — put it back at
@@ -1377,6 +1391,7 @@ export async function runSessionPromptAndDrain(
 	contextSessions?: string[],
 	slackReplyTo?: { channel: string; threadTs: string },
 	promptEntryId?: string,
+	sourceMessageIds?: string[],
 ): Promise<void> {
   try {
     await runSessionPrompt(
@@ -1388,6 +1403,7 @@ export async function runSessionPromptAndDrain(
       contextSessions,
       slackReplyTo,
       promptEntryId,
+      sourceMessageIds,
     );
   } catch (error) {
     if (error instanceof RunPreparationDeferredError) return;
@@ -2092,6 +2108,7 @@ export async function runSessionPrompt(
 	contextSessions?: string[],
 	slackReplyTo?: { channel: string; threadTs: string },
 	promptEntryId?: string,
+	sourceMessageIds?: string[],
 ): Promise<void> {
 	// Any explicit new run lifts a user stop — the queue may drain again.
 	stoppedSessions.delete(sessionId);
@@ -2159,6 +2176,7 @@ export async function runSessionPrompt(
 			slackReplyTo,
 			startToken,
 			durablePromptEntryId,
+			sourceMessageIds,
 		);
 		// Sandboxes and non-standard runners may not create an active-run journal.
 		// A completed turn is nevertheless a safe acknowledgement of its dispatch.
@@ -2194,6 +2212,7 @@ async function runSessionPromptInner(
 	slackReplyTo?: { channel: string; threadTs: string },
 	startToken?: string,
 	promptEntryId?: string,
+	sourceMessageIds?: string[],
 ): Promise<void> {
 	const autoRetry = await retryAutoFallbackModel(sessionId);
 	const session = findSession(sessionId);
@@ -2258,7 +2277,13 @@ async function runSessionPromptInner(
 	if (content?.trim()) {
 		await storeAppendUserLineEarly(
 			sessionId,
-			transcriptLineUser(content, durablePromptEntryId, undefined, images),
+			transcriptLineUser(
+				content,
+				durablePromptEntryId,
+				undefined,
+				images,
+				sourceMessageIds,
+			),
 			{ required: true },
 		);
 	}
@@ -2644,17 +2669,16 @@ async function runSessionPromptInner(
 	// run-host unit (host-client.ts) that survives `systemctl restart` and is
 	// reattached by the boot sweep (resumeLocalHostRun). Transcript writes are
 	// proxied back over the host protocol, so the server stays the store's
-	// only writer. Kill switch: OPENSESSION_PI_DETACH=0 (the generic
-	// disable-run-hosts file and runAgentHosted's in-process fallback also
-	// apply). Automation-owned sessions ride it too, with the automation's
+	// only writer. On systemd hosts this path fails closed if detached hosts are
+	// unavailable; it never absorbs an engine into the gateway's control-plane
+	// cgroup. Automation-owned sessions ride it too, with the automation's
 	// scoping intact: proxy names come from the same fail-closed automation
 	// set the run-rpc fallback builder serves, the repos note and MCP grant
 	// identity are withheld, and the automation's prReviewer rides the spec.
 	const hostedRun =
 		!runnerRun &&
 		!sandboxRun &&
-		routedEngine === "pi" &&
-		process.env.OPENSESSION_PI_DETACH !== "0"
+		routedEngine === "pi"
 			? runAgentHosted({
 					osSessionId: session.id,
 					prompt,

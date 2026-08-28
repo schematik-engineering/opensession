@@ -135,6 +135,33 @@ describe("removeTombstonedSessionArtifacts", () => {
 });
 
 describe("getAllSessions", () => {
+	it("resolves an exact Slack deep link directly from its owning file", async () => {
+		const key = `C123-${Date.now()}.123456`;
+		writeSlackSession(key, {
+			channel: "C123",
+			threadTs: key.slice("C123-".length),
+			userId: "Alex Example",
+			claudeSessionId: "engine-slack-direct",
+			worktreeDir: "/tmp/slack-direct",
+			branch: "fix-slack-link",
+			title: "Fix Slack link",
+			createdAt: "2026-08-28T13:36:09.000Z",
+			lastActivity: "2026-08-28T14:02:17.000Z",
+		});
+
+		const { readSlackSession } = await import(
+			`./sessions.ts?slack-direct=${crypto.randomUUID()}`
+		);
+		expect(readSlackSession(`slack-${key}`)).toMatchObject({
+			id: `slack-${key}`,
+			source: "slack",
+			title: "Fix Slack link",
+			claudeSessionId: "engine-slack-direct",
+			slackThread: { channel: "C123", threadTs: key.slice("C123-".length) },
+		});
+		expect(readSlackSession("slack-../message-queue")).toBeNull();
+	});
+
 	it("refreshes the legacy transcript index without blocking sync reads", async () => {
 		const sessionId = `legacy-transcript-${crypto.randomUUID()}`;
 		const projectDir = join(home, ".claude", "projects", "-legacy-worktree");

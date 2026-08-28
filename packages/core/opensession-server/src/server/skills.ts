@@ -39,6 +39,12 @@ const BUILTIN_COMMANDS: SkillEntry[] = [
     source: "builtin",
   },
   {
+    name: "poteto-mode",
+    description:
+      "Enable Poteto mode for this session (/poteto-mode <task>, /poteto-mode off)",
+    source: "builtin",
+  },
+  {
     name: "compact",
     description:
       "Summarize the conversation so far to shrink context and cost (Claude sessions only)",

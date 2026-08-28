@@ -178,26 +178,6 @@ export interface SandboxAwsLambdaMicrovmConfig {
   logGroup?: string;
 }
 
-export interface SandboxFirecrackerMicrovmConfig {
-  /** Explicit opt-in: the provider owns root-level Firecracker/netns resources. */
-  enabled: boolean;
-  /** Credential-free golden store built by refresh-sandbox-golden.sh. */
-  storeDir: string;
-  /** Disjoint from preview-pool clone indexes (defaults 64..127). */
-  indexStart: number;
-  indexEnd: number;
-}
-
-export interface SandboxAutomationConfig {
-  /** Automation isolation currently requires the locally enforceable network
-   *  boundary of Firecracker. Other providers are admitted only after their
-   *  native egress controls pass the same conformance case. */
-  provider: "microvm";
-  /** Additional HTTPS endpoints/CIDRs an automation may contact. Model, git,
-   *  and the Open Session callback endpoints are added by the launcher. */
-  egressAllowlist?: string[];
-}
-
 export interface SandboxConfig {
   provider: SandboxProviderId;
   /** Shared default for NEW interactive sessions. Absent/"none" = host. */
@@ -242,10 +222,6 @@ export interface SandboxConfig {
   modal?: SandboxModalConfig;
   /** AWS Lambda MicroVM adapter (provider "lambda-microvm"). */
   awsLambdaMicrovm?: SandboxAwsLambdaMicrovmConfig;
-  /** Local Firecracker adapter (provider "microvm"). */
-  firecrackerMicrovm?: SandboxFirecrackerMicrovmConfig;
-  /** Credential-minimal unattended-run profile. */
-  automation?: SandboxAutomationConfig;
   /** Clone auth for remote-provider workspaces + runner bootstrap. The selected
    *  live GitHub service credential takes precedence; App mode never falls back
    *  to a persisted token because it may be stale static authority. */
@@ -270,7 +246,6 @@ const PROVIDER_IDS = new Set<string>([
   "e2b",
   "box",
   "modal",
-  "microvm",
   "lambda-microvm",
 ]);
 
@@ -395,46 +370,6 @@ export function sandboxConfig(): SandboxConfig {
                 logGroup: str(raw.awsLambdaMicrovm.logGroup),
               }
             : undefined,
-        firecrackerMicrovm:
-          raw?.firecrackerMicrovm && typeof raw.firecrackerMicrovm === "object"
-            ? {
-                enabled: raw.firecrackerMicrovm.enabled === true,
-                storeDir:
-                  str(raw.firecrackerMicrovm.storeDir) ||
-                  "/opt/firecracker/sandbox-store",
-                indexStart:
-                  typeof raw.firecrackerMicrovm.indexStart === "number" &&
-                  Number.isInteger(raw.firecrackerMicrovm.indexStart) &&
-                  raw.firecrackerMicrovm.indexStart >= 1 &&
-                  raw.firecrackerMicrovm.indexStart <= 253
-                    ? raw.firecrackerMicrovm.indexStart
-                    : 64,
-                indexEnd:
-                  typeof raw.firecrackerMicrovm.indexEnd === "number" &&
-                  Number.isInteger(raw.firecrackerMicrovm.indexEnd) &&
-                  raw.firecrackerMicrovm.indexEnd >= 1 &&
-                  raw.firecrackerMicrovm.indexEnd <= 253
-                    ? raw.firecrackerMicrovm.indexEnd
-                    : 127,
-              }
-            : undefined,
-        automation:
-          raw?.automation && typeof raw.automation === "object"
-            ? {
-                provider: "microvm",
-                egressAllowlist: Array.isArray(raw.automation.egressAllowlist)
-                  ? raw.automation.egressAllowlist
-                      .filter(
-                        (value: unknown): value is string =>
-                          typeof value === "string" &&
-                          value.trim().length > 0 &&
-                          value.trim().length <= 512,
-                      )
-                      .map((value: string) => value.trim())
-                      .slice(0, 128)
-                  : undefined,
-              }
-            : undefined,
         cloneCredential:
           raw?.cloneCredential?.type === "https-token" ||
           raw?.cloneCredential?.type === "none"
@@ -509,8 +444,7 @@ export function sandboxPrewarmConfig(): SandboxPrewarmConfig {
         normalizedConnectionConfigured("box") === true ||
         cfg.e2b?.apiKey ||
         process.env.E2B_API_KEY ||
-        sandboxProviderConfigured("modal") ||
-        sandboxProviderConfigured("microvm"),
+        sandboxProviderConfigured("modal"),
     );
   return {
     enabled: cfg.prewarm?.enabled ?? prewarmProviderConfigured,
@@ -531,13 +465,6 @@ export function sandboxTransport(): SandboxTransport {
   return sandboxConfig().transport === "ws" ? "ws" : "socket";
 }
 
-/** Effective unattended-run policy. The provider is deliberately not a
- *  generic selector yet: MicroVM is the only backend whose outbound policy is
- *  enforced by Open Session rather than asserted by an external control plane. */
-export function sandboxAutomationConfig(): SandboxAutomationConfig {
-  return sandboxConfig().automation || { provider: "microvm" };
-}
-
 // ── Provider capability status (per-session provider picker) ────────────────
 
 /** The providers a session can explicitly pick ("local" = no sandbox). */
@@ -547,7 +474,6 @@ export const RUNNABLE_SANDBOX_PROVIDERS = [
   "e2b",
   "box",
   "modal",
-  "microvm",
   "lambda-microvm",
 ] as const;
 export type RunnableSandboxProviderId = (typeof RUNNABLE_SANDBOX_PROVIDERS)[number];
@@ -603,10 +529,6 @@ export const SANDBOX_PROVIDER_CERTIFICATIONS: Record<
     warmRestorePassedAt: "2026-08-11",
     note: "live filesystem-image restore and full remote-run matrix passed",
   }),
-  microvm: certification({
-    behavioralPassedAt: "2026-08-10",
-    warmRestorePassedAt: "2026-08-10",
-  }),
   "lambda-microvm": certification({
     note: "live matrix has not run against a provisioned Lambda MicroVM image",
   }),
@@ -657,13 +579,12 @@ export function isRunnableSandboxProvider(v: unknown): v is RunnableSandboxProvi
  *  volume-style (cloned inside the sandbox; no host fallback for runs). */
 export function isRemoteSandboxProvider(
   v: unknown,
-): v is "daytona" | "e2b" | "box" | "modal" | "microvm" | "lambda-microvm" {
+): v is "daytona" | "e2b" | "box" | "modal" | "lambda-microvm" {
   return (
     v === "daytona" ||
     v === "e2b" ||
     v === "box" ||
     v === "modal" ||
-    v === "microvm" ||
     v === "lambda-microvm"
   );
 }
@@ -842,11 +763,9 @@ function sandboxProviderSelectionError(id: RunnableSandboxProviderId): string | 
           ? "connect Box in Workspace > Sandboxes"
           : id === "modal"
             ? "connect Modal in Workspace > Sandboxes"
-            : id === "microvm"
-              ? "run opensession sandbox enable microvm"
-              : id === "lambda-microvm"
-                ? 'set {"awsLambdaMicrovm":{"imageIdentifier":"arn:aws:lambda:...:microvm-image/..."}} in ~/.opensession-sandbox.json'
-                : 'set {"e2b":{"apiKey":"..."}} in ~/.opensession-sandbox.json (or E2B_API_KEY)';
+            : id === "lambda-microvm"
+              ? 'set {"awsLambdaMicrovm":{"imageIdentifier":"arn:aws:lambda:...:microvm-image/..."}} in ~/.opensession-sandbox.json'
+              : 'set {"e2b":{"apiKey":"..."}} in ~/.opensession-sandbox.json (or E2B_API_KEY)';
   return `Sandbox provider "${id}" is not configured: ${hint}.`;
 }
 
@@ -860,8 +779,7 @@ export function sandboxProviderConfigured(id: RunnableSandboxProviderId): boolea
     id === "docker" ||
     id === "daytona" ||
     id === "box" ||
-    id === "modal" ||
-    id === "microvm"
+    id === "modal"
   ) {
     return false;
   }
@@ -899,7 +817,6 @@ export function sandboxCapabilityStatus(): SandboxCapabilityStatus {
   const boxConfigured = enabled && normalizedConnectionConfigured("box") === true;
   const modalConfigured = enabled && normalizedConnectionConfigured("modal") === true;
   const lambdaMicrovmConfigured = enabled && Boolean(cfg.awsLambdaMicrovm?.imageIdentifier);
-  const firecrackerMicrovmConfigured = enabled && normalizedConnectionConfigured("microvm") === true;
   // Remote sandboxes must dial back over WS: healthy = a public-ingress URL or
   // an explicit callbackBaseUrl is configured, and then the row shows no note.
   // Only an actually-missing dial-back URL surfaces a caveat (no static
@@ -938,10 +855,6 @@ export function sandboxCapabilityStatus(): SandboxCapabilityStatus {
       id: "modal",
       configured: modalConfigured,
       ...(modalConfigured ? remoteNote : {}),
-    },
-    {
-      id: "microvm",
-      configured: firecrackerMicrovmConfigured,
     },
     {
       id: "lambda-microvm",

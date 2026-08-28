@@ -19,7 +19,23 @@ describe("reasoning display", () => {
 
 	test("recognizes old heading-only reasoning rows", () => {
 		expect(isLegacyReasoningHeading("**Checking deployment status**")).toBe(true);
+		expect(
+			isLegacyReasoningHeading(
+				"**Checking deployment status**\n\n**Verifying the release**",
+			),
+		).toBe(true);
 		expect(isLegacyReasoningHeading("**Done**\n\nFinal answer")).toBe(false);
+	});
+
+	test("removes bold markdown from batched reasoning headings", () => {
+		expect(
+			reasoningDisplay(
+				"**Confirming app details**\n\n**Analyzing shimmer behavior**\n\n**Clarifying usage**",
+			),
+		).toEqual({
+			title: "Confirming app details\nAnalyzing shimmer behavior\nClarifying usage",
+			body: "",
+		});
 	});
 
 	test("extracts a partial streamed heading for the shimmer", () => {

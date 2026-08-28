@@ -73,6 +73,23 @@ describe("shutdown intake fence", () => {
     expect(source).toContain("resumePendingAutomationRuns(onAutomationSession)");
   });
 
+  test("announces a restart before potentially slow shutdown work", async () => {
+    const source = await read("../../opensession.ts");
+    const shutdown = source.indexOf("const gracefulShutdown = async");
+    const announce = source.indexOf(
+      'broadcastToAll({ type: "server_restarting" });',
+      shutdown,
+    );
+    const flush = source.indexOf("setTimeout(r, 50)", announce);
+    const runtimeStop = source.indexOf("stopSessionKernelRuntime()", announce);
+    const snapshot = source.indexOf("snapshotActiveSessions()", announce);
+
+    expect(announce).toBeGreaterThan(shutdown);
+    expect(announce).toBeLessThan(flush);
+    expect(flush).toBeLessThan(runtimeStop);
+    expect(runtimeStop).toBeLessThan(snapshot);
+  });
+
   test("acknowledges restart-window composer intake as queued", async () => {
     const source = await read("./session-control-wiring.ts");
     const delivery = source.indexOf("deliverToSession: async");

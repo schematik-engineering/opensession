@@ -100,6 +100,8 @@ export interface PrDetails {
 	baseRefName: string;
 	headRefName: string;
 	headRefOid?: string;
+	/** Full owner/name of the head repository. Different from the base repository for fork PRs. */
+	headRepo?: string;
 	additions: number;
 	deletions: number;
 	changedFiles: number;

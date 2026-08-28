@@ -175,6 +175,18 @@ export function sharedCheckoutForNewSessions(repo: Repo): boolean {
   return !!repo.sharedCheckout && configuredSelfDev() !== "worktree";
 }
 
+/** Apply a person's explicit new-session choice on top of the repository's
+ * workspace-wide default. Unknown values are deliberately treated as default
+ * so older and non-web clients keep the configured behavior. */
+export function sharedCheckoutForSessionCreate(
+  repo: Repo,
+  checkoutMode: unknown,
+): boolean {
+  if (checkoutMode === "checkout") return true;
+  if (checkoutMode === "worktree") return false;
+  return sharedCheckoutForNewSessions(repo);
+}
+
 /** Actual HEAD branch of a checkout/worktree, or null (detached/missing). Sync
  *  + cheap (two tiny file reads, no git subprocess): follows the `.git`
  *  file/dir to its HEAD ref. An agent can switch branches inside its worktree

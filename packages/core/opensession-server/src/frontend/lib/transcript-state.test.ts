@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	classifyQueuedContent,
 	isClientVisibleQueuedContent,
+	mergeOptimisticTranscriptEntries,
 	mergeTranscriptEntries,
 	normalizeLegacyVoiceToolEntries,
 	orderTranscriptEntries,
@@ -27,6 +28,104 @@ describe("transcript client state", () => {
 				(e) => e.id,
 			),
 		).toEqual(["old", "new"]);
+	});
+
+	test("places an optimistic prompt by causal anchor instead of wall clock", () => {
+		const older = entry(
+			"older",
+			1,
+			1,
+			"older answer",
+			"2026-07-23T12:00:00.000Z",
+		);
+		const laterAssistant = entry(
+			"later-assistant",
+			2,
+			2,
+			"reply",
+			// The server clock is behind the browser that stamped the prompt.
+			"2026-07-23T12:00:01.000Z",
+		);
+		const optimistic = {
+			id: "outbox-prompt",
+			type: "user" as const,
+			content: "new question",
+			timestamp: "2026-07-23T12:00:10.000Z",
+			optimisticAfterEntryId: "older",
+			optimisticAfterSeq: 1,
+		};
+
+		expect(
+			mergeOptimisticTranscriptEntries(
+				[older, laterAssistant],
+				[optimistic],
+			).map((item) => item.id),
+		).toEqual(["older", "outbox-prompt", "later-assistant"]);
+	});
+
+	test("keeps a later optimistic prompt after the durable prompt it followed", () => {
+		const older = entry("older", 1, 1);
+		const firstPrompt: TranscriptEntry = {
+			id: "first-prompt",
+			seq: 2,
+			changeSeq: 2,
+			type: "user",
+			content: "first",
+			timestamp: "2026-07-23T12:00:01.000Z",
+		};
+		const secondPrompt = {
+			id: "outbox-second",
+			type: "user" as const,
+			content: "second",
+			timestamp: "2026-07-23T12:00:10.000Z",
+			optimisticAfterEntryId: "first-prompt",
+			optimisticAfterSeq: 1,
+		};
+		expect(
+			mergeOptimisticTranscriptEntries(
+				[older, firstPrompt],
+				[secondPrompt],
+			).map((item) => item.id),
+		).toEqual(["older", "first-prompt", "outbox-second"]);
+	});
+
+	test("uses the seq anchor across an unsequenced decoration", () => {
+		const decoration: TranscriptEntry = {
+			id: "divider",
+			type: "system",
+			content: "model changed",
+			timestamp: "2026-07-23T12:00:01.000Z",
+		};
+		const optimistic = {
+			id: "outbox-prompt",
+			type: "user" as const,
+			content: "question",
+			timestamp: "2026-07-23T12:00:10.000Z",
+			optimisticAfterEntryId: "missing-payload",
+			optimisticAfterSeq: 2,
+		};
+		expect(
+			mergeOptimisticTranscriptEntries(
+				[entry("one", 1, 1), decoration, entry("two", 2, 2)],
+				[optimistic],
+			).map((item) => item.id),
+		).toEqual(["one", "divider", "two", "outbox-prompt"]);
+	});
+
+	test("keeps an opening prompt first when assistant output lands early", () => {
+		const assistant = entry("assistant", 1, 1);
+		const optimistic = {
+			id: "pending-initial",
+			type: "user" as const,
+			content: "opening prompt",
+			timestamp: "2026-07-23T12:00:10.000Z",
+			optimisticAfterEntryId: null,
+		};
+		expect(
+			mergeOptimisticTranscriptEntries([assistant], [optimistic]).map(
+				(item) => item.id,
+			),
+		).toEqual(["pending-initial", "assistant"]);
 	});
 
 	test("a delayed stale frame cannot overwrite a newer rewrite", () => {

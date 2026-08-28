@@ -1961,7 +1961,31 @@ export class TranscriptStore {
       const ts = entryTs(entry);
       const changeSeq = nextChangeSeq++;
       lastTs = ts;
-      const bounded = boundEntryForStore(entry);
+      const existing = this.db
+        .query(
+          "SELECT seq, full_ref, data FROM transcript_events WHERE session_id = ? AND uuid = ?"
+        )
+        .get(sessionId, uuid) as {
+          seq: number;
+          full_ref: number | null;
+          data: string;
+        } | null;
+      // The engine later upserts the same early-persisted user row, but its
+      // provider transcript does not know which browser deliveries formed a
+      // batched turn. Preserve that immutable causal identity unless a newer
+      // writer explicitly supplies it.
+      let effectiveEntry = entry;
+      if (existing && !entry.sourceMessageIds?.length) {
+        try {
+          const prior = JSON.parse(existing.data) as TranscriptEntry;
+          if (prior.sourceMessageIds?.length)
+            effectiveEntry = {
+              ...entry,
+              sourceMessageIds: prior.sourceMessageIds,
+            };
+        } catch {}
+      }
+      const bounded = boundEntryForStore(effectiveEntry);
 
       // Blob first (need its id for full_ref).
       let fullRef: number | null = null;
@@ -1975,12 +1999,6 @@ export class TranscriptStore {
           .get(sessionId, uuid, bounded.full) as { id: number };
         fullRef = blobRow.id;
       }
-
-      const existing = this.db
-        .query(
-          "SELECT seq, full_ref FROM transcript_events WHERE session_id = ? AND uuid = ?"
-        )
-        .get(sessionId, uuid) as { seq: number; full_ref: number | null } | null;
 
       if (existing) {
         // Upsert: keep ORIGINAL seq, update data/full_ref/ts (§1 semantics).
@@ -2021,7 +2039,7 @@ export class TranscriptStore {
       }
 
       const seq = existing?.seq ?? nextSeq - 1;
-      this.writeOutlineRow(sessionId, seq, changeSeq, ts, entry);
+      this.writeOutlineRow(sessionId, seq, changeSeq, ts, effectiveEntry);
     }
 
     this.db.run(
@@ -2271,6 +2289,7 @@ const TRANSCRIPT_ENTRY_KEYS = new Set([
   "sender",
   "senderVia",
   "timestamp",
+  "turnBoundary",
   "toolInput",
   "toolName",
   "toolUseId",
@@ -2744,7 +2763,7 @@ function validateDestinationEntry(
     if (entry[key] !== undefined && typeof entry[key] !== "string")
       throw new TypeError(`Invalid transcript entry ${key} at ${index}`);
   }
-  for (const key of ["isError"]) {
+  for (const key of ["isError", "turnBoundary"]) {
     if (entry[key] !== undefined && typeof entry[key] !== "boolean")
       throw new TypeError(`Invalid transcript entry ${key} at ${index}`);
   }
@@ -2964,6 +2983,15 @@ function transcriptOutlineProjection(entry: TranscriptEntry): {
   contentLength: number;
   reviewPrNumber?: number;
 } {
+  // A background wait is model-only context, but it starts a distinct turn.
+  // Index it as a content-free user boundary so hydrated ranges cannot merge
+  // the completed status before the wait into the later continuation.
+  if (
+    entry.noticeKind === "context-injection" &&
+    entry.contextInjection?.source === "background-wait"
+  ) {
+    return { role: "user", contentLength: 0 };
+  }
   if (dropContextInjections([entry]).length === 0) {
     return { role: "hidden", contentLength: 0 };
   }

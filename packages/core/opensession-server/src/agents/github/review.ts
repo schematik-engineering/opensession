@@ -23,6 +23,7 @@ import {
 } from "./state";
 import {
   announceGithubRun,
+  bksIdFor,
   discardRecoverableGithubRun,
   GithubRunRecoveryUncertainError,
   runGithubAgent,
@@ -75,6 +76,15 @@ import {
 } from "./review-context";
 import { learnedRulesSection } from "./learned-rules";
 import { repoForFullName } from "./constants";
+import {
+  admitPublicReview,
+  isExternalPullRequest,
+  publicReviewIsolationAvailable,
+  publicReviewLimits,
+  publicReviewSizeError,
+  runToollessPublicReview,
+  verifyPublicPrInDisposableExecutor,
+} from "./public-review";
 
 const DEFAULT_REPO_DIR = defaultRepo().repo;
 
@@ -154,6 +164,8 @@ export interface ReviewResult {
   findings: number;
   /** Findings that should block merge: P0/P1 severity, or a request_changes verdict. */
   blocking: number;
+  /** The reviewed source was an external fork and used the isolated public path. */
+  publicReview?: true;
   error?: string;
 }
 
@@ -180,6 +192,7 @@ export async function runReview(
   onSessionCreated?: (bksId: string) => void,
   force = false,
   steer?: string,
+  preflightDetails?: PrAutomationDetails,
 ): Promise<ReviewResult | null> {
   if (isShuttingDown()) {
     console.log(`[github] PR #${pr.number} review parked during shutdown`);
@@ -250,30 +263,42 @@ export async function runReview(
       return null;
     };
 
-    // Look up by number before publishing the session link. If details are
-    // unavailable, no worker exists and the next delivery remains retryable.
-    const details = await getPrAutomationDetails(pr.number ? String(pr.number) : pr.headRef, pr.ghRepo || undefined);
+    // Look up by number before publishing progress. Fork identity comes from
+    // GitHub, never from the contributor-controlled branch name.
+    const details =
+      preflightDetails?.number === pr.number &&
+      (!pr.headSha || preflightDetails.headRefOid === pr.headSha)
+        ? preflightDetails
+        : await getPrAutomationDetails(
+            pr.number ? String(pr.number) : pr.headRef,
+            pr.ghRepo || undefined,
+          );
     if (!details) {
       console.warn(`[github] no PR details for #${pr.number} (${pr.headRef}); review not started`);
       return null;
     }
+    const baseGhRepo = pr.ghRepo || defaultRepo().ghRepo;
+    const publicReview = isExternalPullRequest(details, baseGhRepo);
+    if (publicReview && (!pr.headSha || details.headRefOid !== pr.headSha)) {
+      console.log(`[github] public PR #${pr.number} moved before isolated review admission`);
+      return null;
+    }
     if (cancellationRequested()) return finishCancelled();
     const title = `Review · PR #${pr.number} ${details.title}`.slice(0, 100);
-    const bksId = await announceGithubRun({
-      prNumber: pr.number,
-      ghRepo: pr.ghRepo,
-      kind: "review",
-      branch: pr.headRef,
-      title,
-      mode: "ask",
-    });
-    onSessionCreated?.(bksId);
+    const bksId = publicReview
+      ? bksIdFor(pr.number, "review", pr.ghRepo)
+      : await announceGithubRun({
+          prNumber: pr.number,
+          ghRepo: pr.ghRepo,
+          kind: "review",
+          branch: pr.headRef,
+          title,
+          mode: "ask",
+        });
+    if (!publicReview) onSessionCreated?.(bksId);
 
     // A fresh review posts a new placeholder and collapses the previous summary.
-    // Restart recovery edits the interrupted run's placeholder instead, so every
-    // server restart does not manufacture another "Outdated review" comment for
-    // the same head. Old state files only have summaryCommentId, so adopt it when
-    // its live body proves it is this head's unfinished placeholder.
+    // Public reviews intentionally expose no private Open Session URL.
     let reuseId = sameHeadRecovery ? priorRun?.progressCommentId : undefined;
     if (!reuseId && (sameHeadRecovery || legacyRecovery)) {
       const candidateId = priorRun?.progressCommentId ?? state.summaryCommentId;
@@ -286,10 +311,13 @@ export async function runReview(
     }
     const prevId = state.summaryCommentId ?? (await findActiveReviewComment(pr.number, pr.ghRepo)) ?? undefined;
     const shortSha0 = (pr.headSha || "").slice(0, 7);
+    const progressSuffix = publicReview
+      ? " · isolated public review"
+      : ` · [📺 open session](${sessionUrl(pr.number, "review", pr.ghRepo)})`;
     const placeholderId = await postOrEditComment(
       pr.number,
       reuseId,
-      `${REVIEW_MARKER}\n### 🤖 ${personaName()} review\n\n🔄 Reviewing${shortSha0 ? ` \`${shortSha0}\`` : ""}… · [📺 open session](${sessionUrl(pr.number, "review", pr.ghRepo)})`,
+      `${REVIEW_MARKER}\n### 🤖 ${personaName()} review\n\n🔄 Reviewing${shortSha0 ? ` \`${shortSha0}\`` : ""}…${progressSuffix}`,
       pr.ghRepo,
     );
     if (placeholderId) {
@@ -309,62 +337,63 @@ export async function runReview(
         await supersedeReviewComment(prevId, pr.ghRepo).catch(() => {});
       }
     }
-    // If the placeholder failed, summaryCommentId keeps prevId and postReview edits it.
     if (cancellationRequested()) return finishCancelled(placeholderId || undefined);
 
-    // Pin a read-only worktree to the PR head so the files the agent Reads are
-    // the exact tree the local git diff describes. Without that guarantee, fail
-    // the run instead of reviewing a stale shared checkout.
+    // Internal PRs keep the rich local agent worktree. A fork is never placed
+    // in a host worktree: its exact refs are verified in a disposable MicroVM
+    // and the host model receives only a bounded immutable patch with no tools.
     let cwd = prRepo?.repo || DEFAULT_REPO_DIR;
-    try {
-      cwd = await createReviewWorktreeForPrHead(pr.headRef, prRepo?.id, details.baseRefName);
-    } catch (e) {
-      console.warn(`[github] review worktree for ${pr.headRef} failed:`, e);
-      if (placeholderId)
-        await editIssueComment(
-          placeholderId,
-          `${REVIEW_MARKER}\n### 🤖 ${personaName()} review\n\n⚠️ Couldn't prepare the PR checkout to review the diff. It will retry on the next push, or ask ${personaName()} to review manually.`,
-          pr.ghRepo,
-        ).catch(() => {});
-      return { findings: 0, blocking: 0, error: "Could not prepare the PR review worktree" };
+    if (!publicReview) {
+      try {
+        cwd = await createReviewWorktreeForPrHead(
+          pr.headRef,
+          prRepo?.id,
+          details.baseRefName,
+        );
+      } catch (e) {
+        console.warn(`[github] review worktree for ${pr.headRef} failed:`, e);
+        if (placeholderId)
+          await editIssueComment(
+            placeholderId,
+            `${REVIEW_MARKER}\n### 🤖 ${personaName()} review\n\n⚠️ Couldn't prepare the PR checkout to review the diff. It will retry on the next push.`,
+            pr.ghRepo,
+          ).catch(() => {});
+        return { findings: 0, blocking: 0, error: "Could not prepare the PR review worktree" };
+      }
     }
     if (cancellationRequested()) return finishCancelled(placeholderId || undefined);
 
-    // Per-repo knobs from the PR-head worktree (.os-review.json), the author's
-    // model family for the targeted sweep, and the giant-PR summary-only mode.
-    const reviewOpts = loadReviewOptions(cwd);
+    // Public contributors cannot change review policy. Their options come from
+    // the configured base checkout and deterministic host-side execution stays off.
+    const reviewOpts = loadReviewOptions(publicReview ? prRepo?.repo || DEFAULT_REPO_DIR : cwd);
     const summaryOnly = details.changedFiles > reviewOpts.summaryOnlyOverFiles;
-    const author = authorFamilyFor(pr);
-
-    // Deterministic test-fails-on-base check, concurrent with the model review
-    // (independent work in a throwaway base worktree; awaited before posting).
-    const testOnBase: Promise<TestOnBaseResult | null> = reviewOpts.testOnBase
-      ? runTestOnBaseCheck({
-          cwd,
-          baseRefName: details.baseRefName,
-          mainCheckout: prRepo?.repo || DEFAULT_REPO_DIR,
-          sharedCheckout: prRepo?.sharedCheckout,
-          prNumber: pr.number,
-          ghRepo: pr.ghRepo,
-        }).catch((e) => {
-          console.warn(`[github] test-on-base check failed for PR #${pr.number}:`, e);
-          return null;
-        })
-      : Promise.resolve(null);
-
-    // Deterministic TruffleHog secret scan on the PR's added lines, also
-    // concurrent with the model review (fails soft when not installed).
-    const secretScan: Promise<SecretScanResult | null> = reviewOpts.secretScan
-      ? runSecretScanCheck({
-          cwd,
-          baseRefName: details.baseRefName,
-          prNumber: pr.number,
-          ghRepo: pr.ghRepo,
-        }).catch((e) => {
-          console.warn(`[github] secret scan failed for PR #${pr.number}:`, e);
-          return null;
-        })
-      : Promise.resolve(null);
+    const author = publicReview ? null : authorFamilyFor(pr);
+    const testOnBase: Promise<TestOnBaseResult | null> =
+      !publicReview && reviewOpts.testOnBase
+        ? runTestOnBaseCheck({
+            cwd,
+            baseRefName: details.baseRefName,
+            mainCheckout: prRepo?.repo || DEFAULT_REPO_DIR,
+            sharedCheckout: prRepo?.sharedCheckout,
+            prNumber: pr.number,
+            ghRepo: pr.ghRepo,
+          }).catch((e) => {
+            console.warn(`[github] test-on-base check failed for PR #${pr.number}:`, e);
+            return null;
+          })
+        : Promise.resolve(null);
+    const secretScan: Promise<SecretScanResult | null> =
+      !publicReview && reviewOpts.secretScan
+        ? runSecretScanCheck({
+            cwd,
+            baseRefName: details.baseRefName,
+            prNumber: pr.number,
+            ghRepo: pr.ghRepo,
+          }).catch((e) => {
+            console.warn(`[github] secret scan failed for PR #${pr.number}:`, e);
+            return null;
+          })
+        : Promise.resolve(null);
 
     // Continuity context — the "same reviewer returning" inputs: the PR's
     // stated intent and human conversation on every round; on re-reviews, a
@@ -402,7 +431,7 @@ export async function runReview(
     // (shared blind spots — see model-inversion.ts). Falls back to the
     // configured model for human-authored PRs.
     let reviewModel = config.model;
-    const inversion = inverseReviewModel(pr, reviewModel);
+    const inversion = publicReview ? null : inverseReviewModel(pr, reviewModel);
     if (inversion) {
       reviewModel = inversion.model;
       console.log(
@@ -451,42 +480,130 @@ export async function runReview(
         `[github] Reusing the durable model result for PR #${pr.number} after restart`,
       );
     } else {
-      finalResult = await runGithubAgent({
-        prNumber: pr.number,
-        ghRepo: pr.ghRepo,
-        kind: "review",
-        prompt,
-        cwd,
-        mode: "ask",
-        model: reviewModel,
-        branch: pr.headRef,
-        title,
-        // Each review is self-contained: it reads the CURRENT full diff from the
-        // pinned worktree and posts a fresh full assessment, so
-        // we do NOT resume the prior engine session. Resuming accumulated the whole
-        // transcript across every push, and on actively-updated PRs the context grew
-        // past the engine's 1M-token limit. The run then hard-failed with "Prompt is
-        // too long" and could not be compacted because a single over-limit exchange
-        // has nothing to drop. See the 2026-07-11 dream: 12 such failures, all
-        // github-review, e.g. PR #4638 (15 errors / 0 turns). `isUpdate` still drives
-        // the "re-review the current diff" prompt framing above.
-        resume: false,
-        detached: true,
-        recoverDetached: sameHeadRecovery || legacyRecovery,
-      });
-      if (finalResult.uncertain) {
-        preserveRecovery = true;
-        throw new Error(finalResult.error || "Detached review ownership is uncertain");
+      if (publicReview) {
+        const sizeError = publicReviewSizeError(details);
+        if (sizeError) {
+          if (placeholderId)
+            await editIssueComment(
+              placeholderId,
+              `${REVIEW_MARKER}\n### 🤖 ${personaName()} review\n\n⚠️ ${sizeError}`,
+              pr.ghRepo,
+            ).catch(() => {});
+          return { findings: 0, blocking: 0, publicReview: true, error: sizeError };
+        }
+        const limits = publicReviewLimits();
+        const diff = await getPrDiff(String(pr.number), baseGhRepo, limits.maxPatchBytes);
+        if (
+          !diff ||
+          diff.skippedFiles ||
+          !diff.baseRefOid ||
+          diff.headRefOid !== pr.headSha
+        ) {
+          const error = "GitHub could not provide one complete immutable patch within the isolated review limit.";
+          if (placeholderId)
+            await editIssueComment(
+              placeholderId,
+              `${REVIEW_MARKER}\n### 🤖 ${personaName()} review\n\n⚠️ ${error}`,
+              pr.ghRepo,
+            ).catch(() => {});
+          return { findings: 0, blocking: 0, publicReview: true, error };
+        }
+        const isolatedInput = {
+          repoId: prRepo?.id || defaultRepo().id,
+          ghRepo: baseGhRepo,
+          prNumber: pr.number,
+          author: details.author,
+          baseRef: details.baseRefName,
+          baseSha: diff.baseRefOid,
+          headSha: pr.headSha,
+          prompt,
+          model: reviewModel,
+          diff,
+        };
+        if (!publicReviewIsolationAvailable()) {
+          const message = "The isolated review environment is unavailable. No contributor code was run.";
+          if (placeholderId)
+            await editIssueComment(
+              placeholderId,
+              `${REVIEW_MARKER}\n### 🤖 ${personaName()} review\n\n⚠️ ${message}`,
+              pr.ghRepo,
+            ).catch(() => {});
+          return { findings: 0, blocking: 0, publicReview: true, error: message };
+        }
+        const admission = admitPublicReview({
+          repo: baseGhRepo,
+          prNumber: pr.number,
+          headSha: pr.headSha,
+          author: details.author,
+        });
+        if (!admission.ok) {
+          const error = "The automatic public-review budget is exhausted for this contribution.";
+          if (placeholderId)
+            await editIssueComment(
+              placeholderId,
+              `${REVIEW_MARKER}\n### 🤖 ${personaName()} review\n\n⚠️ ${error}`,
+              pr.ghRepo,
+            ).catch(() => {});
+          audit({
+            msg: "public_review_rate_limited",
+            pr_number: pr.number,
+            repo: baseGhRepo,
+            author: details.author,
+            reason: admission.reason,
+          });
+          return { findings: 0, blocking: 0, publicReview: true, error };
+        }
+        try {
+          await verifyPublicPrInDisposableExecutor(isolatedInput);
+        } catch (error) {
+          const message = "The isolated review environment is unavailable. No contributor code was run.";
+          if (placeholderId)
+            await editIssueComment(
+              placeholderId,
+              `${REVIEW_MARKER}\n### 🤖 ${personaName()} review\n\n⚠️ ${message}`,
+              pr.ghRepo,
+            ).catch(() => {});
+          console.error(`[github] isolated public review failed for PR #${pr.number}:`, error);
+          return { findings: 0, blocking: 0, publicReview: true, error: message };
+        }
+        const isolated = await runToollessPublicReview(isolatedInput);
+        finalResult = {
+          bksId,
+          text: isolated.text,
+          error: isolated.error,
+          model: isolated.model,
+        };
+      } else {
+        finalResult = await runGithubAgent({
+          prNumber: pr.number,
+          ghRepo: pr.ghRepo,
+          kind: "review",
+          prompt,
+          cwd,
+          mode: "ask",
+          model: reviewModel,
+          branch: pr.headRef,
+          title,
+          // Each review is self-contained and reads the current full diff from
+          // the pinned internal worktree. Never resume across pushed SHAs.
+          resume: false,
+          detached: true,
+          recoverDetached: sameHeadRecovery || legacyRecovery,
+        });
+        if (finalResult.uncertain) {
+          preserveRecovery = true;
+          throw new Error(finalResult.error || "Detached review ownership is uncertain");
+        }
       }
       persistReviewResult(finalResult);
     }
 
     if (cancellationRequested()) return finishCancelled(placeholderId || undefined);
-    let parsed = parseReviewOutput(finalResult.text, cwd);
-    // Fable occasionally declares a progress narration complete before it emits
-    // the review contract. Give the same engine session one bounded chance to
-    // turn its completed inspection into a postable verdict.
-    if (!finalResult.error && !isCompleteReviewOutput(parsed)) {
+    let parsed = parseReviewOutput(finalResult.text, publicReview ? undefined : cwd);
+    // Internal reviews get one bounded continuation. Public reviews are
+    // intentionally tool-less and self-contained, so they never reopen a guest
+    // or resume a credential-bearing engine to repair malformed output.
+    if (!publicReview && !finalResult.error && !isCompleteReviewOutput(parsed)) {
       if (isShuttingDown()) {
         preserveRecovery = true;
         console.log(`[github] PR #${pr.number} review repair parked for restart`);
@@ -521,7 +638,9 @@ export async function runReview(
       finalResult.error ||
       (isCompleteReviewOutput(parsed)
         ? undefined
-        : "The review did not produce the required structured verdict after one continuation.");
+        : publicReview
+          ? "The isolated review did not produce the required structured verdict."
+          : "The review did not produce the required structured verdict after one continuation.");
     const tob = await testOnBase;
     const secrets = await secretScan;
     if (cancellationRequested()) return finishCancelled(placeholderId || undefined);
@@ -566,13 +685,26 @@ export async function runReview(
       parsed.verdict = "request_changes";
       parsed.confidence = Math.min(typeof parsed.confidence === "number" ? parsed.confidence : 2, 2);
     }
-    await postReview(pr, details, parsed, finalResult.text, reviewError, forceFreshReview, finalResult.model, reviewOpts, summaryOnly, testOnBaseSection(tob) + secretScanSection(secrets));
+    await postReview(
+      pr,
+      details,
+      parsed,
+      finalResult.text,
+      reviewError,
+      forceFreshReview,
+      finalResult.model,
+      reviewOpts,
+      summaryOnly,
+      testOnBaseSection(tob) + secretScanSection(secrets),
+      publicReview,
+    );
 
     const outcome: ReviewResult = {
       verdict: parsed?.verdict,
       confidence: parsed?.confidence,
       findings: parsed?.findings?.length || 0,
       blocking: reviewBlockingCount(parsed),
+      ...(publicReview ? { publicReview: true as const } : {}),
       error: reviewError,
     };
 
@@ -587,6 +719,8 @@ export async function runReview(
         findings: outcome.findings,
         blocking: outcome.blocking,
         is_update: isUpdate,
+        public_review: publicReview,
+        isolation: publicReview ? "disposable_executor_toolless" : "host_worktree",
         model: finalResult.model,
       });
     }
@@ -661,6 +795,7 @@ async function postReview(
   opts: ReviewOptions = REVIEW_OPTION_DEFAULTS,
   summaryOnly = false,
   extraSummary = "",
+  publicReview = false,
 ): Promise<void> {
   const knownCommentId = getOrInitPrState(pr.number, pr.headRef, pr.ghRepo).summaryCommentId;
   const shortSha = (pr.headSha || "").slice(0, 7);
@@ -703,9 +838,14 @@ async function postReview(
     typeof parsed?.confidence === "number" ? ` · confidence ${parsed.confidence}/5` : "";
   const findingCount = findings.length;
   // Next-steps footer pointing at the action labels.
-  const tip = findingCount
-    ? "> 💡 Labels: **`os-auto-fix`** — I fix these and push until CI passes · **`os-adversarial`** — deeper two-pass review · **`os-simplify`** — quality cleanup pass."
-    : "> 💡 Labels: **`os-adversarial`** — deeper two-pass review · **`os-simplify`** — quality cleanup pass · **`os-auto-fix`** — fix anything outstanding and push until CI passes.";
+  const tip = publicReview
+    ? "> 🔒 Reviewed from an immutable patch after the fork commits were verified in a disposable MicroVM. No contributor code ran on Open Session's host."
+    : findingCount
+      ? "> 💡 Labels: **`os-auto-fix`** — I fix these and push until CI passes · **`os-adversarial`** — deeper two-pass review · **`os-simplify`** — quality cleanup pass."
+      : "> 💡 Labels: **`os-adversarial`** — deeper two-pass review · **`os-simplify`** — quality cleanup pass · **`os-auto-fix`** — fix anything outstanding and push until CI passes.";
+  const footer = publicReview
+    ? `<sub>Reviewed \`${shortSha}\`${modelUsed ? ` · ${modelLabel(modelUsed)}` : ""} · isolated public review</sub>`
+    : `<sub>Reviewed \`${shortSha}\`${modelUsed ? ` · ${modelLabel(modelUsed)}` : ""} · earlier reviews collapse above · [open session](${sessionUrl(pr.number, "review", pr.ghRepo)})</sub>`;
   const composed = [
     REVIEW_MARKER,
     `### 🤖 ${personaName()} review${verdict}${confidence}`,
@@ -715,7 +855,7 @@ async function postReview(
     findingCount ? `_${findingCount} inline comment${findingCount === 1 ? "" : "s"} below._` : "",
     withheld ? `<sub>${withheld} low-signal finding${withheld === 1 ? "" : "s"} withheld by repo config / feedback history.</sub>` : "",
     tip,
-    `<sub>Reviewed \`${shortSha}\`${modelUsed ? ` · ${modelLabel(modelUsed)}` : ""} · earlier reviews collapse above · [open session](${sessionUrl(pr.number, "review", pr.ghRepo)})</sub>`,
+    footer,
   ]
     .filter((l) => l !== "")
     .join("\n");
@@ -776,7 +916,7 @@ async function postReview(
 
   // Formal review with inline comments, anchored to the diff.
   if (findings.length && pr.headSha) {
-    const diff = await getPrDiff(pr.headRef, pr.ghRepo || undefined);
+    const diff = await getPrDiff(String(pr.number), pr.ghRepo || undefined);
     const commitId = diff?.headRefOid || pr.headSha;
     const onDiff = diff ? filterToDiff(findings, diff.patch) : findings;
     const fresh = onDiff.filter((f) => !openBotAnchors.has(`${f.path}:${f.line}`));

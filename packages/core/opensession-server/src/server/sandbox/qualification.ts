@@ -1,6 +1,5 @@
 /** Provider qualification orchestration. */
 
-import { existsSync } from "fs";
 import { audit } from "../audit";
 import {
   setSandboxConnectionQualification,
@@ -103,37 +102,6 @@ async function qualifyDocker(): Promise<void> {
   }
 }
 
-async function qualifyMicrovm(): Promise<void> {
-  const cfg = sandboxConfig().firecrackerMicrovm;
-  const required = [
-    "/dev/kvm",
-    "/opt/firecracker/firecracker",
-    "/opt/firecracker/vmlinux",
-    cfg ? `${cfg.storeDir}/golden.ext4` : "",
-    cfg ? `${cfg.storeDir}/golden.mem` : "",
-    cfg ? `${cfg.storeDir}/golden.vmstate` : "",
-  ].filter(Boolean);
-  if (!cfg?.enabled) {
-    throw Object.assign(new Error("Local MicroVM runtime is not enabled"), {
-      code: "MICROVM_NOT_ENABLED",
-    });
-  }
-  const missing = required.filter((path) => !existsSync(path));
-  if (missing.length) {
-    throw Object.assign(new Error("Local MicroVM runtime is incomplete"), {
-      code: "MICROVM_PREREQUISITE_MISSING",
-    });
-  }
-  const version = await command(["/opt/firecracker/firecracker", "--version"], 15_000);
-  if (version.exitCode !== 0) {
-    throw Object.assign(new Error("Firecracker failed its runtime check"), {
-      code: "MICROVM_RUNTIME_FAILED",
-    });
-  }
-  const { qualifyMicrovmRuntime } = await import("./adapters/microvm");
-  await qualifyMicrovmRuntime();
-}
-
 function failureCode(error: unknown): string {
   const code = (error as { code?: unknown })?.code;
   if (typeof code === "string" && /^[A-Z0-9_]{3,80}$/.test(code)) return code;
@@ -159,9 +127,6 @@ function failureSummary(code: string): string {
     DOCKER_NOT_INSTALLED: "Install Docker, then run the enable command again.",
     DOCKER_DAEMON_UNAVAILABLE: "Start Docker and make it available to the Open Session service user.",
     DOCKER_IMAGE_MISSING: "Build or install the Open Session sandbox image, then test again.",
-    MICROVM_NOT_ENABLED: "Run the Local MicroVM enable command, then test again.",
-    MICROVM_PREREQUISITE_MISSING: "Repair the Firecracker runtime and golden image, then test again.",
-    MICROVM_RUNTIME_FAILED: "Firecracker is installed but did not run successfully.",
   };
   return summaries[code] || "Qualification failed. Review provider and ingress diagnostics, then retry.";
 }
@@ -189,7 +154,6 @@ export async function qualifySandboxConnection(
     }
     update({ stage: "Checking provider", progress: 20 });
     if (provider === "docker") await qualifyDocker();
-    else if (provider === "microvm") await qualifyMicrovm();
     else if (provider === "daytona") {
       const { qualifyDaytonaConnection } = await import("./adapters/daytona");
       await qualifyDaytonaConnection();

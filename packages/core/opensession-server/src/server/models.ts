@@ -6,12 +6,13 @@
 import { existsSync, readFileSync } from "fs";
 import { writeJsonAtomic } from "./shared/atomic-write";
 import {
+  canonicalProviderPickerModelId,
   configuredPickerModels,
   modelProviders,
   waferModelEfforts,
   waferModelName,
   BRIDGE_PROVIDER_IDS,
-  OX_ALPHA_MODEL_ID,
+  GLM_5_3_MODEL_ID,
 } from "./model-providers";
 import { stateDir } from "./paths";
 import { piEngineEnabled, piPickerModels } from "./pi-config";
@@ -64,7 +65,8 @@ export function modelEfforts(model: string): SessionEffort[] {
   // Every engine exposes the same variants as its Pi sibling: our
   // effort levels map 1:1 onto pi's ThinkingLevel (pi-runner.ts) and onto the
   // direct SDKs' reasoning levels.
-  const id = model.replace(ENGINE_PREFIX_RE, "");
+  const rawId = model.replace(ENGINE_PREFIX_RE, "");
+  const id = canonicalProviderPickerModelId(`pi/${rawId}`).slice("pi/".length);
   const slash = id.indexOf("/");
   const provider =
     slash === -1
@@ -82,7 +84,7 @@ export function modelEfforts(model: string): SessionEffort[] {
     if (/^claude-(?:fable|opus|sonnet)-/.test(slug)) return CLAUDE_EFFORTS;
   }
   if (provider === "cerebras" && slug === "gpt-oss-120b") return ["low", "medium", "high"];
-  if (provider === "openrouter" && slug === OX_ALPHA_MODEL_ID) return ["low", "high", "max"];
+  if (provider === "openrouter" && slug === GLM_5_3_MODEL_ID) return ["low", "high", "max"];
   // Wafer's ladder is per model (its catalog owns the table) and doubles as
   // the thinking switch: Wafer serves every model with reasoning off until a
   // request carries an effort.
@@ -495,7 +497,10 @@ function prettifyModelSlug(slug: string): string {
 export function piModelLabel(id: string): string {
   const preset = modelPreset(id);
   if (preset) return preset.label;
-  const tail = id.split("/").pop() || id;
+  const canonical = canonicalProviderPickerModelId(
+    id.startsWith("pi/") ? id : `pi/${id}`
+  );
+  const tail = canonical.split("/").pop() || id;
   const native = KNOWN_MODELS.find(
     (m) => m.provider !== "pi" && m.id === tail
   );
@@ -845,6 +850,11 @@ export function toPiModel(model?: string | null): string | undefined {
     : requested;
   const preset = modelPreset(pickerId);
   if (preset) return toPiModel(preset.model);
+  if (requested.includes("/")) {
+    const piId = requested.startsWith("pi/") ? requested : `pi/${requested}`;
+    const canonical = canonicalProviderPickerModelId(piId);
+    if (canonical !== piId) return canonical;
+  }
   if (requested.startsWith("pi/")) {
     const match = requested.match(/^pi\/openai\/(.+)$/);
     const replacement = match && RETIRED_CODEX_REROUTE[match[1]];
@@ -1058,8 +1068,8 @@ export function resolveModel(input: string): ModelInfo | null {
     }
   }
   // Provider-backed picker ids can carry extra routing segments that are not
-  // part of the model's human name (`pi/openrouter/stealth/ox-alpha`). Agents
-  // naturally pass the visible final slug (`ox-alpha`) to create_session. Let
+  // part of the model's human name (`pi/openrouter/z-ai/glm-5.3`). Agents
+  // naturally pass the visible final slug (`glm-5.3`) to create_session. Let
   // that shorthand resolve when it names exactly one selectable Pi model;
   // collisions stay rejected rather than silently choosing a provider.
   const pickerAlias = value.replace(/\s+/g, "-");

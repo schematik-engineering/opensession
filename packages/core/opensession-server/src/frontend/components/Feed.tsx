@@ -24,7 +24,6 @@ import { RepoTile, repoLabel } from "./RepoTile";
 import { useCurrentUser } from "./UserPicker";
 import { usePeople } from "../lib/people";
 import { UserAvatar } from "./UserAvatar";
-import { personLensFilter, setFilter } from "../lib/sidebar-filter";
 import { presenceState, StatusDot, useTeamPresence } from "./TeamPresence";
 import { EmptyState, ListSkeleton } from "../ui/state";
 import { Button } from "../ui/button";
@@ -41,8 +40,9 @@ import { PEOPLE_SECTION_LABEL } from "../lib/people-classes";
  * destination of its own. There is no per-person page to open, since
  * everything you would put on one already exists as their sidebar.
  *
- * So picking a teammate does two things at once, which is the point: it
- * narrows the feed to their merges, and it hands you their sidebar.
+ * Picking a teammate narrows this feed without reconfiguring the global
+ * sidebar. A top-bar filter should update the page beneath it, not make the
+ * rest of the app jump at the same time.
  *
  * The row is people, and only people. GitHub review teams used to sit at the
  * end of it, but a team is a routing rule for reviews rather than a group
@@ -120,19 +120,13 @@ export function Feed({ sessions, teamViewing, headerActionsEl, onSelect }: Props
 	const [personPrs, setPersonPrs] = useState<RecentPr[]>([]);
 	const [personPrsLoading, setPersonPrsLoading] = useState(false);
 
-	// Picking a person is also the sidebar you turn to. Mark their request in
-	// flight before changing scope, rather than waiting for the next effect, so
-	// the first filtered paint cannot make the same false empty-state claim.
+	// Mark the request in flight before changing scope, rather than waiting for
+	// the next effect, so the first filtered paint cannot make the same false
+	// empty-state claim.
 	const pick = (next: Scope) => {
 		setPersonPrs([]);
 		setPersonPrsLoading(next.kind === "person");
 		setScope(next);
-		setFilter({
-			person: personLensFilter(
-				next.kind === "person" ? next.key : "everyone",
-				currentUser,
-			),
-		});
 	};
 	// Repos that ship without pull requests — Open Session's own — say what
 	// they shipped in commits instead, and land in the same list.
@@ -247,9 +241,8 @@ export function Feed({ sessions, teamViewing, headerActionsEl, onSelect }: Props
 						key={member.key}
 						type="button"
 						className={cn(
-							"focus-ring flex min-h-8 shrink-0 items-center gap-1 rounded-md p-1 text-supporting font-medium text-fg transition-colors hover:bg-hover phone:min-h-11",
-							selected &&
-								"bg-accent pr-1.5 font-semibold text-on-accent hover:bg-accent-hover",
+							"focus-ring flex min-h-8 shrink-0 items-center gap-1 rounded-md p-1 text-supporting font-medium text-fg transition-[background-color,color,scale] duration-[var(--dur-micro)] ease-[var(--ease)] hover:bg-hover active:scale-[0.96] phone:min-h-11 motion-reduce:transform-none",
+							selected && "bg-selected pr-1.5 font-semibold hover:bg-pressed",
 						)}
 						onClick={() =>
 							pick(
@@ -265,15 +258,23 @@ export function Feed({ sessions, teamViewing, headerActionsEl, onSelect }: Props
 							<UserAvatar name={member.person.name} size={24} edge={false} />
 							<StatusDot
 								state={presenceState(member)}
-								ring={selected ? "var(--accent)" : "var(--bg-surface)"}
+								ring="var(--bg-surface)"
 								size={7}
 							/>
 						</span>
-						{selected && (
-							<span className="max-w-24 truncate">
+						<span
+							aria-hidden={!selected}
+							className={cn(
+								"grid min-w-0 transition-[grid-template-columns,opacity] duration-[var(--dur)] ease-[var(--ease)] motion-reduce:transition-none",
+								selected
+									? "grid-cols-[1fr] opacity-100"
+									: "grid-cols-[0fr] opacity-0",
+							)}
+						>
+							<span className="min-w-0 max-w-24 overflow-hidden whitespace-nowrap">
 								{member.isYou ? "You" : personLabel(member.key)}
 							</span>
-						)}
+						</span>
 					</button>
 				);
 			})}
@@ -353,7 +354,7 @@ export function Feed({ sessions, teamViewing, headerActionsEl, onSelect }: Props
 			<div data-page-scroll className="min-h-0 flex-1 overflow-y-auto">
 				<div className="mx-auto w-full max-w-[920px] px-6 pb-15 pt-6 phone:px-4 phone:pb-12 phone:pt-[calc(var(--header-h)+18px)]">
 					{(repoOptions.length > 1 || team.length > 0) && (
-						<div className="mb-5 hidden min-w-0 items-center gap-1 overflow-x-auto phone:flex">
+						<div className="mb-5 hidden min-w-0 items-center gap-1 overflow-x-auto phone:flex [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
 							{repoOptions.length > 1 && renderRepoPicker("start")}
 							{team.length > 0 && renderMemberPicker()}
 						</div>

@@ -6,7 +6,6 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
-  statfsSync,
 } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -224,228 +223,6 @@ async function enableDocker(): Promise<number> {
   return 0;
 }
 
-function architecture(): "x64" | "arm64" | null {
-  if (process.arch === "x64" || process.arch === "arm64") return process.arch;
-  return null;
-}
-
-async function downloadPublishedGolden(storeDir: string): Promise<"installed" | "missing" | "failed"> {
-  const arch = architecture();
-  if (!arch) return "missing";
-  const version = await releaseVersion();
-  const base =
-    process.env.OPENSESSION_MICROVM_GOLDEN_URL ||
-    `https://github.com/tellahq/opensession/releases/download/v${version}/opensession-microvm-golden-linux-${arch}.tar.zst`;
-  const scratch = mkdtempSync(join(tmpdir(), "opensession-microvm-golden-"));
-  const archive = join(scratch, "golden.tar.zst");
-  try {
-    const download = await run(["curl", "-fL", "--retry", "2", "-o", archive, base]);
-    if (download.code !== 0) return "missing";
-    const checksum = await run(["curl", "-fL", "--retry", "2", "-o", `${archive}.sha256`, `${base}.sha256`]);
-    const signature = await run(["curl", "-fL", "--retry", "2", "-o", `${archive}.sig`, `${base}.sig`]);
-    const certificate = await run(["curl", "-fL", "--retry", "2", "-o", `${archive}.pem`, `${base}.pem`]);
-    if (checksum.code !== 0 || signature.code !== 0 || certificate.code !== 0) {
-      fail("published golden is missing checksum or signature metadata");
-      return "failed";
-    }
-    const expected = (await Bun.file(`${archive}.sha256`).text()).trim().split(/\s+/)[0];
-    const actual = new Bun.CryptoHasher("sha256").update(await Bun.file(archive).arrayBuffer()).digest("hex");
-    if (!expected || actual !== expected) {
-      fail("published golden checksum verification failed");
-      return "failed";
-    }
-    if (!Bun.which("cosign")) {
-      fail("cosign is required to verify the published MicroVM golden");
-      return "failed";
-    }
-    const verify = await run([
-      "cosign",
-      "verify-blob",
-      "--signature",
-      `${archive}.sig`,
-      "--certificate",
-      `${archive}.pem`,
-      "--certificate-identity-regexp",
-      "^https://github.com/tellahq/opensession/.github/workflows/sandbox-release.yml@refs/.*$",
-      "--certificate-oidc-issuer",
-      "https://token.actions.githubusercontent.com",
-      archive,
-    ]);
-    if (verify.code !== 0) {
-      fail("published golden provenance verification failed");
-      return "failed";
-    }
-    const install = await run([
-      "sudo",
-      "-n",
-      "bash",
-      "-lc",
-      `mkdir -p '${storeDir}' && tar --zstd -xf '${archive}' -C '${storeDir}'`,
-    ]);
-    if (install.code !== 0) {
-      fail("could not install the verified MicroVM golden", install.stderr);
-      return "failed";
-    }
-    ok("verified release golden", base);
-    return "installed";
-  } finally {
-    rmSync(scratch, { recursive: true, force: true });
-  }
-}
-
-function microvmStoreCandidates(): string[] {
-  const explicit = process.env.OPENSESSION_MICROVM_STORE_DIR?.trim();
-  if (explicit) return [explicit];
-  return [
-    "/opt/firecracker/sandbox-store",
-    "/opt/firecracker/store/opensession-sandboxes",
-  ];
-}
-
-async function reflinkCapableStore(storeDir: string): Promise<boolean> {
-  if (!storeDir.startsWith("/opt/firecracker/")) return false;
-  const created = await run(["sudo", "-n", "install", "-d", "-m", "0755", storeDir]);
-  if (created.code !== 0) return false;
-  const localScratch = mkdtempSync(join(tmpdir(), "opensession-cow-source-"));
-  const source = join(localScratch, "source");
-  let hostScratch = "";
-  try {
-    await Bun.write(source, "opensession-cow-check");
-    const made = await run([
-      "sudo",
-      "-n",
-      "mktemp",
-      "-d",
-      `${storeDir}/.opensession-cow-check.XXXXXX`,
-    ]);
-    hostScratch = made.stdout.trim();
-    if (made.code !== 0 || !hostScratch.startsWith(`${storeDir}/.opensession-cow-check.`)) {
-      return false;
-    }
-    const installed = await run([
-      "sudo",
-      "-n",
-      "install",
-      "-m",
-      "0600",
-      source,
-      `${hostScratch}/source`,
-    ]);
-    if (installed.code !== 0) return false;
-    return (
-      await run([
-        "sudo",
-        "-n",
-        "cp",
-        "--reflink=always",
-        `${hostScratch}/source`,
-        `${hostScratch}/clone`,
-      ])
-    ).code === 0;
-  } finally {
-    if (hostScratch.startsWith(`${storeDir}/.opensession-cow-check.`)) {
-      await run([
-        "sudo",
-        "-n",
-        "rm",
-        "-f",
-        `${hostScratch}/source`,
-        `${hostScratch}/clone`,
-      ]).catch(() => undefined);
-      await run(["sudo", "-n", "rmdir", hostScratch]).catch(() => undefined);
-    }
-    rmSync(localScratch, { recursive: true, force: true });
-  }
-}
-
-async function microvmPrerequisites(): Promise<string | undefined> {
-  let valid = true;
-  if (process.platform !== "linux") {
-    fail("Local MicroVM requires Linux");
-    valid = false;
-  } else ok("Linux host");
-  if (!existsSync("/dev/kvm")) {
-    fail("/dev/kvm is unavailable", "enable KVM/nested virtualization on this host");
-    valid = false;
-  } else ok("KVM device");
-  const cpuInfo = existsSync("/proc/cpuinfo") ? readFileSync("/proc/cpuinfo", "utf-8") : "";
-  if (!/\b(vmx|svm)\b/.test(cpuInfo)) {
-    fail("CPU virtualization flags are unavailable");
-    valid = false;
-  } else ok("CPU virtualization");
-  if (!existsSync("/sys/fs/cgroup/cgroup.controllers")) {
-    fail("cgroup v2 is unavailable");
-    valid = false;
-  } else ok("cgroup v2");
-  for (const [name, hint] of [
-    ["docker", "install Docker Engine to build the credential-free guest"],
-    ["curl", "install curl"],
-    ["sudo", "install sudo and configure non-interactive host setup access"],
-  ] as const) {
-    if (!(await requireCommand(name, hint))) valid = false;
-  }
-  if (!existsSync("/opt/firecracker/firecracker") || !existsSync("/opt/firecracker/vmlinux")) {
-    fail("Firecracker runtime is incomplete", "install /opt/firecracker/firecracker and /opt/firecracker/vmlinux");
-    valid = false;
-  } else ok("Firecracker runtime and kernel");
-  const disk = statfsSync(REPO_ROOT);
-  const freeGb = Number(disk.bavail * disk.bsize) / 1024 ** 3;
-  if (freeGb < 30) {
-    fail("less than 30 GB of free disk is available", `${freeGb.toFixed(1)} GB free`);
-    valid = false;
-  } else ok("disk capacity", `${freeGb.toFixed(0)} GB free`);
-  let storeDir: string | undefined;
-  if (valid) {
-    for (const candidate of microvmStoreCandidates()) {
-      if (await reflinkCapableStore(candidate)) {
-        storeDir = candidate;
-        break;
-      }
-    }
-    if (!storeDir) {
-      fail(
-        "no MicroVM store supports copy-on-write clones",
-        "mount XFS with reflink=1 or Btrfs under /opt/firecracker, or set OPENSESSION_MICROVM_STORE_DIR",
-      );
-      valid = false;
-    } else ok("copy-on-write MicroVM store", storeDir);
-  }
-  return valid ? storeDir : undefined;
-}
-
-async function enableMicrovm(): Promise<number> {
-  heading("Local MicroVM sandbox");
-  const storeDir = await microvmPrerequisites();
-  if (!storeDir) return 1;
-  updateSandboxConfig({
-    firecrackerMicrovm: { enabled: true, storeDir, indexStart: 64, indexEnd: 127 },
-  });
-  const published = await downloadPublishedGolden(storeDir);
-  if (published === "failed") return 1;
-  if (published === "missing") {
-    warn("no matching release golden; building a verified local fallback from this checkout");
-    const build = await runInherit(
-      ["sudo", "-n", "bash", `${REPO_ROOT}/deploy/sandbox/microvm/refresh-sandbox-golden.sh`, storeDir],
-      REPO_ROOT,
-    );
-    if (build !== 0) {
-      fail("MicroVM golden build failed");
-      return 1;
-    }
-  }
-  if (!(await installPersistentHostFirewall())) return 1;
-  connectSandboxProvider("microvm", {});
-  heading("Qualification");
-  try {
-    await qualifySandboxConnection("microvm");
-  } catch (error) {
-    fail("Local MicroVM needs attention", error instanceof Error ? error.message : String(error));
-    return 1;
-  }
-  ok("Local MicroVM is Ready", "select it in Workspace → Sandboxes");
-  return 0;
-}
-
 async function installCaddyIngress(originValue: string | undefined): Promise<number> {
   let origin: string;
   try {
@@ -539,17 +316,17 @@ export async function sandbox(args: string[]): Promise<number> {
     return installCaddyIngress(args[2]);
   }
   if (!isWorkspaceSandboxProvider(provider)) {
-    fail("usage: opensession sandbox enable docker|microvm");
-    info(dim("Also available: opensession sandbox test|disable docker|daytona|box|modal|microvm"));
+    fail("usage: opensession sandbox enable docker");
+    info(dim("Also available: opensession sandbox test|disable docker|daytona|box|modal"));
     info(dim("Provider accounts are connected in Workspace → Sandboxes."));
     return 1;
   }
   if (action === "enable") {
-    if (provider !== "docker" && provider !== "microvm") {
+    if (provider !== "docker") {
       fail(`${provider} credentials are connected in Workspace → Sandboxes`);
       return 1;
     }
-    return provider === "docker" ? enableDocker() : enableMicrovm();
+    return enableDocker();
   }
   if (action === "disable") {
     if (!getSandboxConnection(provider)) {
@@ -578,7 +355,7 @@ export async function sandbox(args: string[]): Promise<number> {
       return 1;
     }
   }
-  fail("usage: opensession sandbox enable docker|microvm");
-  info(dim("Also available: opensession sandbox test|disable docker|daytona|box|modal|microvm"));
+  fail("usage: opensession sandbox enable docker");
+  info(dim("Also available: opensession sandbox test|disable docker|daytona|box|modal"));
   return 1;
 }

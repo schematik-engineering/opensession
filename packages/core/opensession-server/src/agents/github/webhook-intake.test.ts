@@ -32,7 +32,12 @@ if (!isIsolatedChild) {
   process.env.ENABLE_SLACK_AGENT = "false";
 
   const { handleGithubWebhook } = await import("./webhook-intake");
-  const { githubDeliveriesStore, loadGithubDeliveries } = await import("./webhook-deliveries");
+  const {
+    claimGithubDelivery,
+    githubDeliveriesStore,
+    loadGithubDeliveries,
+    releaseGithubDelivery,
+  } = await import("./webhook-deliveries");
   const { writeJsonAtomic } = await import("../../server/shared/atomic-write");
 
   afterAll(() => {
@@ -70,6 +75,24 @@ if (!isIsolatedChild) {
       }));
 
       expect(response.status).toBe(413);
+    });
+
+    test("returns retryable failure while the same delivery is still admitting", async () => {
+      const body = "{}";
+      const deliveryId = "in-flight-delivery";
+      expect(claimGithubDelivery(deliveryId)).toBe("claimed");
+      const response = await handleGithubWebhook(new Request("http://localhost/github/webhook", {
+        method: "POST",
+        body,
+        headers: {
+          "x-hub-signature-256": signature(body),
+          "x-github-delivery": deliveryId,
+          "x-github-event": "pull_request",
+        },
+      }));
+      releaseGithubDelivery(deliveryId);
+
+      expect(response.status).toBe(503);
     });
 
     test("returns a duplicate response for a persisted signed delivery without dispatching", async () => {

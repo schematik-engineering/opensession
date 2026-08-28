@@ -16,7 +16,10 @@ import {
   TranscriptStore,
   __setTranscriptStoreForTest,
 } from "./transcript-store";
-import { transcriptLineUser } from "./transcript-persistence";
+import {
+  transcriptLineAssistantText,
+  transcriptLineUser,
+} from "./transcript-persistence";
 import {
   SessionKernelStore,
   __setSessionKernelStoreForTest,
@@ -498,6 +501,37 @@ describe("HostHandle model recovery", () => {
 		}
 	});
 
+  test("keeps auxiliary worker frames out of the parent session", async () => {
+    const root = mkdtempSync(join(tmpdir(), "host-client-auxiliary-test-"));
+    roots.push(root);
+    const store = new TranscriptStore(join(root, "transcripts.db"), { actorOwned: true });
+    const previous = __setTranscriptStoreForTest(store);
+    const spec: RunHostSpec = {
+      hostId: "rh-workflow-worker",
+      osSessionId: "os-parent-session",
+      lifecycle: "auxiliary",
+      transcriptTarget: "none",
+      prompt: "review",
+      cwd: "/tmp",
+    };
+    const handle = makeHandle(spec);
+    try {
+      expect(hostRunBusy(spec.osSessionId)).toBe(false);
+      (handle as any).handleMsg({
+        t: "transcript",
+        engineSessionId: "engine-workflow-worker",
+        lines: [transcriptLineUser("inspect", "workflow-prompt")],
+      });
+      await handle.waitForPendingProjections();
+
+      expect(store.readTail("engine-workflow-worker", 10).entries).toEqual([]);
+      expect(store.readTail(spec.osSessionId, 10).entries).toEqual([]);
+    } finally {
+      (handle as any).finish();
+      __setTranscriptStoreForTest(previous);
+    }
+  });
+
   test("closes after an end frame that follows a failed transcript projection", async () => {
     const root = mkdtempSync(join(tmpdir(), "host-client-projection-failure-test-"));
     roots.push(root);
@@ -632,6 +666,64 @@ describe("HostHandle model recovery", () => {
 			kernelStore.close();
 		}
 	});
+
+  test("waits for an ended host's transcript catch-up before closing", async () => {
+    const root = mkdtempSync(join(tmpdir(), "host-client-ended-catchup-test-"));
+    roots.push(root);
+    const store = new TranscriptStore(join(root, "transcripts.db"), { actorOwned: true });
+    const previous = __setTranscriptStoreForTest(store);
+    const kernelStore = new SessionKernelStore(join(root, "kernel.db"));
+    const previousKernel = __setSessionKernelStoreForTest(kernelStore);
+    const spec: RunHostSpec = {
+      hostId: "rh-ended-catchup",
+      osSessionId: "os-ended-catchup",
+      prompt: "test",
+      cwd: "/tmp",
+    };
+    registerTestRun(spec.osSessionId, spec.hostId);
+    const handle = makeHandle(spec);
+    const sent: unknown[] = [];
+    (handle as any).conn = {
+      send: (message: unknown) => {
+        sent.push(message);
+        return true;
+      },
+      close: () => {},
+    };
+    try {
+      (handle as any).handleMsg({
+        t: "hello",
+        hostId: spec.hostId,
+        pid: 1,
+        osSessionId: spec.osSessionId,
+        state: "ended",
+        pendingAsks: [],
+        done: { type: "done", result: "finished while detached" },
+      });
+
+      expect(handle.ended).toBe(false);
+      expect(sent).not.toContainEqual({ t: "shutdown" });
+
+      (handle as any).handleMsg({
+        t: "transcript",
+        engineSessionId: spec.osSessionId,
+        lines: [transcriptLineAssistantText("final summary", "summary-late")],
+      });
+      (handle as any).handleMsg({ t: "catchup_complete" });
+      await handle.waitForPendingProjections();
+
+      expect(store.readTail(spec.osSessionId, 10).entries).toMatchObject([
+        { id: "summary-late", type: "assistant", content: "final summary" },
+      ]);
+      expect(handle.ended).toBe(true);
+      expect(sent).toContainEqual({ t: "shutdown" });
+    } finally {
+      (handle as any).finish();
+      __setTranscriptStoreForTest(previous);
+      __setSessionKernelStoreForTest(previousKernel);
+      kernelStore.close();
+    }
+  });
 
 	test("rejects transcript frames while a different live run owns the session", () => {
 		const root = mkdtempSync(join(tmpdir(), "host-client-superseded-transcript-test-"));

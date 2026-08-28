@@ -13,7 +13,7 @@ describe("sandbox real-work scorecard", () => {
     const scorecard = buildSandboxScorecard([
       event("session_turn_metric", {
         environment: "sandbox",
-        provider: "microvm",
+        provider: "daytona",
         start_to_first_token_ms: 500,
         duration_ms: 1_000,
         outcome: "ok",
@@ -40,7 +40,7 @@ describe("sandbox real-work scorecard", () => {
       }, day));
       events.push(event("session_turn_metric", {
         environment: "sandbox",
-        provider: "microvm",
+        provider: "daytona",
         sandbox_ready_ms: 90,
         start_to_first_event_ms: 300,
         start_to_first_token_ms: 900,
@@ -50,13 +50,13 @@ describe("sandbox real-work scorecard", () => {
     }
     for (let i = 0; i < SCORECARD_THRESHOLDS.minimumPreviewsPerEnvironment; i++) {
       events.push(event("preview_ready_metric", { environment: "worktree", provider: "host", ready_ms: 2_000 }));
-      events.push(event("preview_ready_metric", { environment: "sandbox", provider: "microvm", ready_ms: 1_900 }));
+      events.push(event("preview_ready_metric", { environment: "sandbox", provider: "daytona", ready_ms: 1_900 }));
     }
     for (let i = 0; i < SCORECARD_THRESHOLDS.minimumSandboxResumes; i++) {
-      events.push(event("sandbox_resume_metric", { provider: "microvm", resume_ms: 800, outcome: "ok" }));
+      events.push(event("sandbox_resume_metric", { provider: "daytona", resume_ms: 800, outcome: "ok" }));
     }
     for (let i = 0; i < SCORECARD_THRESHOLDS.minimumRestartAttempts; i++) {
-      events.push(event("sandbox_restart_survival_metric", { provider: "microvm", recovery_ms: 900, outcome: "ok" }));
+      events.push(event("sandbox_restart_survival_metric", { provider: "daytona", recovery_ms: 900, outcome: "ok" }));
     }
 
     const scorecard = buildSandboxScorecard(events, { now });
@@ -71,15 +71,15 @@ describe("sandbox real-work scorecard", () => {
     for (let i = 0; i < 20; i++) {
       const day = 6 + (i % 5);
       events.push(event("session_turn_metric", { environment: "worktree", provider: "host", start_to_first_token_ms: 500, outcome: "ok" }, day));
-      events.push(event("session_turn_metric", { environment: "sandbox", provider: "microvm", start_to_first_token_ms: 900, outcome: i < 2 ? "failed" : "ok" }, day));
+      events.push(event("session_turn_metric", { environment: "sandbox", provider: "daytona", start_to_first_token_ms: 900, outcome: i < 2 ? "failed" : "ok" }, day));
     }
     for (let i = 0; i < 5; i++) {
       events.push(event("preview_ready_metric", { environment: "worktree", provider: "host", ready_ms: 100 }));
-      events.push(event("preview_ready_metric", { environment: "sandbox", provider: "microvm", ready_ms: 90 }));
-      events.push(event("sandbox_resume_metric", { provider: "microvm", resume_ms: 80, outcome: "ok" }));
+      events.push(event("preview_ready_metric", { environment: "sandbox", provider: "daytona", ready_ms: 90 }));
+      events.push(event("sandbox_resume_metric", { provider: "daytona", resume_ms: 80, outcome: "ok" }));
     }
     for (let i = 0; i < 3; i++) {
-      events.push(event("sandbox_restart_survival_metric", { provider: "microvm", recovery_ms: 90, outcome: i ? "ok" : "failed" }));
+      events.push(event("sandbox_restart_survival_metric", { provider: "daytona", recovery_ms: 90, outcome: i ? "ok" : "failed" }));
     }
 
     const reasons = buildSandboxScorecard(events, { now }).gate.reasons.join(" ");

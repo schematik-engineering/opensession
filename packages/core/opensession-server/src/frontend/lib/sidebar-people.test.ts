@@ -69,7 +69,7 @@ describe("sidebar person sessions", () => {
 		);
 	});
 
-	test("groups only active teammates and retains their older sessions for expansion", () => {
+	test("keeps only active sessions in teammate groups", () => {
 		const groups = sidebarPersonSessions(
 			[
 				session("recent", { startedBy: "Michiel Westerbeek" }),
@@ -93,9 +93,20 @@ describe("sidebar person sessions", () => {
 		expect(groups[0]?.activeSessions.map((item) => item.id)).toEqual([
 			"recent",
 		]);
-		expect(groups[0]?.allSessions.map((item) => item.id)).toEqual([
-			"recent",
-			"older",
+	});
+
+	test("excludes sessions already kept in personal sidebar lanes", () => {
+		const groups = sidebarPersonSessions(
+			[session("available"), session("kept")],
+			roster,
+			"Kent",
+			NOW,
+			new Map(),
+			new Set(["kept"]),
+		);
+
+		expect(groups[0]?.activeSessions.map((item) => item.id)).toEqual([
+			"available",
 		]);
 	});
 

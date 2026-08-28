@@ -336,10 +336,13 @@ async function main(): Promise<void> {
 		"opensession.service",
 		"opensession-executor.service",
 		"opensession-session-kernel.service",
+		"deploy/install-resource-control.sh",
 		"deploy/install-executor-credential.sh",
 		"deploy/install-session-kernel-credential.sh",
 		"deploy/install-run-host-helper.sh",
 		"deploy/opensession-run-host",
+		"deploy/systemd/opensession-control.slice",
+		"deploy/systemd/opensession-workloads.slice",
 	]) {
 		const source = join(REPO_ROOT, rel);
 		const destination = join(stage, rel);

@@ -3,6 +3,7 @@ import {
 	activeSubagentsForWorkspace,
 	isAskWorkspace,
 	isScratchWorkspace,
+	sessionSharesSelectedSidebarGroup,
 	spawnedSessionBelongsInSidebar,
 	workspaceMainSession,
 	workspaceRowOwnsSelection,
@@ -89,6 +90,50 @@ describe("spawnedSessionBelongsInSidebar", () => {
 		const session = { spawnedBy: "parent" };
 		expect(spawnedSessionBelongsInSidebar(session, true, false)).toBe(true);
 		expect(spawnedSessionBelongsInSidebar(session, false, true)).toBe(true);
+	});
+});
+
+describe("sessionSharesSelectedSidebarGroup", () => {
+	test("keeps the complete selected workspace through sidebar filters", () => {
+		const selected = session("selected", { workspaceId: "ws-selected" });
+		expect(
+			sessionSharesSelectedSidebarGroup(
+				session("sibling", { workspaceId: "ws-selected" }),
+				selected,
+			),
+		).toBe(true);
+		expect(
+			sessionSharesSelectedSidebarGroup(
+				session("other", { workspaceId: "ws-other" }),
+				selected,
+			),
+		).toBe(false);
+	});
+
+	test("keeps a selected workspace route before it has a selected session", () => {
+		expect(
+			sessionSharesSelectedSidebarGroup(
+				session("draft-tab", { workspaceId: "ws-draft" }),
+				null,
+				"ws-draft",
+			),
+		).toBe(true);
+	});
+
+	test("keeps legacy shared-worktree rows and session aliases whole", () => {
+		const selected = session("canonical", {
+			aliasIds: ["legacy"],
+			worktreeDir: "/tmp/worktrees/feature",
+		});
+		expect(
+			sessionSharesSelectedSidebarGroup(
+				session("sibling", { worktreeDir: "/tmp/worktrees/feature" }),
+				selected,
+			),
+		).toBe(true);
+		expect(
+			sessionSharesSelectedSidebarGroup(session("legacy"), selected),
+		).toBe(true);
 	});
 });
 

@@ -358,6 +358,11 @@ export const SHORTCUT_REFERENCE: ShortcutReference[] = [
 		description: "Pick a lettered option on a question card",
 		keys: ["A", "B", "C"],
 	},
+	{
+		title: "Comment on an image",
+		description: "Start selecting a region in an open image preview",
+		keys: ["C"],
+	},
 	// A chord family, not a command: the digit varies, and matching is exact on
 	// the whole chord, so there is nothing here one binding could stand for.
 	// Rebinding the modifier alone is not something the registry can express,

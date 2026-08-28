@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import { parseCommitLog } from "./recent-commits";
+import {
+	parseCommitLog,
+	recentCommitMatcher,
+	type RecentCommit,
+} from "./recent-commits";
 
 const RECORD = "\x1e";
 const FIELD = "\x1f";
@@ -7,6 +11,47 @@ const FIELD = "\x1f";
 function entry(fields: string[], stat?: string) {
 	return `${RECORD}${fields.join(FIELD)}\n${stat ? `${stat}\n` : ""}`;
 }
+
+describe("recentCommitMatcher", () => {
+	const sha = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0";
+	const commit: RecentCommit = {
+		repo: "opensession",
+		sha,
+		title: "Show committed work",
+		author: "Kent",
+		person: "kent",
+		committedAt: "2026-08-28T10:00:00Z",
+		filesChanged: 2,
+		additions: 10,
+		deletions: 1,
+	};
+
+	it("matches a commit from the explicit session transcript", () => {
+		const matcher = recentCommitMatcher([commit]);
+		matcher.observe("os-maker", [
+			{
+				id: "tool-result",
+				type: "tool_result",
+				timestamp: "2026-08-28T10:00:01Z",
+				content: `[main ${sha.slice(0, 9)}] Show committed work`,
+			},
+		]);
+		expect(matcher.commits()).toEqual([{ ...commit, sessionId: "os-maker" }]);
+	});
+
+	it("does not treat nearby git log output as authorship", () => {
+		const matcher = recentCommitMatcher([commit]);
+		matcher.observe("os-reader", [
+			{
+				id: "tool-result",
+				type: "tool_result",
+				timestamp: "2026-08-28T10:00:01Z",
+				content: `${sha.slice(0, 9)} Show committed work`,
+			},
+		]);
+		expect(matcher.commits()).toEqual([]);
+	});
+});
 
 describe("parseCommitLog", () => {
 	it("reads a commit's fields and its line counts", () => {

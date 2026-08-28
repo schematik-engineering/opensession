@@ -47,7 +47,9 @@ const DB_PATH =
 
 const SWEEP_MS = 10 * 60_000;
 const FIRST_SWEEP_DELAY_MS = 90_000;
-/** Max sessions (re)indexed mechanically per sweep — backfill pacing. */
+/** Max transcript candidates examined per sweep — backfill pacing. Empty,
+ * missing and failed transcripts count too; otherwise a nearly complete index
+ * can walk all historical sessions just to find a handful of writable rows. */
 const MECH_PER_SWEEP = 400;
 /** Max LLM distillations per sweep — account-pool protection. */
 const DISTILL_PER_SWEEP = 4;
@@ -275,12 +277,13 @@ export async function sweepSessionIndex(): Promise<{
 		const now = Date.now();
 		const recentCutoff = now - DISTILL_RECENT_DAYS * 86_400_000;
 		let distillBudget = DISTILL_PER_SWEEP;
-		let mechBudget = MECH_PER_SWEEP;
+		let attemptBudget = MECH_PER_SWEEP;
+		let attempted = 0;
 		let indexed = 0;
 		let distilled = 0;
 
 		for (const s of sessions) {
-			if (mechBudget <= 0) break;
+			if (attemptBudget <= 0) break;
 			const actTs = Date.parse(s.lastActivity || s.createdAt || "");
 			if (!actTs || Number.isNaN(actTs)) continue;
 			const key = `session:${s.id}`;
@@ -291,6 +294,13 @@ export async function sweepSessionIndex(): Promise<{
 			const wantUpgrade =
 				upToDate && existing!.distilled === "mech" && llmEligible && distillBudget > 0;
 			if (upToDate && !wantUpgrade) continue;
+
+			// The budget bounds ATTEMPTS, not successful writes. The old placement
+			// below extraction let empty/missing transcripts consume no budget, so
+			// one sweep parsed thousands of historical sessions for 63 seconds and
+			// pushed gateway event-loop p95 above 500 ms.
+			attemptBudget--;
+			attempted++;
 
 			// Yield before every parse: even a single big transcript used to
 			// wedge the loop, and the old every-10-sessions cadence let ten
@@ -307,7 +317,6 @@ export async function sweepSessionIndex(): Promise<{
 			const x = extractTexts(entries);
 			if (x.totalChars < 120 && !s.title) continue;
 
-			mechBudget--;
 			let rec = mechanicalRecord(s, x, actTs);
 			if (llmEligible && distillBudget > 0 && x.totalChars >= MIN_DISTILL_CHARS) {
 				distillBudget--;
@@ -326,11 +335,12 @@ export async function sweepSessionIndex(): Promise<{
 
 		if (indexed || distilled) {
 			console.log(
-				`[session-index] swept ${sessions.length} sessions: ${indexed} indexed (${distilled} distilled) in ${Date.now() - startedAt}ms; store has ${store.count()} records`,
+				`[session-index] swept ${sessions.length} sessions: ${attempted} attempted, ${indexed} indexed (${distilled} distilled) in ${Date.now() - startedAt}ms; store has ${store.count()} records`,
 			);
 			audit({
 				msg: "session_index_sweep",
 				scanned: sessions.length,
+				attempted,
 				indexed,
 				distilled,
 				total: store.count(),

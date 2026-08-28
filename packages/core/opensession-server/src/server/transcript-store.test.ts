@@ -606,6 +606,11 @@ describe("transcript outline and random-access ranges", () => {
         type: "system",
         contextInjection: { source: "repos" },
       }),
+      entry("wait", "private wait context", {
+        type: "system",
+        noticeKind: "context-injection",
+        contextInjection: { source: "background-wait", turnId: "wait-turn" },
+      }),
       entry("human", "Please investigate", { type: "user" }),
       entry("tool", "Using Read", {
         type: "tool_use",
@@ -628,20 +633,26 @@ describe("transcript outline and random-access ranges", () => {
     expect(outline.entries.map((row) => row.role)).toEqual([
       "hidden",
       "user",
+      "user",
       "tool_use",
       "tool_result",
       "assistant",
       "review_handoff",
     ]);
-    expect(outline.entries[5]).toMatchObject({ reviewPrNumber: 42 });
+    expect(outline.entries[6]).toMatchObject({ reviewPrNumber: 42 });
     expect(outline.entries[1]).toMatchObject({
-      id: "human",
+      id: "wait",
       seq: 2,
+      contentLength: 0,
+    });
+    expect(outline.entries[2]).toMatchObject({
+      id: "human",
+      seq: 3,
       contentLength: "Please investigate".length,
     });
     expect(JSON.stringify(outline)).not.toContain("large result");
     expect(outline.firstSeq).toBe(1);
-    expect(outline.lastSeq).toBe(6);
+    expect(outline.lastSeq).toBe(7);
   });
 
   test("updates an old outline row in place when its role changes", async () => {

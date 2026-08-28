@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+	osReviewText,
 	refChipText,
 	refLabel,
 	refState,
@@ -21,6 +22,34 @@ function ref(over: Partial<SessionPrRef> = {}): SessionPrRef {
 		...over,
 	};
 }
+
+describe("osReviewText", () => {
+	test("puts the latest score directly in the compact review reading", () => {
+		expect(
+			osReviewText({
+				verdict: "approve",
+				confidence: 4,
+				findings: 0,
+				blocking: 0,
+				stale: false,
+				at: "2026-08-28T12:00:00Z",
+			}),
+		).toBe("4/5 · approved");
+	});
+
+	test("keeps blocking and stale review context beside the score", () => {
+		expect(
+			osReviewText({
+				verdict: "request_changes",
+				confidence: 2,
+				findings: 2,
+				blocking: 1,
+				stale: true,
+				at: "2026-08-28T12:00:00Z",
+			}),
+		).toBe("2/5 · changes requested · 1 blocking · stale");
+	});
+});
 
 describe("refTone", () => {
 	test("a terminal PR reads by its ending, not its checks", () => {

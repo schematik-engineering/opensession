@@ -43,11 +43,16 @@ function writeCodexFixture(lines: string[]): string {
 
 const TS = "2026-07-01T10:00:00.000Z";
 
-function userLine(uuid: string, text: string): string {
+function userLine(
+  uuid: string,
+  text: string,
+  sourceMessageIds?: string[],
+): string {
   return JSON.stringify({
     type: "user",
     uuid,
     timestamp: TS,
+    ...(sourceMessageIds?.length ? { sourceMessageIds } : {}),
     message: { role: "user", content: text },
   });
 }
@@ -119,6 +124,41 @@ describe("entriesForWire", () => {
         },
       ]),
     ).toEqual([]);
+  });
+
+  it("projects a background wait as a private turn boundary", () => {
+    expect(
+      entriesForWire([
+        {
+          id: "ordinary-context",
+          type: "system",
+          content: "private handoff",
+          timestamp: TS,
+          noticeKind: "context-injection",
+          contextInjection: { source: "handoff", turnId: "turn-1" },
+        },
+        {
+          id: "wait-context",
+          type: "system",
+          content: "private wait instructions",
+          timestamp: TS,
+          noticeKind: "context-injection",
+          contextInjection: { source: "background-wait", turnId: "turn-2" },
+          seq: 9,
+          changeSeq: 12,
+        },
+      ]),
+    ).toEqual([
+      {
+        id: "wait-context",
+        type: "user",
+        content: "",
+        timestamp: TS,
+        turnBoundary: true,
+        seq: 9,
+        changeSeq: 12,
+      },
+    ]);
   });
 });
 
@@ -949,6 +989,30 @@ describe("steer-joined composite user turns", () => {
     expect(entries[1].content).toBe("[Alex] Also, explain the changes");
     expect(entries[0].id).toBe("u1");
     expect(entries[1].id).toBe("u1-j2");
+  });
+
+  it("keeps each source delivery identity on its normalized part", () => {
+    const path = writeFixture([
+      userLine(
+        "batch-entry",
+        "[Alex] first\n\n[Johnny] second",
+        ["delivery-one", "delivery-two"],
+      ),
+    ]);
+    const entries = parseTranscript(path).filter((e) => e.type === "user");
+    expect(entries.map((entry) => entry.sourceMessageIds)).toEqual([
+      ["delivery-one"],
+      ["delivery-two"],
+    ]);
+  });
+
+  it("keeps every source identity when normalization cannot split the batch", () => {
+    const path = writeFixture([
+      userLine("batch-entry", "first\n\nsecond", ["delivery-one", "delivery-two"]),
+    ]);
+    const entries = parseTranscript(path).filter((e) => e.type === "user");
+    expect(entries).toHaveLength(1);
+    expect(entries[0].sourceMessageIds).toEqual(["delivery-one", "delivery-two"]);
   });
 
   it("splits parts from different senders", () => {

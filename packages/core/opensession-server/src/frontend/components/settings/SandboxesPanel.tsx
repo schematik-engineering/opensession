@@ -42,12 +42,6 @@ const PROVIDERS: Array<{
 	command: string;
 }> = [
 	{
-		id: "microvm",
-		label: "Local MicroVM",
-		description: "Strong local isolation with Firecracker. No provider account or public ingress required.",
-		command: "opensession sandbox enable microvm",
-	},
-	{
 		id: "docker",
 		label: "Docker",
 		description: "Local container isolation using the Open Session runner image.",
@@ -104,9 +98,7 @@ function providerLabel(provider: SandboxConnectionInfo["provider"]): string {
 function machineSummary(environment: SandboxEnvironmentInfo): string {
 	const settings = environment.settings;
 	if (!settings || !Object.keys(settings).length) {
-		return environment.provider === "microvm"
-			? "4 vCPU · 12 GB memory · 25 GB disk"
-			: "Provider defaults";
+		return "Provider defaults";
 	}
 	return [
 		settings.cpu
@@ -126,7 +118,7 @@ type MachineProfile = {
 	settings: SandboxMachineSettings;
 };
 
-const MACHINE_PROFILES: Record<"daytona" | "box" | "modal" | "microvm", MachineProfile[]> = {
+const MACHINE_PROFILES: Record<"daytona" | "box" | "modal", MachineProfile[]> = {
 	daytona: [
 		{ id: "small", label: "Small", detail: "1 vCPU · 1 GB · 3 GB disk", settings: { cpu: 1, memoryMb: 1024, diskGb: 3 } },
 		{ id: "medium", label: "Medium", detail: "2 vCPU · 4 GB · 8 GB disk", settings: { cpu: 2, memoryMb: 4096, diskGb: 8 } },
@@ -143,17 +135,10 @@ const MACHINE_PROFILES: Record<"daytona" | "box" | "modal" | "microvm", MachineP
 		{ id: "performance", label: "Performance", detail: "2 physical CPUs · 8 GB", settings: { cpu: 2, memoryMb: 8192 } },
 		{ id: "power", label: "Power", detail: "8 physical CPUs · 16 GB", settings: { cpu: 8, memoryMb: 16_384 } },
 	],
-	microvm: [
-		{ id: "compact", label: "Compact", detail: "2 vCPU · 4 GB · 25 GB disk", settings: { cpu: 2, memoryMb: 4096, diskGb: 25 } },
-		{ id: "standard", label: "Standard", detail: "4 vCPU · 8 GB · 25 GB disk", settings: { cpu: 4, memoryMb: 8192, diskGb: 25 } },
-		{ id: "large", label: "Large", detail: "4 vCPU · 12 GB · 25 GB disk", settings: { cpu: 4, memoryMb: 12_288, diskGb: 25 } },
-		{ id: "large-storage", label: "Large + storage", detail: "4 vCPU · 12 GB · 50 GB disk", settings: { cpu: 4, memoryMb: 12_288, diskGb: 50 } },
-		{ id: "xlarge", label: "X-Large", detail: "8 vCPU · 24 GB · 100 GB disk", settings: { cpu: 8, memoryMb: 24_576, diskGb: 100 } },
-	],
 };
 
 function machineProfiles(provider: SandboxConnectionInfo["provider"]): MachineProfile[] {
-	return provider === "daytona" || provider === "box" || provider === "modal" || provider === "microvm"
+	return provider === "daytona" || provider === "box" || provider === "modal"
 		? MACHINE_PROFILES[provider]
 		: [];
 }
@@ -457,7 +442,7 @@ setBusy(false);
 					<div className="col-start-2 row-start-1 flex justify-end self-start">
 						{connection.state === "not_configured" ? (
 							<Button size="sm" variant="primary" onClick={() => setDialogOpen(true)} disabled={!canManage || checking}>
-								{connection.provider === "docker" || connection.provider === "microvm" ? "Enable" : "Connect"}
+								{connection.provider === "docker" ? "Enable" : "Connect"}
 							</Button>
 						) : (
 							<Switch
@@ -526,11 +511,11 @@ function ProjectEnvironmentDialog({
 }) {
 	const first = target || available[0];
 	const [provider, setProvider] = useState<SandboxConnectionInfo["provider"]>(
-		first?.provider || "microvm",
+		first?.provider || "daytona",
 	);
 	const [repo, setRepo] = useState(first?.repo || "");
 	const [profile, setProfile] = useState(
-		machineProfileForSettings(first?.provider || "microvm", first?.settings),
+		machineProfileForSettings(first?.provider || "daytona", first?.settings),
 	);
 	const [saving, setSaving] = useState(false);
 	const wasOpen = useRef(false);
@@ -637,8 +622,6 @@ setSaving(false);
 						"Box exposes three fixed machine types. Stop and resume retain the disk, and new sandboxes restore from this project's named snapshot."}
 					{provider === "modal" &&
 						"Modal CPU values are physical cores and memory is a guaranteed request; workloads may burst when capacity is available."}
-					{provider === "microvm" &&
-						"The default size keeps the fast memory-snapshot restore. Other sizes cold-boot the same golden disk, then retain that shape across pause and resume."}
 				</div>
 
 				<Modal.Footer>

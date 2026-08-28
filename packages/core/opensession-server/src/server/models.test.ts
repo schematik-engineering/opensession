@@ -8,9 +8,11 @@ import {
   explicitEngineFor,
   fallbackPlan,
   interactiveFallbackModel,
+  modelEfforts,
   modelEngineKey,
   modelLabel,
   nextFallbackModel,
+  piModelLabel,
   resolveModel,
   routeModel,
   toPiModel,
@@ -87,7 +89,7 @@ describe("Pi-only model routing", () => {
       process.env.OPENSESSION_PI_CONFIG,
       JSON.stringify({
         enabled: true,
-        pickerModels: ["pi/openrouter/stealth/ox-alpha"],
+        pickerModels: ["pi/openrouter/z-ai/glm-5.3"],
       }),
     );
     writeFileSync(
@@ -99,12 +101,24 @@ describe("Pi-only model routing", () => {
     );
     refreshPickerModels();
 
-    expect(resolveModel("ox-alpha")?.id).toBe(
-      "pi/openrouter/stealth/ox-alpha",
+    expect(resolveModel("glm-5.3")?.id).toBe(
+      "pi/openrouter/z-ai/glm-5.3",
     );
-    expect(resolveModel("Ox Alpha")?.id).toBe(
-      "pi/openrouter/stealth/ox-alpha",
+    expect(resolveModel("GLM 5.3")?.id).toBe(
+      "pi/openrouter/z-ai/glm-5.3",
     );
+  });
+
+  test("routes GLM-5.3's pre-release id to the official model", () => {
+    expect(toPiModel("pi/openrouter/stealth/ox-alpha")).toBe(
+      "pi/openrouter/z-ai/glm-5.3",
+    );
+    expect(piModelLabel("pi/openrouter/stealth/ox-alpha")).toBe("GLM-5.3");
+    expect(modelEfforts("pi/openrouter/stealth/ox-alpha")).toEqual([
+      "low",
+      "high",
+      "max",
+    ]);
   });
 
   test("selects the account pool from Pi's upstream provider", () => {

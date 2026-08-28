@@ -16,6 +16,21 @@ describe("LiveTurnStore", () => {
 		store.clear();
 	});
 
+	test("keeps progress chrome retired between landed stream blocks", async () => {
+		const store = new LiveTurnStore();
+		store.start(undefined, "run-progress");
+		expect(store.getSnapshot().hasPaintedText).toBe(false);
+		store.append("first block");
+		await Bun.sleep(25);
+		expect(store.getSnapshot().hasPaintedText).toBe(true);
+		store.land([{ content: "first block" }]);
+		expect(store.getSnapshot().text).toBe("");
+		expect(store.getSnapshot().hasPaintedText).toBe(true);
+		store.start(undefined, "run-next");
+		expect(store.getSnapshot().hasPaintedText).toBe(false);
+		store.clear();
+	});
+
 	test("deduplicates committed text in either arrival order", async () => {
 		const store = new LiveTurnStore();
 		store.start(undefined, "run-2");

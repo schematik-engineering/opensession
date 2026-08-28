@@ -47,6 +47,7 @@ import {
 } from "../lib/msg-classes";
 import { cn } from "../ui/cn";
 import { reasoningDisplay } from "../lib/reasoning-display";
+import { transcriptEnterClass } from "../lib/transcript-motion";
 
 // Only this much of a message is markdown-parsed eagerly. marked is
 // superlinear on input size (~25ms at 10KB, ~400ms at 80KB, seconds past
@@ -419,6 +420,8 @@ function BubbleMeta({ ts, onEdit }: { ts?: string; onEdit?: () => void }) {
 
 interface Props {
 	entry: TranscriptEntry;
+	/** This message was inserted at the live edge in the current build. */
+	enter?: boolean;
 	/** Provider reasoning summary, including legacy rows inferred by the turn
 	 * grouper before the durable `isReasoning` field existed. */
 	reasoning?: boolean;
@@ -575,6 +578,7 @@ function EntryFiles({
 // markdown/highlighting.
 export const MessageBubble = function MessageBubble({
 	entry,
+	enter = false,
 	reasoning = false,
 	pendingDelivery = false,
 	owner,
@@ -590,6 +594,12 @@ export const MessageBubble = function MessageBubble({
 	// predates the field, which is what a rolling deploy looks like.
 	const e = (classifyEntry(entry));
 	const displayContent = e.content;
+	// Capture the mount decision. A final assistant frame can clear `live` one
+	// commit after the message appears; removing the class then would cut its
+	// one-shot entrance off mid-fade. Keeping the finished class does not replay
+	// the keyframe on ordinary re-renders.
+	const [animateArrival] = useState(enter);
+	const enterClass = transcriptEnterClass(animateArrival);
 
 	// An answered question is a durable sent receipt. It keeps the question and
 	// exact answer visible without making the old choices look actionable.
@@ -616,8 +626,8 @@ export const MessageBubble = function MessageBubble({
 				className={cn(
 					msgRow,
 					msgOwnTurn,
-					pendingDelivery &&
-						"opacity-70 transition-opacity duration-200 motion-reduce:transition-none",
+					enterClass,
+					pendingDelivery && "opacity-70",
 				)}
 				data-delivery-pending={pendingDelivery || undefined}
 				data-eid={e.id}
@@ -670,13 +680,12 @@ export const MessageBubble = function MessageBubble({
 					msgRow,
 					"msg-user",
 					msgOwnTurn,
-					// Your own turns hang their quiet actions below the bubble. The
-					// edit button is always visible to touch pointers, while a row
-					// with only a timestamp needs the clearance on hover devices.
-					!fromOther &&
-						(onEdit ? "mb-8.75" : "[@media(hover:hover)]:mb-8.75"),
-					pendingDelivery &&
-						"opacity-70 transition-opacity duration-200 motion-reduce:transition-none",
+					enterClass,
+					// Your own turns hang their quiet actions below the bubble. Reserve
+					// that clearance from the optimistic mount: when Edit appears on the
+					// durable row, the phone timeline must not grow underneath it.
+					!fromOther && "mb-8.75",
+					pendingDelivery && "opacity-70",
 				)}
 				data-delivery-pending={pendingDelivery || undefined}
 				data-eid={e.id}
@@ -715,7 +724,11 @@ export const MessageBubble = function MessageBubble({
 	if (reasoning || e.isReasoning) {
 		const { title, body } = reasoningDisplay(displayContent);
 		return (
-			<div className={cn(msgRow, "mb-2")} data-eid={e.id} data-reasoning="">
+			<div
+				className={cn(msgRow, "mb-2", enterClass)}
+				data-eid={e.id}
+				data-reasoning=""
+			>
 				{title && <div className={msgReasoningTitle}>{title}</div>}
 				{body && (
 					<ClampedBody
@@ -732,7 +745,7 @@ export const MessageBubble = function MessageBubble({
 	// assistant — no speaker label: every left-aligned bubble is the agent, so
 	// the name row was pure noise above each answer.
 	return (
-		<div className={msgRow} data-eid={e.id}>
+		<div className={cn(msgRow, enterClass)} data-eid={e.id}>
 			<ClampedBody
 				className={cn(msgBody, "markdown text-fg")}
 				content={displayContent}

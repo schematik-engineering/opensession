@@ -40,9 +40,11 @@ change in a browser. See [repo-lifecycle.md](repo-lifecycle.md).
 ## Modes
 
 **`code` sessions** have write access. This is the default. A new code workspace
-normally gets its own branch and worktree, while additional sessions in that
-workspace can share it or create a stacked worktree. They can commit and use the
-repository's configured pull-request flow.
+normally follows its repository setting, while each person can override each
+repository under **Preferences** with **Local checkout** or **Separate worktree**.
+Additional sessions in an existing workspace keep its worktree, and
+a deliberately selected branch or pull request stays isolated. Worktree sessions
+can commit and use the repository's configured pull-request flow.
 
 **`ask` sessions** are read-only. For an isolated repository they share one
 per-repo detached checkout (`<wtPrefix>-ask-checkout`) pinned to

@@ -40,6 +40,33 @@ test("persists before returning and delivers each session in order", async () =>
 	outbox.dispose();
 });
 
+test("persists optimistic anchors without sending them to the server", async () => {
+	const storage = memoryStorage();
+	let delivered: Record<string, unknown> | undefined;
+	const outbox = new PromptOutbox({
+		storage,
+		scope: "transcript-anchor",
+		deliver: async (_sessionId, body) => {
+			delivered = body;
+			return { status: "started", message: "ok" };
+		},
+	});
+	outbox.enqueue({
+		sessionId: "s1",
+		content: "anchored",
+		transcriptAfterEntryId: "entry-4",
+		transcriptAfterSeq: 4,
+	});
+	expect(outbox.list("s1")[0]).toMatchObject({
+		transcriptAfterEntryId: "entry-4",
+		transcriptAfterSeq: 4,
+	});
+	await outbox.flush();
+	expect(delivered).not.toHaveProperty("transcriptAfterEntryId");
+	expect(delivered).not.toHaveProperty("transcriptAfterSeq");
+	outbox.dispose();
+});
+
 test("keeps the item state as the only in-tab send lock", async () => {
 	const storage = memoryStorage();
 	const delivered: string[] = [];

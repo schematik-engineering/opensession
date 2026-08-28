@@ -48,17 +48,17 @@ describe("visible transcript hydration", () => {
 		).toEqual([]);
 	});
 
-	test("requests missing data between visible rows", () => {
+	test("does not hydrate compacted gaps between visible rows", () => {
 		expect(
 			visibleTranscriptHydrationDemand(
 				outline,
 				new Set(["above", "below"]),
 				(id) => id !== "visible",
 			),
-		).toEqual([ranges[1]]);
+		).toEqual([]);
 	});
 
-	test("waits when a visible structural range is only partially loaded", () => {
+	test("waits when a visible structural range is missing newer payload", () => {
 		const partial = range("partial", 4, ["loaded", "missing"]);
 		expect(
 			visibleTranscriptHydrationDemand(
@@ -67,6 +67,17 @@ describe("visible transcript hydration", () => {
 				(id) => id === "loaded",
 			),
 		).toEqual([partial]);
+	});
+
+	test("defers an older missing prefix to explicit top approach", () => {
+		const partial = range("partial", 4, ["older", "loaded-1", "loaded-2"]);
+		expect(
+			visibleTranscriptHydrationDemand(
+				[{ key: partial.key, ranges: [partial] }],
+				new Set([partial.key]),
+				(id) => id.startsWith("loaded"),
+			),
+		).toEqual([]);
 	});
 
 	test("does not claim readiness before the virtualizer reports a window", () => {

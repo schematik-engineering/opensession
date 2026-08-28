@@ -43,6 +43,15 @@ test("active floating interactions escape nested popup portal containers", () =>
 	expect(menuSource).toContain("document.body");
 });
 
+test("the summary separates its headline from PR metadata", () => {
+	const summaryStart = statusBarSource.indexOf('if (variant === "summary")');
+	const summaryEnd = statusBarSource.indexOf('if (variant === "header")');
+	const summary = statusBarSource.slice(summaryStart, summaryEnd);
+
+	expect(summaryStart).toBeGreaterThan(-1);
+	expect(summary).toContain("flex-col justify-center gap-1");
+});
+
 test("the summary's checks preview stays open with its parent", () => {
 	const summaryStart = statusBarSource.indexOf('if (variant === "summary")');
 	const summaryEnd = statusBarSource.indexOf('if (variant === "header")');

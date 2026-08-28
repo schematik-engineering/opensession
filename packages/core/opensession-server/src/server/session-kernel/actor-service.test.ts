@@ -153,11 +153,11 @@ describe("session kernel actor service", () => {
     }
   });
 
-  test("global runtime work does not wait for an active read-only session turn", async () => {
+  test("runtime work uses session lanes without waiting for an unrelated turn", async () => {
     const isolatedService = await startSessionKernelService({
       port: 0,
       token,
-      workerCount: 1,
+      workerCount: 2,
       responseTimeoutMs: 700,
       workerUrl: new URL("./testing/read-barrier-worker.ts", import.meta.url),
     });
@@ -212,6 +212,56 @@ describe("session kernel actor service", () => {
     } finally {
       isolatedService.stop();
     }
+  });
+
+  test("catalog discovery never opens a candidate session database", async () => {
+    const sessionId = `runtime-lane-${crypto.randomUUID()}`;
+    const ready = async () =>
+      await (await fetch(`${service.url}/ready`)).json() as {
+        lanes: Array<{
+          index: number;
+          turnsCompleted: number;
+          kernelStoreCacheMisses: number;
+        }>;
+      };
+    const before = await ready();
+    const catalogMisses = before.lanes.find((lane) => lane.index === 0)
+      ?.kernelStoreCacheMisses;
+    await rpc({
+      t: "call",
+      rpcId: "runtime-lane-schedule",
+      outputBytes: 256 * 1024,
+      request: {
+        t: "store",
+        method: "scheduleTimer",
+        args: [{
+          sessionId,
+          timerId: "wake",
+          kind: "runtime_lane_timer",
+          dueAt: Date.now() - 1,
+          payload: null,
+        }],
+      },
+    });
+
+    const work = await rpc({
+      t: "runtime_work",
+      rpcId: "runtime-lane-claim",
+      now: Date.now(),
+      timerKinds: ["runtime_lane_timer"],
+      effectKinds: [],
+      limit: 100,
+    });
+    expect(work).toMatchObject({
+      t: "runtime_work_result",
+      timers: [expect.objectContaining({ sessionId, timerId: "wake" })],
+    });
+    const after = await ready();
+    expect(after.lanes.find((lane) => lane.index === 0)?.kernelStoreCacheMisses)
+      .toBe(catalogMisses);
+    expect(after.lanes.slice(1).some((lane, index) =>
+      lane.turnsCompleted > (before.lanes[index + 1]?.turnsCompleted ?? 0)
+    )).toBe(true);
   });
 
   test("restarts the catalog lane instead of the service after a read timeout", async () => {
@@ -450,14 +500,16 @@ describe("session kernel actor service", () => {
       expect(replayedSettlement.ok).toBe(true);
 
       const pending = await send({
-        t: "runtime_work",
+        t: "runtime_session_work",
         rpcId: "async-settlement-pending",
+        sessionId,
+        candidateCount: 1,
         now: Date.now(),
         timerKinds: [],
         effectKinds: ["human_ask_deliver"],
         limit: 100,
       });
-      expect(pending.t).toBe("runtime_work_result");
+      expect(pending.t).toBe("runtime_session_work_result");
       expect((pending as { outbox: Array<{ id: number }> }).outbox.some(
         (item) => item.id === id,
       ))
@@ -479,6 +531,7 @@ describe("session kernel actor service", () => {
     expect(live.status).toBe(200);
     expect(await ready.json()).toMatchObject({
       ready: true,
+      component: "session-kernel",
       actorVersion: SESSION_KERNEL_ACTOR_VERSION,
       transportVersion: SESSION_KERNEL_TRANSPORT_VERSION,
     });
@@ -889,7 +942,7 @@ describe("session kernel actor service", () => {
     }
   });
 
-  test("a global barrier fails fast while a session mailbox is wedged", async () => {
+  test("runtime discovery does not create a global barrier for a wedged mailbox", async () => {
     const sessionId = "barrier-timeout-session";
     await rpc({
       t: "call",
@@ -960,13 +1013,15 @@ describe("session kernel actor service", () => {
           },
         }),
       });
-      expect(response.status).toBe(429);
+      expect(response.status).toBe(200);
       expect(Date.now() - startedAt).toBeLessThan(400);
       expect(await response.json()).toMatchObject({
-        error: expect.stringContaining("global barrier timed out"),
+        t: "runtime_work_result",
+        timers: [],
+        outbox: [],
       });
       lock.exec("COMMIT;");
-      expect(await active).toMatchObject({ t: "call_result", status: 1 });
+      expect(await active).toMatchObject({ t: "call_result", status: -1 });
     } finally {
       try {
         lock.exec("ROLLBACK;");

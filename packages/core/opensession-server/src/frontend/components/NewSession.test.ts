@@ -74,6 +74,18 @@ test("the new session payload persists fast mode", async () => {
   expect(createPayload).toContain("...(fastMode ? { fastMode: true } : {})");
 });
 
+test("a new session sends the person's checkout preference", async () => {
+  const source = await Bun.file(new URL("./NewSession.tsx", import.meta.url)).text();
+  const createStart = source.indexOf('type: "create_session"');
+  const createEnd = source.indexOf("const canCreate =", createStart);
+  const createPayload = source.slice(createStart, createEnd);
+
+  expect(createPayload).toContain(
+    'checkoutMode: startPoint.kind === "new" ? checkoutPref : "worktree"',
+  );
+  expect(source).toContain("!startsInLocalCheckout");
+});
+
 test("a pull request start checks out its existing branch and adopts its workspace", async () => {
   const source = await Bun.file(new URL("./NewSession.tsx", import.meta.url)).text();
   const createStart = source.indexOf("function handleCreate()");

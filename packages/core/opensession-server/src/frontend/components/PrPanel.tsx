@@ -87,6 +87,7 @@ import {
   IconGitMerge,
   IconGlobe,
   IconMessage,
+  IconMessages,
   IconPullRequest,
   IconSliders,
   IconUndo,
@@ -125,6 +126,8 @@ import { ReviewRail } from "./pr/ReviewRail";
 import { GitStatusRows } from "./pr/GitStatus";
 import { ReviewToolbar } from "./pr/ReviewToolbar";
 import { EmptyState, LoadingState } from "../ui/state";
+import { ResponsiveDialog } from "../ui/sheet";
+import { useIsPhone } from "../hooks/useIsPhone";
 import { CodeFlow } from "./CodeFlow";
 import { revealDiffFile } from "../lib/diff-navigation";
 import { PrFileTree } from "./pr/PrFileTree";
@@ -457,6 +460,7 @@ export function PrPanel({
   // reviewer opts into it, and the primary action stays "Approve".
   const [mergeAfterReview, setMergeAfterReview] = useState(false);
   const [sessionsOpen, setSessionsOpen] = useState(false);
+  const isPhone = useIsPhone();
   /**
    * The review is two places, not six tabs: Overview (the conversation and the
    * PR's metadata) and Files changed (the code). `codeView` is which lens the
@@ -1946,6 +1950,20 @@ toast(e.message || "Couldn't unlink the PR");
               Review
             </Button>
           )}
+        {sessions && !headerCompact && (
+          <Button
+            variant="default"
+            size="sm"
+            icon={<IconMessages size={18} />}
+            onClick={() => setSessionsOpen(true)}
+          >
+            {relatedSessions.length === 0
+              ? "Start session"
+              : relatedSessions.length === 1
+                ? "Open session"
+                : `${relatedSessions.length} sessions`}
+          </Button>
+        )}
         <Menu.Root>
           <Tooltip label="Pull request actions">
             <Menu.Trigger
@@ -1977,6 +1995,18 @@ toast(e.message || "Couldn't unlink the PR");
                   <span className="min-w-0 flex-1 truncate">Start review</span>
                 </Menu.Item>
               )}
+            {sessions && headerCompact && (
+              <Menu.Item onClick={() => setSessionsOpen(true)}>
+                <IconMessages size={18} className={MENU_ICON} />
+                <span className="min-w-0 flex-1 truncate">
+                  {relatedSessions.length === 0
+                    ? "Start a session"
+                    : relatedSessions.length === 1
+                      ? "Open session"
+                      : `Open ${relatedSessions.length} sessions`}
+                </span>
+              </Menu.Item>
+            )}
             <Menu.Item
               render={<a href={pr.url} target="_blank" rel="noopener" />}
             >
@@ -2231,28 +2261,33 @@ toast(e.message || "Couldn't unlink the PR");
         </main>
       </div>
 
-      {sessionsOpen && (
-        <>
-          <button
-            className="absolute inset-0 z-20 cursor-default border-0 bg-black/25"
-            aria-label="Close sessions"
-            onClick={() => setSessionsOpen(false)}
-          />
-          <div
-            className={`absolute right-5 ${showBar ? "top-[108px]" : "top-16"} z-30 w-[460px] max-w-[calc(100%-40px)] rounded-md border border-line-strong bg-panel p-4 smooth-shadow-lg`}
-          >
-            <div className="mb-2 flex items-center">
-              <span className="text-sm font-semibold text-fg">
+      <ResponsiveDialog
+        open={sessionsOpen}
+        onClose={() => setSessionsOpen(false)}
+        phone={isPhone}
+        label="Sessions on this pull request"
+        sheetClassName="max-h-[88dvh]"
+        modalClassName="w-[min(460px,calc(100vw-32px))]"
+      >
+        <div className="flex min-h-0 flex-col">
+          <div className="flex shrink-0 items-center gap-3 px-5 pb-3 pt-5 phone:pt-2">
+            <div className="min-w-0 flex-1">
+              <h2 className="text-item-title font-semibold text-fg">
                 Sessions on this PR
-              </span>
-              <button
-                className="ml-auto border-0 bg-transparent text-item-title text-faint hover:text-fg"
-                onClick={() => setSessionsOpen(false)}
-                aria-label="Close"
-              >
-                ×
-              </button>
+              </h2>
+              <p className="mt-0.5 text-supporting text-dim">
+                Open existing work or start something new on this branch.
+              </p>
             </div>
+            <Button
+              variant="ghost"
+              className="size-10 shrink-0 phone:size-11"
+              icon={<IconX size={20} />}
+              aria-label="Close sessions"
+              onClick={() => setSessionsOpen(false)}
+            />
+          </div>
+          <div className="min-h-0 overflow-y-auto px-5 pb-5">
             <PrSessionsList
               sessions={relatedSessions}
               repo={active?.repo || ""}
@@ -2268,8 +2303,8 @@ toast(e.message || "Couldn't unlink the PR");
               compose
             />
           </div>
-        </>
-      )}
+        </div>
+      </ResponsiveDialog>
 
       {/* Review controls only exist while the person is actively reviewing.
           Passive PR browsing should not imply that a review is in progress. */}

@@ -335,10 +335,6 @@ async function adapterFor(provider: string): Promise<PrewarmAdapter | null> {
     const { boxPrewarmAdapter } = await import("./adapters/box");
     return boxPrewarmAdapter;
   }
-  if (provider === "microvm") {
-    const { microvmPrewarmAdapter } = await import("./adapters/microvm");
-    return microvmPrewarmAdapter;
-  }
   if (provider === "modal") {
     const { modalPrewarmAdapter } = await import("./adapters/modal");
     return modalPrewarmAdapter;
@@ -1085,12 +1081,8 @@ async function auditProviderOrphans(now: number): Promise<void> {
   const g = globalThis as unknown as { __prewarmOrphanAuditAt?: number };
   if (now - (g.__prewarmOrphanAuditAt || 0) < ORPHAN_AUDIT_INTERVAL_MS) return;
   g.__prewarmOrphanAuditAt = now;
-  for (const provider of ["daytona", "box", "e2b", "modal", "microvm"]) {
-    if (
-      !sandboxProviderConfigured(
-        provider as "daytona" | "box" | "e2b" | "modal" | "microvm",
-      )
-    ) continue;
+  for (const provider of ["daytona", "box", "e2b", "modal"] as const) {
+    if (!sandboxProviderConfigured(provider)) continue;
     // A create in flight has a live sandbox with no recorded id yet — skip
     // this provider's audit round rather than destroy it mid-bootstrap.
     const creating = [...pool().values()].some(

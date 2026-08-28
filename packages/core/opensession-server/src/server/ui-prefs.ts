@@ -19,7 +19,11 @@ import { userStore } from "./shared/user-store";
 // entry count — this is a preferences file, not a datastore.
 const KEY_RE = /^[a-z][a-zA-Z0-9-]{0,40}$/;
 const MAX_VALUE_LEN = 200;
-const LONG_VALUE_KEYS = new Set(["repo-order", "shortcuts"]);
+const LONG_VALUE_KEYS = new Set([
+	"repo-order",
+	"session-checkouts",
+	"shortcuts",
+]);
 const MAX_LONG_VALUE_LEN = 16_384;
 const MAX_ENTRIES = 100;
 

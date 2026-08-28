@@ -28,7 +28,6 @@ import {
 	isAgentSessionCancelled,
 	type StreamEvent,
 	markSessionStarting,
-	runAgent,
 	unmarkSessionStarting,
 } from "./agent-runner";
 import {
@@ -44,6 +43,7 @@ import { ensureGeneratedTitle } from "./generated-titles";
 import { nameKnownSessionReferencesForTitle } from "./session-reference-title";
 import { onSessionIdle as onHumanAsksSessionIdle } from "./human-asks";
 import { interactiveMcpServers } from "./interactive-mcp";
+import { runAgentHosted } from "./host-client";
 import { parseTranscriptAsync } from "./jsonl-parser";
 import { accountProviderForModel, interactiveFallbackModel, modelLabel, providerFor, resolveModel, } from "./models";
 import { configuredInteractiveDefaultModel } from "./model-catalog";
@@ -116,7 +116,7 @@ import {
 	sessionTurn,
 	sessionTurnSnapshot,
 } from "./session-kernel";
-import { ensureAskCheckout, ensureScratchDir, getRepo, isRegisteredWorktree, listWorktrees, NO_REPO, repoForPath, repoForPathOrNull, resolveUniqueBranch, sharedCheckoutForNewSessions, worktreeHeadBranch, worktreePathFor, } from "./worktree";
+import { ensureAskCheckout, ensureScratchDir, getRepo, isRegisteredWorktree, listWorktrees, NO_REPO, repoForPath, repoForPathOrNull, resolveUniqueBranch, sharedCheckoutForSessionCreate, worktreeHeadBranch, worktreePathFor, } from "./worktree";
 import { type WSClientData, broadcastToSession, preparingWorkspaces, } from "./ws-hub";
 import {
 	markReplayedCommandResult,
@@ -168,6 +168,7 @@ export interface CreateSessionMessage {
 	sandbox?: unknown;
 	runner?: unknown;
 	worktreeMode?: unknown;
+	checkoutMode?: unknown;
 	workspaceId?: unknown;
 	/** Workspace that supplied a model preset for an otherwise independent create. */
 	modelWorkspaceId?: unknown;
@@ -409,11 +410,18 @@ async function attachCreateRepos(
 	return attached;
 }
 
-function runnerOpeningHostId(runId: string, generation: number): string {
+export function runnerOpeningHostId(runId: string, generation: number): string {
 	const digest = new Bun.CryptoHasher("sha256")
 		.update(`${runId}:${generation}`)
 		.digest("hex");
-	return `rh-opening-${digest.slice(0, 32)}`;
+	return [
+		"rh",
+		digest.slice(0, 8),
+		digest.slice(8, 12),
+		digest.slice(12, 16),
+		digest.slice(16, 20),
+		digest.slice(20, 32),
+	].join("-");
 }
 
 const activeOpeningCreates = new Map<
@@ -1391,47 +1399,44 @@ export async function openCreatedSession(
 				creationSettled = true;
 				await acknowledgePromptDispatch(bksId, openingPromptEntryId);
 			};
-			for await (const event of sandboxOpeningRun ?? runnerOpeningRun ?? runAgent({
+			const openingMcp = interactiveMcpServers(spec.user, bksId);
+			const openingReposNote = [
+				spec.presetNote || "",
+				pstackMode ? PSTACK_MODE_NOTE : "",
+				// A session that spans repos is handed the persisted map rather
+				// than a reconstructed branch note.
+				spanning
+					? buildReposNote(spanning)
+					: buildBranchNote({
+							mode: spec.mode,
+							branch: spec.branch,
+							worktreeDir: spec.wtPath,
+						}),
+				await memoryNoteFor(spec.user, [
+					...spec.memoryRepoIds,
+					...attachedRepoIds,
+				]),
+			].filter(Boolean).join("\n\n") || undefined;
+			const localOpeningRun = runAgentHosted({
+				osSessionId: bksId,
 				prompt: openingPromptForRun,
 				// A recovered create is the same logical turn. Reuse the durable
-				// intake id so Pi and the context log upsert the original rows
-				// instead of rendering the opening message again after each restart.
+				// intake id so the transcript upserts the original user row.
 				promptEntryId: openingPromptEntryId,
+				startToken,
+				shouldCancel: () => isAgentSessionCancelled(bksId, startToken),
 				cwd: spec.wtPath,
 				mode: spec.mode,
+				mcpGrantUser: spec.user,
 				model: spec.model,
 				effort: spec.effort,
 				fastMode: spec.fastMode,
 				accountId: spec.accountId,
 				fallbackModel: interactiveFallbackModel(spec.model),
-				// Feed workspaces default to their feed's scoped list (least
-				// privilege) — same value the session file persists above.
-				// May be undefined at runtime (see ResolvedCreate.runMcpServers).
 				mcpServers: spec.runMcpServers as McpScope,
-				reposNote:
-					[
-						spec.presetNote || "",
-						pstackMode ? PSTACK_MODE_NOTE : "",
-						// A session that spans repos is handed the map of them
-						// (which repo is where, on which branch) in place of the
-						// branch note — buildReposNote carries that note inside it.
-						spanning
-							? buildReposNote(spanning)
-							: buildBranchNote({
-									mode: spec.mode,
-									branch: spec.branch,
-									worktreeDir: spec.wtPath,
-								}),
-						await memoryNoteFor(spec.user, [
-							...spec.memoryRepoIds,
-							...attachedRepoIds,
-						]),
-					]
-						.filter(Boolean)
-						.join("\n\n") || undefined,
+				proxyMcpServers: Object.keys(openingMcp),
+				reposNote: openingReposNote,
 				images: spec.images,
-				// Fork: resume the source engine session into a new branch,
-				// optionally from a specific past message.
 				...(spec.fork
 					? {
 							sessionId: spec.fork.engineSessionId,
@@ -1439,22 +1444,16 @@ export async function openCreatedSession(
 							resumeSessionAt: spec.fork.resumeAt,
 						}
 					: {}),
-				inProcessMcp: interactiveMcpServers(spec.user, bksId),
 				confirmTools: STRIPE_CONFIRM_TOOLS,
-				aws: true, // interactive sessions keep AWS read access (via injected creds)
-				// Whose commits these are. Passing `user` alone is not enough:
-				// the git identity is a separate option, and this is a
-				// session's whole first turn, which for most sessions is where
-				// the work lands. Without it that work commits under the
-				// machine's default identity and shows up under nobody. The
-				// sandbox and runner paths above resolve the same identity
-				// inside their own launchers.
+				aws: true,
 				author: commitAuthorFor(spec.user, spec.createdBy),
-				user: spec.user, // gate per-user MCP servers (allowedUsers) to the creator
-				journal: { osSessionId: bksId, kind: "create" },
-				startToken,
+				user: spec.user,
+				journalKind: "create",
+				trustProfile: "interactive",
 				onAskUser: makeAskHandler(bksId),
-			})) {
+				fallbackInProcessMcp: () => openingMcp,
+			});
+			for await (const event of sandboxOpeningRun ?? runnerOpeningRun ?? localOpeningRun) {
 				// Opening turns use this event ladder instead of run-session's
 				// follow-up ladder. Consume Pi's exact boundary acknowledgement here
 				// too, including context-only steers that transcript parsing hides.
@@ -1844,10 +1843,10 @@ export async function handleCreateSessionMessage(
 		finishCreate();
 		return response;
 	}
-	let createPlan = await actorCreationSetupPlan(bksId, createIdentity);
 	if (
 		recoveringSession?.claudeSessionId ||
-		recoveringSession?.codexThreadId
+		recoveringSession?.codexThreadId ||
+		recoveringSession?.piSessionId
 	) {
 		clearCreatePlan(bksId);
 		const response = replayedSessionCreatedResult(
@@ -1858,6 +1857,7 @@ export async function handleCreateSessionMessage(
 		finishCreate();
 		return response;
 	}
+	let createPlan = await actorCreationSetupPlan(bksId, createIdentity);
 	// This WebSocket create is interactive. The raw credential reaches only the
 	// server-owned materializer; recovery persists and resolves its principal.
 	const githubCredential = ws.data.authLogin
@@ -2012,6 +2012,15 @@ export async function handleCreateSessionMessage(
 		: msg.worktreeMode === "stack"
 			? "stack"
 			: "share";
+	// A personal choice overrides only the repository's default for a fresh code
+	// workspace. PR starts, forks and existing workspace worktrees keep their
+	// explicit destination in the branches below.
+	const usesSharedCheckout = sharedCheckoutForSessionCreate(
+		repo,
+		msg.checkoutMode,
+	);
+	const isolatesConfiguredSharedCheckout =
+		!usesSharedCheckout && !!repo.sharedCheckout && msg.checkoutMode === "worktree";
 	let workspace = recoveringSession?.workspaceId
 		? getWorkspace(recoveringSession.workspaceId)
 		: typeof msg.workspaceId === "string" && msg.workspaceId
@@ -2054,7 +2063,7 @@ export async function handleCreateSessionMessage(
 		// lookup below would silently reuse the worktree anyway —
 		// re-submitted prompt slugs and existing branches picked in the
 		// unscoped palette both hit this). Only then mint a fresh one.
-		if (!isAsk && !forkSource && !fromPr && !sharedCheckoutForNewSessions(repo) && branch) {
+		if (!isAsk && !forkSource && !fromPr && !usesSharedCheckout && branch) {
 			const existingWt = (await listWorktrees(repo.id)).find(
 				(w) => w.branch === branch,
 			)?.path;
@@ -2164,9 +2173,10 @@ export async function handleCreateSessionMessage(
 			// checkout exists; only the first-ever create pays a worktree
 			// add (ensureAskCheckout).
 			wtPath = await ensureAskCheckout(repo.id);
-		} else if (sharedCheckoutForNewSessions(repo)) {
-			// Open Session: code sessions edit the live main checkout on the
-			// default branch (hot-reloads in the running server). No worktree.
+		} else if (usesSharedCheckout && !workspace?.worktreeDir) {
+			// This repository's default, or the person's override, points a fresh
+			// code workspace at the live main checkout. An existing workspace's
+			// owned worktree remains the more specific destination.
 			wtPath = repo.repo;
 		} else if (workspace?.worktreeDir && worktreeMode === "share") {
 			// Share the workspace's owned worktree (parallel sessions, one branch).
@@ -2190,7 +2200,9 @@ export async function handleCreateSessionMessage(
 				// before we bake the name into the path + session file.
 				if (branch)
 					branch = await resolveUniqueBranch(branch, repo.id);
-				wtPath = worktreePathFor(branch, repo.id);
+				wtPath = worktreePathFor(branch, repo.id, {
+					isolated: isolatesConfiguredSharedCheckout,
+				});
 				// Volume-mode sandbox (docs/self-hosting-sandboxes.md): the
 				// workspace is cloned into a per-session volume INSIDE the
 				// sandbox — skip host createWorktree entirely. The session
@@ -2230,7 +2242,7 @@ export async function handleCreateSessionMessage(
 			!workspace.worktreeDir &&
 			!isAsk &&
 			!isScratch &&
-			(!sharedCheckoutForNewSessions(repo) || fromPr) &&
+			(!usesSharedCheckout || fromPr) &&
 			(worktreeMode !== "stack" || !workspace.branch)
 		) {
 			updateWorkspace(workspace.id, {
@@ -2248,7 +2260,7 @@ export async function handleCreateSessionMessage(
 					? ""
 					: selectedRunner
 						? branch
-						: sharedCheckoutForNewSessions(repo)
+						: usesSharedCheckout && wtPath === repo.repo
 						? repo.defaultBranch
 						: workspace?.worktreeDir === wtPath
 							? workspace.branch || branch
@@ -2503,7 +2515,7 @@ export async function handleCreateSessionMessage(
 			gitEnv: githubGitEnv,
 			needsWorktree,
 			worktreeKind: fromPr ? "existing" : "new",
-			worktreeIsolated: false,
+			worktreeIsolated: isolatesConfiguredSharedCheckout,
 			materializeWorktree: needsWorktree
 				? actorWorktreeMaterializer({
 						sessionId: bksId,
@@ -2512,7 +2524,7 @@ export async function handleCreateSessionMessage(
 						branch,
 						worktreePath: wtPath,
 						baseBranch: stackBase,
-						isolated: false,
+						isolated: isolatesConfiguredSharedCheckout,
 						existingBranch: fromPr,
 						credentialPrincipal: githubCredential?.principal,
 					})

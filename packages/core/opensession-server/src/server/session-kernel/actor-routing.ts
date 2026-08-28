@@ -83,6 +83,9 @@ export function sessionActorServiceRoute(
   }
   if (request.t === "acknowledge")
     return { scope: "session", sessionId: request.sessionId, mutation: true };
+  if (request.t === "runtime_catalog_work") return { scope: "catalog_read" };
+  if (request.t === "runtime_session_work")
+    return { scope: "session", sessionId: request.sessionId, mutation: true };
   return { scope: "global" };
 }
 

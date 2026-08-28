@@ -72,7 +72,7 @@ const queuedSteerDeps: QueuedSteerDeps = {
     if (text.trim() || images?.length) {
       await storeAppendUserLineEarly(
         sessionId,
-        transcriptLineUser(text, promptEntryId, undefined, images),
+        transcriptLineUser(text, promptEntryId, undefined, images, [itemId]),
         { required: true },
       );
     }

@@ -458,17 +458,37 @@ export function startSessionKernelActorWorker(): void {
       } else if (request.t === "maintain") {
         const pending = host.maintain();
         post({ t: "maintain_result", rpcId: request.rpcId, pending });
-      } else if (request.t === "runtime_work") {
+      } else if (request.t === "runtime_catalog_work") {
         post({
-          t: "runtime_work_result",
+          t: "runtime_catalog_work_result",
           rpcId: request.rpcId,
-          ...host.runtimeWork(
+          ...host.runtimeCatalogWork(
             request.now,
             request.timerKinds,
             request.effectKinds,
             request.limit,
+            request.additionalOutboxGroups,
+            request.activeOutbox,
           ),
         });
+      } else if (request.t === "runtime_session_work") {
+        post({
+          t: "runtime_session_work_result",
+          rpcId: request.rpcId,
+          ...host.runtimeSessionWork(
+            request.sessionId,
+            request.candidateCount,
+            request.now,
+            request.timerKinds,
+            request.effectKinds,
+            request.limit,
+            request.additionalOutboxGroups,
+            request.activeOutbox,
+            request.activeOutboxRecheckAt,
+          ),
+        });
+      } else if (request.t === "runtime_work") {
+        throw new Error("Runtime work must be routed through session mailboxes");
       }
     } catch (error) {
       host.recordSqliteBusy(error);
@@ -495,6 +515,7 @@ export function startSessionKernelActorWorker(): void {
         t: "error",
         rpcId: request.rpcId,
         error: error instanceof Error ? error.message : String(error),
+        ...(isSessionKernelCentralStoreFailure(error) ? { fatal: true } : {}),
       });
     }
   };

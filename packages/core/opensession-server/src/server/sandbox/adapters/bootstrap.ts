@@ -646,9 +646,12 @@ export async function remoteCloneUrl(repo: {
   ghRepo?: string;
   host?: "github" | "codestorage";
   csRepo?: string;
-}): Promise<string> {
+}, options: { credential?: "configured" | "none" } = {}): Promise<string> {
   const origin = await hostGit(["remote", "get-url", "origin"], repo.repo);
   if (repo.host === "codestorage") {
+    if (options.credential === "none") {
+      throw new Error(`repo ${repo.id} does not expose a credential-free code.storage clone`);
+    }
     const csRepoId = repo.csRepo || (origin ? parseCsRemote(origin)?.repoId : undefined);
     if (!csRepoId) {
       throw new Error(
@@ -670,7 +673,9 @@ export async function remoteCloneUrl(repo: {
       `repo ${repo.id} has no https-reachable origin (origin="${redactUrl(origin) || "none"}") — remote sandboxes clone over https; set an origin or ghRepo`,
     );
   }
-  return await injectCloneCredential(https);
+  return options.credential === "none"
+    ? credentialFreeHttpsUrl(https)
+    : await injectCloneCredential(https);
 }
 
 /**
@@ -730,6 +735,45 @@ export function bootstrapSignature(): string {
     `${base}+node@${REMOTE_NODE_VERSION}+just@${REMOTE_JUST_VERSION}` +
     `+gh@${REMOTE_GH_VERSION}+${REMOTE_RUNTIME_REVISION}`
   );
+}
+
+/** Toolchain identity for DURABLE repo templates: everything bootstrap
+ * installs that a restored sandbox cannot cheaply reconcile in place.
+ * Deliberately excludes the runnerSha commit pin itself: on adoption,
+ * bootstrapRemoteSandbox already reconciles a stale checkout with a shallow
+ * fetch + detached checkout of the pin, an incremental frozen-lockfile
+ * install, and a forced runner recompile — seconds to a minute inside the
+ * restored filesystem. Keying templates on the pin instead threw away every
+ * provider artifact (full re-clone + project setup + re-snapshot) on every
+ * deploy. The runner repo's committed lockfile stands in for the dependency
+ * payload: templates survive code-only runner bumps and still rotate when
+ * the dependency set actually moves. */
+export function runnerToolchainSignature(): string {
+  const cfg = sandboxConfig();
+  const base = cfg.runnerSha
+    ? runnerLockfileOid(cfg.runnerSha)
+    : cfg.runnerBundleUrl || "unpinned";
+  return (
+    `${base}+node@${REMOTE_NODE_VERSION}+just@${REMOTE_JUST_VERSION}` +
+    `+gh@${REMOTE_GH_VERSION}+${REMOTE_RUNTIME_REVISION}`
+  );
+}
+
+/** bun.lock blob oid at the pinned runner commit — falling back to the local
+ * checkout's HEAD when the pin isn't resolvable here, then to the pin itself
+ * so an unreadable repo degrades to per-deploy invalidation, never to silent
+ * reuse across an unknown dependency change. */
+function runnerLockfileOid(runnerSha: string): string {
+  for (const rev of [runnerSha, "HEAD"]) {
+    const proc = Bun.spawnSync({
+      cmd: ["git", "-C", REPO_ROOT, "rev-parse", "--verify", "--quiet", `${rev}:bun.lock`],
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    const oid = proc.exitCode === 0 ? proc.stdout.toString().trim() : "";
+    if (oid) return `lock:${oid}`;
+  }
+  return runnerSha;
 }
 
 function remoteRunnerInstallCommand(force = false): string {
@@ -1335,6 +1379,7 @@ export async function setupRemoteWorkspace(
   defaultBranch: string,
   repoId?: string,
   identity?: Omit<WorkloadIdentityContext, "lifecycle">,
+  options: { seedPrivateFiles?: boolean; runLifecycleHooks?: boolean } = {},
 ): Promise<void> {
   const startedAt = Date.now();
   const mark = (stage: string) => console.log(`[sandbox-remote] workspace ${repoId || cwd}: ${stage} (+${Date.now() - startedAt}ms)`);
@@ -1452,11 +1497,16 @@ export async function setupRemoteWorkspace(
   }
   // Per-session only: warm/template preparation never calls this path, so
   // private files are injected after restore and can never land in a shared
-  // provider snapshot.
-  await materializeRemoteWorkspaceSeedFiles(driver, cwd, repoId);
-  mark("private files seeded");
-  await runRemoteLifecycleHook(driver, cwd, "setup", "fresh", repoId, identity);
-  mark("lifecycle ready");
+  // provider snapshot. Source-verification guests explicitly skip both seed
+  // files and repository-controlled lifecycle hooks.
+  if (options.seedPrivateFiles !== false) {
+    await materializeRemoteWorkspaceSeedFiles(driver, cwd, repoId);
+    mark("private files seeded");
+  }
+  if (options.runLifecycleHooks !== false) {
+    await runRemoteLifecycleHook(driver, cwd, "setup", "fresh", repoId, identity);
+    mark("lifecycle ready");
+  }
 }
 
 const REMOTE_LIFECYCLE_DIR = `${REMOTE_HOME}/.opensession/lifecycle`;

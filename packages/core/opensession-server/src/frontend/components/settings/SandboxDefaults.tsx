@@ -22,7 +22,6 @@ function providerLabel(id: string): string {
 	if (id === "e2b") return "E2B";
 	if (id === "box") return "Box";
 	if (id === "modal") return "Modal";
-	if (id === "microvm") return "Local MicroVM";
 	if (id === "lambda-microvm") return "AWS Lambda MicroVM";
 	return id;
 }

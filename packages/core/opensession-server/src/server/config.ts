@@ -616,6 +616,8 @@ export function getConfig(): OpenSessionConfig {
 
 export function configuredServer(): ResolvedServer {
   const s = getConfig().server || {};
+  // PORT remains the stable TCP supervisor's public listener; only the
+  // entrypoint consumes the child's private OPENSESSION_GATEWAY_BACKEND_PORT.
   const envPort = parseInt(process.env.PORT || "");
   const port = Number.isFinite(envPort) ? envPort : s.port ?? 3850;
   const publicBaseUrl =

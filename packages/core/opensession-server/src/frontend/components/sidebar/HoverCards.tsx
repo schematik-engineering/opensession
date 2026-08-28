@@ -806,8 +806,8 @@ export function WsMobileSheet({
 					>
 						<IconInbox size={22} />
 						{claimed
-							? "Remove from my workspaces"
-							: "Add to my workspaces"}
+							? "Stop keeping in sidebar"
+							: "Keep in sidebar"}
 					</SheetItem>
 				)}
 				{onToggleRead && (

@@ -178,6 +178,31 @@ describe("sidebar row placement", () => {
 		expect(classifySidebarPlacement(candidate, context)).toBe("needs-review");
 	});
 
+	test("puts a personally kept review workspace in Active", () => {
+		const candidate = row(
+			"kept-review",
+			[
+				session("kept-review", {
+					startedBy: "Johnny",
+					prReviewRequested: ["michiel"],
+				}),
+			],
+			{ owner: "johnny" },
+		);
+
+		expect(classifySidebarPlacement(candidate, context)).toBe("needs-review");
+		expect(
+			classifySidebarPlacement(candidate, { ...context, claimed: true }),
+		).toBe("status");
+		expect(
+			classifySidebarPlacement(candidate, {
+				...context,
+				claimed: true,
+				snoozed: true,
+			}),
+		).toBe("snoozed");
+	});
+
 	test("preserves source order within each placement", () => {
 		const rows = ["newest", "middle", "oldest"].map((key) =>
 			row(key, [session(key)]),

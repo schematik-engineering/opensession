@@ -1120,6 +1120,16 @@ describe("SessionKernel", () => {
 		});
 	});
 
+	test("derives an executor-compatible physical host id for opening recovery", async () => {
+		const { runnerOpeningHostId } = await import("../session-create");
+		const first = runnerOpeningHostId("logical-opening", 3);
+		expect(first).toMatch(
+			/^rh-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+		);
+		expect(runnerOpeningHostId("logical-opening", 3)).toBe(first);
+		expect(runnerOpeningHostId("logical-opening", 4)).not.toBe(first);
+	});
+
 	test("settles a recovered opening when its journal retires after durable turn completion", async () => {
 		const sessionId = `local-opening-retired-${crypto.randomUUID()}`;
 		const identity = `local-opening-request-${crypto.randomUUID()}`;
@@ -1637,10 +1647,26 @@ describe("SessionKernel", () => {
 		expect(store.deliverySnapshot(sessionId).dispatch).toBeUndefined();
 		expect(store.claimNextDeliveryDispatch({
 			sessionId,
-			promptEntryId: "follow-up-entry",
+			promptEntryId: "unused-fallback-entry",
 		})).toMatchObject({
 			kind: "deliver",
+			promptEntryId: "follow-up",
 			items: [{ id: "follow-up", content: "try again" }],
+		});
+	});
+
+	test("uses a fresh fallback identity when several messages form one turn", async () => {
+		store.setDeliverySlot("batched-delivery", "queued", [
+			{ id: "first", content: "one" },
+			{ id: "second", content: "two" },
+		]);
+		expect(store.claimNextDeliveryDispatch({
+			sessionId: "batched-delivery",
+			promptEntryId: "batch-entry",
+		})).toMatchObject({
+			kind: "deliver",
+			promptEntryId: "batch-entry",
+			items: [{ id: "first" }, { id: "second" }],
 		});
 	});
 
@@ -2381,9 +2407,13 @@ describe("SessionKernel", () => {
       })).toBe("confirmed");
 			expect(recoveredDuringCancel.claimNextDeliveryDispatch({
 				sessionId: "restart-interrupt",
-				promptEntryId: "restart-entry",
+				promptEntryId: "unused-restart-entry",
 				stillWorking: true,
-			})).toMatchObject({ kind: "deliver", interrupted: true });
+			})).toMatchObject({
+				kind: "deliver",
+				promptEntryId: "held",
+				interrupted: true,
+			});
 		} finally {
 			recoveredDuringCancel.close();
 		}
@@ -2392,7 +2422,7 @@ describe("SessionKernel", () => {
 		try {
 			expect(recoveredAfterClaim.failDeliveryDispatch(
 				"restart-interrupt",
-				"restart-entry",
+				"held",
 			)).toBe(true);
 			expect(
 				recoveredAfterClaim.deliverySnapshot("restart-interrupt").interrupt,
@@ -2401,7 +2431,11 @@ describe("SessionKernel", () => {
 				sessionId: "restart-interrupt",
 				promptEntryId: "retry-entry",
 				stillWorking: true,
-			})).toMatchObject({ kind: "deliver", interrupted: true });
+			})).toMatchObject({
+				kind: "deliver",
+				promptEntryId: "held",
+				interrupted: true,
+			});
       const claimedInterrupt = (
         recoveredAfterClaim.deliverySnapshot("restart-interrupt").dispatch as {
           interrupt?: { runGeneration: number };

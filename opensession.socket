@@ -1,0 +1,13 @@
+# Stable public listener for Open Session. systemd retains this socket while
+# opensession.service and its gateway supervisor are upgraded or restarted.
+[Unit]
+Description=Open Session stable gateway listener
+
+[Socket]
+ListenStream=127.0.0.1:3850
+NoDelay=true
+Backlog=512
+Service=opensession.service
+
+[Install]
+WantedBy=sockets.target

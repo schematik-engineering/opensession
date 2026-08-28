@@ -1,6 +1,6 @@
 /** Persistent per-repository sandbox environment readiness. */
 
-import { existsSync, readFileSync, statSync } from "fs";
+import { readFileSync } from "fs";
 import { stateDir } from "../paths";
 import { writeJsonAtomic } from "../shared/atomic-write";
 import { REPOS } from "../worktree";
@@ -107,7 +107,7 @@ function normalizeMachineSettings(
     }
     settings.memoryMb = raw.memoryMb;
   }
-  if (raw.diskGb != null && (provider === "daytona" || provider === "microvm")) {
+  if (raw.diskGb != null && provider === "daytona") {
     if (!Number.isInteger(raw.diskGb) || raw.diskGb < 1 || raw.diskGb > 1_000) {
       throw Object.assign(new Error("Disk must be between 1 and 1000 GB"), { code: "MACHINE_SETTINGS_INVALID" });
     }
@@ -130,25 +130,6 @@ function normalizeMachineSettings(
       });
     }
     settings.diskGb = raw.diskGb;
-  }
-  if (provider === "microvm") {
-    const supported = [
-      { cpu: 2, memoryMb: 4_096, diskGb: 25 },
-      { cpu: 4, memoryMb: 8_192, diskGb: 25 },
-      { cpu: 4, memoryMb: 12_288, diskGb: 25 },
-      { cpu: 4, memoryMb: 12_288, diskGb: 50 },
-      { cpu: 8, memoryMb: 24_576, diskGb: 100 },
-    ].some(
-      (profile) =>
-        profile.cpu === settings.cpu &&
-        profile.memoryMb === settings.memoryMb &&
-        profile.diskGb === settings.diskGb,
-    );
-    if (!supported) {
-      throw Object.assign(new Error("Choose one of the supported Local MicroVM sizes"), {
-        code: "MACHINE_SETTINGS_INVALID",
-      });
-    }
   }
   return Object.keys(settings).length ? settings : undefined;
 }
@@ -210,35 +191,6 @@ async function derivedEnvironment(
         ...(stored?.settings ? { settings: stored.settings } : {}),
       };
     }
-  } else if (provider === "microvm") {
-    const { microvmRepoTemplatePath } = await import("./adapters/microvm");
-    const path = microvmRepoTemplatePath(repo);
-    if (path && existsSync(path)) {
-      const stat = statSync(path);
-      const expires = stat.mtimeMs + 24 * 60 * 60_000;
-      if (expires > Date.now()) {
-        return {
-          repo,
-          provider,
-          state: "ready",
-          mode: "template",
-          updatedAt: stat.mtime.toISOString(),
-          preparedAt: stat.mtime.toISOString(),
-          expiresAt: new Date(expires).toISOString(),
-          ...(stored?.settings ? { settings: stored.settings } : {}),
-        };
-      }
-      return {
-        repo,
-        provider,
-        state: "stale",
-        mode: "template",
-        updatedAt: stat.mtime.toISOString(),
-        preparedAt: stat.mtime.toISOString(),
-        expiresAt: new Date(expires).toISOString(),
-        ...(stored?.settings ? { settings: stored.settings } : {}),
-      };
-    }
   }
   return (
     interruptedPreparation(stored) || {
@@ -252,7 +204,7 @@ async function derivedEnvironment(
 
 export async function listSandboxEnvironments(): Promise<SandboxEnvironment[]> {
   const out: SandboxEnvironment[] = [];
-  const providers: WorkspaceSandboxProvider[] = ["docker", "daytona", "box", "modal", "microvm"];
+  const providers: WorkspaceSandboxProvider[] = ["docker", "daytona", "box", "modal"];
   for (const repo of Object.keys(REPOS)) {
     for (const provider of providers) out.push(await derivedEnvironment(repo, provider));
   }
@@ -281,9 +233,6 @@ async function removeTemplate(
         await deleteModalTemplateArtifact(previous.artifactId);
       }
     }
-  } else if (provider === "microvm") {
-    const { deleteMicrovmRepoTemplate } = await import("./adapters/microvm");
-    await deleteMicrovmRepoTemplate(repo);
   }
 }
 
@@ -294,7 +243,7 @@ async function removeTemplate(
  */
 export async function invalidateSandboxEnvironmentsForRepo(repo: string): Promise<void> {
   if (!(repo in REPOS)) return;
-  for (const provider of ["daytona", "box", "modal", "microvm"] as const) {
+  for (const provider of ["daytona", "box", "modal"] as const) {
     const stored = storedEnvironment(repo, provider);
     if (!stored) continue;
     // Remote repo templates contain a credential-free warm clone. Adoption

@@ -4,7 +4,6 @@ import { existsSync } from "fs";
 import type { TranscriptEntry } from "./types";
 import {
   classifyEntries,
-  dropContextInjections,
   parseAnsweredAskData,
 } from "@tellahq/opensession-protocol/notices";
 import { withToolPresentations } from "@tellahq/opensession-protocol/tool-presentation";
@@ -67,6 +66,7 @@ interface RawJsonlEntry {
   uuid?: string;
   timestamp?: string;
   requestId?: string;
+  sourceMessageIds?: string[];
   // Open Session's Pi normalizer marks provider thinking blocks so they keep
   // their quiet activity presentation after the JSONL normalization round-trip.
   isReasoning?: boolean;
@@ -181,20 +181,32 @@ function splitAttributedParts(text: string): string[] {
 }
 
 /** Push a user turn, splitting a steer-joined composite into one entry per
- *  attributed part (derived ids keep streaming merges stable). */
+ *  attributed part. Delivery identities survive normalization so optimistic
+ *  clients never have to correlate repeated text or client/server clocks. */
 function pushUserEntries(
   entries: TranscriptEntry[],
   id: string,
   text: string,
   ts: string,
+  sourceMessageIds?: string[],
 ): void {
   const parts = splitAttributedParts(text);
+  const sources = sourceMessageIds?.filter(
+    (source): source is string => typeof source === "string" && source.length > 0,
+  );
   parts.forEach((part, i) => {
+    const partSources =
+      sources?.length === parts.length
+        ? [sources[i]!]
+        : i === 0
+          ? sources
+          : undefined;
     entries.push({
       id: i === 0 ? id : `${id}-j${i + 1}`,
       type: "user",
       content: resolveSlackIds(part),
       timestamp: ts,
+      ...(partSources?.length ? { sourceMessageIds: partSources } : {}),
     });
   });
 }
@@ -420,7 +432,7 @@ function parseEntry(raw: RawJsonlEntry): TranscriptEntry[] {
           const baseId = raw.uuid || crypto.randomUUID();
           const id = userTextCount === 0 ? baseId : `${baseId}-t${userTextCount}`;
           userTextCount++;
-          pushUserEntries(entries, id, text, ts);
+          pushUserEntries(entries, id, text, ts, raw.sourceMessageIds);
           if (files.length) {
             // The note rides the end of the turn — attach to its last user entry
             // (or a bare one when the message was attachments-only).
@@ -464,7 +476,13 @@ function parseEntry(raw: RawJsonlEntry): TranscriptEntry[] {
           entries.push(...harness);
         } else {
           const { text, files } = extractUploadsNote(stripped);
-          pushUserEntries(entries, raw.uuid || crypto.randomUUID(), text, ts);
+          pushUserEntries(
+            entries,
+            raw.uuid || crypto.randomUUID(),
+            text,
+            ts,
+            raw.sourceMessageIds,
+          );
           if (files.length) {
             const lastUser = [...entries].reverse().find((e) => e.type === "user");
             if (lastUser) attachUploads(lastUser, files);
@@ -1188,6 +1206,35 @@ function stripStoredUserContext(entries: TranscriptEntry[]): TranscriptEntry[] {
   return changed ? shown : entries;
 }
 
+/** Hide model-only context while preserving the one structural fact a reader
+ * needs: a background wait starts another agent turn. The payload stays
+ * private; clients receive only a content-free boundary carrying the original
+ * sequence identity, so old stored waits gain the fix without migration. */
+function projectContextForWire(entries: TranscriptEntry[]): TranscriptEntry[] {
+  const projected: TranscriptEntry[] = [];
+  for (const entry of entries) {
+    const contextRecord =
+      entry.noticeKind === "context-injection" ||
+      entry.noticeKind === "standing-context";
+    if (!contextRecord) {
+      projected.push(entry);
+      continue;
+    }
+    if (entry.contextInjection?.source === "background-wait") {
+      projected.push({
+        id: entry.id,
+        type: "user",
+        content: "",
+        timestamp: entry.timestamp,
+        turnBoundary: true,
+        ...(entry.seq !== undefined ? { seq: entry.seq } : {}),
+        ...(entry.changeSeq !== undefined ? { changeSeq: entry.changeSeq } : {}),
+      });
+    }
+  }
+  return projected;
+}
+
 /**
  * Everything a batch of entries needs before it leaves the server: strip
  * injected context, classify how each entry reads (notices.ts), say what each
@@ -1206,7 +1253,7 @@ export function prepareEntriesForWire(
   entries: TranscriptEntry[]
 ): TranscriptEntry[] {
   return withToolPresentations(
-    classifyEntries(stripStoredUserContext(dropContextInjections(entries)))
+    classifyEntries(stripStoredUserContext(projectContextForWire(entries)))
   );
 }
 

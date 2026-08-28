@@ -49,6 +49,17 @@ describe("Button", () => {
 		expect(html.indexOf("Review")).toBeLessThan(html.indexOf("<svg"));
 	});
 
+	test("can keep a meaningful icon at full strength", () => {
+		const muted = renderToStaticMarkup(<Button icon={<svg />}>Add</Button>);
+		const full = renderToStaticMarkup(
+			<Button icon={<svg />} iconTone="full">
+				Add
+			</Button>,
+		);
+		expect(muted).toContain("opacity-60");
+		expect(full).not.toContain("opacity-60");
+	});
+
 	test("overlay actions keep standard button behavior on a dark scrim", () => {
 		const html = renderToStaticMarkup(
 			<Button variant="overlay" icon={<svg />}>

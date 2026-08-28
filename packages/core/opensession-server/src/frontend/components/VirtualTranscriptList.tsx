@@ -15,7 +15,14 @@ import {
 	seededBlockEstimate,
 	type TranscriptSizes,
 } from "../lib/transcript-sizes";
-import { newTailBlockKeys } from "../lib/transcript-block-identity";
+import {
+	newTailBlockKeys,
+	shouldAnimateTranscriptItemArrival,
+} from "../lib/transcript-block-identity";
+import {
+	TRANSCRIPT_ARRIVING_POSITION_CLASS,
+	transcriptEnterClass,
+} from "../lib/transcript-motion";
 import { TranscriptTopApproachGate } from "../lib/transcript-top-approach";
 import {
 	registerTranscriptVirtualNavigation,
@@ -27,6 +34,13 @@ export interface VirtualTranscriptItem {
 	key: string;
 	anchorId: string;
 	entryIds: string[];
+	/** Previously rendered entry identities this row durably replaces. A fresh
+	 * outer block with one of these aliases is reconciliation, not an arrival. */
+	arrivalAliases?: string[];
+	/** Semantic entry revisions for content changes that do not add another id.
+	 * Used only to select the handful of rows that need a synchronous
+	 * post-commit measurement. */
+	measureVersion?: readonly unknown[];
 	estimateSize: number;
 	/** Keep the estimate until sparse payload content is available to measure. */
 	measure?: boolean;
@@ -60,10 +74,8 @@ interface Props {
  *  animation does not restart when its element re-renders). The transform
  *  lives on this inner wrapper because the virtualized row itself positions
  *  with an inline translateY that the keyframe must not fight. */
-const ENTER_CLASS = "[animation:transcript-enter_var(--dur)_var(--ease)]";
-
 function EnterRow({ enter, children }: { enter?: boolean; children: React.ReactNode }) {
-	return <div className={enter ? ENTER_CLASS : undefined}>{children}</div>;
+	return <div className={transcriptEnterClass(Boolean(enter))}>{children}</div>;
 }
 
 /**
@@ -91,6 +103,8 @@ class TranscriptVirtualizer extends React.Component<Omit<Props, "enabled">, Adap
 	private root: HTMLDivElement | null = null;
 	private mounted = false;
 	private rendering = false;
+	private measuringCommittedRows = false;
+	private renderAfterCommitMeasure = false;
 	private mountCleanup: (() => void) | undefined;
 	private navigationCleanup: (() => void) | undefined;
 	private navigationContainer: HTMLDivElement | null = null;
@@ -102,14 +116,29 @@ class TranscriptVirtualizer extends React.Component<Omit<Props, "enabled">, Adap
 	private topApproachCallback: (() => void) | undefined;
 	private topApproachTimer: number | undefined;
 	private topApproachTouchY: number | null = null;
+	private topApproachScrollTop: number | null = null;
 	private topApproachGate = new TranscriptTopApproachGate();
 	private rowObserver: ResizeObserver | null = null;
 	private rowRefs = new Map<string, (node: HTMLDivElement | null) => void>();
+	/** Rows newly inserted at the hydrated head need measurement compensation
+	 * even while they straddle the viewport. The normal TanStack predicate only
+	 * adjusts rows whose estimated end is already above scrollTop; a tall new
+	 * row can therefore paint for one frame before the next correction. */
+	private headGrowthKeys = new Set<string>();
+	private headGrowthGeneration = 0;
+	private scheduledHeadGrowthGeneration = 0;
+	private headGrowthTimer: number | undefined;
+	private renderedGrowth:
+		| { key: string; version: number | undefined }
+		| undefined;
 	/** Every block key this adapter instance has ever mounted. The first build
 	 *  seeds it (opening a session is not an arrival); afterwards, a tail key
 	 *  missing from the set just arrived live and plays the entrance fade. Keys
 	 *  stay in the set once seen, so a virtualizer remount never replays it. */
 	private mountedKeys: Set<string> | null = null;
+	/** Entry identities already painted inside those blocks. Unlike block keys,
+	 * these survive an optimistic row becoming a new durable transcript range. */
+	private mountedEntryIds = new Set<string>();
 	private seeded: { session: string; sizes?: TranscriptSizes } | null = null;
 	private virtualizer: Virtualizer<HTMLDivElement, HTMLDivElement>;
 
@@ -150,11 +179,13 @@ class TranscriptVirtualizer extends React.Component<Omit<Props, "enabled">, Adap
 	}
 
 	componentDidUpdate(
-		_prevProps: Omit<Props, "enabled">,
+		prevProps: Omit<Props, "enabled">,
 		_prevState: AdapterState,
 		snapshot: number | null,
 	) {
+		this.measureCommittedRows(prevProps);
 		this.virtualizer._willUpdate();
+		this.scheduleHeadGrowthClear();
 		if (snapshot !== null) {
 			// Height gained by this commit's own mutation goes back on scrollTop
 			// before paint, holding the reader's place while history grows above.
@@ -175,7 +206,52 @@ class TranscriptVirtualizer extends React.Component<Omit<Props, "enabled">, Adap
 		this.navigationCleanup?.();
 		this.clearTopApproach();
 		if (this.visibleTimer !== undefined) window.clearTimeout(this.visibleTimer);
+		if (this.headGrowthTimer !== undefined)
+			window.clearTimeout(this.headGrowthTimer);
 		this.rowObserver?.disconnect();
+	}
+
+	private prepareHeadGrowth(props: Omit<Props, "enabled">) {
+		const key = props.topGrowthKey ?? props.items[0]?.key ?? "";
+		const next = { key, version: props.topGrowthVersion };
+		const previous = this.renderedGrowth;
+		this.renderedGrowth = next;
+		if (!previous || !key) return;
+
+		let added = false;
+		if (key !== previous.key) {
+			const previousIndex = props.items.findIndex(
+				(item) => item.key === previous.key,
+			);
+			if (previousIndex > 0) {
+				for (const item of props.items.slice(0, previousIndex)) {
+					this.headGrowthKeys.add(item.key);
+					added = true;
+				}
+			}
+		} else if (next.version !== previous.version) {
+			// The bounded opening payload can start inside a structural range.
+			// Completing its older prefix grows the same row above visible content.
+			this.headGrowthKeys.add(key);
+			added = true;
+		}
+		if (added) this.headGrowthGeneration++;
+	}
+
+	private scheduleHeadGrowthClear() {
+		if (
+			this.headGrowthKeys.size === 0 ||
+			this.scheduledHeadGrowthGeneration === this.headGrowthGeneration
+		)
+			return;
+		this.scheduledHeadGrowthGeneration = this.headGrowthGeneration;
+		if (this.headGrowthTimer !== undefined)
+			window.clearTimeout(this.headGrowthTimer);
+		const generation = this.headGrowthGeneration;
+		this.headGrowthTimer = window.setTimeout(() => {
+			this.headGrowthTimer = undefined;
+			if (this.headGrowthGeneration === generation) this.headGrowthKeys.clear();
+		}, 750);
 	}
 
 	private syncSeeded(sizeCacheKey?: string) {
@@ -192,6 +268,13 @@ class TranscriptVirtualizer extends React.Component<Omit<Props, "enabled">, Adap
 
 	private requestRender = (_instance: Virtualizer<HTMLDivElement, HTMLDivElement>, sync: boolean) => {
 		if (!this.mounted) return;
+		if (this.measuringCommittedRows) {
+			// componentDidUpdate is already before paint. Batch every changed row
+			// into one nested render rather than asking flushSync to interrupt a
+			// React lifecycle for each measurement.
+			this.renderAfterCommitMeasure = true;
+			return;
+		}
 		const update = () => {
 			if (this.mounted)
 				this.setState(({ revision }) => ({ revision: revision + 1 }));
@@ -225,6 +308,11 @@ class TranscriptVirtualizer extends React.Component<Omit<Props, "enabled">, Adap
 			observeElementRect,
 			observeElementOffset,
 			scrollToFn: elementScroll,
+			// Semantic transcript revisions are measured synchronously in
+			// componentDidUpdate. ResizeObserver is only the fallback for external
+			// geometry changes, so let TanStack coalesce those into the next frame;
+			// flushing React from inside observer delivery can resize another row and
+			// trigger the browser's undelivered-notifications warning.
 			useAnimationFrameWithResizeObserver: true,
 			onChange: this.requestRender,
 		};
@@ -233,6 +321,30 @@ class TranscriptVirtualizer extends React.Component<Omit<Props, "enabled">, Adap
 	private setRoot = (node: HTMLDivElement | null) => {
 		this.root = node;
 	};
+
+	private measureCommittedRows(prevProps: Omit<Props, "enabled">) {
+		const keys = committedTranscriptMeasureKeys(prevProps.items, this.props.items);
+		if (!this.root || keys.size === 0) return;
+		this.measuringCommittedRows = true;
+		this.renderAfterCommitMeasure = false;
+		try {
+			for (const node of this.root.querySelectorAll<HTMLDivElement>(
+				"[data-transcript-key]",
+			)) {
+				if (!keys.has(node.dataset.transcriptKey ?? "")) continue;
+				const index = Number(node.dataset.index);
+				if (!Number.isInteger(index)) continue;
+				// ResizeObserver reports after the commit. Measuring semantic
+				// transcript changes here lets the virtualizer update its root height
+				// and bottom compensation in the same pre-paint layout phase.
+				this.virtualizer.resizeItem(index, node.getBoundingClientRect().height);
+			}
+		} finally {
+			this.measuringCommittedRows = false;
+		}
+		if (this.renderAfterCommitMeasure)
+			this.setState(({ revision }) => ({ revision: revision + 1 }));
+	}
 
 	/** The nearest message scroller, cached per root node: `closest` walks the
 	 * whole ancestor chain and used to run several times on every commit. */
@@ -327,6 +439,20 @@ class TranscriptVirtualizer extends React.Component<Omit<Props, "enabled">, Adap
 	};
 
 	private onTopApproachScroll = () => {
+		const scrollTop = this.topApproachContainer?.scrollTop;
+		if (scrollTop !== undefined) {
+			if (
+				this.topApproachScrollTop !== null &&
+				didScrollTranscriptTowardHistory(
+					this.topApproachScrollTop,
+					scrollTop,
+					this.topApproachContainer?.clientHeight ?? 0,
+					this.topApproachContainer?.scrollHeight ?? 0,
+				)
+			)
+				this.topApproachGate.request();
+			this.topApproachScrollTop = scrollTop;
+		}
 		if (this.topApproachTimer !== undefined) return;
 		this.topApproachTimer = window.setTimeout(() => {
 			this.topApproachTimer = undefined;
@@ -367,6 +493,7 @@ class TranscriptVirtualizer extends React.Component<Omit<Props, "enabled">, Adap
 		);
 		this.topApproachContainer = null;
 		this.topApproachTouchY = null;
+		this.topApproachScrollTop = null;
 		if (this.topApproachTimer !== undefined) {
 			window.clearTimeout(this.topApproachTimer);
 			this.topApproachTimer = undefined;
@@ -383,6 +510,7 @@ class TranscriptVirtualizer extends React.Component<Omit<Props, "enabled">, Adap
 		if (containerChanged) this.topApproachGate.reset();
 		if (!container || !callback) return;
 		this.topApproachContainer = container;
+		this.topApproachScrollTop = container.scrollTop;
 		container.addEventListener("scroll", this.onTopApproachScroll, { passive: true });
 		container.addEventListener("wheel", this.onTopApproachWheel, { passive: true });
 		container.addEventListener("touchstart", this.onTopApproachTouchStart, {
@@ -425,25 +553,31 @@ class TranscriptVirtualizer extends React.Component<Omit<Props, "enabled">, Adap
 	render() {
 		this.rendering = true;
 		this.syncSeeded(this.props.sizeCacheKey);
+		this.prepareHeadGrowth(this.props);
 		this.virtualizer.setOptions(this.options(this.props));
 		this.virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (
 			item,
-			_delta,
+			delta,
 			instance,
 		) => {
-			// At the live edge the follow glue owns positioning: TanStack's
-			// per-row compensation pairs every size change with an equal instant
-			// scrollTop step, which turns a turn's end-of-stream restructure into
-			// a one-frame teleport past the glide (measured 1716px). Readers away
-			// from the edge keep the compensation — it holds their place while
-			// history hydrates above them.
+			// A growing live row must carry scrollTop in the same virtualizer frame.
+			// Leaving all live-edge movement to the React layout effect exposed three
+			// distinct phone paints: new tool content, then a taller virtual root,
+			// then the corrected bottom. Shrinks still fall through to the browser's
+			// clamp/follow pass; compensating only positive growth avoids pushing a
+			// reader past the new end during a turn's final restructure.
 			const scrollEl = instance.scrollElement;
-			if (scrollEl) {
-				const fromBottom =
-					scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
-				if (fromBottom < 120) return false;
-			}
-			return shouldAdjustTranscriptScroll(item.end, instance.scrollOffset ?? 0);
+			const liveEdgeDelta =
+				scrollEl &&
+				scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 120
+					? delta
+					: undefined;
+			return shouldAdjustTranscriptScroll(
+				item.end,
+				instance.scrollOffset ?? 0,
+				this.headGrowthKeys.has(String(item.key)),
+				liveEdgeDelta,
+			);
 		};
 		const virtualItems = this.virtualizer.getVirtualItems();
 		const totalSize = this.virtualizer.getTotalSize();
@@ -451,12 +585,22 @@ class TranscriptVirtualizer extends React.Component<Omit<Props, "enabled">, Adap
 		// "mounted by the previous build" is virtualizer knowledge: the function
 		// component above is compiler-managed and may re-render without a new
 		// item list, and a ref-based previous-set there is a compile error.
+		const itemsByKey = new Map(this.props.items.map((item) => [item.key, item]));
 		const entering = newTailBlockKeys(
 			this.mountedKeys,
 			this.props.items.map((item) => item.key),
-		);
+		).filter((key) => {
+			const item = itemsByKey.get(key);
+			return (
+				!item ||
+				shouldAnimateTranscriptItemArrival(item, this.mountedEntryIds)
+			);
+		});
 		if (this.mountedKeys === null) this.mountedKeys = new Set();
-		for (const item of this.props.items) this.mountedKeys.add(item.key);
+		for (const item of this.props.items) {
+			this.mountedKeys.add(item.key);
+			for (const entryId of item.entryIds) this.mountedEntryIds.add(entryId);
+		}
 		const enteringSet = new Set(entering);
 		const result = (
 			<div
@@ -476,7 +620,18 @@ class TranscriptVirtualizer extends React.Component<Omit<Props, "enabled">, Adap
 							ref={item.measure === false ? undefined : this.rowRef(item.key)}
 							data-index={virtualItem.index}
 							data-eid={item.anchorId}
-							className={cn("absolute left-0 top-0 w-full", item.className)}
+							data-transcript-key={item.key}
+							className={cn(
+								"absolute left-0 top-0 w-full",
+								item.className,
+								// Live machine rows glide when their measured position moves.
+								// User rows stay fixed: their optimistic-to-durable identity
+								// handoff can arrive seconds later and must not visibly move.
+								virtualItem.index >=
+									Math.max(0, this.props.items.length - this.props.trailingMounted) &&
+									shouldTransitionTranscriptItemPosition(item) &&
+									TRANSCRIPT_ARRIVING_POSITION_CLASS,
+							)}
 							style={{ transform: `translateY(${virtualItem.start}px)` }}
 						>
 							<EnterRow enter={enteringSet.has(item.key)}>{item.content}</EnterRow>
@@ -490,11 +645,65 @@ class TranscriptVirtualizer extends React.Component<Omit<Props, "enabled">, Adap
 	}
 }
 
+export function committedTranscriptMeasureKeys(
+	previous: VirtualTranscriptItem[],
+	next: VirtualTranscriptItem[],
+): Set<string> {
+	const previousItems = new Map(previous.map((item) => [item.key, item]));
+	const changed = new Set<string>();
+	for (const item of next) {
+		if (item.measure === false) continue;
+		const before = previousItems.get(item.key);
+		const beforeVersion = before?.measureVersion;
+		const nextVersion = item.measureVersion;
+		if (
+			!before ||
+			before.entryIds.length !== item.entryIds.length ||
+			before.entryIds.some((id, index) => id !== item.entryIds[index]) ||
+			beforeVersion?.length !== nextVersion?.length ||
+			Boolean(
+				nextVersion?.some((version, index) => version !== beforeVersion?.[index]),
+			)
+		)
+			changed.add(item.key);
+	}
+	return changed;
+}
+
+export function shouldTransitionTranscriptItemPosition(
+	item: VirtualTranscriptItem,
+): boolean {
+	// A prompt may move when its optimistic row becomes a durable transcript
+	// range. That identity handoff must be visually inert, not a delayed glide.
+	return !item.arrivalAliases?.length;
+}
+
+export function didScrollTranscriptTowardHistory(
+	previousOffset: number,
+	nextOffset: number,
+	viewportHeight = 0,
+	contentHeight = 0,
+): boolean {
+	if (nextOffset < previousOffset - 0.5) return true;
+	// A child virtualizer can subscribe before its parent restores the live edge,
+	// leaving the sampled offset at zero. A one-step Home key or scrollbar jump
+	// then reports zero again. Treat that top-edge event as intent only when the
+	// mounted window is genuinely scrollable and movement was not toward latest.
+	return (
+		contentHeight > viewportHeight * 2 &&
+		nextOffset <= viewportHeight &&
+		nextOffset <= previousOffset + 0.5
+	);
+}
+
 export function shouldAdjustTranscriptScroll(
 	itemEnd: number,
 	scrollOffset: number,
+	headGrowth = false,
+	liveEdgeDelta?: number,
 ): boolean {
-	return itemEnd <= scrollOffset + 1;
+	if (liveEdgeDelta !== undefined) return liveEdgeDelta > 0;
+	return headGrowth || itemEnd <= scrollOffset + 1;
 }
 
 export function virtualTranscriptRange(

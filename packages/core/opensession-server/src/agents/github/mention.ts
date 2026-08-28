@@ -8,6 +8,8 @@
  * the bot's replies (which don't mention itself) never re-trigger.
  */
 import { getPrAutomationDetails, type PrAutomationDetails } from "../../server/pr-info";
+import { defaultRepo } from "../../server/config";
+import { isExternalPullRequest } from "./public-review";
 import { listAutomations } from "../../server/automations";
 import { createWorktreeForPrBranch, createWorktreeForFollowup } from "../../server/worktree";
 import {
@@ -266,6 +268,13 @@ export async function runConversationalMention(
   try {
     const details = await getPrAutomationDetails(String(prNumber), ghRepo || undefined);
     if (!details) return;
+    if (isExternalPullRequest(details, ghRepo || defaultRepo().ghRepo)) {
+      const message = `${REPLY_MARKER}\nExternal PRs are read-only. I can run an isolated review, but I can't execute requests or push changes from this fork.`;
+      if (args.kind === "review" && args.replyToId)
+        await replyToReviewComment(prNumber, args.replyToId, message, ghRepo).catch(() => {});
+      else await postIssueComment(prNumber, message, ghRepo).catch(() => {});
+      return;
+    }
     // Merged/closed PR: you can't push to it, but a mention like "fix this in a
     // follow-up PR" (Kent's case) should still spin up a session — off a fresh
     // branch that opens its own PR — not be silently dropped.

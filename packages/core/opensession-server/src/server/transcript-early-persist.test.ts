@@ -37,8 +37,12 @@ async function withStore(run: (store: TranscriptStore) => Promise<void>) {
 
 const SESSION = "bks-early-persist-test";
 
-function userEntries(text: string, uuid: string) {
-  return parseJsonlLines([JSON.stringify(transcriptLineUser(text, uuid))]);
+function userEntries(text: string, uuid: string, sourceMessageIds?: string[]) {
+  return parseJsonlLines([
+    JSON.stringify(
+      transcriptLineUser(text, uuid, undefined, undefined, sourceMessageIds),
+    ),
+  ]);
 }
 
 describe("intake-time user-line persist", () => {
@@ -93,7 +97,7 @@ describe("intake-time user-line persist", () => {
       // Intake: raw user content, persisted before any engine exists.
       const first = await store.appendTranscriptEvents(
         SESSION,
-        userEntries("fix the mask selection", uuid)
+        userEntries("fix the mask selection", uuid, ["delivery-one"])
       );
       expect(first).toMatchObject({ inserted: 1, updated: 0 });
 
@@ -112,6 +116,7 @@ describe("intake-time user-line persist", () => {
       expect(users).toHaveLength(1);
       expect(users[0].id).toBe(uuid);
       expect(users[0].content).toContain("fix the mask selection");
+      expect(users[0].sourceMessageIds).toEqual(["delivery-one"]);
     });
   });
 

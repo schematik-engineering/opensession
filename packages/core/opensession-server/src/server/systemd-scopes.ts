@@ -8,7 +8,7 @@
  * per-scope limits keep one user/server or preview from consuming that fuse.
  */
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 const UID = typeof process.getuid === "function" ? process.getuid() : 1000;
 export const SYSTEMD_USER_RUNTIME = `/run/user/${UID}`;
@@ -63,6 +63,55 @@ export function systemdUserEnv(env: LimitEnv = process.env): Record<string, stri
 
 export function systemdUserScopesAvailable(): boolean {
   return existsSync(`${SYSTEMD_USER_RUNTIME}/systemd/private`) && !!Bun.which("systemd-run");
+}
+
+function selfCgroup(): string {
+  try {
+    return readFileSync("/proc/self/cgroup", "utf8");
+  } catch {
+    return "";
+  }
+}
+
+export function processRunsInControlPlane(cgroup = selfCgroup()): boolean {
+  return cgroup.includes("/opensession-control.slice/");
+}
+
+/**
+ * Move a gateway-owned engine command into the low-priority user workload
+ * slice. Detached run hosts already live in opensession-workloads.slice and
+ * must stay there so stopping their unit still kills every descendant.
+ */
+export function controlPlaneWorkloadCommand(
+  command: string[],
+  unit: string,
+  options: {
+    env?: LimitEnv;
+    cgroup?: string;
+    scopesAvailable?: boolean;
+  } = {},
+): { command: string[]; env: Record<string, string>; unit?: string } {
+  const env = options.env ?? process.env;
+  const shouldScope = processRunsInControlPlane(options.cgroup) &&
+    (options.scopesAvailable ?? systemdUserScopesAvailable());
+  if (!shouldScope)
+    return { command, env: env as Record<string, string> };
+  return {
+    command: [
+      "systemd-run",
+      "--user",
+      "--scope",
+      "--collect",
+      "--quiet",
+      `--unit=${unit}`,
+      ...engineScopeSystemdArgs(env),
+      "--property=TimeoutStopSec=2",
+      "--",
+      ...command,
+    ],
+    env: { ...(env as Record<string, string>), ...systemdUserEnv(env) },
+    unit,
+  };
 }
 
 /** Stable, path-private unit name used to stop a preview after a server restart. */

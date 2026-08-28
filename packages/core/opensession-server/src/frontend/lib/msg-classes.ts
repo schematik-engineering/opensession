@@ -90,17 +90,25 @@ export const msgBodyStreaming =
  * Desktop treats the generated `**title**` as chrome and keeps the body quiet;
  * these do the same while leaving every summary visible in the timeline. */
 export const msgReasoningTitle =
-	"text-body font-normal leading-6 break-words text-dim";
-export const msgReasoningBody = `${msgBody} text-dim`;
+	"whitespace-pre-line text-body font-normal leading-6 break-words text-dim";
+// Reasoning is never answer emphasis. Keep provider-authored strong markers
+// structurally intact for markdown while preventing them from becoming bold.
+export const msgReasoningBody = `${msgBody} text-dim [&_strong]:font-normal`;
 
-/** The current reasoning heading doubles as its loading indicator. This is the
- * same restrained text shimmer as Queueing/Sending: a faint resting word with
- * one dim crest, and base.css freezes it for reduced motion. */
-export const msgReasoningShimmer =
-	"bg-clip-text text-transparent [-webkit-background-clip:text] " +
-	"[background-image:linear-gradient(100deg,var(--text-faint)_38%,var(--text-dim)_50%,var(--text-faint)_62%)] " +
-	"[background-size:200%_100%] [background-repeat:no-repeat] " +
-	"animate-[text-shimmer_1.8s_linear_infinite]";
+/** Active model text doubles as its loading indicator. Match ChatGPT's quieter
+ * wash: the text rests at its normal secondary color while a short,
+ * low-contrast band crosses the glyphs. Inline-block is load-bearing: the sweep
+ * is sized to the text, not the full transcript column. base.css freezes it for
+ * reduced motion. Shared by streamed reasoning and the turn-level fallback, so
+ * a silent provider still leaves one legible liveness signal. */
+export const msgActivityShimmer =
+	"inline-block bg-clip-text text-transparent [-webkit-background-clip:text] [-webkit-text-fill-color:transparent] " +
+	"[background-color:var(--text-dim)] " +
+	"[background-image:linear-gradient(to_right,var(--text-dim)_0,var(--reasoning-shimmer-contrast)_40%,var(--reasoning-shimmer-contrast)_60%,var(--text-dim)_100%)] " +
+	"[background-position:-100%_0] [background-size:50%_200%] [background-repeat:no-repeat] " +
+	"animate-[reasoning-shimmer_3s_ease_0.5s_infinite]";
+
+export const msgReasoningShimmer = msgActivityShimmer;
 
 /**
  * Type and measure shared by every notice line, pill or not. The

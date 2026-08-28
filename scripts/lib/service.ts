@@ -44,11 +44,15 @@ import {
   SESSION_KERNEL_SERVICE_PATH,
   SESSION_KERNEL_TOKEN_PATH,
   SHIM_PATH,
+  SOCKET_NAME,
+  SOCKET_PATH,
   STAGED_EXECUTOR_UNIT_PATH,
+  STAGED_SOCKET_PATH,
   STAGED_SESSION_KERNEL_UNIT_PATH,
   STAGED_UNIT_PATH,
   USER_SESSION_KERNEL_TOKEN_PATH,
   USER_SESSION_KERNEL_UNIT_PATH,
+  USER_SOCKET_PATH,
   USER_UNIT_PATH,
 } from "./paths";
 import { isCompiledBinary } from "../../packages/core/opensession-server/src/runner-host/exe";
@@ -335,6 +339,20 @@ async function resolveUsername(): Promise<string> {
  *  - `EnvironmentFile=-…` so a box that has not written secrets yet still
  *    starts, instead of failing with a unit that looks fine.
  */
+export async function renderSocketUnit(scope: SystemdScope = "user"): Promise<string> {
+  const template = join(REPO_ROOT, "opensession.socket");
+  if (!existsSync(template)) throw new Error(`missing socket unit template at ${template}`);
+  const port = process.env.PORT || envFileValue("PORT") || "3850";
+  if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65_535)
+    throw new Error("PORT must be a valid TCP port");
+  return (await Bun.file(template).text())
+    .replace(/^ListenStream=.*$/m, `ListenStream=127.0.0.1:${port}`)
+    .replace(
+      /^WantedBy=.*$/m,
+      scope === "system" ? "WantedBy=sockets.target" : "WantedBy=default.target",
+    );
+}
+
 export async function renderUnit(
   scope: SystemdScope = "user",
 ): Promise<string> {
@@ -372,14 +390,14 @@ export async function renderUnit(
   // running turns in the gateway process. The system scope retains detached,
   // restart-surviving execution through the independent executor service.
   return unit
+    .replace(/^Slice=opensession-control\.slice\n/m, "")
     .replace(
       /^# SESSION_KERNEL_CREDENTIAL$/m,
       `LoadCredential=session-kernel-token:${USER_SESSION_KERNEL_TOKEN_PATH}`,
     )
-    .replace(/^Wants=opensession-executor\.service\n/m, "")
     .replace(
-      /^After=network\.target opensession-session-kernel\.service opensession-executor\.service$/m,
-      "After=network.target opensession-session-kernel.service",
+      /^After=network\.target opensession\.socket opensession-session-kernel\.service opensession-executor\.service$/m,
+      "After=network.target opensession.socket opensession-session-kernel.service",
     )
     .replace(
       credentialMarker,
@@ -463,6 +481,7 @@ export async function renderSessionKernelUnit(
     );
   if (scope === "system") return unit;
   return unit
+    .replace(/^Slice=opensession-control\.slice\n/m, "")
     .replace(/^User=.*\n/m, "")
     .replace(
       /^LoadCredential=session-kernel-token:.*$/m,
@@ -671,10 +690,12 @@ export async function install(
       const scope = opts.scope ?? "user";
       const wasActive = installedScope() === scope && (await isActive());
       const unit = await renderUnit(scope);
+      const socketUnit = await renderSocketUnit(scope);
       const kernelUnit = await renderSessionKernelUnit(scope);
       const env = userEnv();
       let migratedUserUnit: string | null = null;
       let migratedUserKernelUnit: string | null = null;
+      let migratedUserSocketUnit: string | null = null;
 
       if (scope === "user") {
         if (
@@ -704,8 +725,10 @@ export async function install(
           chmodSync(USER_SESSION_KERNEL_TOKEN_PATH, 0o600);
         }
         await Bun.write(USER_UNIT_PATH, unit);
+        await Bun.write(USER_SOCKET_PATH, socketUnit);
         await Bun.write(USER_SESSION_KERNEL_UNIT_PATH, kernelUnit);
         info(dim(`installed ${USER_UNIT_PATH}`));
+        info(dim(`installed ${USER_SOCKET_PATH}`));
         info(dim(`installed ${USER_SESSION_KERNEL_UNIT_PATH}`));
         await enableLinger();
         const runtimeDir =
@@ -720,6 +743,7 @@ export async function install(
       } else {
         const executorUnit = await renderExecutorUnit();
         await Bun.write(STAGED_UNIT_PATH, unit);
+        await Bun.write(STAGED_SOCKET_PATH, socketUnit);
         await Bun.write(STAGED_EXECUTOR_UNIT_PATH, executorUnit);
         await Bun.write(STAGED_SESSION_KERNEL_UNIT_PATH, kernelUnit);
         const serviceUser = await resolveUsername();
@@ -736,6 +760,10 @@ export async function install(
           dim(`installing ${STAGED_UNIT_PATH} -> ${SERVICE_PATH} (needs sudo)`),
         );
         const prep = [
+          [
+            "sudo",
+            join(serviceWorkdir(), "deploy", "install-resource-control.sh"),
+          ],
           [
             "sudo",
             join(serviceWorkdir(), "deploy", "install-executor-credential.sh"),
@@ -770,6 +798,7 @@ export async function install(
           ],
           ["sudo", "-n", RUN_HOST_HELPER, "check"],
           ["sudo", "cp", STAGED_UNIT_PATH, SERVICE_PATH],
+          ["sudo", "cp", STAGED_SOCKET_PATH, SOCKET_PATH],
           ["sudo", "cp", STAGED_EXECUTOR_UNIT_PATH, EXECUTOR_SERVICE_PATH],
           [
             "sudo",
@@ -801,6 +830,8 @@ export async function install(
             migratedUserKernelUnit = await Bun.file(
               USER_SESSION_KERNEL_UNIT_PATH,
             ).text();
+          if (existsSync(USER_SOCKET_PATH))
+            migratedUserSocketUnit = await Bun.file(USER_SOCKET_PATH).text();
           await runInherit(
             systemctl("user", ["disable", "--now", SERVICE_NAME]),
             undefined,
@@ -815,10 +846,17 @@ export async function install(
             undefined,
             env,
           );
+          if (existsSync(USER_SOCKET_PATH))
+            await runInherit(
+              systemctl("user", ["disable", "--now", SOCKET_NAME]),
+              undefined,
+              env,
+            );
           await run([
             "rm",
             "-f",
             USER_UNIT_PATH,
+            USER_SOCKET_PATH,
             USER_SESSION_KERNEL_UNIT_PATH,
           ]);
           await runInherit(
@@ -832,6 +870,7 @@ export async function install(
             ? [["sudo", "systemctl", "stop", SERVICE_NAME]]
             : []),
           ["sudo", "systemctl", "daemon-reload"],
+          ["sudo", "systemctl", "enable", "--now", SOCKET_NAME],
           ["sudo", "systemctl", "enable", EXECUTOR_SERVICE_NAME],
           [
             "sudo",
@@ -855,6 +894,8 @@ export async function install(
                   USER_SESSION_KERNEL_UNIT_PATH,
                   migratedUserKernelUnit,
                 );
+              if (migratedUserSocketUnit)
+                await Bun.write(USER_SOCKET_PATH, migratedUserSocketUnit);
               await runInherit(
                 systemctl("user", ["daemon-reload"]),
                 undefined,
@@ -870,6 +911,11 @@ export async function install(
                   undefined,
                   env,
                 );
+              await runInherit(
+                systemctl("user", ["enable", "--now", SOCKET_NAME]),
+                undefined,
+                env,
+              );
               await runInherit(
                 systemctl("user", ["enable", "--now", SERVICE_NAME]),
                 undefined,
@@ -890,6 +936,7 @@ export async function install(
       for (const cmd of [
         ...(wasActive ? [systemctl(scope, ["stop", SERVICE_NAME])] : []),
         systemctl(scope, ["daemon-reload"]),
+        systemctl(scope, ["enable", "--now", SOCKET_NAME]),
         systemctl(scope, ["enable", SESSION_KERNEL_SERVICE_NAME]),
         systemctl(scope, ["restart", SESSION_KERNEL_SERVICE_NAME]),
         systemctl(scope, ["enable", "--now", SERVICE_NAME]),
@@ -1030,6 +1077,12 @@ export async function control(
   const scope = installedScope() ?? "user";
   const env = userEnv();
   if (action === "start") {
+    const socket = await runInherit(
+      systemctl(scope, ["start", SOCKET_NAME]),
+      undefined,
+      env,
+    );
+    if (socket !== 0) return socket;
     const actor = await runInherit(
       systemctl(scope, ["start", SESSION_KERNEL_SERVICE_NAME]),
       undefined,
@@ -1049,7 +1102,14 @@ export async function control(
     undefined,
     env,
   );
-  if (action === "stop") return gateway || actor;
+  if (action === "stop") {
+    const socket = await runInherit(
+      systemctl(scope, ["stop", SOCKET_NAME]),
+      undefined,
+      env,
+    );
+    return gateway || actor || socket;
+  }
   return actor === 0
     ? await runInherit(systemctl(scope, ["start", SERVICE_NAME]), undefined, env)
     : actor;
@@ -1099,6 +1159,11 @@ export async function uninstall(): Promise<boolean> {
         undefined,
         env,
       );
+      await runInherit(
+        systemctl(scope, ["disable", "--now", SOCKET_NAME]),
+        undefined,
+        env,
+      );
       if (scope === "user") {
         await runInherit(
           systemctl(scope, ["disable", "--now", SESSION_KERNEL_SERVICE_NAME]),
@@ -1109,6 +1174,7 @@ export async function uninstall(): Promise<boolean> {
           "rm",
           "-f",
           USER_UNIT_PATH,
+          USER_SOCKET_PATH,
           USER_SESSION_KERNEL_UNIT_PATH,
           USER_SESSION_KERNEL_TOKEN_PATH,
         ]);
@@ -1132,6 +1198,7 @@ export async function uninstall(): Promise<boolean> {
       ]);
       for (const path of [
         SERVICE_PATH,
+        SOCKET_PATH,
         EXECUTOR_SERVICE_PATH,
         SESSION_KERNEL_SERVICE_PATH,
         "/etc/systemd/system/opensession.service.d/executor-credential.conf",

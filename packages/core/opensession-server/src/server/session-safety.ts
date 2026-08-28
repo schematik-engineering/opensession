@@ -66,17 +66,21 @@ export async function reconcileAutomaticallyRecoverableSessionSafety(
 export function automaticSafetyReconciliationRunning(
   sessionId: string,
   quarantine?: DurableSessionQuarantine,
+  claimedJournalSessions?: ReadonlySet<string>,
 ): boolean {
   return (
     (!!quarantine && automaticallyRecoverableSessionSafety(quarantine)) ||
-    activeRunRecords().some(
-      (run) => run.osSessionId === sessionId && !!run.claimedAt,
-    )
+    (claimedJournalSessions
+      ? claimedJournalSessions.has(sessionId)
+      : activeRunRecords().some(
+          (run) => run.osSessionId === sessionId && !!run.claimedAt,
+        ))
   );
 }
 
 export function publicSessionSafety(
   quarantine: DurableSessionQuarantine,
+  claimedJournalSessions?: ReadonlySet<string>,
 ): SessionSafetyState {
   return {
     status: "paused_for_safety",
@@ -85,6 +89,7 @@ export function publicSessionSafety(
     automaticReconciliationRunning: automaticSafetyReconciliationRunning(
       quarantine.sessionId,
       quarantine,
+      claimedJournalSessions,
     ),
     pausedAt: new Date(quarantine.quarantinedAt).toISOString(),
     operation: safetyOperationLabel(quarantine.commandKind),

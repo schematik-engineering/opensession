@@ -15,10 +15,9 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync } from "fs";
 import { join } from "path";
 import { OPENSESSION_SESSIONS_DIR } from "../paths";
 import { writeJsonAtomic } from "../shared/atomic-write";
-import { sandboxConfig } from "./config";
 import {
-  bootstrapSignature,
   remoteWarmWorkspaceDir,
+  runnerToolchainSignature,
   shellQuoteWord,
   type RemoteDriver,
 } from "./adapters/bootstrap";
@@ -170,40 +169,97 @@ function clean(value: string): string {
   return value.replace(/[^A-Za-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
 }
 
-const PROJECT_PREPARATION_INPUTS = [
+const DEFAULT_PREPARATION_INPUTS = [
   ".agents/setup",
   ".agents/sandbox-environment.json",
   "bun.lock",
 ] as const;
 
-/** Hash only committed files whose bytes affect the reusable prepared
- * filesystem. Shared project images are built from repository commits, never
- * from an operator's dirty worktree. Reading working-tree bytes here made an
+/** Repos declare EXTRA preparation inputs in their committed
+ * `.agents/sandbox-environment.json` under `preparationInputs`: repo-relative
+ * files or directories (extra lockfiles, patch dirs, toolchain pins) whose
+ * committed content should rotate the prepared template. The declaration
+ * lives in the repo so each project owns its own invalidation surface.
+ * Exported for tests. */
+export function parsePreparationInputs(raw: unknown): string[] {
+  const list = (raw as { preparationInputs?: unknown } | null)?.preparationInputs;
+  if (!Array.isArray(list)) return [];
+  const out: string[] = [];
+  for (const entry of list) {
+    if (typeof entry !== "string") continue;
+    const path = entry.replace(/\/+$/, "");
+    if (!path || path.length > 200 || path.startsWith("/") || path.startsWith("-")) continue;
+    if (/[\0\n:\\]/.test(path)) continue;
+    if (path.split("/").some((seg) => seg === "" || seg === "." || seg === "..")) continue;
+    if (!out.includes(path)) out.push(path);
+    if (out.length >= 32) break;
+  }
+  return out;
+}
+
+/** The declared extras from the repo's committed environment file (never the
+ * working tree when HEAD exists — same rule as the hashing below). Exported
+ * for tests. */
+export function declaredPreparationInputs(repoDir: string, hasHead: boolean): string[] {
+  try {
+    const raw = hasHead
+      ? (() => {
+          const shown = spawnSync(
+            "git",
+            ["-C", repoDir, "show", "HEAD:.agents/sandbox-environment.json"],
+            { encoding: "utf-8", maxBuffer: 1024 * 1024 },
+          );
+          return shown.status === 0 ? shown.stdout : "";
+        })()
+      : readFileSync(join(repoDir, ".agents/sandbox-environment.json"), "utf-8");
+    if (!raw) return [];
+    return parsePreparationInputs(JSON.parse(raw)).filter(
+      (p) => !(DEFAULT_PREPARATION_INPUTS as readonly string[]).includes(p),
+    );
+  } catch {
+    return [];
+  }
+}
+
+/** Committed git object id (blob or tree — directories work too) for one
+ * preparation input, so content addressing is git's own. */
+function committedInputId(repoDir: string, relative: string, hasHead: boolean): string {
+  if (hasHead) {
+    const r = spawnSync(
+      "git",
+      ["-C", repoDir, "rev-parse", "--verify", "--quiet", `HEAD:${relative}`],
+      { encoding: "utf-8" },
+    );
+    const oid = r.status === 0 ? r.stdout.trim() : "";
+    return oid || "<absent>";
+  }
+  try {
+    return createHash("sha256").update(readFileSync(join(repoDir, relative))).digest("hex");
+  } catch {
+    return "<absent>";
+  }
+}
+
+/** Hash only committed content whose bytes affect the reusable prepared
+ * filesystem: the defaults above plus whatever the repo itself declares.
+ * Shared project images are built from repository commits, never from an
+ * operator's dirty worktree. Reading working-tree bytes here made an
  * unrelated local bun.lock edit invalidate every provider artifact. */
 export function projectPreparationSignature(repoId: string): string {
   const repo = configuredRepos()[repoId];
   const hash = createHash("sha256");
-  hash.update(`project-preparation-v2\0${repoId}\0`);
+  hash.update(`project-preparation-v3\0${repoId}\0`);
   if (!repo) return hash.update("<unregistered>").digest("hex");
   const hasHead = spawnSync("git", ["-C", repo.repo, "rev-parse", "--verify", "HEAD"], {
     stdio: "ignore",
   }).status === 0;
-  for (const relative of PROJECT_PREPARATION_INPUTS) {
+  const inputs = [
+    ...DEFAULT_PREPARATION_INPUTS,
+    ...declaredPreparationInputs(repo.repo, hasHead),
+  ];
+  for (const relative of inputs) {
     hash.update(`${relative}\0`);
-    if (hasHead) {
-      const committed = spawnSync("git", ["-C", repo.repo, "show", `HEAD:${relative}`], {
-        encoding: "buffer",
-        maxBuffer: 32 * 1024 * 1024,
-      });
-      if (committed.status === 0 && committed.stdout) hash.update(committed.stdout);
-      else hash.update("<absent>");
-    } else {
-      try {
-        hash.update(readFileSync(join(repo.repo, relative)));
-      } catch {
-        hash.update("<absent>");
-      }
-    }
+    hash.update(committedInputId(repo.repo, relative, hasHead));
     hash.update("\0");
   }
   return hash.digest("hex");
@@ -219,11 +275,13 @@ function file(provider: RemoteTemplateProvider, repoId: string): string {
 
 /** Includes every create-time input whose change makes an artifact unsafe to
  * reuse. Source freshness is handled by adoption's fetch; dependency/setup
- * freshness is handled separately by projectPreparationSignature. */
+ * freshness is handled separately by projectPreparationSignature; a runner
+ * commit pin bump is deliberately NOT here — adoption's bootstrap reconciles
+ * the pin inside the restored filesystem (see runnerToolchainSignature), so
+ * templates survive ordinary deploys instead of rebuilding on every one. */
 export function remoteRepoTemplateSignature(
   provider: RemoteTemplateProvider,
 ): string {
-  const cfg = sandboxConfig();
   const settings = getSandboxConnection(provider)?.settings || {};
   const shape =
     provider === "daytona"
@@ -238,7 +296,7 @@ export function remoteRepoTemplateSignature(
           cloud: settings.cloud || null,
         };
   return createHash("sha256")
-    .update(`repo-template-v2|${bootstrapSignature()}|${JSON.stringify(shape)}`)
+    .update(`repo-template-v3|${runnerToolchainSignature()}|${JSON.stringify(shape)}`)
     .digest("hex");
 }
 

@@ -12,6 +12,10 @@ export interface LiveTurnSnapshot {
 	live: boolean;
 	by: string | null;
 	runId: string | null;
+	/** This run has painted visible stream text at least once. It stays true
+	 * across block reconciliation so progress chrome does not flicker back
+	 * between landed blocks. */
+	hasPaintedText: boolean;
 	revision: number;
 }
 
@@ -20,6 +24,7 @@ const EMPTY: LiveTurnSnapshot = {
 	live: false,
 	by: null,
 	runId: null,
+	hasPaintedText: false,
 	revision: 0,
 };
 
@@ -89,6 +94,7 @@ export class LiveTurnStore {
 	getSnapshot = () => this.snapshot;
 	getServerSnapshot = () => EMPTY;
 	hasText = () => Boolean(this.buffer.text);
+	hasPaintedText = () => this.snapshot.hasPaintedText;
 	textLength = () => this.buffer.text.length;
 
 	start(by?: string | null, runId?: string) {
@@ -103,6 +109,7 @@ export class LiveTurnStore {
 			live: true,
 			by: by ?? null,
 			runId: runId ?? randomUUID(),
+			hasPaintedText: false,
 			revision: this.snapshot.revision + 1,
 		};
 		this.emit();
@@ -141,6 +148,7 @@ export class LiveTurnStore {
 		this.snapshot = {
 			...this.snapshot,
 			text: this.buffer.text,
+			hasPaintedText: this.snapshot.hasPaintedText || Boolean(this.buffer.text),
 			live: false,
 			by: null,
 			revision: this.snapshot.revision + 1,
@@ -192,6 +200,7 @@ export class LiveTurnStore {
 		this.snapshot = {
 			...this.snapshot,
 			text: target.slice(0, this.shown),
+			hasPaintedText: true,
 			revision: this.snapshot.revision + 1,
 		};
 		countSessionPerf("stream_paints");

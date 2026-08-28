@@ -84,7 +84,11 @@ function StreamingMessage({
 		/* .msg-streaming + .msg-body-assistant stay as hooks: the streaming caret
 		   is a ::after on that pair, and the reduced-motion exception names it. */
 		<div className={cn(msgRow, msgStreamingRow)}>
-			<MarkdownBody className={cn(msgBodyStreaming, "markdown")} html={html} />
+			<MarkdownBody
+				className={cn(msgBodyStreaming, "markdown")}
+				html={html}
+				enhance={false}
+			/>
 		</div>
 	);
 }

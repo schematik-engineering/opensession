@@ -138,6 +138,8 @@ import { SessionSplit, type SplitSide } from "./components/SessionSplit";
 import { RestartOverlay } from "./components/RestartOverlay";
 import { MediaLightboxHost } from "./components/MediaLightbox";
 import { ChipHoverCards } from "./components/ChipHoverCard";
+import { TranscriptMotionLab } from "./components/TranscriptMotionLab";
+import { transcriptMotionFixtureOptions } from "./lib/transcript-motion-scenarios";
 import { ShortcutCheatSheet } from "./components/ShortcutCheatSheet";
 import { UpdatePill } from "./components/UpdatePill";
 import { OrganizationSwitcher } from "./components/OrganizationSwitcher";
@@ -1913,6 +1915,14 @@ const path = await resolveAnonymousUserPath(
 				}
 			});
 			if (!started.openImmediately) return;
+			// "Open" means the new session's conversation, even when the create
+			// adopts the PR workspace whose Review pane is currently foregrounded.
+			// Leaving Review selected mounts PrPanel against the client-minted id
+			// before the server has persisted it, briefly reporting "Session not
+			// found" until the person opens the tab again. Clear both the live pane
+			// and the target workspace's remembered selection before navigating.
+			setActiveViewTabState(null);
+			if (started.workspaceId) saveActiveViewTab(started.workspaceId, null);
 			if (started.prompt || started.images?.length) {
 				setPendingInitialPrompts((current) => ({
 					...current,
@@ -4004,7 +4014,7 @@ if (siblingCreateRef.current === optimisticId)
 	// Lanes are per-user (lib/lanes.ts): setting one moves the row in YOUR
 	// sidebar only, so teammates can hold the same workspace in their own
 	// lanes. Clearing also drops any legacy global override, so "Auto" (and
-	// "Remove from my workspaces") releases rows pinned before lanes went
+	// "Stop keeping in sidebar") releases rows pinned before lanes went
 	// per-user. Shared by the sidebar rows' menus and the viewer's ⋯ menu.
 	const setSessionLanes = (sessions: UnifiedSession[], status: Lane | null) => {
 		for (const c of sessions) {
@@ -6032,6 +6042,8 @@ console.error("Archive failed:", e);
 							   the root, freezing the back-swipe for seconds. */
 							<Prs
 								sessions={sessions}
+								send={send}
+								addHandler={addHandler}
 								onSelect={(s) => navigate({ view: "session", id: s.id })}
 								onNewSession={() => openPalette()}
 								onShowArchived={refreshArchived}
@@ -6202,6 +6214,10 @@ if (!embeddedDemo) {
 	// The preview interstitial renders INSTEAD of the app (and outside UserGate —
 	// it must work in cold-storage contexts like the iOS PWA's in-app browser).
 	const previewWaitSessionId = matchPreviewWaitRoute(location.pathname);
+	const transcriptMotionFixture = transcriptMotionFixtureOptions(
+		location.pathname,
+		location.search,
+	);
 	// `reducedMotion="user"` makes every `motion.*` component honour the OS
 	// setting. Motion's default is "never", so without this the CSS blanket in
 	// legacy.css would quietly cover only half the app — Motion animates inline
@@ -6211,7 +6227,13 @@ if (!embeddedDemo) {
 	// not zero" behaviour this preference actually asks for.
 	createRoot(document.getElementById("root")!).render(
 		<MotionConfig reducedMotion="user">
-			{previewWaitSessionId ? (
+			{transcriptMotionFixture ? (
+				<TranscriptMotionLab
+					initialSeed={transcriptMotionFixture.seed}
+					speed={transcriptMotionFixture.speed}
+					profile={transcriptMotionFixture.profile}
+				/>
+			) : previewWaitSessionId ? (
 				<PreviewWait sessionId={previewWaitSessionId} />
 			) : (
 				<TooltipProvider>

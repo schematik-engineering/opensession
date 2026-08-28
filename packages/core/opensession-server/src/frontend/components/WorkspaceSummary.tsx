@@ -160,6 +160,11 @@ interface Props {
 	reviewRequest?: UnifiedSession["reviewRequest"] | null;
 	/** The sibling session that owns `reviewRequest`, when it is not `session`. */
 	reviewRequestSessionId?: string;
+	/** Mirror a reviewer change into the app-level session list immediately. */
+	onReviewChange?: (
+		sessionId: string,
+		request: NonNullable<UnifiedSession["reviewRequest"]> | null,
+	) => void;
 	/** Workspace-wide GitHub requests, including requests held by a sibling session. */
 	prReviewRequested?: string[];
 	/** Live run state, so the PR block refetches the moment a turn ends. */
@@ -494,6 +499,7 @@ export function WorkspaceSummaryBody({
 	onArchive,
 	reviewRequest,
 	reviewRequestSessionId,
+	onReviewChange,
 	prReviewRequested,
 	running,
 	send,
@@ -574,7 +580,6 @@ export function WorkspaceSummaryBody({
 		) ?? null;
 	const [prompted, setPrompted] = useState(false);
 	const [changesOpen, setChangesOpen] = useState(false);
-	const [commitsOpen, setCommitsOpen] = useState(false);
 	const [selectedReview, setSelectedReview] = useState(reviewRequest ?? null);
 	const [reviewError, setReviewError] = useState<string | null>(null);
 	const [reviewBusy, setReviewBusy] = useState(false);
@@ -620,6 +625,10 @@ export function WorkspaceSummaryBody({
 			return;
 		}
 		go(onOpenAssets);
+	}
+
+	function openUncommittedChanges() {
+		onOpenPanelTab("changes");
 	}
 
 	function askCommit() {
@@ -753,9 +762,11 @@ setFixBusy(false);
 		// A workspace-level request can be stored on a sibling session. Change or
 		// clear that owner, while a brand-new request still belongs to this session.
 		const owner = (previous && reviewRequestSessionId) || session.id;
+		onReviewChange?.(owner, next);
 		setSessionReviewerApi(owner, name, getCurrentUser())
 			.catch((error: any) => {
 				setSelectedReview(previous);
+				onReviewChange?.(owner, previous);
 				setReviewError(error?.message || "Failed to set reviewer");
 			})
 			.finally(() => setReviewBusy(false));
@@ -864,9 +875,9 @@ setFixBusy(false);
 		);
 	}
 
-	/** A long session commits dozens of times, and the card would spend its whole
-	 *  height listing them. Closed, its commit, file, and line totals summarize
-	 *  the completed work; the row opens the individual commits. */
+	/** A long session can commit dozens of times. Keep the card folded to one
+	 *  totals row, then show the individual commits in the same small side
+	 *  overlay used for checks rather than stretching the summary itself. */
 	function committedSummaryRow() {
 		if (commits.length === 0) return null;
 		const stats = commits.reduce(
@@ -877,31 +888,55 @@ setFixBusy(false);
 			}),
 			{ files: 0, additions: 0, deletions: 0 },
 		);
+		const label = `${commits.length} commit${commits.length === 1 ? "" : "s"}`;
 		return (
-			<button
-				className={WS_SUMMARY_ROW}
-				onClick={() => setCommitsOpen(true)}
-				aria-expanded={false}
-			>
-				<span className={WS_SUMMARY_RAIL}>
-					<IconGitCommit size={20} className={WS_SUMMARY_ICON} />
-				</span>
-				<span className={WS_SUMMARY_LABEL}>
-					{commits.length} commit{commits.length === 1 ? "" : "s"}
-				</span>
-				<span
-					className={cn(
-						WS_SUMMARY_STATE,
-						"flex items-baseline gap-2 text-dim tabular-nums",
-					)}
+			<Popover.Root exclusive={false}>
+				<Popover.Trigger
+					render={
+						<button
+							type="button"
+							className={WS_SUMMARY_ROW}
+							title={`View ${label}`}
+						>
+							<span className={WS_SUMMARY_RAIL}>
+								<IconGitCommit size={20} className={WS_SUMMARY_ICON} />
+							</span>
+							<span className={WS_SUMMARY_LABEL}>{label}</span>
+							<span
+								className={cn(
+									WS_SUMMARY_STATE,
+									"flex items-baseline gap-2 text-dim tabular-nums",
+								)}
+							>
+								<span>
+									{stats.files} file{stats.files === 1 ? "" : "s"}
+								</span>
+								<span className="text-green">+{stats.additions}</span>
+								<span className="text-red">−{stats.deletions}</span>
+							</span>
+						</button>
+					}
+				/>
+				<Popover.Popup
+					portalContainer={typeof document !== "undefined" ? document.body : undefined}
+					side={embedded ? "bottom" : "left"}
+					align="end"
+					sideOffset={10}
+					className="flex max-h-[min(440px,70vh,var(--available-height))] w-[min(380px,calc(100vw-24px))] flex-col overflow-hidden p-0"
 				>
-					<span>
-						{stats.files} file{stats.files === 1 ? "" : "s"}
-					</span>
-					<span className="text-green">+{stats.additions}</span>
-					<span className="text-red">−{stats.deletions}</span>
-				</span>
-			</button>
+					<div className="flex items-baseline justify-between gap-2.5 border-b border-divider bg-surface px-3 py-[9px]">
+						<span className="text-label font-semibold text-fg">{label}</span>
+						<span className="inline-flex gap-2 text-meta font-semibold tabular-nums">
+							<span className="text-dim">
+								{stats.files} file{stats.files === 1 ? "" : "s"}
+							</span>
+							<span className="text-green">+{stats.additions}</span>
+							<span className="text-red">−{stats.deletions}</span>
+						</span>
+					</div>
+					<div className="overflow-y-auto p-1">{commits.map(committedRow)}</div>
+				</Popover.Popup>
+			</Popover.Root>
 		);
 	}
 
@@ -1009,9 +1044,9 @@ setFixBusy(false);
 							? "h-11"
 							: cn(
 									"h-7",
-									// Match the sibling group wrappers, then reach into Review. The PR
-									// band already closes the group, so do not add a second visual break.
-									"[.ws-summary-pr-group:has(>.ws-summary-band:last-child)+.ws-summary-review-group_&]:mt-0",
+									// Match the sibling group wrappers, then reach into Review. Keep a
+									// small breath after the PR without splitting the two groups apart.
+									"[.ws-summary-pr-group:has(>.ws-summary-band:last-child)+.ws-summary-review-group_&]:mt-1",
 								),
 					)}
 				>
@@ -1252,38 +1287,12 @@ setFixBusy(false);
 
 			{(diffIsCommitted || commits.length > 0) && (
 				<div className={groupClass}>
-					{commits.length > 0 ? (
-						/* The heading owns the toggle: it names the band the list belongs
-						   to, so it is the one place to open and close the whole band. The
-						   chevron waits for the cursor, so a card at rest keeps a plain
-						   label like every other section. */
-						<button
-							className={cn(
-								WS_SUMMARY_SECTION,
-								"group/committed w-full cursor-pointer justify-between gap-2",
-								"border-none bg-transparent text-left",
-							)}
-							onClick={() => setCommitsOpen((open) => !open)}
-							aria-expanded={commitsOpen}
-						>
-							<span>Committed</span>
-							<IconChevronDown
-								size={14}
-								className={cn(
-									"shrink-0 transition-[transform,opacity] motion-reduce:transition-none",
-									"opacity-0 group-hover/committed:opacity-100 group-focus-visible/committed:opacity-100",
-									commitsOpen && "rotate-180 opacity-100",
-								)}
-							/>
-						</button>
-					) : (
-						<div className={WS_SUMMARY_SECTION}>Committed</div>
-					)}
+					<div className={WS_SUMMARY_SECTION}>Committed</div>
 					{diffIsCommitted &&
 						diffChangeRow(
 							`${changedFiles} file${changedFiles === 1 ? "" : "s"} committed`,
 						)}
-					{commitsOpen ? commits.map(committedRow) : committedSummaryRow()}
+					{committedSummaryRow()}
 				</div>
 			)}
 
@@ -1299,21 +1308,35 @@ setFixBusy(false);
 			{dirty > 0 && (
 				<div className={groupClass}>
 					<div className={WS_SUMMARY_SECTION}>Uncommitted</div>
-					<button
-						className={WS_SUMMARY_ROW}
-						onClick={askCommit}
-						disabled={!send}
-					>
-						<span className={WS_SUMMARY_RAIL}>
-							<IconClock size={20} className={WS_SUMMARY_ICON} />
-						</span>
-						<span className={WS_SUMMARY_LABEL}>
-							{prompted
-								? "Asked to commit"
-								: `${dirty} file${dirty === 1 ? "" : "s"} uncommitted`}
-						</span>
-						{!prompted && <span className={WS_SUMMARY_ACTION}>Commit</span>}
-					</button>
+					<div className="mx-2 flex h-[31px] w-[calc(100%_-_16px)] min-w-0 shrink-0 items-stretch gap-1 phone:h-11">
+						<button
+							type="button"
+							className={cn(WS_SUMMARY_ROW, "mx-0 h-full w-auto min-w-0 flex-1")}
+							onClick={openUncommittedChanges}
+							title="View uncommitted changes"
+						>
+							<span className={WS_SUMMARY_RAIL}>
+								<IconClock size={20} className={WS_SUMMARY_ICON} />
+							</span>
+							<span className={WS_SUMMARY_LABEL}>
+								{dirty} file{dirty === 1 ? "" : "s"} uncommitted
+							</span>
+						</button>
+						{send && (
+							<button
+								type="button"
+								className={cn(
+									WS_SUMMARY_ACTION,
+									"focus-ring shrink-0 cursor-pointer rounded-row border-none bg-transparent px-2 hover:bg-hover disabled:cursor-default disabled:hover:bg-transparent",
+								)}
+								onClick={askCommit}
+								disabled={prompted}
+								title={`Ask ${AGENT_NAME} to commit the uncommitted changes and push`}
+							>
+								{prompted ? "Asked" : "Commit"}
+							</button>
+						)}
+					</div>
 				</div>
 			)}
 

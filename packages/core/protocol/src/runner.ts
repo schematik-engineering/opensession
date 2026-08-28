@@ -47,6 +47,14 @@ export interface RunHostSpec {
   hostId: string;
   /** Open Session session this run belongs to (busy/steer/cancel key, journal). */
   osSessionId: string;
+  /** Session runs participate in the owning actor's run lifecycle. Auxiliary
+   *  runs (for example workflow workers) use the same isolated host machinery
+   *  without claiming the parent session's run slot. */
+  lifecycle?: "session" | "auxiliary";
+  /** Session runs project forwarded transcript rows onto osSessionId.
+   *  Auxiliary workers may retain engine-keyed history or suppress forwarding
+   *  when their workflow journal already owns the visible result. */
+  transcriptTarget?: "session" | "engine" | "none";
   prompt: string;
   /** Transcript uuid of the server's already-written user line for this
    *  prompt. The in-host engine threads it into its own user-line write so
@@ -99,6 +107,8 @@ export interface RunHostSpec {
   author?: GitIdentity | null;
   user?: string;
   fallbackModel?: string;
+  /** Stable provider-account affinity for internal fan-out workers. */
+  accountAffinityKey?: string;
   /** Reasoning effort for the run (UI scale; each runner normalizes it). */
   effort?: string;
   /** OpenAI priority service tier for ChatGPT OAuth Codex runs. */
@@ -174,6 +184,13 @@ type HostToClientPayload =
       done?: StreamEvent;
     }
   | { t: "event"; event: StreamEvent }
+  /**
+   * Per-connection catch-up fence. On attach, the host sends hello, replays
+   * every recoverable frame, then sends this marker. An ended hello is not a
+   * safe terminal fence by itself because its missing transcript tail follows
+   * it on the wire.
+   */
+  | { t: "catchup_complete" }
   | { t: "ask"; askId: string; input: Record<string, unknown> }
   /**
    * A steer/interrupt_steer arrived too late (run already finishing, or the

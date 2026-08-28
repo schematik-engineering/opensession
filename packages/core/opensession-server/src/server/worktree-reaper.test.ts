@@ -181,6 +181,15 @@ describe("activeSessionWorktrees", () => {
 	});
 });
 
+describe("worktree reaper wiring", () => {
+	it("refreshes live run state before an irreversible sweep", () => {
+		const boot = readFileSync(join(import.meta.dir, "../../opensession.ts"), "utf8");
+		expect(boot).toContain(
+			"startWorktreeReaper(() => enrichSessionRuntime(getCachedSessions()))",
+		);
+	});
+});
+
 describe("bankWorkingState", () => {
 	let tmp: string;
 	let savedStateDir: string | undefined;

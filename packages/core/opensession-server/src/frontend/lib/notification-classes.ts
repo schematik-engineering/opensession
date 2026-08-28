@@ -18,7 +18,7 @@ export const TOAST_NOTICE_LANE =
  * the fixed header and an optional docked tab strip.
  */
 export const ONGOING_TOAST_POSITION =
-	"fixed bottom-[72px] phone:top-[calc(var(--pane-header-h)+var(--strip-clearance,0px)+8px)] phone:bottom-auto";
+	"fixed bottom-10 phone:top-[calc(var(--pane-header-h)+var(--strip-clearance,0px)+8px)] phone:bottom-auto";
 
 export const PERSISTENT_NOTICE_SHELF =
 	"pointer-events-none fixed bottom-2 left-2 z-[9500] flex w-fit " +

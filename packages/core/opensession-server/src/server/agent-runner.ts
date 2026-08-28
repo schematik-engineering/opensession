@@ -758,10 +758,12 @@ async function* runAgentInner(opts: RunAgentOpts): AsyncGenerator<StreamEvent> {
           prompt,
           !!currentOpts.images?.length,
         );
-      } else {
-        prompt +=
-          "\n\n[Note: a previous attempt on another model was cut short and may have " +
-          "left partial work in this directory — review what's already done before continuing.]";
+      } else if (currentEngineId) {
+        // The source engine existed but yielded no readable handoff. Keep the
+        // recovery hint model-only: appending it as visible user text changes
+        // the opening row that was already persisted at intake, so the client
+        // can no longer reconcile its optimistic prompt and shows both copies.
+        prompt = fallbackMissingHandoffPrompt(prompt);
       }
     }
     if (wasCancelled()) return;
@@ -2319,6 +2321,17 @@ export function fallbackContinuationPrompt(
 ): string {
   const context = wrapContext(handoff, "handoff");
   return hasImages ? `${context}\n\n${originalPrompt}` : context;
+}
+
+/** Preserve the original visible turn when an initialized source engine has
+ * no readable transcript to hand over. The hint is runner context, not text
+ * the person typed, so transcript projection strips it from the user row. */
+function fallbackMissingHandoffPrompt(originalPrompt: string): string {
+  return `${wrapContext(
+    "A previous attempt on another model was cut short and may have left " +
+      "partial work in this directory. Review what's already done before continuing.",
+    "handoff",
+  )}\n\n${originalPrompt}`;
 }
 
 function recoveredResultContinuationPrompt(originalPrompt?: string | null): string {

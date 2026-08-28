@@ -36,10 +36,17 @@ export const CEREBRAS_PICKER_MODELS = [
   "zai-glm-4.7",
 ] as const;
 
-/** OpenRouter published Ox Alpha before Pi's bundled models.dev snapshot knew
- * about it. Keep the transient free model usable at its advertised limits
- * while the upstream catalog catches up. */
-export const OX_ALPHA_MODEL_ID = "stealth/ox-alpha";
+/** OpenRouter published GLM-5.3 before Pi's bundled models.dev snapshot knew
+ * about it. Keep the official model usable at its advertised limits while the
+ * upstream catalog catches up. */
+export const GLM_5_3_MODEL_ID = "z-ai/glm-5.3";
+
+/** Canonicalize picker ids retained from GLM-5.3's pre-release alias. */
+export function canonicalProviderPickerModelId(id: string): string {
+  return id === "pi/openrouter/stealth/ox-alpha"
+    ? `pi/openrouter/${GLM_5_3_MODEL_ID}`
+    : id;
+}
 
 /** The reasoning levels Wafer's `reasoning_effort` accepts (docs.wafer.ai
  *  /serverless/api-reference). A subset of models.ts' SessionEffort, spelled
@@ -166,7 +173,7 @@ export function defaultPickerModelsForProvider(id: string): readonly string[] {
 
 /** Provider metadata shaped for Pi's registerProvider. This covers both a
  * provider absent from Pi's built-in catalog (Wafer) and a model that landed
- * ahead of Pi's bundled models.dev snapshot (Ox Alpha on OpenRouter). */
+ * ahead of Pi's bundled models.dev snapshot (GLM-5.3 on OpenRouter). */
 export interface PiProviderCatalog {
   name: string;
   api: "openai-completions";
@@ -190,13 +197,12 @@ export function piProviderCatalog(id: string): PiProviderCatalog | undefined {
       api: "openai-completions",
       baseUrl: "https://openrouter.ai/api/v1",
       models: [{
-        id: OX_ALPHA_MODEL_ID,
-        name: "Ox Alpha",
+        id: GLM_5_3_MODEL_ID,
+        name: "GLM-5.3",
         reasoning: true,
         thinkingLevelMap: {},
-        // Pi currently transports text and images, not video attachments.
-        input: ["text", "image"],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        input: ["text"],
+        cost: { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
         contextWindow: 1_048_576,
         maxTokens: 131_072,
       }],
@@ -265,6 +271,11 @@ function stringArray(v: unknown): string[] | undefined {
   return Array.isArray(v) ? v.filter((x: unknown): x is string => typeof x === "string" && !!x) : undefined;
 }
 
+function canonicalPickerModels(v: unknown): string[] | undefined {
+  const ids = stringArray(v);
+  return ids ? [...new Set(ids.map(canonicalProviderPickerModelId))] : undefined;
+}
+
 function providerMap(v: unknown): Record<string, ModelProviderConfig> | undefined {
   if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
   const out: Record<string, ModelProviderConfig> = {};
@@ -292,7 +303,7 @@ export function normalizeModelProviderConfig(raw: unknown): ModelProviderSetting
     enabled,
     bridgeAccountIds: stringArray(bridge?.accounts) ?? stringArray(r.bridgeAccountIds),
     port: typeof r.port === "number" && r.port > 0 ? r.port : undefined,
-    pickerModels: stringArray(r.pickerModels),
+    pickerModels: canonicalPickerModels(r.pickerModels),
     bridgeMaxRequestsPerHour:
       typeof r.bridgeMaxRequestsPerHour === "number" && r.bridgeMaxRequestsPerHour > 0
         ? r.bridgeMaxRequestsPerHour
@@ -375,9 +386,7 @@ function rawProviders(raw: Record<string, unknown>): Record<string, unknown> {
 }
 
 function rawPickerModels(raw: Record<string, unknown>): string[] {
-  return Array.isArray(raw.pickerModels)
-    ? raw.pickerModels.filter((x: unknown): x is string => typeof x === "string" && !!x)
-    : [];
+  return canonicalPickerModels(raw.pickerModels) || [];
 }
 
 /** Configured third-party providers (id → apiKey/baseURL). Read fresh. */

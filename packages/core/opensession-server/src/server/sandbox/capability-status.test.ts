@@ -73,7 +73,7 @@ afterAll(() => {
 const write = (cfg: object) => writeFileSync(cfgPath(), JSON.stringify(cfg));
 const writeIngress = (publicBaseUrl: string) =>
   writeFileSync(instanceCfgPath(), JSON.stringify({ ingress: { publicBaseUrl, exposure: "custom" } }));
-const ready = (provider: "docker" | "daytona" | "box" | "modal" | "microvm") => {
+const ready = (provider: "docker" | "daytona" | "box" | "modal") => {
   connectSandboxProvider(
     provider,
     provider === "daytona" || provider === "box"
@@ -118,7 +118,6 @@ describe("sandboxCapabilityStatus (the /api/sandbox/status payload)", () => {
       "e2b",
       "box",
       "modal",
-      "microvm",
       "lambda-microvm",
     ]);
     expect(s.providers.every((p) => !p.configured)).toBe(true);
@@ -127,7 +126,6 @@ describe("sandboxCapabilityStatus (the /api/sandbox/status payload)", () => {
       "daytona",
       "box",
       "modal",
-      "microvm",
     ]);
     expect(s.killSwitch).toBe(!sandboxesEnabled());
   });
@@ -212,15 +210,6 @@ describe("sandboxCapabilityStatus (the /api/sandbox/status payload)", () => {
       idleSuspendSeconds: undefined,
       suspendedDurationSeconds: 90,
     });
-  });
-
-  test("local Firecracker microvm requires explicit config and a clean golden", () => {
-    write({ provider: "microvm", firecrackerMicrovm: { enabled: false } });
-    expect(sandboxProviderConfigured("microvm")).toBe(false);
-    expect(
-      sandboxCapabilityStatus().providers.find((p) => p.id === "microvm")
-        ?.configured,
-    ).toBe(false);
   });
 
   test("an explicit callbackBaseUrl also counts as dial-back configured", () => {

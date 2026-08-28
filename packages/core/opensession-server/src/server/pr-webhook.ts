@@ -89,11 +89,21 @@ function branchesFor(
 }
 
 // A push lands as a burst (synchronize + workflow/check events within
-// seconds) — coalesce into one broadcast per repo+branch. Invalidations
-// happen immediately per delivery, so the refetch the broadcast triggers
-// always reads post-invalidation state.
+// seconds) — coalesce into one broadcast per repo+branch and one session-list
+// invalidation globally. A large CI fan-out can deliver hundreds of check
+// events; invalidating per delivery made every connected client rebuild its
+// scoped session list in overlapping waves and starved transcript watches.
 const pendingBroadcasts = new Map<string, ReturnType<typeof setTimeout>>();
+let pendingSessionsInvalidation: ReturnType<typeof setTimeout> | undefined;
 const BROADCAST_DEBOUNCE_MS = 2_000;
+
+function scheduleSessionsInvalidation(): void {
+	if (pendingSessionsInvalidation) return;
+	pendingSessionsInvalidation = setTimeout(() => {
+		pendingSessionsInvalidation = undefined;
+		invalidateSessionsCache();
+	}, BROADCAST_DEBOUNCE_MS);
+}
 
 export function reviewerRemovalClearsSessionRequest(
 	payload: any,
@@ -192,19 +202,20 @@ export function handlePrWebhookEvent(event: string, payload: any): void {
 				void executeSessionProjection(sessionId, "review_request", () =>
 					setReviewRequest(sessionId, null),
 				)
-					.then(() => invalidateSessionsCache())
+					.then(() => scheduleSessionsInvalidation())
 					.catch((e) =>
 						console.error("[pr-webhook] failed to clear review request:", e),
 					);
 			}
 		}
+		// Session prState enrichment reads the bulk cache through the session
+		// list snapshots. Invalidate once for the whole delivery burst; the
+		// branch-specific detail broadcasts stay independently coalesced below.
+		scheduleSessionsInvalidation();
 		for (const branch of prBranches) {
 			invalidatePrInfo(ghRepo, branch);
 			scheduleBroadcast(repoId, ghRepo, branch, number);
 		}
-		// Session prState enrichment reads the bulk cache through the 2s
-		// sessions cache — drop it so sidebar rows catch up on their next poll.
-		invalidateSessionsCache();
 	} catch (e) {
 		console.error("[pr-webhook] failed to apply event:", e);
 	}

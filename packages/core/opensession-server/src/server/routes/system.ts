@@ -35,11 +35,13 @@ import {
 import { requireWorkspaceAdmin } from "../workspace-auth";
 import { audit } from "../audit";
 import { serviceReadiness } from "../service-readiness";
+import { runtimeGeneration } from "../runtime-generation";
 
 // The listing is served from catalog state only. Keep a short-TTL snapshot with
 // single-flight refresh so repeated reliability-panel polling is cheap even
 // when the catalog is degraded; mutations invalidate it immediately.
 const DEAD_LETTERS_CACHE_TTL_MS = 5_000;
+const RUNTIME_GENERATION = runtimeGeneration();
 type DeadLettersEntry = {
 	at: number;
 	inFlight?: Promise<unknown>;
@@ -191,7 +193,7 @@ export async function handleSystemRoutes(
 			// lane is degraded; launches themselves still fail closed.
 			const ready = readiness.phase === "ready";
 			return Response.json(
-				{ ok: ready, ready, phase: readiness.phase, bootId: BOOT_ID, activeRuns: activeAgentRunCount(), executor: { ...executor, ...executorReadiness }, sessionKernel: kernel },
+				{ ok: ready, ready, phase: readiness.phase, bootId: BOOT_ID, generation: RUNTIME_GENERATION, activeRuns: activeAgentRunCount(), executor: { ...executor, ...executorReadiness }, sessionKernel: kernel },
 				{ status: ready ? 200 : 503 },
 			);
 		} catch (error) {

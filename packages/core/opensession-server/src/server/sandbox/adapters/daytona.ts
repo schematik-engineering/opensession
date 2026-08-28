@@ -396,10 +396,24 @@ export class DaytonaProvider implements SandboxProvider {
     const client = await daytonaClient();
     const prevState = findRemoteStateBySession(this.id, spec.sessionId);
     const trust = resolveTrustPolicy(spec, prevState);
+    const sourceVerification = spec.sourceVerification === true;
+    if (
+      sourceVerification &&
+      (trust.trustProfile !== "automation" || spec.cloneCredential !== "none")
+    ) {
+      throw new Error(
+        "source verification requires the automation trust profile and a credential-free clone",
+      );
+    }
     const repo = getRepo(spec.repo || prevState?.repoId);
     const branch = spec.branch || prevState?.branch || repo.defaultBranch;
+    const verificationKey = spec.sessionId.replace(/[^A-Za-z0-9_.-]+/g, "-");
     const cwd =
-      spec.cwd || prevState?.cwd || worktreePathFor(branch, repo.id, { isolated: true });
+      spec.cwd ||
+      prevState?.cwd ||
+      (sourceVerification
+        ? `/tmp/opensession-public-review/${verificationKey}`
+        : worktreePathFor(branch, repo.id, { isolated: true }));
 
     // Find by label (authoritative), else create.
     let sbx: DaytonaSandbox | null = null;
@@ -414,7 +428,7 @@ export class DaytonaProvider implements SandboxProvider {
       } catch {}
     }
     if (sbx && stateOf(sbx) === "gone") sbx = null;
-    if (!sbx) {
+    if (!sbx && !sourceVerification) {
       // Warm-on-typing adoption (src/server/sandbox/prewarm.ts): a ready
       // prewarm for (daytona, repo) whose runner pin + snapshot still match
       // is claimed atomically and relabeled to this session — the expensive
@@ -457,7 +471,9 @@ export class DaytonaProvider implements SandboxProvider {
       // 2026-07). Unset = Daytona's default snapshot (1 vCPU/1GB/3GiB disk),
       // too small for real repo workspaces: the runner payload alone is ~2GB
       // and a large repo's clone died on ENOSPC. See SandboxDaytonaConfig.
-      const template = await recoverDaytonaRepoTemplate(client, repo.id);
+      const template = sourceVerification
+        ? undefined
+        : await recoverDaytonaRepoTemplate(client, repo.id);
       // A prepared repo template already carries its machine shape. When the
       // template is absent/stale (first launch after a merge), the cold
       // fallback must use the same per-project profile; Daytona's default
@@ -469,14 +485,27 @@ export class DaytonaProvider implements SandboxProvider {
         return client.create(
           {
             ...daytonaCreateSource(snapshot, resources),
-            labels: { [SESSION_LABEL]: spec.sessionId, "opensession.sandbox": "1" },
-            autoStopInterval: cfg.idleStopMinutes || DEFAULT_IDLE_STOP_MINUTES,
+            labels: {
+              [SESSION_LABEL]: spec.sessionId,
+              "opensession.sandbox": "1",
+              ...(sourceVerification
+                ? { "opensession.public-review": "1" }
+                : {}),
+            },
+            autoStopInterval: sourceVerification
+              ? 10
+              : cfg.idleStopMinutes || DEFAULT_IDLE_STOP_MINUTES,
+            ...(sourceVerification ? { autoDeleteInterval: 30 } : {}),
           } as any,
           { timeout: 300 },
         );
       };
       try {
-        sbx = await create(template?.artifactId || cfg.daytona?.snapshot);
+        sbx = await create(
+          sourceVerification
+            ? undefined
+            : template?.artifactId || cfg.daytona?.snapshot,
+        );
         preparedWorkspace = Boolean(template);
       } catch (error) {
         if (!template || !daytonaNotFound(error)) throw error;
@@ -509,12 +538,14 @@ export class DaytonaProvider implements SandboxProvider {
       ...trust,
     });
 
-    const driver = daytonaDriver(sbx);
+    try {
+      const driver = daytonaDriver(sbx);
     // client.create resolves only after Daytona reports the sandbox started.
     // A second refresh/start round trip added 2–3s to every snapshot restore.
     if (!newlyCreated) await driver.ensureStarted();
     mark("sandbox started");
     const prepareRunner = async () => {
+      if (sourceVerification) return;
       // A sandbox that cannot reach our callback URL can never run anything.
       await assertDialbackReachable(driver, "daytona");
       mark("dial-back verified");
@@ -525,11 +556,15 @@ export class DaytonaProvider implements SandboxProvider {
       await setupRemoteWorkspace(
         driver,
         cwd,
-        await remoteCloneUrl(repo),
+        await remoteCloneUrl(repo, { credential: spec.cloneCredential }),
         branch,
         repo.defaultBranch,
         repo.id,
         { sandboxId: sbx.id, provider: this.id, sessionId: spec.sessionId, repoId: repo.id, trustProfile: trust.trustProfile },
+        {
+          seedPrivateFiles: !sourceVerification,
+          runLifecycleHooks: !sourceVerification,
+        },
       );
       mark("workspace ready");
     };
@@ -553,7 +588,20 @@ export class DaytonaProvider implements SandboxProvider {
       lastActivityAt: new Date().toISOString(),
       ...trust,
     });
-    return this.makeHandle(sbx, spec.sessionId, cwd);
+      return this.makeHandle(sbx, spec.sessionId, cwd);
+    } catch (error) {
+      if (sourceVerification) {
+        try {
+          await this.destroy(sbx.id, { strict: true });
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [error, cleanupError],
+            "public review Executor setup failed and strict disposal also failed",
+          );
+        }
+      }
+      throw error;
+    }
   }
 
   private makeHandle(sbx: DaytonaSandbox, sessionId: string, cwd: string): Sandbox {
@@ -636,15 +684,31 @@ export class DaytonaProvider implements SandboxProvider {
 
   /** Deletes the sandbox — and with it the volume-style workspace (documented
    *  data loss: push your work). */
-  async destroy(sandboxId: string): Promise<void> {
+  async destroy(
+    sandboxId: string,
+    options: { strict?: boolean } = {},
+  ): Promise<void> {
     try {
       const client = await daytonaClient();
       const sbx = await client.get(sandboxId);
       if (sbx) await client.delete(sbx, 120);
-    } catch (e) {
-      console.warn(`[sandbox:daytona] destroy(${sandboxId}):`, e);
+      if (options.strict) {
+        let remaining: DaytonaSandbox | undefined;
+        try {
+          remaining = await client.get(sandboxId);
+        } catch (error) {
+          if (!daytonaNotFound(error)) throw error;
+        }
+        if (remaining && stateOf(remaining) !== "gone") {
+          throw new Error(`Daytona sandbox ${sandboxId} still exists after deletion`);
+        }
+      }
+      removeRemoteState(this.id, sandboxId);
+    } catch (error) {
+      if (options.strict) throw error;
+      console.warn(`[sandbox:daytona] destroy(${sandboxId}):`, error);
+      removeRemoteState(this.id, sandboxId);
     }
-    removeRemoteState(this.id, sandboxId);
   }
 }
 

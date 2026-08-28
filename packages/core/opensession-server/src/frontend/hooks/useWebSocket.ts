@@ -12,6 +12,7 @@ import {
   shouldRetireCommandResult,
   wsCommandOutboxForScope,
 } from "../lib/ws-command-outbox";
+import { webSocketReconnectDelay } from "../lib/ws-reconnect";
 
 // Liveness probe cadence. iOS/Safari kills backgrounded sockets without firing
 // onclose, leaving a half-open socket that reads as OPEN but delivers nothing —
@@ -113,6 +114,9 @@ export function useWebSocket(presenceActive = true) {
   // never opens and the upgrade 401s for ever. Reloading on that would be an
   // endless refresh of the sign-in card.
   const everOpenRef = useRef(false);
+  // A graceful handoff gets a bounded fast reconnect loop until a replacement
+  // server completes its hello. Ordinary outages retain the calmer 2s backoff.
+  const handoffPendingRef = useRef(false);
   const commandResultsRef = useRef(false);
   const commandOutboxRef = useRef(wsCommandOutboxForScope(localCommandScope()));
   const commandNegotiatedRef = useRef(false);
@@ -247,13 +251,15 @@ export function useWebSocket(presenceActive = true) {
       try {
         const msg = JSON.parse(e.data) as WSServerMessage;
         if (!commandNegotiatedRef.current) {
-          if (msg.type === "hello")
+          if (msg.type === "hello") {
+            handoffPendingRef.current = false;
             finishCommandNegotiation(
               msg.capabilities?.commandResults === true,
               msg.commandScope,
             );
-          else finishCommandNegotiation(false);
+          } else finishCommandNegotiation(false);
         }
+        if (msg.type === "server_restarting") handoffPendingRef.current = true;
         if (
           msg.type === "command_result" &&
           shouldRetireCommandResult(msg)
@@ -369,7 +375,10 @@ export function useWebSocket(presenceActive = true) {
         } catch {}
       }
       if (disposedRef.current || wsRef.current !== ws) return;
-      reconnectTimer.current = setTimeout(() => connectRef.current(), 2000);
+      reconnectTimer.current = setTimeout(
+        () => connectRef.current(),
+        webSocketReconnectDelay(event.code, handoffPendingRef.current),
+      );
     };
 
     ws.onerror = () => ws.close();

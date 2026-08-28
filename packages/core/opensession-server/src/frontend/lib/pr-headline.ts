@@ -73,14 +73,9 @@ export function deriveHeadline(
 				label: `Ahead by ${ahead} commit${ahead === 1 ? "" : "s"}`,
 				tone: "yellow",
 			};
-		// A shared checkout's HEAD belongs to every session, not this one, and
-		// deliberately diverges while concurrent commits are serialized upstream.
-		if (!sharedCheckout && behind > 0)
-			return {
-				key: "behind",
-				label: `Behind by ${behind} commit${behind === 1 ? "" : "s"}`,
-				tone: "yellow",
-			};
+		// A local checkout behind the PR's remote head does not block the remote
+		// merge. GitHub's mergeability is authoritative here: offering Pull hid
+		// the Merge CTA even when the complete remote PR was conflict-free.
 		if (pr.mergeable === "CONFLICTING")
 			return { key: "conflicts", label: "Merge conflicts", tone: "red" };
 		const checks = summarizeChecks(pr);

@@ -16,6 +16,21 @@ describe("UI preference limits", () => {
 		expect(order.length).toBeLessThanOrEqual(maxValueLength("repo-order"));
 	});
 
+	test("per-repository checkout choices can hold a large configured repo list", () => {
+		const checkouts = JSON.stringify(
+			Object.fromEntries(
+				Array.from({ length: 100 }, (_, index) => [
+					`repository:${index}:${"x".repeat(30)}`,
+					index % 2 ? "checkout" : "worktree",
+				]),
+			),
+		);
+		expect(checkouts.length).toBeGreaterThan(200);
+		expect(checkouts.length).toBeLessThanOrEqual(
+			maxValueLength("session-checkouts"),
+		);
+	});
+
 	test("keyboard shortcut maps can hold account bindings", () => {
 		const shortcuts = JSON.stringify(
 			Object.fromEntries(

@@ -67,6 +67,7 @@ describe("buildBranchNote", () => {
 			),
 		});
 
+		expect(note).toContain("git push -u origin ready-after-review");
 		expect(note).toContain("you may merge it yourself");
 		expect(note).toContain("latest Open Session review covers the current head");
 		expect(note).toContain("reports no blocking findings");

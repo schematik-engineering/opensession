@@ -17,6 +17,44 @@ function paths() {
   };
 }
 
+function runtimeWork(
+  host: SessionKernelStoreHost,
+  now: number,
+  timerKinds: string[],
+  effectKinds: string[],
+  limit: number,
+  additionalOutboxGroups: Array<{ effectKinds: string[]; limit: number }> = [],
+  activeOutbox: Array<{ id: number; sessionId: string }> = [],
+  activeOutboxRecheckAt = now,
+) {
+  const catalog = host.runtimeCatalogWork(
+    now,
+    timerKinds,
+    effectKinds,
+    limit,
+    additionalOutboxGroups,
+    activeOutbox,
+  );
+  const timers = [...catalog.timers];
+  const outbox = new Map(catalog.outbox.map((item) => [item.id, item]));
+  for (const sessionId of catalog.sessionIds) {
+    const work = host.runtimeSessionWork(
+      sessionId,
+      catalog.sessionIds.length,
+      now,
+      timerKinds,
+      effectKinds,
+      limit,
+      additionalOutboxGroups,
+      activeOutbox,
+      activeOutboxRecheckAt,
+    );
+    timers.push(...work.timers);
+    for (const item of work.outbox) outbox.set(item.id, item);
+  }
+  return { timers: timers.slice(0, limit), outbox: [...outbox.values()] };
+}
+
 function failWithSqliteIo(store: SessionKernelStore, method: string): void {
   Object.defineProperty(store, method, {
     configurable: true,
@@ -531,7 +569,7 @@ describe("per-session session kernel storage", () => {
 
     failWithSqliteIo(host.storeForSession("runtime-broken"), "dueTimers");
 
-    expect(() => host.runtimeWork(Date.now(), [], [], 100)).not.toThrow();
+    expect(() => runtimeWork(host, Date.now(), [], [], 100)).not.toThrow();
     expect(host.quarantinedSession("runtime-broken")).toMatchObject({
       commandKind: "runtime:scan",
     });
@@ -873,7 +911,8 @@ describe("per-session session kernel storage", () => {
     first.close();
 
     const recovered = new SessionKernelStoreHost(path.central, path.isolated);
-    const work = recovered.runtimeWork(
+    const work = runtimeWork(
+      recovered,
       Date.now(),
       ["known_timer"],
       ["known_effect"],
@@ -905,6 +944,66 @@ describe("per-session session kernel storage", () => {
     recovered.close();
   });
 
+  test("fetches separate outbox quotas while opening each actor once", () => {
+    const path = paths();
+    const first = new SessionKernelStoreHost(path.central, path.isolated);
+    const sessionId = "grouped-runtime-work";
+    first.call("enqueueOutbox", [
+      sessionId,
+      "ordinary_effect",
+      null,
+      "ordinary-one",
+    ]);
+    first.call("enqueueOutbox", [
+      sessionId,
+      "creation_opening_turn",
+      null,
+      "opening-one",
+    ]);
+    first.call("enqueueOutbox", [
+      sessionId,
+      "creation_opening_turn",
+      null,
+      "opening-two",
+    ]);
+    first.close();
+
+    const recovered = new SessionKernelStoreHost(path.central, path.isolated);
+    const work = runtimeWork(
+      recovered,
+      Date.now(),
+      [],
+      ["ordinary_effect"],
+      1,
+      [{ effectKinds: ["creation_opening_turn"], limit: 100 }],
+    );
+
+    expect(work.outbox.map((item) => item.kind)).toEqual([
+      "ordinary_effect",
+      "creation_opening_turn",
+      "creation_opening_turn",
+    ]);
+    expect(recovered.metrics().kernelStoreCacheMisses).toBe(1);
+
+    const recheckAt = Date.now() + 30_000;
+    const whileActive = runtimeWork(
+      recovered,
+      Date.now(),
+      [],
+      ["ordinary_effect"],
+      1,
+      [{ effectKinds: ["creation_opening_turn"], limit: 100 }],
+      work.outbox.map((item) => ({ id: item.id, sessionId: item.sessionId })),
+      recheckAt,
+    );
+    expect(whileActive.outbox).toEqual([]);
+    expect(recovered.central.isolatedDueWakeCandidates(recheckAt - 1, 100))
+      .not.toContain(sessionId);
+    expect(recovered.central.isolatedDueWakeCandidates(recheckAt, 100))
+      .toContain(sessionId);
+    recovered.close();
+  });
+
   // Explicit budget: this test creates 24 per-session isolated databases,
   // which is real synchronous disk work (~4s warm locally, ~9s on GitHub's
   // 2-core runner) — the default 5s timeout flags slow hardware, not a hang.
@@ -922,15 +1021,15 @@ describe("per-session session kernel storage", () => {
       }]);
     }
 
-    const first = host.runtimeWork(Date.now(), ["known_timer"], [], 100);
-    const second = host.runtimeWork(Date.now(), ["known_timer"], [], 100);
+    const passes = Array.from(
+      { length: 12 },
+      () => runtimeWork(host, Date.now(), ["known_timer"], [], 100),
+    );
 
-    expect(first.timers).toHaveLength(16);
-    expect(second.timers).toHaveLength(16);
-    expect(new Set([
-      ...first.timers.map((timer) => timer.sessionId),
-      ...second.timers.map((timer) => timer.sessionId),
-    ]).size).toBe(24);
+    expect(passes.every((pass) => pass.timers.length === 4)).toBe(true);
+    expect(new Set(
+      passes.flatMap((pass) => pass.timers.map((timer) => timer.sessionId)),
+    ).size).toBe(24);
     host.close();
   }, 30_000);
 
@@ -955,7 +1054,7 @@ describe("per-session session kernel storage", () => {
       payload: null,
     }]);
 
-    const first = host.runtimeWork(Date.now(), ["known_timer"], [], 100);
+    const first = runtimeWork(host, Date.now(), ["known_timer"], [], 100);
     expect(first.timers.map((timer) => timer.sessionId))
       .toContain("zzz-live-create");
     host.close();
@@ -983,7 +1082,7 @@ describe("per-session session kernel storage", () => {
       }]);
     }
 
-    const first = host.runtimeWork(Date.now(), ["known_timer"], [], 100);
+    const first = runtimeWork(host, Date.now(), ["known_timer"], [], 100);
     expect(first.timers.map((timer) => timer.sessionId))
       .toContain("zzz-overdue-effect");
     host.close();
@@ -1005,9 +1104,9 @@ describe("per-session session kernel storage", () => {
       host.central.settleIsolatedSessionWake(sessionId, dueAt);
     }
 
-    const first = host.runtimeWork(Date.now(), ["known_timer"], [], 100);
-    const second = host.runtimeWork(Date.now(), ["known_timer"], [], 100);
-    const third = host.runtimeWork(Date.now(), ["known_timer"], [], 100);
+    const first = runtimeWork(host, Date.now(), ["known_timer"], [], 100);
+    const second = runtimeWork(host, Date.now(), ["known_timer"], [], 100);
+    const third = runtimeWork(host, Date.now(), ["known_timer"], [], 100);
     expect(new Set([
       ...first.timers.map((timer) => timer.sessionId),
       ...second.timers.map((timer) => timer.sessionId),

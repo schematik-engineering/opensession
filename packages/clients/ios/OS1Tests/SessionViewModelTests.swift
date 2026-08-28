@@ -32,6 +32,11 @@ final class SessionViewModelTests: XCTestCase {
         SessionViewModel(session: Session(id: "bks-1"))
     }
 
+    func testServerHandoffUsesTheFastReconnectCadence() {
+        XCTAssertEqual(SessionViewModel.reconnectDelay, .seconds(2))
+        XCTAssertEqual(SessionViewModel.handoffReconnectDelay, .milliseconds(250))
+    }
+
     private func entry(
         _ id: String, _ type: String, text: String? = nil, toolUseId: String? = nil
     ) -> TranscriptEntry {
@@ -1763,6 +1768,29 @@ final class SendDraftTests: XCTestCase {
 
         XCTAssertEqual(viewModel.entries.map(\.id), [deliveryId])
         XCTAssertEqual(viewModel.entries.map(\.text), ["look at this now"])
+        XCTAssertTrue(viewModel.queuedItems.isEmpty)
+        XCTAssertTrue(viewModel.steeredItems.isEmpty)
+        XCTAssertTrue(viewModel.deliveringItems.isEmpty)
+    }
+
+    func testBatchedTranscriptRetiresRepeatedQueuedMessagesBySourceId() async {
+        markRunning()
+        await send("again")
+        await send("again")
+        let sourceIds = deliveries.map { $0.item.id }
+        XCTAssertEqual(viewModel.queuedItems.count, 2)
+
+        viewModel.handle(.transcriptAppend(
+            sessionId: "bks-1",
+            entries: [TranscriptEntry(
+                id: "batch-entry",
+                type: "user",
+                content: "normalized batch",
+                sourceMessageIds: sourceIds
+            )]
+        ))
+
+        XCTAssertEqual(viewModel.entries.map(\.id), ["batch-entry"])
         XCTAssertTrue(viewModel.queuedItems.isEmpty)
         XCTAssertTrue(viewModel.steeredItems.isEmpty)
         XCTAssertTrue(viewModel.deliveringItems.isEmpty)

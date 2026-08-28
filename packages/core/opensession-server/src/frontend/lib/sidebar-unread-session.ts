@@ -1,6 +1,14 @@
 import type { UnifiedSession } from "./types";
 import { isUnread } from "./reads";
 
+/** Unread activity earns bold emphasis once the agent has stopped producing it. */
+export function shouldEmphasizeUnread(
+	unread: boolean,
+	isRunning: boolean,
+): boolean {
+	return unread && !isRunning;
+}
+
 /**
  * Pick the tab that makes an aggregated workspace row unread.
  *

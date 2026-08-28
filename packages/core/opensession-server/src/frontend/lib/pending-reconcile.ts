@@ -22,6 +22,11 @@ export interface PendingPrompt {
 	content: string;
 	user?: string;
 	sentAt: number;
+	/** Causal transcript position captured when the message was sent. Unlike a
+	 *  timestamp, this stays valid across client/server clock skew and delayed
+	 *  assistant frames. `null` means the transcript was empty. */
+	transcriptAfterEntryId?: string | null;
+	transcriptAfterSeq?: number;
 	/** The delivery response says this prompt started a turn. A transient queue
 	 *  receipt must not retire its transcript bubble before the real entry lands. */
 	serverStarted?: true;
@@ -78,6 +83,8 @@ export function optimisticOutboxFallbacks(
 			content: item.content,
 			user: item.user,
 			sentAt: item.createdAt,
+			transcriptAfterEntryId: item.transcriptAfterEntryId,
+			transcriptAfterSeq: item.transcriptAfterSeq,
 			...(item.busyMode === "steer" ? { busyMode: "steer" as const } : {}),
 			...(item.images?.length ? { images: item.images } : {}),
 		}));
@@ -132,7 +139,13 @@ export interface ReconcileResult {
 
 export function reconcilePending(
 	pending: readonly OptimisticPendingPrompt[],
-	entries: readonly { type: string; content: string; timestamp: string }[],
+	entries: readonly {
+		id?: string;
+		type: string;
+		content: string;
+		timestamp: string;
+		sourceMessageIds?: string[];
+	}[],
 	echoes: readonly { id?: string; content: string }[],
 	now: number,
 ): ReconcileResult {
@@ -142,6 +155,8 @@ export function reconcilePending(
 	const userPool = entries
 		.filter((e) => e.type === "user")
 		.map((e) => ({
+			id: e.id,
+			sourceMessageIds: new Set(e.sourceMessageIds ?? []),
 			c: e.content.trim(),
 			t: new Date(e.timestamp).getTime(),
 		}));
@@ -153,6 +168,27 @@ export function reconcilePending(
 		const deliveryId = p.id.startsWith("outbox-")
 			? p.id.slice("outbox-".length)
 			: undefined;
+		// A single prompt uses the outbox id as its durable row id; a batch carries
+		// every constituent id in sourceMessageIds. Claim identity before falling
+		// back to legacy content/time matching: server normalization may strip
+		// context or add attribution, and neither should leave the optimistic copy
+		// alive beside the real turn.
+		const exactEntry = deliveryId
+			? userPool.findIndex(
+					(entry) =>
+						entry.id === deliveryId ||
+						entry.sourceMessageIds.has(deliveryId),
+				)
+			: -1;
+		if (exactEntry >= 0) {
+			const matched = userPool[exactEntry]!;
+			const hadSourceIds = matched.sourceMessageIds.size > 0;
+			matched.sourceMessageIds.delete(deliveryId!);
+			if (!hadSourceIds || matched.sourceMessageIds.size === 0)
+				userPool.splice(exactEntry, 1);
+			landed.add(p.id);
+			continue;
+		}
 		const exactEcho = deliveryId
 			? echoPool.findIndex((q) => q.id === deliveryId)
 			: -1;

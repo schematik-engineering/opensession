@@ -17,6 +17,12 @@ final class ServerEventTests: XCTestCase {
         XCTAssertEqual(bootId, "boot-1")
     }
 
+    func testServerRestarting() {
+        guard case .serverRestarting = parse(#"{"type":"server_restarting"}"#) else {
+            return XCTFail("expected .serverRestarting")
+        }
+    }
+
     func testPong() {
         guard case .pong = parse(#"{"type":"pong"}"#) else {
             return XCTFail("expected .pong")

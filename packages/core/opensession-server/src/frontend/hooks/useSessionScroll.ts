@@ -550,6 +550,7 @@ export function useSessionScroll(initialFollowing = true): SessionScroll {
     const el = container;
     if (!el || typeof ResizeObserver === "undefined") return;
     let mounted = false;
+    let resizeFrame = 0;
     const ro = new ResizeObserver(() => {
       // The initial batch describes observation setup, not a resize. relayout's
       // layout effect owns the opening position; skipping this also avoids a
@@ -558,7 +559,17 @@ export function useSessionScroll(initialFollowing = true): SessionScroll {
         mounted = true;
         return;
       }
-      if (followingRef.current || pinnedRef.current) relayout();
+      // This observer is the fallback for non-React growth such as an image
+      // decoding or the visual viewport changing. Semantic transcript commits
+      // already call relayout from a layout effect. Writing scrollTop or the
+      // spacer from inside ResizeObserver delivery can resize another observed
+      // layer and trigger the browser's undelivered-notifications warning, so
+      // coalesce fallback maintenance into the next rendering turn.
+      if (resizeFrame || (!followingRef.current && !pinnedRef.current)) return;
+      resizeFrame = requestAnimationFrame(() => {
+        resizeFrame = 0;
+        if (followingRef.current || pinnedRef.current) relayout();
+      });
     });
     const observeLayers = () => {
       ro.observe(el);
@@ -570,6 +581,7 @@ export function useSessionScroll(initialFollowing = true): SessionScroll {
     return () => {
       mutations.disconnect();
       ro.disconnect();
+      if (resizeFrame) cancelAnimationFrame(resizeFrame);
     };
   }, [container, relayout]);
 

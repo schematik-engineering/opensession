@@ -143,9 +143,10 @@ describe("fake engine through runAgent", () => {
 			fake.calls[0].opts.startToken,
 		);
 		// Cross-family hop: no engine-session resume, just a fresh session with
-		// the empty-handoff note telling the model prior partial work may exist.
+		// a model-only recovery hint. It must not alter the visible user row.
 		expect(fake.calls[1].sessionId).toBeUndefined();
 		expect(fake.calls[1].prompt).toContain("previous attempt");
+		expect(stripContext(fake.calls[1].prompt)).toBe("keep going");
 		expect(fake.calls[1].journalKind).toBe("prompt-fallback");
 		expect(fake.calls[0].firstJournaledAt).toBeTruthy();
 		expect(fake.calls[1].firstJournaledAt).toBe(fake.calls[0].firstJournaledAt);
@@ -220,6 +221,9 @@ describe("fake engine through runAgent", () => {
 		expect(types(events)).toEqual(["model_switch", "init", "text_chunk", "done"]);
 		expect(fake.calls).toHaveLength(1);
 		expect(fake.calls[0].model).toBe("pi/openai/gpt-5.6-sol");
+		// No source engine started, so there is no interrupted work to explain and
+		// the fallback receives exactly the person's original prompt.
+		expect(fake.calls[0].prompt).toBe("keep going");
 		expect(events[0]).toMatchObject({
 			type: "model_switch",
 			fromModel: "claude-sonnet-5",

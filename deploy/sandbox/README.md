@@ -304,22 +304,8 @@ needed after changing it.
   Daytona Tier 1/2 orgs restrict sandbox egress, which blocks the WS
   dial-back entirely — launchRun there needs a Tier 3 org or self-hosted
   Daytona.
-- **Local Firecracker adapter** (`provider: "microvm"`): restores a
-  credential-free golden from `/opt/firecracker/sandbox-store`; the selected
-  engine and workspace both run inside the guest through the same run-ws/rpc-ws
-  transport as remote providers. The payload-baked golden design layers
-  `Dockerfile.runner` over `Dockerfile.workspace`. Runtime recognizes only the
-  exact `~/.bks-bootstrapped` marker. A mismatch triggers the normal
-  incremental `bootstrapRemoteSandbox` path.
-
-  Golden refresh is currently unavailable in this checkout. Do not run
-  `deploy/sandbox/microvm/refresh-sandbox-golden.sh` until it is repaired: its
-  Bun snippet imports obsolete root `src/` paths, and metadata generation
-  references an unset `RUNNER_PIN`. The attempted `golden.json` is build
-  metadata only; no runtime staleness reader consumes it. Never reuse the
-  preview-pool golden in `/opt/firecracker/store`.
 - `deploy/sandbox/conformance.ts` — the provider conformance matrix
-  (`bun run deploy/sandbox/conformance.ts [docker-socket|docker-ws|daytona|e2b|box|modal|microvm|lambda-microvm]`):
+  (`bun run deploy/sandbox/conformance.ts [docker-socket|docker-ws|daytona|e2b|box|modal|lambda-microvm]`):
   verify.ts's checks parameterized over providers. Docker entries always run
   and must stay green; configured providers otherwise skip when their required
   credentials are not discovered. The harness currently reads live sandbox

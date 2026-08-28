@@ -21,9 +21,10 @@ export const WORKSPACE_SANDBOX_PROVIDERS = [
   "daytona",
   "box",
   "modal",
-  "microvm",
 ] as const;
-export type WorkspaceSandboxProvider = (typeof WORKSPACE_SANDBOX_PROVIDERS)[number];
+export type WorkspaceSandboxProvider =
+  | (typeof WORKSPACE_SANDBOX_PROVIDERS)[number]
+  | "microvm";
 
 export type SandboxQualificationStatus = "checking" | "ready" | "failed";
 
@@ -228,7 +229,7 @@ export function safeSandboxConnections(): SafeSandboxConnection[] {
     }
     const hasCredentials = connection.credentialRef
       ? workspaceSecretExists(connection.credentialRef)
-      : provider === "docker" || provider === "microvm";
+      : provider === "docker";
     const signatureCurrent = sandboxAdapterSignatureCurrent(
       provider,
       connection.qualification?.adapterSignature,

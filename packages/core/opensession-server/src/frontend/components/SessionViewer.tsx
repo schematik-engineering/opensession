@@ -21,6 +21,7 @@ import { TranscriptViewStore } from "../lib/transcript-view-store";
 import {
 	measureSessionPerf,
 	recordSessionPerf,
+	scheduleTranscriptDomNodeSample,
 } from "../lib/session-performance";
 import { AGENT_NAME, DEFAULT_DOC_TITLE, sessionSourceName } from "../lib/brand";
 import { brandLogo } from "../brand-logos";
@@ -52,6 +53,7 @@ import {
 	orderTranscriptEntries,
 	queueAttribution,
 	summarizeInFlightContent,
+	type OptimisticTranscriptEntry,
 } from "../lib/transcript-state";
 import {
 	HISTORY_PAGE_ENTRIES,
@@ -281,7 +283,6 @@ import {
 	IconDesk,
 	IconDotsHorizontal,
 	IconEye,
-	IconInbox,
 	IconBranches,
 	IconNewBranch,
 	IconPullRequest,
@@ -299,6 +300,7 @@ import {
 	IconArrowUpRight,
 	IconStack,
 } from "./icons";
+import { KeepInSidebarIcon } from "./sidebar/KeepInSidebarMark";
 import { SessionRelations, type RelatedSession } from "./SessionRelations";
 import {
 	SOURCE_CHIP,
@@ -559,7 +561,7 @@ interface Props {
 	    sidebar's review bands flip immediately instead of waiting for a poll. */
 	onReviewChange?: (
 		id: string,
-		req: { to: string; by: string; at: string; accepted?: { by: string; at: string } } | null,
+		req: NonNullable<UnifiedSession["reviewRequest"]> | null,
 	) => void;
 	/**
 	 * Whether the Review pane is foregrounded — driven by the top tab strip's
@@ -725,11 +727,11 @@ const HIDDEN_REOPEN_MS = 30_000;
 // late: on the iOS PWA the WebSocket only reconnects after visibility, so what
 // streamed while backgrounded arrives moments after the visibilitychange.
 const RESUME_GROWTH_WINDOW_MS = 8_000;
-// Let fast transcript hydration settle out of sight, but never leave readable
-// rows hidden behind the opening curtain while a slow outline or range request
-// catches up. The virtualizer preserves the live-edge position as that older
-// content grows above it.
-const OPEN_SETTLE_MAX_MS = 350;
+// Legacy transcripts have no structural outline frame, so a short fallback
+// lifts their opening curtain after the tail paints. Indexed transcripts never
+// use this deadline: revealing their bounded init before transcript_index lands
+// is the cold-open churn this curtain exists to prevent.
+const LEGACY_OPEN_SETTLE_MAX_MS = 350;
 // "Jump to the start of the session" walks the backlog a page at a time rather
 // than asking for it in one frame: a multi-thousand-entry transcript would be a
 // tens-of-MB payload and one giant reconciliation. Fat pages keep the number of
@@ -1113,12 +1115,8 @@ export function SessionViewer({
 				entries: transcriptViewStore.getSnapshot().length,
 			});
 			transcriptCommitCount.current++;
-			if (phase === "mount" || transcriptCommitCount.current % 20 === 0) {
-				recordSessionPerf(
-					"transcript_dom_nodes",
-					document.querySelectorAll(".viewer-messages [data-eid]").length,
-				);
-			}
+			if (phase === "mount" || transcriptCommitCount.current % 20 === 0)
+				scheduleTranscriptDomNodeSample();
 		},
 		[transcriptViewStore],
 	);
@@ -1386,7 +1384,13 @@ export function SessionViewer({
 	// queue flap (as "Queueing…") instead of as a transcript bubble.
 	const [pending, setPending] = useState<OptimisticPendingPrompt[]>(() =>
 		initialPending
-			? [{ id: `pending-initial-${session.id}`, ...initialPending }]
+			? [
+					{
+						id: `pending-initial-${session.id}`,
+						transcriptAfterEntryId: null,
+						...initialPending,
+					},
+				]
 			: [],
 	);
 	// Read by the reconcile effect below, which must not re-run on every send.
@@ -1412,6 +1416,8 @@ export function SessionViewer({
 				content: item.content,
 				user: item.user || getCurrentUser(),
 				sentAt: item.createdAt,
+				transcriptAfterEntryId: item.transcriptAfterEntryId,
+				transcriptAfterSeq: item.transcriptAfterSeq,
 				...(item.images?.length ? { images: item.images } : {}),
 			};
 			if (result.status === "started") {
@@ -1500,6 +1506,7 @@ export function SessionViewer({
 				...prev,
 				{
 					id: `pending-initial-${session.id}`,
+					transcriptAfterEntryId: null,
 					...initialPending,
 				},
 			];
@@ -1940,21 +1947,23 @@ export function SessionViewer({
 		[suspendEndMaintenance],
 	);
 
-	// Open-settle curtain: positive proof lifts it as soon as the complete outline
-	// and near-visible payload settle. The deadline is equally load-bearing: an
-	// incomplete or slow hydration must not turn already-rendered transcript rows
-	// into an apparently empty page.
+	// Open-settle curtain: indexed transcripts lift only on positive proof that
+	// their complete outline and real near-visible rows have settled. On a phone
+	// under CPU pressure transcript_index can arrive seconds after the bounded
+	// init; the old unconditional 350ms deadline exposed that intermediate tail,
+	// then visibly regrouped and re-anchored it when the index finally committed.
+	// Legacy mode has no index/settled callback, so it keeps a short fallback.
 	const [openSettlePending, setOpenSettlePending] = useState(true);
 	const transcriptRendered =
 		!loading && (entries.length > 0 || Boolean(transcriptIndex));
 	useEffect(() => {
-		if (!transcriptRendered) return;
+		if (!transcriptRendered || transcriptIndexExpected) return;
 		const timer = window.setTimeout(
 			() => setOpenSettlePending(false),
-			OPEN_SETTLE_MAX_MS,
+			LEGACY_OPEN_SETTLE_MAX_MS,
 		);
 		return () => window.clearTimeout(timer);
-	}, [transcriptRendered]);
+	}, [transcriptIndexExpected, transcriptRendered]);
 	const settledIndexRef = useRef<TranscriptIndexEntry[] | null>(null);
 	const onVisibleRangesSettled = useCallback(() => {
 		if (!transcriptOutlineReady) return;
@@ -2470,11 +2479,11 @@ export function SessionViewer({
 	const naturallyInSidebar = claimSessions.some(
 		(c) => !c.spawnedBy && !c.automation && ownedBy(c, currentUser),
 	);
-	const canAddToSidebar =
+	const canKeepInSidebar =
 		!session.archived &&
 		!!onSetStatus &&
 		(hiddenFromSidebar || (!claimed && !naturallyInSidebar));
-	function addToSidebar() {
+	function keepInSidebar() {
 		unhideForSession(session);
 		if (!claimed && !naturallyInSidebar) onSetStatus?.(claimSessions, "mine");
 	}
@@ -3494,7 +3503,13 @@ export function SessionViewer({
 	const resetOptimisticState = useEffectEvent(() => {
 		setPending(
 			initialPending
-				? [{ id: `pending-initial-${session.id}`, ...initialPending }]
+				? [
+						{
+							id: `pending-initial-${session.id}`,
+							transcriptAfterEntryId: null,
+							...initialPending,
+						},
+					]
 				: [],
 		);
 		setIsRunningLive(session.isRunning);
@@ -4352,6 +4367,19 @@ export function SessionViewer({
 		// Attachments ride along on every path — images fold into the run as
 		// content blocks; files route to the queue server-side.
 		const steerNow = isBusy && !!opts?.steer;
+		const optimisticTail = [...pendingRef.current]
+			.reverse()
+			.find((item) => item.busyMode !== "queue");
+		const transcriptTail = transcriptViewStore.getSnapshot().at(-1);
+		const transcriptAfterEntryId = optimisticTail
+			? optimisticTail.id.startsWith("outbox-")
+				? optimisticTail.id.slice("outbox-".length)
+				: optimisticTail.id
+			: transcriptTail?.id ?? null;
+		const transcriptAfterSeq =
+			transcriptSeqRef.current?.sessionId === session.id
+				? transcriptSeqRef.current.lastSeq
+				: undefined;
 		let outboxItem: PromptOutboxItem;
 		try {
 			outboxItem = promptOutbox.enqueue({
@@ -4361,6 +4389,8 @@ export function SessionViewer({
 				effort,
 				fastMode,
 				busyMode: isBusy ? (steerNow ? "steer" : "queue") : undefined,
+				transcriptAfterEntryId,
+				transcriptAfterSeq,
 				...(imgs.length ? { images: imgs } : {}),
 				...(fls.length ? { files: filePayload } : {}),
 				...(!isolated && contextSessions.length ? { contextSessions } : {}),
@@ -4387,7 +4417,9 @@ export function SessionViewer({
 					id: `outbox-${outboxItem.clientId}`,
 					content: text,
 					user,
-					sentAt: Date.now(),
+					sentAt: outboxItem.createdAt,
+					transcriptAfterEntryId,
+					transcriptAfterSeq,
 					images: imgs.length ? imgs : undefined,
 					...(steerNow ? { busyMode: "steer" as const } : {}),
 				},
@@ -4403,7 +4435,9 @@ export function SessionViewer({
 					id: `outbox-${outboxItem.clientId}`,
 					content: text,
 					user,
-					sentAt: Date.now(),
+					sentAt: outboxItem.createdAt,
+					transcriptAfterEntryId,
+					transcriptAfterSeq,
 					images: imgs.length ? imgs : undefined,
 					busyMode: "queue" as const,
 				},
@@ -4639,7 +4673,7 @@ export function SessionViewer({
 		),
 		...(settingUpWorkspace ? [] : fallbackPending),
 	];
-	const optimisticTranscriptEntries: TranscriptEntry[] =
+	const optimisticTranscriptEntries: OptimisticTranscriptEntry[] =
 		pendingBubbles.length === 0
 			? EMPTY_TRANSCRIPT_ENTRIES
 			: pendingBubbles.map((pending) => ({
@@ -4647,6 +4681,8 @@ export function SessionViewer({
 					type: "user",
 					content: pending.content,
 					timestamp: new Date(pending.sentAt).toISOString(),
+					optimisticAfterEntryId: pending.transcriptAfterEntryId,
+					optimisticAfterSeq: pending.transcriptAfterSeq,
 					// Preserve attribution across the optimistic-to-durable handoff.
 					// Without this, MessageBubble falls back to the session owner first.
 					sender: pending.user,
@@ -5814,21 +5850,22 @@ export function SessionViewer({
 			</Modal.Root>
 			{!hideHeader && (() => {
 				const workspaceScopedMenu = Boolean(session.workspaceId);
-				const addToSidebarAction = (inMenu: boolean) =>
-					canAddToSidebar &&
+				const keepInSidebarAction = (inMenu: boolean) =>
+					canKeepInSidebar &&
 					(inMenu ? (
-						<Menu.Item onClick={addToSidebar} title="Keep this workspace in your sidebar">
-							<IconInbox size={20} className={MENU_ICON} />
+						<Menu.Item onClick={keepInSidebar} title="Add to sidebar">
+							<KeepInSidebarIcon className={MENU_ICON} />
 							<span className="grow">Add to sidebar</span>
 						</Menu.Item>
 					) : (
 						<Button
 							size="md"
 							variant="default"
-							className="mr-1.5"
-							icon={<IconInbox size={20} />}
-							onClick={addToSidebar}
-							title="Keep this workspace in your sidebar"
+							className="mr-1.5 text-fg"
+							icon={<KeepInSidebarIcon />}
+							iconTone="full"
+							onClick={keepInSidebar}
+							title="Add to sidebar"
 						>
 							Add to sidebar
 						</Button>
@@ -6273,7 +6310,7 @@ export function SessionViewer({
 								    conditional, so the rules between them collapse themselves
 								    rather than being predicted here (VIEWER_MENU_SEP). */}
 								{placementActions}
-								{isPhone && addToSidebarAction(true)}
+								{isPhone && keepInSidebarAction(true)}
 								{(compactHeader || isPhone) && shareAction(true)}
 								<Menu.Separator className={VIEWER_MENU_SEP} />
 								{newSessionAction}
@@ -6560,7 +6597,7 @@ export function SessionViewer({
 				</TopBarLeading>
 				<TopBarActions className={VIEWER_HEADER_ACTIONS} ref={headerActionsRef}>
 					{!isPhone && secondaryActions(false)}
-					{!isPhone && addToSidebarAction(false)}
+					{!isPhone && keepInSidebarAction(false)}
 					{/* Whoever ELSE has the session open, right before Share. Your
 					    own face used to sit here too, which meant every session
 					    you opened showed a face permanently — the one thing a
@@ -6656,6 +6693,7 @@ export function SessionViewer({
 							// together with a GitHub review that completes it.
 							reviewRequest={effectiveReview?.req ?? null}
 							reviewRequestSessionId={effectiveReview?.ownerId}
+							onReviewChange={onReviewChange}
 							prReviewRequested={effectiveReview?.prReviewRequested}
 							running={isRunningLive}
 							send={connected ? send : undefined}
@@ -6905,6 +6943,7 @@ export function SessionViewer({
 												onArchive={handleArchive}
 												reviewRequest={effectiveReview?.req ?? null}
 												reviewRequestSessionId={effectiveReview?.ownerId}
+												onReviewChange={onReviewChange}
 												prReviewRequested={effectiveReview?.prReviewRequested}
 												running={isRunningLive}
 												send={connected ? send : undefined}
@@ -7341,7 +7380,11 @@ export function SessionViewer({
 							onScroll={handleMessagesScroll}
 							onClick={handleMessagesClick}
 						>
-							<AnimatePresence initial={false} mode="popLayout">
+							{/* The outgoing setup/loading canvas owns min-h-full. Waiting for its
+							    short fade before mounting transcript rows prevents both surfaces
+							    occupying the phone scroller for one frame and pushing a just-sent
+							    message from the composer edge to the top. */}
+							<AnimatePresence initial={false} mode="wait">
 							{settingUpWorkspace ? (
 								<WorkspaceSetup key="workspace-setup" />
 							) : loading ? (
@@ -7531,12 +7574,17 @@ export function SessionViewer({
 								</InlineAlert>
 							)}
 
-							{isBusy && !settingUpWorkspace && (
-								<BusyInline
-									since={busySince}
-									stoppingSince={stopRequestedAt}
-								/>
-							)}
+							<AnimatePresence initial={false}>
+								{isBusy && !settingUpWorkspace && (
+									<BusyInline
+										key="busy"
+										since={busySince}
+										stoppingSince={stopRequestedAt}
+										liveTurnStore={liveTurnStore}
+										onLayout={relayout}
+									/>
+								)}
+							</AnimatePresence>
 
 							{ask && (
 								<AskCard

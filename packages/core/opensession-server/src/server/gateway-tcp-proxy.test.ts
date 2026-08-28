@@ -1,0 +1,87 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import {
+  createGatewayTcpProxyMetrics,
+  startGatewayTcpProxy,
+} from "./gateway-tcp-proxy";
+
+const servers: Array<{ stop(closeActiveConnections?: boolean): void }> = [];
+
+afterEach(() => {
+  for (const server of servers.splice(0)) server.stop(true);
+});
+
+function backend(body: string) {
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: () => new Response(body),
+  });
+  servers.push(server);
+  return server;
+}
+
+describe("gateway TCP proxy", () => {
+  test("passes WebSocket upgrades and frames without interpreting them", async () => {
+    const websocketBackend = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request, server) {
+        return server.upgrade(request) ? undefined : new Response("upgrade required", { status: 426 });
+      },
+      websocket: {
+        message(socket, message) {
+          socket.send(message);
+        },
+      },
+    });
+    servers.push(websocketBackend);
+    const proxy = startGatewayTcpProxy({
+      hostname: "127.0.0.1",
+      port: 0,
+      backendPort: () => websocketBackend.port!,
+    });
+    servers.push(proxy);
+
+    const echoed = await new Promise<string>((resolve, reject) => {
+      const socket = new WebSocket(`ws://127.0.0.1:${proxy.port}/ws`);
+      socket.onopen = () => socket.send("through-proxy");
+      socket.onmessage = (event) => {
+        resolve(String(event.data));
+        socket.close();
+      };
+      socket.onerror = () => reject(new Error("WebSocket proxy failed"));
+    });
+    expect(echoed).toBe("through-proxy");
+  });
+
+  test("keeps the public listener while the selected backend changes", async () => {
+    const first = backend("first");
+    let backendPort = first.port!;
+    const metrics = createGatewayTcpProxyMetrics();
+    const proxy = startGatewayTcpProxy({
+      hostname: "127.0.0.1",
+      port: 0,
+      backendPort: () => backendPort,
+      retryMs: 5,
+      connectDeadlineMs: 1_000,
+      metrics,
+    });
+    servers.push(proxy);
+
+    expect(await fetch(`http://127.0.0.1:${proxy.port}/`).then((r) => r.text()))
+      .toBe("first");
+
+    first.stop(true);
+    const waiting = fetch(`http://127.0.0.1:${proxy.port}/`).then((r) => r.text());
+    await Bun.sleep(25);
+    const second = backend("second");
+    backendPort = second.port!;
+
+    expect(await waiting).toBe("second");
+    expect(proxy.port).toBeGreaterThan(0);
+    expect(metrics.accepted).toBe(2);
+    expect(metrics.connected).toBe(2);
+    expect(metrics.retries).toBeGreaterThan(0);
+    expect(metrics.maxConnectWaitMs).toBeGreaterThan(0);
+  });
+});

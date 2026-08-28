@@ -4239,7 +4239,10 @@ export class SessionKernelStore {
         const applyInterrupt = confirmedInterrupt && batchOwnsInterrupt;
         if (applyInterrupt) state.interrupt = undefined;
         const promptEntryId =
-          retryDispatchId || plan.batch[0]?.promptEntryId || input.promptEntryId;
+          retryDispatchId ||
+          plan.batch[0]?.promptEntryId ||
+          (plan.batch.length === 1 ? plan.batch[0]?.id : undefined) ||
+          input.promptEntryId;
         if (!promptEntryId || promptEntryId.length > 256)
           throw new Error("Invalid claimed prompt dispatch identity");
         state.queued = plan.rest;
@@ -4778,10 +4781,14 @@ export class SessionKernelStore {
 		now = Date.now(),
 		limit = 100,
 		kinds?: readonly string[],
+		excludedIds: readonly number[] = [],
 	): DurableOutboxItem[] {
 		if (kinds && kinds.length === 0) return [];
 		const kindFilter = kinds?.length
 			? ` AND kind IN (${kinds.map(() => "?").join(",")})`
+			: "";
+		const exclusionFilter = excludedIds.length
+			? ` AND id NOT IN (${excludedIds.map(() => "?").join(",")})`
 			: "";
 		const rows = this.db
 			.query(
@@ -4792,10 +4799,15 @@ export class SessionKernelStore {
            AND NOT EXISTS (
              SELECT 1 FROM session_kernel_quarantine q
              WHERE q.session_id = session_kernel_outbox.session_id
-           )${kindFilter}
+           )${kindFilter}${exclusionFilter}
          ORDER BY next_attempt_at, id LIMIT ?`,
       )
-			.all(now, ...(kinds || []), limit) as Record<string, unknown>[];
+			.all(
+				now,
+				...(kinds || []),
+				...excludedIds,
+				limit,
+			) as Record<string, unknown>[];
 		return rows.map((row) => ({
 			id: Number(row.id),
 			effectId: String(row.effect_id),
@@ -5885,11 +5897,19 @@ export class SessionKernelStore {
 		return row.next_at === null ? undefined : Number(row.next_at);
 	}
 
-	nextOutboxWakeAt(): number | undefined {
+	nextOutboxWakeAt(
+		activeIds: readonly number[] = [],
+		activeRecheckAt = Date.now(),
+	): number | undefined {
+		const activeWake = activeIds.length
+			? `CASE WHEN id IN (${activeIds.map(() => "?").join(",")}) THEN ? ELSE next_attempt_at END`
+			: "next_attempt_at";
 		const row = this.db.query(`
-			SELECT MIN(next_attempt_at) AS next_at
+			SELECT MIN(${activeWake}) AS next_at
 			FROM session_kernel_outbox WHERE dead_lettered_at IS NULL
-		`).get() as { next_at: number | null };
+		`).get(...activeIds, ...(activeIds.length ? [activeRecheckAt] : [])) as {
+			next_at: number | null;
+		};
 		return row.next_at === null ? undefined : Number(row.next_at);
 	}
 

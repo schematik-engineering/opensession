@@ -94,7 +94,7 @@ export function laneCtxEntries(
 		{
 			kind: "item",
 			icon: <IconInbox size={20} />,
-			label: claimed ? "Remove from my workspaces" : "Add to my workspaces",
+			label: claimed ? "Stop keeping in sidebar" : "Keep in sidebar",
 			onClick: () => onSetStatus(claimed ? null : "mine"),
 		},
 		{

@@ -1,5 +1,5 @@
 import { repoLabel } from "./repo-label";
-import type { UnifiedSession } from "./types";
+import type { OsReview, UnifiedSession } from "./types";
 
 /**
  * Derivation for the PRs a session knows only as refs — everything the status
@@ -26,6 +26,26 @@ export type PrStateFacts = Pick<
 >;
 
 export type PrTone = "green" | "purple" | "red" | "yellow" | "muted";
+
+/** Compact latest-review reading for session and workspace hover cards. */
+export function osReviewText(review: OsReview): string {
+	const verdict =
+		review.verdict === "approve"
+			? "approved"
+			: review.verdict === "request_changes"
+				? "changes requested"
+				: review.verdict === "comment"
+					? "commented"
+					: "reviewed";
+	return [
+		typeof review.confidence === "number" ? `${review.confidence}/5` : "",
+		verdict,
+		review.blocking > 0 ? `${review.blocking} blocking` : "",
+		review.stale ? "stale" : "",
+	]
+		.filter(Boolean)
+		.join(" · ");
+}
 
 /** Worst-first, so a series folds down to the tone that needs attention. */
 const TONE_RANK: Record<PrTone, number> = {

@@ -5,13 +5,14 @@
  * fire-and-forget, and returns a human message to relay.
  */
 import { defaultRepo } from "../../server/config";
-import { getPrDetails, getPrDiff } from "../../server/pr-info";
+import { getPrAutomationDetails, getPrDiff } from "../../server/pr-info";
 import { runReview, type PrRef } from "./review";
 import { maybeHandoffFindings } from "./handoff";
 import { runAutoFix } from "./autofix";
 import { runSimplify } from "./simplify";
 import { runAdversarial } from "./adversarial";
 import { resolveReviewConfig } from "./webhook";
+import { isExternalPullRequest } from "./public-review";
 
 export type PrActionKind = "review" | "autofix" | "simplify" | "adversarial";
 
@@ -55,11 +56,20 @@ export async function triggerPrAction(
   steer?: string,
   ghRepo?: string,
 ): Promise<TriggerResult> {
-  const details = await getPrDetails(String(prNumber), ghRepo || undefined);
+  const details = await getPrAutomationDetails(String(prNumber), ghRepo || undefined);
   if (!details) {
     return { ok: false, message: `I couldn't find PR #${prNumber} on ${ghRepo || defaultRepo().ghRepo}.` };
   }
-  const diff = await getPrDiff(details.headRefName, ghRepo || undefined);
+  const baseGhRepo = ghRepo || defaultRepo().ghRepo;
+  const external = isExternalPullRequest(details, baseGhRepo);
+  if (external && kind !== "review") {
+    return {
+      ok: false,
+      url: details.url,
+      message: `External PR #${prNumber} is read-only. Only isolated review is available.`,
+    };
+  }
+  const diff = await getPrDiff(String(prNumber), baseGhRepo);
   const ref: PrRef = {
     number: prNumber,
     headRef: details.headRefName,
@@ -83,7 +93,7 @@ export async function triggerPrAction(
       // and needs the same handoff tail as webhook.ts's fireReview: without it an
       // unsatisfied recovered review reached nobody (PR #5055, 2026-07-19).
       done = runReview(ref, resolveReviewConfig().config, resolveSessionCreated, true, steer)
-        .then((result) => maybeHandoffFindings(ref, result))
+        .then((result) => result?.publicReview ? undefined : maybeHandoffFindings(ref, result))
         .catch(fail);
       break;
     case "autofix":
@@ -97,9 +107,20 @@ export async function triggerPrAction(
       break;
   }
 
-  // Each behavior announces only after it owns the relevant lock. If it exits
-  // first, another action won the lock or setup failed, so do not hand the UI
-  // an id for a worker that never started.
+  // Public reviews deliberately have no private session link. The isolated
+  // result is posted to GitHub when the background promise completes.
+  if (external) {
+    return {
+      ok: true,
+      url: details.url,
+      done,
+      message: `running an isolated review of PR #${prNumber} (“${details.title}”). I'll post the results on the PR: ${details.url}`,
+    };
+  }
+
+  // Each internal behavior announces only after it owns the relevant lock. If
+  // it exits first, another action won the lock or setup failed, do not hand
+  // the UI an id for a worker that never started.
   const bksId = await Promise.race([
     sessionCreated,
     done.then(() => ""),

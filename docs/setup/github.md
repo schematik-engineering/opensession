@@ -132,15 +132,54 @@ The webhook secret authenticates GitHub, not the person who caused an event.
 Before an event can command the agent, the actor's exact login must appear in
 `identity.team[].github`; the configured `policy.githubBotLogins` are trusted
 separately for machine-originated events. This gate covers PR comments and
-inline comments, labels, automatic review events, merge automations, workflow
-notifications, Slack review notifications, reconcile retries, and restart
-recovery. Unknown actors are ignored. GitHub's `author_association` field is
-not a trust source.
+inline comments, labels, same-repository automatic reviews, merge automations,
+workflow notifications, Slack review notifications, and restart recovery.
+GitHub's `author_association` field is not a trust source.
 
-This means a public contributor can still open a PR and receive ordinary
-credential-free GitHub Actions CI, but cannot wake the Open Session agent,
-spend its model budget, push code, steer a session, or trigger a privileged PR
-behavior. Keep the team GitHub roster current; an empty roster fails closed.
+An external fork is the narrow exception. When review automation is enabled,
+its open and update events may start an automatic isolated review. Open Session
+verifies the immutable PR refs in a fresh disposable Daytona Executor, confirms
+provider deletion, and gives a tool-less model only the bounded patch. No contributor
+code runs on the host, and no model or GitHub credential enters the guest.
+External PRs cannot trigger mentions, autofix, simplify, adversarial review,
+conversational work, pushes or handoffs. Public review comments do not contain
+the private Open Session URL. See [Security model](../security-model.md#isolated-public-pr-reviews).
+
+GitHub Actions policy is independent. A repository may keep outside-contributor
+workflows disabled or approval-gated while still receiving Open Session's
+isolated semantic review. The shipped PR workflows also gate every job to
+same-repository branches, so fork jobs remain skipped if the platform setting
+is loosened accidentally. Keep the team GitHub roster current; an empty roster
+still fails closed for every write-capable behavior.
+
+### Enabling public contributions
+
+Keep public PR creation restricted until every item below is complete:
+
+1. Configure and qualify the Daytona provider. Confirm it reports **Ready** in
+   Workspace → Sandboxes. Public review fails closed when it is
+   unavailable, but opening submissions before readiness leaves contributors
+   without the promised automatic review.
+2. Enable the `github-pr-review` automation. This is the budget switch for
+   automatic review events; it does not grant external contributors any
+   write-capable command.
+3. In GitHub repository settings, have a human repository administrator change
+   the pull-request creation policy from **Collaborators only** to **All**. The
+   GitHub App does not need Administration permission for normal operation, and
+   should not receive it just for this one-time setting.
+4. In **Settings → Actions → General**, keep workflows from fork PRs disabled or
+   require maintainer approval before they run. This is separate from Open
+   Session review and complements the same-repository job gates in the shipped
+   workflows. With the least-privilege App permission set above, GitHub's
+   Actions-policy API returns 403 by design, so a repository administrator must
+   verify this setting in GitHub.
+5. Open a disposable fork PR and confirm the review uses the isolated public
+   path, contains no private session URL, and leaves autofix, commands, pushes,
+   handoffs and GitHub Actions unavailable.
+
+Changing the PR creation policy is the only step above that requires repository
+Administration authority. Runtime checkout, review and result posting continue
+to use the narrower App permissions documented in this guide.
 
 **Multi-repo**: the App webhook covers every repository on which the App is
 installed. A repo joins the PR agent when it is also in the config registry

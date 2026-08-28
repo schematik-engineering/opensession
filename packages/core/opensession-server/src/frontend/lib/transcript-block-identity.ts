@@ -1,4 +1,44 @@
 type TranscriptEntryIdentity = { id: string };
+type TranscriptArrivalEntry = TranscriptEntryIdentity & {
+	type: string;
+	sourceMessageIds?: string[];
+};
+type TranscriptArrivalItem = { arrivalAliases?: string[] };
+
+/** Keep one React/virtualizer identity while a locally-created user row receives
+ * its durable transcript id. For a batched row, the first source owns the
+ * mounted bubble that survives the merge. */
+export function transcriptEntryMountKey(
+	entry: TranscriptArrivalEntry,
+): string {
+	if (entry.type !== "user") return entry.id;
+	const id = entry.sourceMessageIds?.[0] ?? entry.id;
+	return id.startsWith("outbox-") ? id : `outbox-${id}`;
+}
+
+/** Identities used by the optimistic user row before its durable replacement
+ * receives a transcript block or indexed-range key. */
+export function transcriptArrivalAliases(
+	entries: readonly TranscriptArrivalEntry[],
+): string[] | undefined {
+	const aliases = new Set<string>();
+	for (const entry of entries) {
+		if (entry.type !== "user") continue;
+		for (const id of [entry.id, ...(entry.sourceMessageIds ?? [])]) {
+			aliases.add(id.startsWith("outbox-") ? id : `outbox-${id}`);
+		}
+	}
+	return aliases.size ? [...aliases] : undefined;
+}
+
+/** A new outer block is reconciliation rather than an arrival when one of its
+ * optimistic aliases was already painted. */
+export function shouldAnimateTranscriptItemArrival(
+	item: TranscriptArrivalItem,
+	mountedEntryIds: ReadonlySet<string>,
+): boolean {
+	return !item.arrivalAliases?.some((alias) => mountedEntryIds.has(alias));
+}
 
 /**
  * A mounted live turn keeps the identity of its first entry while later steps

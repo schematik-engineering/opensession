@@ -21,6 +21,7 @@ import {
 } from "../lib/native-file-save";
 import { copyImageToClipboard } from "../lib/image-clipboard";
 import { copyToClipboard } from "../lib/share-link";
+import { chordFromEvent } from "../lib/shortcuts";
 import { fullTime } from "../lib/time";
 import {
 	WALKTHROUGH_LABEL_CLASS,
@@ -1773,6 +1774,14 @@ if (!nativeShareWasCancelled(error)) toast("Could not share that link");
 		item.kind === "image" &&
 		(Boolean(item.onRegionComment) ||
 			canCommentOnImageRegion(item.commentSessionId));
+	const toggleComment = () => {
+		if (commenting) resetComment();
+		else {
+			setChromeVisible(true);
+			setCommenting(true);
+			setCommentError(null);
+		}
+	};
 	const sendRegionComment = async (keepOpen = false) => {
 		const text = commentText.trim();
 		const { commentSessionId, onRegionComment, src } = item;
@@ -2013,6 +2022,15 @@ sendingCommentRef.current = false;
 				e.stopPropagation();
 				requestClose();
 			} else if (
+				!editingText &&
+				!e.repeat &&
+				commentable &&
+				chordFromEvent(e) === "c"
+			) {
+				e.preventDefault();
+				e.stopPropagation();
+				toggleComment();
+			} else if (
 				isPhone &&
 				!chromeVisible &&
 				!editingText &&
@@ -2133,14 +2151,9 @@ sendingCommentRef.current = false;
 								lightboxAction,
 								commenting && "bg-white/15 text-white",
 							)}
-							onClick={() => {
-								if (commenting) resetComment();
-								else {
-									setCommenting(true);
-									setCommentError(null);
-								}
-							}}
+							onClick={toggleComment}
 							aria-pressed={commenting}
+							aria-keyshortcuts="C"
 							aria-label={commenting ? "Cancel image comment" : "Comment on image"}
 						>
 							Comment
@@ -2491,15 +2504,9 @@ sendingCommentRef.current = false;
 							<button
 								type="button"
 								className={cn(phoneAction, "justify-self-center", commenting && "bg-white/15")}
-								onClick={() => {
-									if (commenting) resetComment();
-									else {
-										setChromeVisible(true);
-										setCommenting(true);
-										setCommentError(null);
-									}
-								}}
+								onClick={toggleComment}
 								aria-pressed={commenting}
+								aria-keyshortcuts="C"
 								aria-label={commenting ? "Cancel image comment" : "Comment on image"}
 							>
 								<IconMessage size={21} />

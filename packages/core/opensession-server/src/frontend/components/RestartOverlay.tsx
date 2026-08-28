@@ -3,6 +3,7 @@ import type { WSServerMessage } from "../lib/types";
 import { PRODUCT_NAME } from "../lib/brand";
 import { dismissToast, toast } from "../ui/toast";
 import { fetchHealthStatus } from "../lib/health";
+import { bootTransition } from "../lib/restart-boot";
 
 // Give foreground recovery enough time to probe and replace the stale PWA
 // socket before showing anything. Background time never counts toward this.
@@ -29,8 +30,8 @@ interface Props {
  *  - Socket loss with no restart signal → a calm "Reconnecting…" pill while
  *    useWebSocket retries. On reconnect the server's bootId (hello frame;
  *    /api/health fallback for servers without it) is compared: unchanged →
- *    pure blip; changed → it really was a restart. Either way, the pill clears
- *    silently.
+ *    pure blip; changed → it really was a restart, so a fallback receipt says
+ *    so even if the pre-restart broadcast was lost.
  *  - An explicit `server_restarting` broadcast (graceful drain) shows the same
  *    NON-blocking pill — restarts complete in a couple of seconds and Caddy
  *    parks in-flight requests, so nothing needs to block the composer or
@@ -71,18 +72,20 @@ export function RestartOverlay({ connected, addHandler }: Props) {
     if (phaseRef.current === "restarting") setPhase("ok");
   };
 
-  // Adopt/compare a server-reported bootId. First sighting just records it,
-  // unless an explicit restart is pending, where ANY fresh sighting after the
-  // announcement is evidence of the new instance (a never-learned old bootId
-  // must not wedge the pill). A change outside the restart flow needs no UI:
-  // there is no pending restart status to clear.
+  // Adopt/compare a server-reported bootId. The first sighting is only a
+  // baseline: a health request made after the announcement can still be
+  // answered by the draining process, so it must not clear the notice. If the
+  // announcement itself was lost, a changed bootId provides a fallback receipt.
   const handleBootId = (id: unknown) => {
     if (typeof id !== "string" || !id) return;
-    const prev = bootId.current;
+    const transition = bootTransition(bootId.current, id);
     bootId.current = id;
     if (explicit.current) {
-      if (!prev || id !== prev) resolveRestart();
+      if (transition === "changed") resolveRestart();
       return;
+    }
+    if (transition === "changed") {
+      toast(`${PRODUCT_NAME} restarted`, { variant: "success" });
     }
   };
 

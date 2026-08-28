@@ -14,7 +14,11 @@ describe("executor deployment", () => {
       "ExecStart=/home/ubuntu/.bun/bin/bun run packages/core/opensession-server/src/executor/main.ts",
     );
     expect(executor).not.toContain("PartOf=opensession.service");
-    expect(gateway).toContain("Wants=opensession-executor.service");
+    expect(gateway).not.toContain("Wants=opensession-executor.service");
+    expect(gateway).toContain("RuntimeDirectory=opensession-gateway");
+    expect(gateway).toContain(
+      "ExecStart=/home/ubuntu/.bun/bin/bun run packages/core/opensession-server/src/server/gateway-supervisor.ts",
+    );
     expect(gateway).not.toContain("Requires=opensession-executor.service");
     expect(gateway).toContain("# EXECUTOR_CREDENTIAL:");
     expect(gateway).not.toContain(
@@ -24,7 +28,7 @@ describe("executor deployment", () => {
 
   test("deploys one pinned gateway, kernel, and executor release", async () => {
     const deploy = await Bun.file(resolve(import.meta.dir, "deploy.sh")).text();
-    expect(deploy).toContain('RELEASE_DIR="$(run_release prepare "$TARGET_COMMIT")"');
+    expect(deploy).toContain('RELEASE_DIR="$(run_release prepare-frontend "$TARGET_COMMIT")"');
     expect(deploy).toContain('run_release switch "$TARGET_COMMIT"');
     expect(deploy).toContain('workdir="$CURRENT_LINK"');
     expect(deploy).toContain("Environment=OPENSESSION_PREBUILT_FRONTEND=0");
@@ -75,6 +79,7 @@ describe("executor deployment", () => {
     expect(helper).toContain("run-host directory is outside the configured state root");
     expect(helper).toContain("OPENSESSION_RUN_SPEC_HASH");
     expect(helper).toContain("OPENSESSION_RUN_JOURNAL=$dir/journal.json");
+    expect(helper).toContain('"--slice=opensession-workloads.slice"');
     expect(helper).toContain('if [ "$action" = "self-deploy" ]');
     expect(helper).toContain('"$repo_dir/deploy/self-deploy.sh"');
     expect(helper).toContain('if [ "$runner_mode" = "compiled" ]');

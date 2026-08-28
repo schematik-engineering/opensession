@@ -137,7 +137,7 @@ export function buildBranchNote(session: {
 	return [
 		"## Branch discipline (shared worktree)",
 		`You are working in \`${session.worktreeDir}\` on branch \`${session.branch}\`. Other sessions in this workspace share this exact worktree and branch — commits you don't recognize are their work, not noise.`,
-		`Stay on \`${session.branch}\`: never create or switch branches, and never rebase away, reset, or cherry-pick around sibling commits. Commit your changes on this branch and push with \`git push origin ${session.branch}\`.`,
+		`Stay on \`${session.branch}\`: never create or switch branches, and never rebase away, reset, or cherry-pick around sibling commits. Commit your changes on this branch and push with \`git push -u origin ${session.branch}\`.`,
 		repo.host === "codestorage"
 			? `Commit and push your branch with \`git push -u origin ${session.branch}\` — this repo is hosted on Code Storage; there is no gh CLI and no pull requests; a pushed branch IS the change request. Never merge it into the default branch yourself.`
 			: `This workspace keeps ONE pull request: if an open PR for \`${session.branch}\` already exists, pushing updates it — do not open another. Only run \`gh pr create\` when the branch has no open PR. For an ordinary (non-stacked) PR, you may merge it yourself once the latest Open Session review covers the current head, reports no blocking findings, marks it safe to merge, and all required checks have passed. Do not merge while the review is stale, pending, or unsatisfied, or while required checks are pending or failing.`,

@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Pstack mode
 
-Treat the text after `/pstack` as the task. Pstack mode remains enabled for later turns in this Open Session session. `/pstack off` disables it.
+Treat the text after `/pstack` as the task. Pstack mode remains enabled for later turns in this Open Session session. `/pstack off` disables it. `/poteto-mode` is the longer name for the same mode.
 
 This is the Open Session adaptation of pstack's Poteto Mode. It keeps the methodology, but uses Open Session's policy-gated tools and isolated child sessions instead of Pi extension tools. Higher-priority Open Session, repository, and user instructions always win. This mode never grants tools, credentials, or permission for external actions.
 

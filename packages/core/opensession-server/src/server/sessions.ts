@@ -729,57 +729,77 @@ function overlaySidecarExtras(session: UnifiedSession): UnifiedSession {
   return session;
 }
 
+function slackSessionRow(file: string): UnifiedSession | null {
+  if (!file.endsWith(".json") || SKIP_FILES.has(file)) return null;
+  const path = `${SLACK_SESSIONS_DIR}/${file}`;
+  const data = readJsonSafe<SlackSessionFile>(path);
+  if (!data) return null;
+
+  const branch = data.branch || file.replace(".json", "");
+  const startedBy = data.userId
+    ? resolveSlackUser(data.userId)
+    : null;
+
+  // Use a stable ID based on filename
+  const id = `slack-${file.replace(".json", "")}`;
+  const archived = isArchivedId(id);
+
+  return overlaySidecarExtras({
+    id,
+    claudeSessionId: data.claudeSessionId || null,
+    source: "slack",
+    branch,
+    worktreeDir: data.worktreeDir || null,
+    createdBy: startedBy,
+    startedBy,
+    // The message that started the thread, when the loop recorded one.
+    // `branch` is the last resort: for a thread/DM session it is the raw
+    // `<channel>-<threadTs>` key, which is not a name anyone can read.
+    title: data.title?.trim() || branch,
+    lastActivity:
+      data.lastActivity ||
+      data.createdAt ||
+      getFileMtime(path),
+    createdAt: data.createdAt || getFileMtime(path),
+    isRunning: false,
+    transcriptPath: null,
+    slackThread: data.channel
+      ? { channel: data.channel, threadTs: data.threadTs || "" }
+      : undefined,
+    model: data.model,
+    codexThreadId: data.codexThreadId || undefined,
+    // Written by agent-session-sync when a web-UI run on a pi/* model minted
+    // an engine session; without it every pi read falls to the claude-slot
+    // ride and the run-start arm can't resume the pi session.
+    piSessionId: data.piSessionId || undefined,
+    archived: archived || undefined,
+    archivedReason: archived ? getArchiveReason(id) || "manual" : undefined,
+  });
+}
+
+/** Resolve one exact Slack-owned session without waiting for the materialized
+ * list index to discover it. Slack posts its deep link immediately after writing
+ * this file, so a targeted read is the authority for that link during the gap. */
+export function readSlackSession(sessionId: string): UnifiedSession | null {
+  if (!sessionId.startsWith("slack-")) return null;
+  const key = sessionId.slice("slack-".length);
+  if (!key || key.includes("/") || key.includes("\\")) return null;
+  const session = slackSessionRow(`${key}.json`);
+  if (!session) return null;
+  session.transcriptPath = resolveTranscriptPath(
+    findTranscriptPath(session.worktreeDir, session.claudeSessionId),
+    session.codexThreadId,
+    session.model,
+  );
+  return session;
+}
+
 function* slackSessionRows(): Generator<UnifiedSession> {
   if (!existsSync(SLACK_SESSIONS_DIR)) return [];
 
   for (const file of readdirSync(SLACK_SESSIONS_DIR)) {
-    if (!file.endsWith(".json") || SKIP_FILES.has(file)) continue;
-    const data = readJsonSafe<SlackSessionFile>(
-      `${SLACK_SESSIONS_DIR}/${file}`
-    );
-    if (!data) continue;
-
-    const branch = data.branch || file.replace(".json", "");
-    const startedBy = data.userId
-      ? resolveSlackUser(data.userId)
-      : null;
-
-    // Use a stable ID based on filename
-    const id = `slack-${file.replace(".json", "")}`;
-    const archived = isArchivedId(id);
-
-    yield overlaySidecarExtras({
-      id,
-      claudeSessionId: data.claudeSessionId || null,
-      source: "slack",
-      branch,
-      worktreeDir: data.worktreeDir || null,
-      createdBy: startedBy,
-      startedBy,
-      // The message that started the thread, when the loop recorded one.
-      // `branch` is the last resort: for a thread/DM session it is the raw
-      // `<channel>-<threadTs>` key, which is not a name anyone can read.
-      title: data.title?.trim() || branch,
-      lastActivity:
-        data.lastActivity ||
-        data.createdAt ||
-        getFileMtime(`${SLACK_SESSIONS_DIR}/${file}`),
-      createdAt:
-        data.createdAt || getFileMtime(`${SLACK_SESSIONS_DIR}/${file}`),
-      isRunning: false,
-      transcriptPath: null,
-      slackThread: data.channel
-        ? { channel: data.channel, threadTs: data.threadTs || "" }
-        : undefined,
-      model: data.model,
-      codexThreadId: data.codexThreadId || undefined,
-      // Written by agent-session-sync when a web-UI run on a pi/* model minted
-      // an engine session; without it every pi read falls to the claude-slot
-      // ride and the run-start arm can't resume the pi session.
-      piSessionId: data.piSessionId || undefined,
-      archived: archived || undefined,
-      archivedReason: archived ? getArchiveReason(id) || "manual" : undefined,
-    });
+    const session = slackSessionRow(file);
+    if (session) yield session;
   }
 }
 

@@ -590,20 +590,16 @@ setError(e.message);
 
                     <DetailKey>Mode</DetailKey>
                     <span className="text-dim">
-                      {sel.mode === "ask"
-                        ? sel.sandbox
-                          ? "Ask · isolated MicroVM workspace"
-                          : "Ask · read-only on the main checkout"
-                        : sel.sandbox
-                          ? "Code · isolated MicroVM workspace, can open PRs"
+                      {sel.sandbox
+                        ? "Unavailable legacy sandbox configuration"
+                        : sel.mode === "ask"
+                          ? "Ask · read-only on the main checkout"
                           : "Code · isolated worktree, can open PRs"}
                     </span>
 
                     <DetailKey>Environment</DetailKey>
                     <span className="text-dim">
-                      {sel.sandbox
-                        ? "MicroVM · pinned credentials and restricted egress"
-                        : "Host worktree"}
+                      {sel.sandbox ? "Unavailable" : "Host worktree"}
                     </span>
 
                     <DetailKey>Model</DetailKey>
@@ -1749,7 +1745,7 @@ function AutomationForm({
   const [accountId, setAccountId] = useState(initial?.accountId || "");
   const [accountStrict, setAccountStrict] = useState(initial?.accountStrict !== false);
   const [usageCredits, setUsageCredits] = useState(!!initial?.usageCredits);
-  const [sandbox, setSandbox] = useState(!!initial?.sandbox);
+  const sandbox = false;
   const [models, setModels] = useState<ModelOption[]>([]);
   const [defaultModel, setDefaultModel] = useState("");
   const providerAccounts = useProviderAccounts();
@@ -1998,27 +1994,6 @@ setError(e.message);
               <option value="ask">Ask · read-only on main</option>
               <option value="code">Code · fresh worktree per run</option>
             </Select>
-          </label>
-
-          <label className="flex min-h-10 flex-1 items-center justify-between gap-3 text-label font-medium text-dim">
-            <span className="flex flex-col gap-1">
-              <span>Run in a MicroVM</span>
-              <span className="font-normal text-faint">
-                Pinned credentials, explicit MCP access, restricted network
-              </span>
-            </span>
-            <Switch
-              checked={sandbox}
-              onCheckedChange={(checked) => {
-                setSandbox(checked);
-                if (checked) {
-                  setAccountStrict(true);
-                  setFallbackModel("");
-                  setMcpServers((current) => current ?? []);
-                }
-              }}
-              aria-label="Run this automation in a MicroVM"
-            />
           </label>
 
           <label className={FIELD_LABEL}>

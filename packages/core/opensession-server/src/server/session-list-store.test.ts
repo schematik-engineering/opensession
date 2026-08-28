@@ -140,6 +140,23 @@ describe("SessionListStore", () => {
 		);
 	});
 
+	test("includes an archived session when its direct route is selected", () => {
+		const store = memoryStore();
+		store.upsertMany([
+			session("live", "2026-08-22T12:00:00.000Z"),
+			session("archived", "2026-08-22T11:00:00.000Z", {
+				archived: true,
+				automation: "triage",
+			}),
+		]);
+
+		expect(store.listSidebar().map((row) => row.id)).toEqual(["live"]);
+		expect(store.listSidebar("archived").map((row) => row.id)).toEqual([
+			"live",
+			"archived",
+		]);
+	});
+
 	test("updates archive columns and payload together", () => {
 		const store = memoryStore();
 		store.upsert(session("one", "2026-08-22T12:00:00.000Z"));

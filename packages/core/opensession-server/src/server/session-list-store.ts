@@ -290,12 +290,16 @@ export class SessionListStore {
 					FROM ranked_automation
 					WHERE automation_rank <= 5 OR is_running = 1
 						OR waiting_for_input = 1 OR manual_status IS NOT NULL OR id = ?
+					UNION ALL
+					SELECT payload, last_activity_ms, NULL AS automation_run_count
+					FROM session_list
+					WHERE archived = 1 AND id = ?
 				)
 				SELECT payload, automation_run_count
 				FROM selected
 				ORDER BY last_activity_ms DESC
 			`)
-			.all(selectedSessionId || "") as StoredRow[];
+			.all(selectedSessionId || "", selectedSessionId || "") as StoredRow[];
 		return decodeRows(rows);
 	}
 

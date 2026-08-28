@@ -1,12 +1,14 @@
-import { useEffect, useState } from "react";
-import { motion } from "motion/react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { motion, useReducedMotion } from "motion/react";
 import { duration, ease } from "../../ui/motion";
 import { TranscriptSkeleton } from "../../ui/state";
 import { PageLoader } from "../../ui/page-loader";
 import { Spinner } from "../../ui/spinner";
 import { PulseDot } from "../../ui/status";
 import { cn } from "../../ui/cn";
-import { msgRow } from "../../lib/msg-classes";
+import { busyActivityStatus } from "../../lib/busy-activity";
+import { msgActivityShimmer, msgRow } from "../../lib/msg-classes";
+import type { LiveTurnStore } from "../../lib/live-turn-store";
 
 /** The chat canvas while a new session's worktree is being prepared. The
  * opening message stays visible in the composer queue until it can move into
@@ -74,22 +76,36 @@ export function ConversationLoading() {
 	);
 }
 
-// Ticking elapsed-time label for the busy dot row. Self-ticking
-// so the 10Hz re-render stays inside this tiny span, not the whole viewer.
-function BusyElapsed({ since }: { since: number }) {
+// Persistent turn-level fallback for providers that emit no visible reasoning
+// or tool event for a while. It only claims what the client knows: the request
+// is active. The 1Hz ticker stays inside this tiny node instead of re-rendering
+// the transcript, and the elapsed value is hidden from assistive tech so it is
+// not announced every second.
+function BusyWorking({ since }: { since: number | null }) {
 	const [now, setNow] = useState(() => Date.now());
 	useEffect(() => {
-		const t = setInterval(() => setNow(Date.now()), 100);
+		if (since == null) return;
+		setNow(Date.now());
+		const t = setInterval(() => setNow(Date.now()), 1000);
 		return () => clearInterval(t);
-	}, []);
-	const s = Math.max(0, now - since) / 1000;
-	let label: string;
-	if (s < 60) label = `${s.toFixed(1)}s`;
-	else if (s < 3600)
-		label = `${Math.floor(s / 60)}m, ${(s % 60).toFixed(1)}s`;
-	else label = `${Math.floor(s / 3600)}h, ${Math.floor((s % 3600) / 60)}m`;
-	// Tabular figures so a 10Hz counter doesn't jitter its own width.
-	return <span className="text-meta text-faint tabular-nums">{label}</span>;
+	}, [since]);
+	const status = busyActivityStatus(since == null ? 0 : now - since);
+	return (
+		<>
+			<span
+				role="status"
+				aria-live="polite"
+				className={cn("text-meta font-medium", msgActivityShimmer)}
+			>
+				{status.label}
+			</span>
+			{status.elapsed && (
+				<span aria-hidden="true" className="text-meta text-faint tabular-nums">
+					· {status.elapsed}
+				</span>
+			)}
+		</>
+	);
 }
 
 // How long a steer may wait before the chip starts showing how long it has
@@ -156,35 +172,66 @@ function BusyStopping({ since }: { since: number }) {
 	);
 }
 
+const getFalse = () => false;
+
 export function BusyInline({
 	since,
 	stoppingSince,
+	liveTurnStore,
+	onLayout,
 }: {
 	since: number | null;
 	stoppingSince: number | null;
+	liveTurnStore: LiveTurnStore;
+	onLayout?: () => void;
 }) {
+	const reducedMotion = useReducedMotion();
+	const hasPaintedText = useSyncExternalStore(
+		liveTurnStore.subscribe,
+		liveTurnStore.hasPaintedText,
+		getFalse,
+	);
+	// Once words are visible, the stream itself and its caret are the progress
+	// indicator. Keeping a second status row under a growing answer makes every
+	// line wrap relocate that row, and under reduced motion those relocations are
+	// intentionally instant. Collapse it once instead; stopping always remains
+	// explicit even when streamed text is still present.
+	const shown = !hasPaintedText || stoppingSince != null;
 	return (
-		<div
-			className={cn(
-				msgRow,
-				"mt-0.5 flex-row items-center gap-2 px-1 py-1.25 text-dim",
-			)}
+		<motion.div
+			initial={reducedMotion ? false : { height: 0, opacity: 0 }}
+			animate={{ height: shown ? "auto" : 0, opacity: shown ? 1 : 0 }}
+			exit={{ height: 0, opacity: 0 }}
+			transition={{
+				type: "tween",
+				duration: reducedMotion ? 0 : duration.base,
+				ease,
+			}}
+			onUpdate={onLayout}
+			className="overflow-hidden"
 		>
-			{/* The 8px pull hangs off the DOT, not off the row: msgRow centres
-			    itself in the reading column with `mx-auto`, and a `-ml-2` on the
-			    row overrides that auto (Tailwind emits `margin-left` after
-			    `margin-inline`), leaving `margin-right: auto` to shove the whole
-			    row against the scroller's left gutter. Here it lands the dot's
-			    centre on the work fold's chevron, which hangs out by the same
-			    8px from a box that stays centred. */}
-			<span className="-ml-2 grid size-5 shrink-0 place-items-center">
-				<PulseDot size={7} />
-			</span>
-			{stoppingSince != null ? (
-				<BusyStopping since={stoppingSince} />
-			) : (
-				since != null && <BusyElapsed since={since} />
-			)}
-		</div>
+			<div
+				className={cn(
+					msgRow,
+					"mt-0.5 flex-row items-center gap-2 px-1 py-1.25 text-dim",
+				)}
+			>
+				{/* The 8px pull hangs off the DOT, not off the row: msgRow centres
+				    itself in the reading column with `mx-auto`, and a `-ml-2` on the
+				    row overrides that auto (Tailwind emits `margin-left` after
+				    `margin-inline`), leaving `margin-right: auto` to shove the whole
+				    row against the scroller's left gutter. Here it lands the dot's
+				    centre on the work fold's chevron, which hangs out by the same
+				    8px from a box that stays centred. */}
+				<span className="-ml-2 grid size-5 shrink-0 place-items-center">
+					<PulseDot size={7} />
+				</span>
+				{stoppingSince != null ? (
+					<BusyStopping since={stoppingSince} />
+				) : (
+					<BusyWorking since={since} />
+				)}
+			</div>
+		</motion.div>
 	);
 }

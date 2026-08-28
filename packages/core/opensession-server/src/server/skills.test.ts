@@ -85,8 +85,10 @@ describe("searchSkills", () => {
   test("lists the skills opensession ships for every repo", () => {
     // Every session gets these whatever it is working on, so the menu must
     // offer them with no worktree at all.
-    const shipped = searchSkills(undefined, "simplify").filter((s) => s.name === "simplify");
-    expect(shipped.map((s) => s.source)).toEqual(["user"]);
+    for (const name of ["simplify", "deslop", "control-ui", "poteto-mode"]) {
+      const shipped = searchSkills(undefined, name).filter((s) => s.name === name);
+      expect(shipped.map((s) => s.source)).toEqual(["user"]);
+    }
   });
 
   test("a checkout's own skill shadows the shipped one of the same name", () => {
@@ -100,10 +102,12 @@ describe("searchSkills", () => {
 
   test("builtin commands only join the menu for an existing session", () => {
     const ws = workspace();
-    const named = (includeBuiltins: boolean) =>
-      searchSkills(ws, "model", 24, includeBuiltins).filter((s) => s.name === "model");
+    const named = (name: string, includeBuiltins: boolean) =>
+      searchSkills(ws, name, 24, includeBuiltins).filter((s) => s.name === name);
 
-    expect(named(false)).toEqual([]);
-    expect(named(true).map((s) => s.source)).toEqual(["builtin"]);
+    expect(named("model", false)).toEqual([]);
+    expect(named("model", true).map((s) => s.source)).toEqual(["builtin"]);
+    expect(named("poteto-mode", false).map((s) => s.source)).toEqual(["user"]);
+    expect(named("poteto-mode", true).map((s) => s.source)).toEqual(["builtin"]);
   });
 });

@@ -81,6 +81,7 @@ import {
 	activeSubagentsForWorkspace,
 	isAskWorkspace,
 	isScratchWorkspace,
+	sessionSharesSelectedSidebarGroup,
 	spawnedSessionBelongsInSidebar,
 	workspaceMainSession,
 	workspaceRowOwnsSelection,
@@ -121,7 +122,10 @@ import {
 import { Reorder } from "motion/react";
 import { getRecents, onRecentsChanged } from "../lib/recents";
 import { getReads, isUnread, markRead, markUnread, onReadsChanged } from "../lib/reads";
-import { pickUnreadWorkspaceSession } from "../lib/sidebar-unread-session";
+import {
+	pickUnreadWorkspaceSession,
+	shouldEmphasizeUnread,
+} from "../lib/sidebar-unread-session";
 import { mentionFor, onMentionsChanged } from "../lib/mentions";
 import { TeamLensMenu, useTeamPresence } from "./TeamPresence";
 import { sessionPath, absoluteLink, copyToClipboard } from "../lib/share-link";
@@ -313,6 +317,7 @@ import {
 	WsStatusMark,
 } from "./sidebar/HoverCards";
 import { AutoCreatedMark } from "./sidebar/AutoCreatedMark";
+import { KeepInSidebarMark } from "./sidebar/KeepInSidebarMark";
 import { OriginMark } from "./sidebar/OriginMark";
 import { AutomationReportRow } from "./sidebar/AutomationReportRow";
 import { ActiveSubagentRows } from "./sidebar/ActiveSubagentRows";
@@ -429,12 +434,17 @@ function WorkspaceContextMenu({
 				),
 		});
 	const rowClaimed = sessions.some((session) => isClaimed(session));
-	const rowMine = sessions.some((session) => ownedBy(session, currentUser));
-	if (sessions.length > 0 && (!rowMine || rowClaimed))
+	const rowNaturallyInSidebar = sessions.some(
+		(session) =>
+			!session.spawnedBy &&
+			!session.automation &&
+			ownedBy(session, currentUser),
+	);
+	if (sessions.length > 0 && (!rowNaturallyInSidebar || rowClaimed))
 		entries.push({
 			kind: "item",
 			icon: <IconInbox size={20} />,
-			label: rowClaimed ? "Remove from my workspaces" : "Add to my workspaces",
+			label: rowClaimed ? "Stop keeping in sidebar" : "Keep in sidebar",
 			onClick: () => onSetStatus(sessions, rowClaimed ? null : "mine"),
 		});
 	entries.push({
@@ -1379,10 +1389,23 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 	// selected parent row.
 	const activeWorkspaceSubagents = (activeSubagentsForWorkspace(sessions, selectedWorkspaceId));
 	const activeWorkspaceSubagentIds = (new Set(activeWorkspaceSubagents.map(({ session }) => session.id)));
+	const selectedSession =
+		sessions.find(
+			(session) =>
+				session.id === selectedId || session.aliasIds?.includes(selectedId || ""),
+		) || null;
+	const isInSelectedGroup = (session: UnifiedSession) =>
+		sessionSharesSelectedSidebarGroup(
+			session,
+			selectedSession,
+			selectedWorkspaceId,
+		);
 
 	// Every non-archived session, narrowed by the repo/person filters and search.
 	// Rows are built per-workspace below; a session matching the filter surfaces its
-	// whole workspace row.
+	// whole workspace row. The selected row survives every lens: the server sends
+	// that explicit exception, and dropping it here makes "Keep in sidebar" look
+	// ineffective while the session remains open.
 	const filtered = (() => {
 		let visible = sessions.filter((s) => !s.archived);
 		if (filter.repo !== "all") {
@@ -1393,11 +1416,12 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 			const wsRepo = new Map(workspaces.map((p) => [p.id, p.repo]));
 			visible = visible.filter(
 				(s) =>
+					isInSelectedGroup(s) ||
 					// Narrowing to a repo must not surface sessions that have none:
 					// sessionRepo's fallback would hand them the default repo.
-					!s.repoLess &&
-					(sessionRepo(s) === filter.repo ||
-						(!!s.workspaceId && wsRepo.get(s.workspaceId) === filter.repo)),
+					(!s.repoLess &&
+						(sessionRepo(s) === filter.repo ||
+							(!!s.workspaceId && wsRepo.get(s.workspaceId) === filter.repo))),
 			);
 		}
 		// Only a specific teammate narrows the sessions themselves. "me" and
@@ -1409,19 +1433,22 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 			filter.person !== "everyone" &&
 			filter.person !== "unassigned"
 		)
-			visible = visible.filter((s) =>
-				// An automation run has no teammate to compare: it belongs to
-				// whoever the automation reports to, which the Automations band
-				// answers for itself below. Excluding them here instead is what
-				// used to empty that band the moment you looked at a colleague.
-				s.automation
-					? true
-					: !!s.startedBy && ownerKeyOf(s, canonical) === filter.person,
+			visible = visible.filter(
+				(s) =>
+					isInSelectedGroup(s) ||
+					// An automation run has no teammate to compare: it belongs to
+					// whoever the automation reports to, which the Automations band
+					// answers for itself below. Excluding them here instead is what
+					// used to empty that band the moment you looked at a colleague.
+					(s.automation
+						? true
+						: !!s.startedBy && ownerKeyOf(s, canonical) === filter.person),
 			);
 		if (!search) return visible;
 		const q = search.toLowerCase();
 		return visible.filter(
 			(s) =>
+				isInSelectedGroup(s) ||
 				s.title.toLowerCase().includes(q) ||
 				(s.branch || "").toLowerCase().includes(q) ||
 				(s.startedBy || "").toLowerCase().includes(q) ||
@@ -1443,7 +1470,8 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 	// the complete live list at the bottom. The server's sidebar projection adds
 	// every live or just-finished run to `sessions`; the directory boundary here
 	// turns only real teammates into headings and files unowned automations under
-	// the Agent person.
+	// the Agent person. A session kept in a personal lane leaves Team, so every
+	// row here can always offer “Add to your sidebar” without rendering twice.
 	const activePersonGroups = sidebarPersonSessions(
 		sessions,
 		roster,
@@ -1454,6 +1482,9 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 				name,
 				overview.owner,
 			]),
+		),
+		new Set(
+			sessions.filter((session) => isClaimed(session)).map((session) => session.id),
 		),
 	);
 
@@ -1470,8 +1501,6 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 
 	// ── Workspace rows ──────────────────────────────────────────────────────
 	// The row shape itself is WsRow in lib/sidebar-types.
-	const selectedSession = sessions.find((session) => session.id === selectedId) || null;
-
 	// Most-urgent-first for the row dot: a blocked question beats everything,
 	// a live run beats a ready-to-merge PR, merged/pending are quiet states.
 	const STATUS_PRIORITY: MineStatus[] = [
@@ -1501,7 +1530,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 			)
 				continue;
 			// Automations render in their own band — EXCEPT runs YOU claimed
-			// (right-click → Add to my workspaces / Set status): those graduate
+			// (right-click → Keep in sidebar / Set status): those graduate
 			// into the workspace rows and take part in your lanes like your own
 			// work, sitting in In progress while they run and Backlog once idle.
 			// Lanes are per-user, so a claimed run moves only for the user who
@@ -1714,7 +1743,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 	// rule "it came back because it needed me, and stays back until I hide it
 	// again" instead of flickering as questions get asked and answered.
 	//
-	// Otherwise the viewer offers "Add to sidebar" when you open a hidden
+	// Otherwise the viewer offers "Keep in sidebar" when you open a hidden
 	// session through a link or ⌘K. There is no Hidden band: hiding is removal
 	// from your sidebar, not a folder to browse.
 	const { hiddenKeys: hiddenRowKeys, resurfaced: resurfacedRows } = (partitionHidden(allWsRows, hides));
@@ -1961,6 +1990,10 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 			personFilter: filter.person,
 			snoozed: activeSnoozeKeys.has(r.key),
 			inStatusScope: inScope(r, showAutoCreated),
+			// Only this user's lane is a Keep act. A legacy global manualStatus
+			// still chooses a status within the ordinary list, but must not pull a
+			// review out of every teammate's review section.
+			claimed: r.sessions.some((session) => !!getLane(session.id)),
 		}));
 		// How many rows the switch at the foot of the list moves: held back
 		// right now, or on the page and only there because the machine's work is
@@ -2739,9 +2772,9 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 		}
 	}
 
-	// Repo, review, project and support groups are open by default (grouping is
-	// itself the point), so we track their *collapsed* state under a
-	// "collapsed:" key; every other group is closed by default and tracked
+	// Repo, review, project, support and person groups are open by default
+	// (grouping is itself the point), so we track their *collapsed* state under
+	// a "collapsed:" key; every other group is closed by default and tracked
 	// directly. This list must match isOpen's — a key toggled here but read
 	// bare there (or vice versa) makes its chevron a no-op.
 	const collapseKey = (key: string) =>
@@ -2750,7 +2783,8 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 		key.startsWith("project:") ||
 		key.startsWith("support:") ||
 		key.startsWith("lifecycle:") ||
-		key.startsWith("inbox:")
+		key.startsWith("inbox:") ||
+		key.startsWith("person:")
 			? `collapsed:${key}`
 			: key;
 
@@ -2774,7 +2808,8 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 			key.startsWith("support:") ||
 			key.startsWith("lifecycle:") ||
 			key.startsWith("project:") ||
-			key.startsWith("inbox:")
+			key.startsWith("inbox:") ||
+			key.startsWith("person:")
 		)
 			return !expanded.has(`collapsed:${key}`);
 		return expanded.has(key);
@@ -3109,6 +3144,15 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 		const rowPin = workspacePinState(row);
 		const pinned = rowPin.pinned;
 		const toggleRowPin = rowPin.toggle;
+		const claimed = row.sessions.some((session) => isClaimed(session));
+		const naturallyInSidebar = row.sessions.some(
+			(session) =>
+				!session.spawnedBy &&
+				!session.automation &&
+				ownedBy(session, currentUser),
+		);
+		const canKeepInSidebar =
+			row.sessions.length > 0 && !claimed && !naturallyInSidebar;
 		// Active snooze → the row wears a wake countdown instead of the idle time.
 		const snoozeIso = activeSnoozeKeys.has(row.key)
 			? (snoozes[row.key] ?? null)
@@ -3207,10 +3251,14 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 						// row carries the slide. The drag writes --swipe-x straight onto
 						// the node, so the transform reads it rather than a React style.
 						SIDEBAR_WS_ROW,
-						// The reserve follows the chips that actually appear: an
-						// unpinned row reveals snooze + archive, not the pin, so it
-						// gives up one chip less of its right end (26px + the 4px gap).
-						!pinned && "hover:pr-[68px]",
+						// The reserve follows the chips that actually appear. Keep sits
+						// rightmost after Archive, adding one chip; an unpinned row without
+						// it still reveals only Snooze + Archive.
+						pinned && canKeepInSidebar
+							? "hover:pr-[128px]"
+							: !pinned && !canKeepInSidebar
+								? "hover:pr-[68px]"
+								: null,
 						"z-1 mt-0 touch-pan-y transform-[translateX(var(--swipe-x,0))]",
 						SIDEBAR_HOVER_LAYER,
 						// "Needs you" paints no fill of its own: it is a question
@@ -3232,6 +3280,9 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 					data-waiting={waiting || undefined}
 					data-running={row.running || undefined}
 					data-unread={row.unread || undefined}
+					data-finished-unread={
+						shouldEmphasizeUnread(row.unread, row.running) || undefined
+					}
 					style={
 						swipeOffset
 							? ({ "--swipe-x": `${swipeOffset}px` } as React.CSSProperties)
@@ -3368,6 +3419,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 						// Same class as a session row's title, so workspace rows pick up
 						// the shared type scale (incl. the phone bump) and the
 						// selected/waiting/unread emphasis from the row's data attributes.
+						// Unread only gains weight after the aggregate run has finished.
 						className={SIDEBAR_ROW_TITLE}
 						onDoubleClick={(e) => {
 							e.stopPropagation();
@@ -3383,8 +3435,8 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 						{stripPrTitlePrefix(row.name)}
 					</span>
 				)}
-				{/* Keep machine origin beside the row whether it came from the
-				    automation identity, an automation run, or a report's Fix action. */}
+				{/* Machine origin stays passive beside the title. Keep belongs with
+				    the row's other actions at the right edge. */}
 				{!editing && rowWasAgentStarted(row) && <AutoCreatedMark />}
 				{/* Where the work came from, when the whole row came from one place:
 				    a Slack thread, a Linear issue. Same slot and ink as the mark
@@ -3488,7 +3540,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 					sessionIdsKey={row.sessions.map((session) => session.id).join("\0")}
 					pushed={showRunDuration || Boolean(snoozeIso)}
 				/>
-				{/* Hover actions stay in one predictable order: Pin, Snooze, Archive. */}
+				{/* Hover actions stay in one predictable order: Pin, Snooze, Archive, Keep. */}
 				<span
 					className={cn(
 						SIDEBAR_WS_ACTIONS,
@@ -3617,6 +3669,12 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar({
 							</span>
 						</Tooltip>
 					) : null}
+					{canKeepInSidebar && (
+						<KeepInSidebarMark
+							className={SIDEBAR_WS_ACTION}
+							onKeep={() => onSetStatus(row.sessions, "mine")}
+						/>
+					)}
 				</span>
 				</button>
 			</div>
@@ -6072,8 +6130,8 @@ fetchFeedItems("plain")
 				)}
 
 			{/* ── People: teammates with a running or just-finished session. Each
-			    person starts with only that active window visible; their chevron
-			    expands the same heading to every matching session they own. ── */}
+			    member is an independent, open-by-default disclosure so a busy
+			    teammate can be folded without hiding everybody else. ── */}
 			{activePersonGroups.length > 0 && (
 				<div className={cn(SIDEBAR_INDEPENDENT_SECTION, "mt-2 pb-7")}>
 					<div
@@ -6114,95 +6172,83 @@ fetchFeedItems("plain")
 						<div className={SIDEBAR_INDEPENDENT_SCROLL}>
 							{activePersonGroups.map((group) => {
 								const groupKey = `person:${group.key}`;
-								const hasMore =
-									group.allSessions.length > group.activeSessions.length;
-								const showAll = hasMore && isOpen(groupKey);
-								const visibleSessions = showAll
-									? group.allSessions
-									: group.activeSessions;
-								const personHeaderBody = (
-									<>
-										<span className={SIDEBAR_RAIL}>
-											<UserAvatar name={group.label} size={20} />
-										</span>
-										<span className={SIDEBAR_GROUP_NAME}>{group.label}</span>
-										<span className={cn(SIDEBAR_GROUP_COUNT, "shrink-0")}>
-											{group.allSessions.length}
-										</span>
-										{hasMore && (
+								const personOpen = isOpen(groupKey);
+								return (
+									<React.Fragment key={group.key}>
+										<button
+											className={cn(
+												SIDEBAR_GROUP_HEADER,
+												SIDEBAR_GROUP_HEADER_INSET,
+												SIDEBAR_HEADER_ROW,
+											)}
+											onClick={(event) => {
+												const header = event.currentTarget;
+												toggleGroup(groupKey);
+												requestAnimationFrame(() =>
+													header.scrollIntoView({ block: "nearest", inline: "nearest" }),
+												);
+											}}
+											aria-expanded={personOpen}
+											title={`${personOpen ? "Collapse" : "Expand"} ${group.label}'s sessions`}
+										>
+											<span className={SIDEBAR_RAIL}>
+												<UserAvatar name={group.label} size={20} />
+											</span>
+											<span className={SIDEBAR_GROUP_NAME}>{group.label}</span>
+											<span className={cn(SIDEBAR_GROUP_COUNT, "shrink-0")}>
+												{group.activeSessions.length}
+											</span>
 											<IconChevronDown
 												className={cn(
 													SIDEBAR_GROUP_CHEVRON,
-													!showAll && SIDEBAR_GROUP_CHEVRON_COLLAPSED,
+													!personOpen && SIDEBAR_GROUP_CHEVRON_COLLAPSED,
 												)}
 												size={22}
 												style={{
-													transform: showAll ? "none" : "rotate(-90deg)",
+													transform: personOpen ? "none" : "rotate(-90deg)",
 												}}
 											/>
+										</button>
+										{personOpen && (
+											<div className={SIDEBAR_AUTOMATION_RUNS}>
+												{group.activeSessions.map((session) => {
+													const pin = sessionPinState(session);
+													return (
+														<SidebarItem
+															key={session.id}
+															session={session}
+															selected={session.id === selectedId}
+															unread={
+																session.id !== selectedId &&
+																isUnread(session.id, session.lastActivity, reads)
+															}
+															mention={
+																session.id !== selectedId
+																	? mentionFor(session.id)?.by
+																	: undefined
+															}
+															mine={false}
+															showOwner={false}
+															alwaysShowAddToSidebar
+															onClick={() => onSelect(session)}
+															onArchive={(current) =>
+																archiveWithNext(session, current)
+															}
+															pinned={pin.pinned}
+															onTogglePin={pin.toggle}
+															shipsDirectlyToMain={shipsDirectlyToMain(
+																session.repo,
+																session.branch,
+															)}
+															onRename={(title) => onRename(session, title)}
+															onSetStatus={(status) =>
+																onSetStatus([session], status)
+															}
+														/>
+													);
+												})}
+											</div>
 										)}
-									</>
-								);
-								const personHeaderClass = cn(
-									SIDEBAR_GROUP_HEADER,
-									SIDEBAR_GROUP_HEADER_INSET,
-									SIDEBAR_HEADER_ROW,
-								);
-								return (
-									<React.Fragment key={group.key}>
-										{hasMore ? (
-											<button
-												className={personHeaderClass}
-												onClick={() => toggleGroup(groupKey)}
-												aria-expanded={showAll}
-												title={
-													showAll
-														? `Show only ${group.label}'s active sessions`
-														: `Show all ${group.label}'s sessions`
-												}
-											>
-												{personHeaderBody}
-											</button>
-										) : (
-											<div className={personHeaderClass}>{personHeaderBody}</div>
-										)}
-										<div className={SIDEBAR_AUTOMATION_RUNS}>
-											{visibleSessions.map((session) => {
-												const pin = sessionPinState(session);
-												return (
-													<SidebarItem
-														key={session.id}
-														session={session}
-														selected={session.id === selectedId}
-														unread={
-															session.id !== selectedId &&
-															isUnread(session.id, session.lastActivity, reads)
-														}
-														mention={
-															session.id !== selectedId
-																? mentionFor(session.id)?.by
-																: undefined
-														}
-														mine={false}
-														showOwner={false}
-														onClick={() => onSelect(session)}
-														onArchive={(current) =>
-															archiveWithNext(session, current)
-														}
-														pinned={pin.pinned}
-														onTogglePin={pin.toggle}
-														shipsDirectlyToMain={shipsDirectlyToMain(
-															session.repo,
-															session.branch,
-														)}
-														onRename={(title) => onRename(session, title)}
-														onSetStatus={(status) =>
-															onSetStatus([session], status)
-														}
-													/>
-												);
-											})}
-										</div>
 									</React.Fragment>
 								);
 							})}

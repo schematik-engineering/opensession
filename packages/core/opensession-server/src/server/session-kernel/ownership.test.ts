@@ -79,6 +79,26 @@ describe("single session ownership", () => {
 		]) expect(routing).not.toContain(legacyGlobal);
 	});
 
+	test("runtime work claims on session lanes without a fleet barrier", () => {
+		const service = read("session-kernel/actor-service.ts");
+		const worker = read("session-kernel/actor-worker.ts");
+		const host = read("session-kernel/store-host.ts");
+		expect(service).toContain('request.t === "runtime_work"');
+		expect(service).toContain("runtimeWorkRequest(request");
+		expect(service).toContain("enqueueSession(sessionId");
+		expect(worker).toContain('request.t === "runtime_session_work"');
+		expect(host).toContain("runtimeCatalogWork(");
+		expect(host).toContain("runtimeSessionWork(");
+		expect(host).not.toContain("runtimeWork(");
+	});
+
+	test("workflow agents cannot execute inside the gateway control plane", () => {
+		const workflow = read("workflow-execute.ts");
+		expect(workflow).toContain("runAuxiliaryAgentHosted");
+		expect(workflow).toContain('transcriptTarget: "none"');
+		expect(workflow).not.toContain("runAgent(");
+	});
+
 	test("run, queue, ask and session-file state delegate to SessionKernel", () => {
 		expect(read("run-state.ts")).toContain("sessionKernel(sessionId)");
 		expect(read("queue-state.ts")).toContain("new DeliveryOwnedMap");
@@ -377,10 +397,10 @@ describe("single session ownership", () => {
 		expect(create).toContain("const identity = actorPlan");
 		expect(create.indexOf("openingPromptEntryId = beginPromptDispatch"))
 			.toBeLessThan(create.indexOf("await persist()"));
-		// The direct host run must use the create dispatch's stable transcript id.
-		// Otherwise every cold recovery mints a new user row for the same prompt.
+		// The detached host run must use the create dispatch's stable transcript
+		// id. Otherwise every cold recovery mints another row for one prompt.
 		expect(create).toMatch(
-			/runAgent\(\{[\s\S]*?prompt: openingPromptForRun,[\s\S]*?promptEntryId: openingPromptEntryId,/,
+			/runAgentHosted\(\{[\s\S]*?prompt: openingPromptForRun,[\s\S]*?promptEntryId: openingPromptEntryId,/,
 		);
 		expect(create).not.toContain("if (requeuePromptDispatch(bksId))");
 		const routes = read("routes/sessions.ts");
@@ -395,6 +415,14 @@ describe("single session ownership", () => {
 			expect(source.indexOf("sessionKernel(bksId).creationState()"))
 				.toBeLessThan(source.indexOf("actorCreationSetupPlan(bksId, createIdentity)"));
 		}
+		// A stale create replay for any completed engine must return before setup
+		// planning mutates the actor. Pi owns a distinct session-id slot.
+		expect(create.indexOf("recoveringSession?.piSessionId")).toBeLessThan(
+			create.indexOf("actorCreationSetupPlan(bksId, createIdentity)"),
+		);
+		expect(wiring.indexOf("completedCreate?.piSessionId")).toBeLessThan(
+			wiring.indexOf("actorCreationSetupPlan(bksId, createIdentity)"),
+		);
 		expect(create).toContain("failCreate(error instanceof Error");
 		expect(create).toContain("if (projected) return projected");
 		expect(create.indexOf("if (projected) return projected")).toBeLessThan(

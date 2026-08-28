@@ -8,7 +8,7 @@ Six files, each optional:
 | File          | When it runs                              | Job                                       |
 | ------------- | ----------------------------------------- | ----------------------------------------- |
 | `setup`       | once per workspace preparation, and as a first-host-preview safety net | install deps, fetch prebuilt assets |
-| `resume`      | after an actual durable Local MicroVM wake | idempotent post-wake repair               |
+| `resume`      | reserved for providers that implement durable wake | idempotent post-wake repair        |
 | `start.sh`    | when a preview starts                     | bring the dev server up in the foreground |
 | `preview.json`| warm preview-pool preparation             | declare which routes to pre-compile       |
 | `portals.json`| session Portals panel                     | declare supervised service starters       |
@@ -42,7 +42,7 @@ Runs during workspace preparation and as a first-host-preview safety net,
   and does not block the session. The retained log is available in the
   sandbox panel. See
   [deploy/sandbox/README.md](../deploy/sandbox/README.md).
-- **Remote-clone Sandbox workspace setup, including Local MicroVM.** A present
+- **Remote-clone Sandbox workspace setup.** A present
   hook must be executable. Failure blocks workspace preparation and leaves no
   success stamp, so a later preparation attempt can retry it. During remote
   setup, a PATH shim makes `bun install` use `--frozen-lockfile`; commit
@@ -61,8 +61,8 @@ artifact fetch, codegen. Slow extras belong behind an existence check.
 
 ## resume — idempotent post-wake repair
 
-Currently `.agents/resume` runs only after an actual durable Local MicroVM
-wake. Other Sandbox providers and host worktrees do not run it. Use it to
+Currently `.agents/resume` is reserved but not invoked by the selectable
+Sandbox providers or host worktrees. When a provider adopts it, use it to
 repair wall-clock- or environment-sensitive state such as stale pid files,
 expired cached tokens, and clock-skewed build caches.
 
@@ -232,8 +232,6 @@ configuration: create the service,
 call `start_portal`, verify it with `list_portals`, then tell the user which
 Portal is ready.
 
-After a durable Local MicroVM wake, `.agents/resume` repairs the workspace
-before the wake completes.
 
 ## Environment sources for sandboxes
 

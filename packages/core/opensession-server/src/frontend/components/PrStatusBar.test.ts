@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { GitStatusInfo } from "../lib/types";
+import type { GitStatusInfo, PrDetails } from "../lib/types";
 import { deriveHeadline } from "../lib/pr-headline";
 
 function gitStatus(overrides: Partial<GitStatusInfo> = {}): GitStatusInfo {
@@ -53,4 +53,37 @@ test("keeps Pull for an isolated worktree behind its own upstream", () => {
 		label: "Behind by 2 commits",
 		tone: "yellow",
 	});
+});
+
+test("offers Merge instead of Pull when a behind PR has no conflicts", () => {
+	const pr: PrDetails = {
+		number: 42,
+		title: "Behind but mergeable",
+		url: "https://github.com/tellahq/app/pull/42",
+		state: "OPEN",
+		isDraft: false,
+		baseRefName: "main",
+		headRefName: "feature",
+		additions: 1,
+		deletions: 0,
+		changedFiles: 1,
+		reviewDecision: "APPROVED",
+		author: "octocat",
+		body: "",
+		checks: [],
+		mergeable: "MERGEABLE",
+		mergeStateStatus: "BEHIND",
+	};
+
+	expect(deriveHeadline(pr, gitStatus({ behind: 2, behindBase: 3 }))).toEqual({
+		key: "ready",
+		label: "Ready to merge",
+		tone: "green",
+	});
+	expect(
+		deriveHeadline(
+			{ ...pr, mergeable: "CONFLICTING" },
+			gitStatus({ behind: 2, behindBase: 3 }),
+		),
+	).toEqual({ key: "conflicts", label: "Merge conflicts", tone: "red" });
 });

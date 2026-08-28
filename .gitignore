@@ -93,6 +93,12 @@ deploy/sandbox/microvm/.cache-busybox-source.tar.bz2
 !.agents/skills/pr-autofix/**
 !.agents/skills/pstack/
 !.agents/skills/pstack/**
+!.agents/skills/poteto-mode/
+!.agents/skills/poteto-mode/**
+!.agents/skills/deslop/
+!.agents/skills/deslop/**
+!.agents/skills/control-ui/
+!.agents/skills/control-ui/**
 !.agents/skills/audit-codebase/
 !.agents/skills/audit-codebase/**
 !.agents/skills/bro/

@@ -46,6 +46,39 @@ export function spawnedSessionBelongsInSidebar(
 	return !session.spawnedBy || needsAttention || claimed;
 }
 
+/**
+ * Whether a session belongs to the sidebar row that is currently open.
+ *
+ * The server deliberately returns the complete selected row even when a repo,
+ * person, or search lens would exclude it. The frontend must preserve that
+ * exception while applying its own filters or actions such as “Keep in
+ * sidebar” appear to do nothing until the lens is cleared.
+ */
+export function sessionSharesSelectedSidebarGroup(
+	session: Pick<UnifiedSession, "id" | "aliasIds" | "workspaceId" | "worktreeDir">,
+	selected: Pick<UnifiedSession, "id" | "aliasIds" | "workspaceId" | "worktreeDir"> | null,
+	selectedWorkspaceId?: string | null,
+): boolean {
+	if (
+		selectedWorkspaceId &&
+		session.workspaceId === selectedWorkspaceId
+	)
+		return true;
+	if (!selected) return false;
+	if (
+		session.id === selected.id ||
+		session.aliasIds?.includes(selected.id) ||
+		selected.aliasIds?.includes(session.id)
+	)
+		return true;
+	if (selected.workspaceId)
+		return session.workspaceId === selected.workspaceId;
+	return (
+		!!selected.worktreeDir?.includes("/worktrees/") &&
+		session.worktreeDir === selected.worktreeDir
+	);
+}
+
 export interface ActiveWorkspaceSubagent {
 	session: UnifiedSession;
 	/** One for a direct child of workspace work, increasing for nested workers. */

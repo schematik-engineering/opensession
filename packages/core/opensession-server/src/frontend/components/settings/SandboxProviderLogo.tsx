@@ -5,12 +5,9 @@ import { cn } from "../../ui/cn";
 type SandboxProvider = SandboxConnectionInfo["provider"];
 
 // Provider-owned marks, bundled locally so Settings never makes a third-party
-// request: Daytona + Firecracker official favicons; Docker + Modal CC0 paths.
+// request: Daytona's official favicon; Docker + Modal CC0 paths.
 const DAYTONA_FAVICON =
 	"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAMAAABlApw1AAAAHlBMVEUKCgr////k5OSEhIQpKSnIyMhBQUFmZmakpKQZGRlC6tY/AAAACXBIWXMAAAsTAAALEwEAmpwYAAAEZ0lEQVR42u3d627bMAwFYFqMHfX9X3jp0rRObEmkTIokIP0dhp2vaXwRjzBYgi+YgAmYgAmYgAmYgAmYgAmYgECAtKXQgHSDWwoMeOQHSQFY5JcUgEl+QQHY5JcTgFF+MQFY5ZcSgFl+IQHY5ZcRgGF+EQFY5pcQgGl+AQHY5gfYIgAq+UN8Apr5RwBU8w8A6ObXByjnVwfUrj8RnoXU8ysD9PPrAlb9/KqA9Us/vyZgSH5FwJj8HYB0XIb5OwDbMdFql18LMCy/EmBcfh3AwPwqgJH5NQBD8ysAxuaXBwzOLw4YnV8aMDy/MGB8flmAQX5RgEV+SYBJfkFALX++XVvrAED155/h2hoAqOS/p8U/oJb/8XfcAxr53QOwkT8w4Jk/7q/QT/6wX+JX/iXoZfQ3fwTAieAvfwjAQbDLHwPwIdjnDwJ4E7zljwLYCd7zhwH8Cj7yxwH8CD7zWwIS8rdVDvkNAWkD5G5sHfPbAdJ3WuRtLSbaVOe11m1N7dUJSM+w2DGhYUySr73xQzv/h0AU8H8SfkkAhPzvAkmAQJMaaDUBVAFINKmBWHNABYBIkxqoNQ0UB8g0qYFcM0FhgFCTGug1GRQFSDWpgVHzQUGAWJMaODUlFAPINamBVbNCIYBgk/rsE0CoCe7bYa2GTerT70BdcH1tgk3M86uQskCyS1q4D8QRlO7EYQTFZ6EogvLTaBBB5X0ghqD2RhZCUH0njiCo70oEEDT2hfwLWjtz7gXNvVHvgvbmrnMBYXc6uxZQttddC0jzAc8C2oDDsYA4oakI7rYC6ojJrYA8I5MU3I+rW0Af8lUEmfsee1zdnwFjSpnFvsdngF4BZ8yapa5Dp4BOAWtOnIWuo+eAPgFv0J1l7gMFQJeAOanPIvexEqBHwK0aZIn7cBHQIWB3JbLAc0QZwBfwyx75+nNQBVAVCJ1mzZef42qAiiBLHcfNV59Dq4CiIMudJ84Xn6PrgIIgSx6IztfeAxqAU0Hu2Vosr+1W/rOzfyqxAPuaRut5EXg/KMq6nx2PvrMAB0FeTAGfPbQ24F3wlRdTwKEJSADsBV/rYgo4djEpgD9BNf8AwK4NmziAl6CeXx+w7yO/umU0wFPQyK8OeG+E/wiIgG9BK7824LOT/xRQAQ/BupgCjqci/gvIgIu705cBZ+dSvgVRAOcngx6CIIDS2awtxQCUjyduIQC145URANXjoQEA9b1s/4DGXrx7QGuWMAqAfSs3ZyGjAJ2rPcvxDSDMolwDKLM0zwDSLNAxgDbL9AsgzmLdAqizZK8A8izcKYA+y/cJYHQRXAI4XQqPAFYXxCGA12XxB2B2cdwBuF0ibwB2F8oZgN8I9AXoaDS6AqwdjUxfnwDym2jOvgPIbqJ5uwoht4nm7j6AzCaavzsx8ppo63FZPwuhwpnXsU+jaJRf7n0AbfILvpGhSX7Jd2K0yC+6K4EG+WX3hXB8fuGdOcT5/xNPwARMwARMwARMwARMwARMwARQAf8Agnd/k0M+tPcAAAAASUVORK5CYII=";
-
-const FIRECRACKER_FAVICON =
-	"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABQ0lEQVRYhe2WwQrCMAyGm+lreRBvIiIiIuIzeBAR8QFERDz4KB4E8dn0l81tlq7Lss46BANhrjPNl39tOvXzhpZC6K51NCsLENQYjrZCNEMQ/7Y998ofGK4n77zgoitj1V4Bhy8szZsCdFMUjkVXxkopgO5LTrrEkzb4/9OVT57UIEve0xZcL36vjAJSKyRMAfqyvU7n95xJjD5mmpzbrDbPLTEY5MPL10BJiTGUKeZPAWMcIzuQFQBjhdD1eylAGsfBcQCYaMnKVp9ATOzA0XihAnrAlKnG1Q3LLkKzp8/cj1qJZQEKupt/AHFr8gVQuwK1A1T8xPoDlDXrmsfcz96nUzaf/TT8ogq5ux6Lz6pAR3sutu1gGXwEgg6P3DyFfQ8rqgRBe7A5RI0XazcI2vHJxQApyKYh+zDd3r98oriaUuoJuz5Sp/JvboMAAAAASUVORK5CYII=";
 
 const tileStyle = {
 	boxShadow:
@@ -56,14 +53,6 @@ export function SandboxProviderLogo({ provider }: { provider: SandboxProvider })
 		return (
 			<SandboxProviderTile className="bg-white">
 				<img className="size-10" src={DAYTONA_FAVICON} alt="" aria-hidden="true" />
-			</SandboxProviderTile>
-		);
-	}
-
-	if (provider === "microvm") {
-		return (
-			<SandboxProviderTile className="bg-[#111318]">
-				<img className="size-6" src={FIRECRACKER_FAVICON} alt="" aria-hidden="true" />
 			</SandboxProviderTile>
 		);
 	}

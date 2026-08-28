@@ -238,6 +238,9 @@ export type ButtonProps = React.ComponentPropsWithoutRef<"button"> & {
 	/** Leading icon — pass a 20px glyph from components/icons.tsx. Renders an
 	 * icon-only square button when there are no children. */
 	icon?: React.ReactNode;
+	/** Keep a labelled button's icon at full strength when its color carries
+	 * meaning. Neutral supporting icons stay muted by default. */
+	iconTone?: "muted" | "full";
 	/** Trailing dropdown chevron, for a button that opens a menu. Inherits the
 	 * button's own color at low strength: a fixed grey caret reads as a dead
 	 * spot next to a red or green label. */
@@ -279,7 +282,18 @@ export type ButtonProps = React.ComponentPropsWithoutRef<"button"> & {
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 	function Button(
-		{ variant = "default", size = "md", icon, caret, trailing, render, className, children, ...rest },
+		{
+			variant = "default",
+			size = "md",
+			icon,
+			iconTone = "muted",
+			caret,
+			trailing,
+			render,
+			className,
+			children,
+			...rest
+		},
 		ref,
 	) {
 		const hasLabel = children != null && children !== false && children !== "";
@@ -305,7 +319,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 					<span
 						className={cn(
 							"inline-flex shrink-0 items-center",
-							!iconOnly && iconDim[variant],
+							!iconOnly && iconTone === "muted" && iconDim[variant],
 						)}
 					>
 						{icon}

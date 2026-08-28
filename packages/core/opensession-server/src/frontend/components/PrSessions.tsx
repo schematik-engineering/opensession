@@ -152,8 +152,8 @@ export function PrSessionsList({
 	return (
 		<div className="flex flex-col">
 			{sessions.length === 0 && (
-				<div className="px-2 py-1.5 -mx-2 text-xs text-faint">
-					No sessions are linked to this PR yet.
+				<div className="-mx-2 px-2 py-1.5 text-supporting text-faint">
+					No sessions yet.
 				</div>
 			)}
 			{sessions.map((s) => (
@@ -167,7 +167,7 @@ export function PrSessionsList({
 						e.preventDefault();
 						onOpenSession?.(s.id);
 					}}
-					className="-mx-2 flex items-center gap-2 rounded-md px-2 py-1.5 text-item-title text-fg no-underline hover:bg-surface"
+					className="-mx-2 flex min-h-10 items-center gap-2 rounded-control px-2 py-1.5 text-item-title text-fg no-underline hover:bg-hover phone:min-h-11"
 				>
 					<span
 						className={`w-1.5 h-1.5 rounded-full shrink-0 ${
@@ -193,15 +193,15 @@ export function PrSessionsList({
 			))}
 			{canCompose && (
 				<form
-					className="mt-2 flex items-center gap-2"
+					className="mt-3 flex items-center gap-2 phone:flex-col phone:items-stretch"
 					onSubmit={(e) => {
 						e.preventDefault();
 						handleStart();
 					}}
 				>
 					<Input
-						className="min-w-0 flex-1"
-						placeholder="Start a new session on this PR…"
+						className="min-w-0 flex-1 phone:min-h-11"
+						placeholder="What should this session do?"
 						value={prompt}
 						onChange={(e) => setPrompt(e.target.value)}
 						disabled={starting}
@@ -209,7 +209,7 @@ export function PrSessionsList({
 					<Button
 						type="submit"
 						variant="primary"
-						className="shrink-0 text-xs"
+						className="shrink-0 text-xs phone:min-h-11"
 						disabled={starting || !prompt.trim()}
 					>
 						{starting ? "Starting…" : "Start"}

@@ -58,11 +58,7 @@ import { createSessionsMcpServer } from "../agents/slack/sessions-tools";
 import { createSelfImproveMcpServer } from "../agents/slack/self-improve-tools";
 import { AUTOMATION_DENIED_TOOLS } from "./automation-denied-tools";
 import { audit } from "./audit";
-import { getSandboxProvider, type Sandbox } from "./sandbox";
-import {
-  sandboxAutomationConfig,
-  sandboxProviderConfigured,
-} from "./sandbox/config";
+import type { Sandbox } from "./sandbox";
 import type { RunHostSpec } from "../runner-host/protocol";
 import { configuredIntegration, personaName } from "./config";
 import { shouldPersistModelSwitch, type StreamEvent } from "./run-events";
@@ -407,63 +403,13 @@ function sanitizeAccountId(v?: unknown): string | { error: string } | undefined 
 }
 
 function validateSandboxAutomation(
-  automation: Pick<
-    Automation,
-    | "sandbox"
-    | "model"
-    | "accountId"
-    | "accountStrict"
-    | "fallbackModel"
-    | "mcpServers"
-    | "claudeCliEnv"
-    | "codexCliEnv"
-  >,
+  automation: Pick<Automation, "sandbox">,
 ): { error: string } | null {
   if (!automation.sandbox) return null;
-  if (!sandboxProviderConfigured("microvm")) {
-    return {
-      error:
-        "sandbox automations require the credential-free Firecracker MicroVM provider",
-    };
-  }
-  if (!automation.accountId) {
-    return { error: "sandbox automations require a pinned model account" };
-  }
-  const runModel = automationModel(automation.model) || "";
-  if (
-    /^(?:claude-|pi\/anthropic\/|pi\/anthropic\/)/.test(runModel) &&
-    !getAccountById(automation.accountId)
-  ) {
-    return { error: "the pinned account does not belong to the selected Claude model" };
-  }
-  if (
-    /^(?:pi\/openai\/|pi\/openai\/)/.test(runModel) &&
-    !getCodexAccountById(automation.accountId)
-  ) {
-    return { error: "the pinned account does not belong to the selected OpenAI model" };
-  }
-  if (automation.accountStrict === false) {
-    return { error: "sandbox automation account pins must be strict" };
-  }
-  if (automation.fallbackModel && automation.fallbackModel !== "none") {
-    return {
-      error:
-        "sandbox automations cannot widen credentials through a fallback model; set fallbackModel to none",
-    };
-  }
-  if (!Array.isArray(automation.mcpServers)) {
-    return {
-      error:
-        "sandbox automations require an explicit mcpServers allowlist (use [] for none)",
-    };
-  }
-  if (automation.claudeCliEnv || automation.codexCliEnv) {
-    return {
-      error:
-        "sandbox automations cannot provision nested Claude/Codex CLI credentials",
-    };
-  }
-  return null;
+  return {
+    error:
+      "sandbox automations are unavailable while managed Executor automation isolation is being qualified",
+  };
 }
 
 function sanitizeModel(model?: unknown, allowNone = false): string | { error: string } | undefined {
@@ -1081,23 +1027,6 @@ function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "automation";
 }
 
-function sandboxAutomationMcpEgress(mcpServers: string[]): string[] {
-  const destinations = new Set<string>();
-  const projected = filterMcpServers(mcpServers, undefined, []);
-  for (const config of Object.values(projected)) {
-    if (!config || typeof config !== "object") continue;
-    const entry = config as Record<string, unknown>;
-    if (typeof entry.url === "string") destinations.add(entry.url);
-    if (entry.env && typeof entry.env === "object") {
-      for (const value of Object.values(entry.env as Record<string, unknown>)) {
-        if (typeof value === "string" && /^(?:https?|wss?):\/\//i.test(value))
-          destinations.add(value);
-      }
-    }
-  }
-  return [...destinations];
-}
-
 const automationPreparations = new Set<string>();
 const activeAutomationIntentSessions = new Set<string>();
 
@@ -1331,20 +1260,9 @@ export async function runAutomation(
       if (!automation.sandbox) cwd = await ensureAskCheckout(repo.id);
     }
     if (automation.sandbox) {
-      const automationSandbox = sandboxAutomationConfig();
-      const provider = getSandboxProvider(automationSandbox.provider);
-      sandbox = await provider.ensure({
-        sessionId: bksId,
-        repo: repo.id,
-        branch,
-        mode: automation.mode,
-        trustProfile: "automation",
-        egressAllowlist: [
-          ...(automationSandbox.egressAllowlist || []),
-          ...sandboxAutomationMcpEgress(automation.mcpServers || []),
-        ],
-      });
-      cwd = sandbox.cwd;
+      throw new Error(
+        "sandbox automations are unavailable while managed Executor automation isolation is being qualified",
+      );
     }
 
     recordRunStart(automation.id, {

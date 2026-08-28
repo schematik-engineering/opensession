@@ -40,7 +40,7 @@ flowchart LR
 
   kernel["session kernel service :3849<br/>authoritative session decisions"]
   launch["run orchestration<br/>fixed-policy executor for<br/>Linux system-scope local runs"]
-  runner["Pi turn<br/>detached run host, Sandbox runner,<br/>or in-process fallback"]
+  runner["Pi turn<br/>detached run host or<br/>Sandbox runner"]
 
   clients --> http
   hooks -->|webhooks and OAuth| wh
@@ -177,7 +177,7 @@ that touches them.
 | [plain.md](plain.md) | Plain support tickets, the triage automation |
 | [integrations-misc.md](integrations-misc.md) | Stripe, WorkOS, Grafana/Sentry/Tinybird, web push, voice |
 | [engines.md](engines.md) | the Pi engine, account pools, provider keys, run isolation |
-| [../self-hosting-sandboxes.md](../self-hosting-sandboxes.md) | certified Docker, Daytona, Box, Modal, and local MicroVM sandboxes; implemented E2B and Lambda adapters remain unavailable pending certification |
+| [../self-hosting-sandboxes.md](../self-hosting-sandboxes.md) | certified Docker, Daytona, Box, and Modal sandboxes; implemented E2B and Lambda adapters remain unavailable pending certification |
 | [../runners.md](../runners.md) | attaching a Mac/Linux/Windows box as a Runner |
 | [../worktrees.md](../worktrees.md) | how sessions map to git worktrees, and where the disk goes |
 | [../../CLIENTS.md](../../CLIENTS.md) | web UI, PWA, Electron shell, Swift app, Chrome extension |

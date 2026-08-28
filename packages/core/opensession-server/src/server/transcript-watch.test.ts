@@ -58,6 +58,39 @@ function watch(
 }
 
 describe("race-free transcript watch", () => {
+  test("fresh snapshots skip resume-only cursor reads", async () => {
+    const state = setup();
+    const sid = `bks-fresh-${crypto.randomUUID()}`;
+    state.store.appendTranscriptEvents(sid, [entry("a", "before")]);
+    let lastChangeReads = 0;
+    let lastResetReads = 0;
+    const handle = await startTranscriptWatch({
+      sessionId: sid,
+      store: {
+        getLastChangeSeq(sessionId) {
+          lastChangeReads++;
+          return state.store.getLastChangeSeq(sessionId);
+        },
+        getLastResetChangeSeq(sessionId) {
+          lastResetReads++;
+          return state.store.getLastResetChangeSeq(sessionId);
+        },
+        readChangesSince: state.store.readChangesSince.bind(state.store),
+        readTail: state.store.readTail.bind(state.store),
+        readTailWindow: state.store.readTailWindow.bind(state.store),
+      },
+      socket: state.socket,
+      subscribe: subscribeTranscript,
+      isCurrent: () => true,
+    });
+    cleanups.push(() => handle.unsubscribe());
+
+    expect(state.frames[0]?.type).toBe("transcript_init");
+    // One baseline belongs to sendSnapshot. The reset cursor is resume-only.
+    expect(lastChangeReads).toBe(1);
+    expect(lastResetReads).toBe(0);
+  });
+
   test("reconciles an append committed synchronously while init is being sent", async () => {
     const state = setup();
     const sid = `bks-race-${crypto.randomUUID()}`;

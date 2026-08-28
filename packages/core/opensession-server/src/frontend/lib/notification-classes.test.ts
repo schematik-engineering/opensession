@@ -31,7 +31,7 @@ describe("notification lanes", () => {
 
 	test("centres ongoing status across the product in a lower lane", () => {
 		expect(ONGOING_TOAST_POSITION).toContain("fixed");
-		expect(ONGOING_TOAST_POSITION).toContain("bottom-[72px]");
+		expect(ONGOING_TOAST_POSITION).toContain("bottom-10");
 		expect(ONGOING_TOAST_POSITION).toContain("var(--pane-header-h)");
 		expect(ONGOING_TOAST_POSITION).toContain("var(--strip-clearance,0px)");
 		expect(ONGOING_TOAST_POSITION).toContain("phone:bottom-auto");

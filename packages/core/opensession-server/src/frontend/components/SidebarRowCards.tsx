@@ -4,7 +4,7 @@ import type { ReviewQueueItem } from "../lib/review-queue";
 import { relativeTime, type OpenPr } from "../lib/api";
 import { CAP_LABEL } from "../lib/cap-label";
 import { providerFromUrl } from "../lib/provider";
-import { refTone, type PrTone } from "../lib/pr-refs";
+import { osReviewText, refTone, type PrTone } from "../lib/pr-refs";
 import { prChipClass } from "../lib/pr-tone-classes";
 import { TONE_TEXT, prettyReview, type HoverTone } from "../lib/sidebar-hover";
 import { plainThreadUrl } from "./PlainThreadPanel";
@@ -227,13 +227,12 @@ export function CardFooter({
 // ── Pull request ────────────────────────────────────────────────────────────
 
 /**
- * The automated review's verdict, in the one word a person is looking for:
- * approved, or what it wants instead. The raw comment's score ("approve · 4/5")
- * put three tokens on the line to say one thing, so the confidence moved into
- * the tooltip beside the review's age; only a blocking count changes what to do
- * next, so that stays out loud. Tone follows the verdict; a review the branch
- * has moved past goes faint and says so rather than lending a stale verdict the
- * same weight.
+ * The latest automated review's score and verdict. The score stays visible in
+ * session and workspace hover cards so a PR's merge-safety reading does not
+ * depend on discovering a nested browser tooltip. A blocking count changes what
+ * to do next, so that stays out loud too. Tone follows the verdict; a review the
+ * branch has moved past goes faint and says so rather than lending a stale
+ * verdict the same weight.
  */
 export function osReviewLabel(review: OsReview): React.ReactNode {
 	const tone =
@@ -242,33 +241,16 @@ export function osReviewLabel(review: OsReview): React.ReactNode {
 			: review.verdict === "request_changes"
 				? "text-red"
 				: "text-dim";
-	const verdict =
-		review.verdict === "approve"
-			? "approved"
-			: review.verdict === "request_changes"
-				? "changes requested"
-				: review.verdict === "comment"
-					? "commented"
-					: "reviewed";
-	const parts = [
-		verdict,
-		review.blocking > 0 ? `${review.blocking} blocking` : "",
-		review.stale ? "stale" : "",
-	].filter(Boolean);
-	const confidence =
-		typeof review.confidence === "number"
-			? ` · confidence ${review.confidence}/5`
-			: "";
 	return (
 		<span
 			className={review.stale ? "text-faint" : tone}
 			title={
 				review.stale
-					? `Reviewed ${relativeTime(review.at)}, on a commit this branch has moved past${confidence}`
-					: `Reviewed ${relativeTime(review.at)}${confidence}`
+					? `Reviewed ${relativeTime(review.at)}, on a commit this branch has moved past`
+					: `Reviewed ${relativeTime(review.at)}`
 			}
 		>
-			{parts.join(" · ")}
+			{osReviewText(review)}
 		</span>
 	);
 }

@@ -57,7 +57,6 @@ ${bold("Setup")}
   service install          install and start the user service (--system: root unit)
   service uninstall        stop and remove it
   sandbox enable docker    install, configure and qualify local Docker
-  sandbox enable microvm   install, configure and qualify Local MicroVM
   sandbox test <provider>  re-run a connection qualification
   sandbox disable <provider> stop new use without deleting live sandboxes
   sandbox ingress install <https-origin> install an owned Caddy fragment

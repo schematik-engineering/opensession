@@ -114,8 +114,9 @@ type RuntimeState = {
 	nextMaintenanceAt?: number;
 	maintenancePending?: boolean;
 	activeTimers?: Set<string>;
-	activeOutbox?: Set<number>;
-	activeOpeningOutbox?: Set<number>;
+	activeOutbox?: Map<number, string>;
+	activeOpeningOutbox?: Map<number, string>;
+	pendingOutbox?: Map<number, DurableOutboxItem>;
 	lastRuntimePollErrorAt?: number;
 };
 
@@ -132,6 +133,10 @@ runtime.startedAt ??= Date.now();
 const BOOT_MAINTENANCE_DELAY_MS = 5 * 60_000;
 const MAINTENANCE_SWEEP_INTERVAL_MS = 60 * 60_000;
 const MAINTENANCE_CONTINUATION_DELAY_MS = 15_000;
+// Keep active physical effects out of the one-second discovery loop while
+// retaining a short, durable retry horizon if the gateway disappears.
+const ACTIVE_OUTBOX_RECHECK_MS = 30_000;
+const PENDING_OUTBOX_LIMIT = 512;
 
 export function registerSessionTimerHandler(
 	kind: string,
@@ -207,22 +212,30 @@ export async function drainSessionKernelRuntime(): Promise<void> {
 		const timerKinds = [...runtime.timerHandlers.keys()];
 		const effectKinds = registeredSessionEffectKinds();
 		const openingKind = "creation_opening_turn";
+		const now = Date.now();
+		const activeOutbox = (runtime.activeOutbox ??= new Map());
+		const activeOpeningOutbox = (runtime.activeOpeningOutbox ??= new Map());
+		const pendingOutbox = (runtime.pendingOutbox ??= new Map());
+		const activeEffects = new Map<number, string>([
+			...activeOutbox.entries(),
+			...activeOpeningOutbox.entries(),
+		]);
+		for (const item of pendingOutbox.values())
+			activeEffects.set(item.id, item.sessionId);
+		// Fetch ordinary and opening effects in one actor pass. Separate quotas
+		// preserve opening admission without opening and rescanning another batch
+		// of per-session SQLite databases every second.
 		const work = await sessionKernelRuntimeWork(
 			timerKinds,
 			effectKinds.filter((kind) => kind !== openingKind),
+			now,
+			100,
+			effectKinds.includes(openingKind)
+				? [{ effectKinds: [openingKind], limit: OPENING_OUTBOX_CONCURRENCY }]
+				: [],
+			[...activeEffects].map(([id, sessionId]) => ({ id, sessionId })),
+			now + ACTIVE_OUTBOX_RECHECK_MS,
 		);
-		if (effectKinds.includes(openingKind)) {
-			// Admit enough opening effects to project their session files immediately.
-			// session-create.ts applies the smaller eight-turn engine gate only after
-			// projection, so slow agent turns cannot hide later accepted sessions.
-			const openings = await sessionKernelRuntimeWork(
-				[],
-				[openingKind],
-				Date.now(),
-				OPENING_OUTBOX_CONCURRENCY,
-			);
-			work.outbox.push(...openings.outbox);
-		}
 		const activeTimers = (runtime.activeTimers ??= new Set());
 		for (const timer of work.timers) {
 			if (activeTimers.size >= TIMER_CONCURRENCY) break;
@@ -248,9 +261,11 @@ export async function drainSessionKernelRuntime(): Promise<void> {
 				)
 				.finally(() => activeTimers.delete(key));
 		}
-		const activeOutbox = (runtime.activeOutbox ??= new Set());
-		const activeOpeningOutbox = (runtime.activeOpeningOutbox ??= new Set());
 		for (const item of work.outbox) {
+			if (pendingOutbox.size >= PENDING_OUTBOX_LIMIT) break;
+			pendingOutbox.set(item.id, item);
+		}
+		for (const item of pendingOutbox.values()) {
 			// Opening turns can legitimately last for hours. Keep their bounded
 			// execution pool separate so eight accepted openings cannot starve
 			// delivery, preparation, or projection effects globally.
@@ -262,8 +277,13 @@ export async function drainSessionKernelRuntime(): Promise<void> {
 				item.kind === openingKind
 					? OPENING_OUTBOX_CONCURRENCY
 					: OUTBOX_CONCURRENCY;
-			if (active.size >= admissionLimit || active.has(item.id)) continue;
-			active.add(item.id);
+			if (active.has(item.id)) {
+				pendingOutbox.delete(item.id);
+				continue;
+			}
+			if (active.size >= admissionLimit) continue;
+			pendingOutbox.delete(item.id);
+			active.set(item.id, item.sessionId);
 			void executeSessionEffect(item)
 				.then(async (executed) => {
 					if (!executed) return;

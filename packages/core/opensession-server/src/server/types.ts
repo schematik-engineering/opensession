@@ -571,7 +571,7 @@ export interface NativeSessionFile {
   autoFallbackModel?: string | null;
 	/** Workspace model-preset instructions captured when this session was created. */
 	presetNote?: string;
-  pstackMode?: boolean; // sticky pstack engineering mode, toggled with /pstack
+  pstackMode?: boolean; // sticky pstack engineering mode, toggled with /pstack or /poteto-mode
   effort?: string; // Pi reasoning variant for this session's runs; unset = model default
   fastMode?: boolean; // OpenAI priority service tier for ChatGPT OAuth Codex runs
   accountId?: string; // pinned Claude/Codex provider account; unset = auto pool

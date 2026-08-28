@@ -294,16 +294,6 @@ async function resolveTarget(
       };
     }
 
-    if (sb.provider === "microvm" && sandboxProviderConfigured("microvm")) {
-      const { microvmPtySession } = await import("./sandbox/adapters/microvm");
-      const sandboxId = sb.sandboxId;
-      return {
-        kind: "remote",
-        target: "microvm",
-        displayCwd: cwd,
-        connect: (io) => microvmPtySession(sandboxId, cwd, io),
-      };
-    }
   } catch (e: any) {
     return hostShellTarget(
       session,
@@ -315,7 +305,7 @@ async function resolveTarget(
 
 /**
  * Session-aware terminal start (the term_start WS handler's entry): resolves
- * the target (host / docker / Daytona / Box / MicroVM) and connects the shell
+ * the target (host / Docker / Daytona / Box) and connects the shell
  * for one (socket, termId) pair. Async because sandbox resolution can take
  * seconds (container wake, remote PTY connect) — a term_stop or another
  * term_start for the same termId racing in cancels it.

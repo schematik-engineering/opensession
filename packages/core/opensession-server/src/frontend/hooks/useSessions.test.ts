@@ -4,6 +4,7 @@ import {
   LIVE_POLL_FALLBACK_MS,
   liveSnapshotMatchesQuery,
   reconcilePendingSessionPatches,
+  reconcileStickySessions,
   sessionPatchNeedsAcknowledgement,
   sidebarSessionsQuery,
 } from "./useSessions";
@@ -51,6 +52,68 @@ describe("liveSnapshotMatchesQuery", () => {
 
     expect(liveSnapshotMatchesQuery(archivedRoute, nextRoute)).toBe(false);
     expect(liveSnapshotMatchesQuery(nextRoute, nextRoute)).toBe(true);
+  });
+});
+
+describe("reconcileStickySessions", () => {
+  const optimistic: UnifiedSession = {
+    ...session(false),
+    title: "New session",
+    workspaceId: null,
+  };
+  const authoritative: UnifiedSession = {
+    ...optimistic,
+    title: "Fix the sidebar",
+    workspaceId: "workspace-1",
+  };
+
+  test("keeps an unseen optimistic row across stale snapshots", () => {
+    const sticky = new Map([
+      [optimistic.id, { session: optimistic, serverSeen: false }],
+    ]);
+
+    expect(reconcileStickySessions([], sticky)).toEqual([optimistic]);
+    expect(sticky.has(optimistic.id)).toBe(true);
+  });
+
+  test("keeps the selected row as a fallback after the server first sees it", () => {
+    const sticky = new Map([
+      [optimistic.id, { session: optimistic, serverSeen: false }],
+    ]);
+
+    expect(
+      reconcileStickySessions([authoritative], sticky, optimistic.id),
+    ).toEqual([authoritative]);
+    expect(sticky.get(optimistic.id)).toEqual({
+      session: authoritative,
+      serverSeen: true,
+    });
+
+    // An indexed/cached projection can briefly lose the just-created row. It
+    // stays in place using the freshest server shape rather than disappearing.
+    expect(reconcileStickySessions([], sticky, optimistic.id)).toEqual([
+      authoritative,
+    ]);
+  });
+
+  test("retires the fallback after leaving a server-confirmed session", () => {
+    const sticky = new Map([
+      [optimistic.id, { session: authoritative, serverSeen: true }],
+    ]);
+
+    expect(reconcileStickySessions([], sticky, "another-session")).toEqual([]);
+    expect(sticky.has(optimistic.id)).toBe(false);
+  });
+
+  test("retires a background create as soon as the server returns it", () => {
+    const sticky = new Map([
+      [optimistic.id, { session: optimistic, serverSeen: false }],
+    ]);
+
+    expect(reconcileStickySessions([authoritative], sticky)).toEqual([
+      authoritative,
+    ]);
+    expect(sticky.has(optimistic.id)).toBe(false);
   });
 });
 

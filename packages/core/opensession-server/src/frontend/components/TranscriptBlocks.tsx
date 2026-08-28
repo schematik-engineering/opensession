@@ -6,6 +6,8 @@ import {
 	type TranscriptIndexedRange,
 } from "../lib/transcript-index";
 import {
+	transcriptArrivalAliases,
+	transcriptEntryMountKey,
 	turnMountKey,
 	turnScrollAnchor,
 } from "../lib/transcript-block-identity";
@@ -25,8 +27,10 @@ import {
 import { WalkthroughCard } from "./WalkthroughCard";
 import { walkthroughInsertIndex } from "./walkthrough-placement";
 import {
+	mergeOptimisticTranscriptEntries,
 	normalizeLegacyVoiceToolEntries,
 	orderTranscriptEntries,
+	type OptimisticTranscriptEntry,
 } from "../lib/transcript-state";
 import { collectWrittenAssets } from "../lib/open-asset";
 import { classifyEntry } from "@tellahq/opensession-protocol/notices";
@@ -58,7 +62,7 @@ interface Props {
 	entries: TranscriptEntry[];
 	/** Just-sent user turns that have not landed durably yet. They participate in
 	 *  transcript ordering so live tools can never render above their prompt. */
-	optimisticEntries?: TranscriptEntry[];
+	optimisticEntries?: OptimisticTranscriptEntry[];
 	/** Transcript ids accepted as sent but not yet read by the engine. */
 	pendingDeliveryIds?: string[];
 	/** Whether the conversation is live (last work block shows a spinner / stays open). */
@@ -123,9 +127,9 @@ function reviewBlockRole(block: RenderBlock): ReviewBlockRole {
 		: { kind: "other" };
 }
 
-/** A review handoff and the tool work it triggers form one quiet phase. Human
- * requests and model output both stay outside the phase, so a disclosure can
- * never hide either side of the conversation. */
+/** A review handoff and the work it triggers form one quiet phase. Human
+ * requests and final model output stay outside; intermediate narration already
+ * belongs to the grouped turn work. */
 function groupReviewLoops(blocks: RenderBlock[]): RenderBlock[] {
 	const grouped: RenderBlock[] = [];
 	for (let i = 0; i < blocks.length; i++) {
@@ -141,8 +145,8 @@ function groupReviewLoops(blocks: RenderBlock[]): RenderBlock[] {
 		while (i + 1 < blocks.length) {
 			const next = blocks[i + 1];
 			const nextRole = reviewBlockRole(next);
-			// Notes, walkthroughs, and model output have their own placement and must
-			// never vanish inside an automation disclosure.
+			// Notes, walkthroughs, and final model output have their own placement and
+			// must never vanish inside an automation disclosure.
 			if (
 				next.kind === "note" ||
 				next.kind === "walkthrough" ||
@@ -225,12 +229,20 @@ function renderBlockKey(block: RenderBlock, index: number): string {
 		const first = renderBlockEntries(block)[0];
 		return `review-loop:${first?.id ?? index}`;
 	}
-	return block.entry.id;
+	return transcriptEntryMountKey(block.entry);
 }
 
 function renderBlockAnchor(block: RenderBlock, key: string): string {
 	if (block.kind === "turn") return turnScrollAnchor(block.items);
+	if (block.kind === "entry") return block.entry.id;
 	return key;
+}
+
+function transcriptMeasureVersion(entries: TranscriptEntry[]): string[] {
+	return entries.map(
+		(entry) =>
+			`${entry.id}:${entry.changeSeq ?? ""}:${entry.content.length}:${entry.contentLength ?? ""}:${entry.images?.length ?? 0}:${entry.videos?.length ?? 0}:${entry.files?.length ?? 0}:${entry.isError ? 1 : 0}`,
+	);
 }
 
 function renderBlockEstimate(block: RenderBlock): number {
@@ -245,10 +257,9 @@ function renderBlockEstimate(block: RenderBlock): number {
 }
 
 /**
- * Groups a flat transcript into tool-work folds and message bubbles, then
- * renders them. Only consecutive tool calls may enter a TurnBlock. Every model
- * message stays in the transcript itself, including intermediate reasoning and
- * narration before or between tools.
+ * Groups a flat transcript into per-turn work folds and message bubbles, then
+ * renders them. Tool calls and intermediate assistant narration share one
+ * TurnBlock; the turn's final assistant output always stays outside the fold.
  * Shared by the main session view and the sub-agent sidebar so both render
  * identically.
  */
@@ -261,9 +272,9 @@ function renderBlockEstimate(block: RenderBlock): number {
 export const TranscriptBlocks = function TranscriptBlocks(
 	props: Props,
 ) {
-	const entries = (props.optimisticEntries?.length
-				? orderTranscriptEntries([...props.entries, ...props.optimisticEntries])
-				: props.entries);
+	const entries = props.optimisticEntries?.length
+		? mergeOptimisticTranscriptEntries(props.entries, props.optimisticEntries)
+		: props.entries;
 	const renderedProps = entries === props.entries ? props : { ...props, entries };
 	return (
 		<>
@@ -312,7 +323,9 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
 	const pendingDeliveryEntryIds = new Set(pendingDeliveryIds ?? []);
 	const renderedEntries = normalizeLegacyVoiceToolEntries(entries)
 		.map(classifyEntry)
-		.filter((entry) => !isRenderlessUserEntry(entry));
+		.filter(
+			(entry) => entry.turnBoundary || !isRenderlessUserEntry(entry),
+		);
 	const shareAfterEntryIds = new Set<string>();
 	if (slackShare) {
 		for (let i = 0; i < renderedEntries.length; i++) {
@@ -335,41 +348,32 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
 
 	const blocks: RenderBlock[] = [];
 	// The current assistant turn: consecutive assistant/tool_use entries between
-	// user/system boundaries. Messages and tools accumulate together so the
-	// footer can still summarize the whole turn, but only consecutive tool calls
-	// are emitted into folds.
+	// user/system boundaries. Everything except the final ordinary assistant
+	// entry is work; keeping it in one block prevents narration from splitting a
+	// run into a ladder of one-step disclosures.
 	let turn: TranscriptEntry[] = [];
 
 	const flushTurn = (trailing = false) => {
 		if (turn.length === 0) return;
 		const last = turn[turn.length - 1];
-		const final = last.type === "assistant" ? last : null;
-		let tools: TranscriptEntry[] = [];
-		const expandWhileRunning = turn.some((entry) => entry.type === "assistant");
-		const flushTools = () => {
-			if (tools.length === 0) return;
-			blocks.push({ kind: "turn", items: tools, expandWhileRunning });
-			tools = [];
-		};
-		for (const entry of turn) {
-			if (entry.type === "tool_use") {
-				tools.push(entry);
-				continue;
-			}
-			flushTools();
-			// Model output is conversation, not work chrome. Keeping every message
-			// as its own block makes it impossible for a tool disclosure to hide it.
-			// Bold-only intermediate rows are the reasoning-summary shape persisted
-			// before `isReasoning` existed; keep their presentation quiet too.
+		// Provider-tagged reasoning is work even when it is the last persisted
+		// entry. An ordinary last assistant entry is the only safe final-output
+		// candidate, so it always remains outside the fold. As a live turn grows,
+		// an earlier candidate moves into work only once a later step proves it was
+		// intermediate narration.
+		const final =
+			last.type === "assistant" && !last.isReasoning ? last : null;
+		const work = final ? turn.slice(0, -1) : turn;
+		if (work.length > 0) {
 			blocks.push({
-				kind: "entry",
-				entry,
-				reasoning:
-					entry.isReasoning ||
-					(entry !== final && isLegacyReasoningHeading(entry.content)),
+				kind: "turn",
+				items: work,
+				expandWhileRunning: work.some(
+					(entry) => entry.type === "assistant",
+				),
 			});
 		}
-		flushTools();
+		if (final) blocks.push({ kind: "entry", entry: final });
 		// Quiet actions under the settled answer, the files the turn wrote, and
 		// scratch files that have no other direct route from the transcript.
 		if (final && !(live && trailing)) {
@@ -393,7 +397,9 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
 			turn.push(entry);
 		} else {
 			flushTurn();
-			blocks.push({ kind: "entry", entry });
+			// Hidden system-triggered turns exist only to keep the completed output
+			// before them out of later work. They are structural, never a blank row.
+			if (!entry.turnBoundary) blocks.push({ kind: "entry", entry });
 		}
 	}
 	flushTurn(true);
@@ -452,8 +458,8 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
 		const key = renderBlockKey(block, i);
 		const entriesInBlock = renderBlockEntries(block);
 		if (block.kind === "review-loop") {
-			// Assistant output deliberately sits outside the review disclosure. It
-			// does not make the review loop historical while that same turn is live.
+			// Final assistant output deliberately sits outside the review disclosure.
+			// It does not make the loop historical while that same turn is live.
 			const isLive = Boolean(
 				live &&
 					!groupedBlocks
@@ -464,6 +470,8 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
 				key,
 				anchorId: renderBlockAnchor(block, key),
 				entryIds: entriesInBlock.map((entry) => entry.id),
+				arrivalAliases: transcriptArrivalAliases(entriesInBlock),
+				measureVersion: transcriptMeasureVersion(entriesInBlock),
 				estimateSize: renderBlockEstimate(block),
 				content: (
 					<ReviewLoopBlock
@@ -506,6 +514,14 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
 										reviewBlockRole(inner).kind !== "handoff" ? (
 										<MessageBubble
 											entry={inner.entry}
+											enter={
+												optimisticEntryIds.has(inner.entry.id) ||
+												Boolean(
+													isLive &&
+														innerIndex === block.blocks.length - 1 &&
+														inner.entry.type !== "user",
+												)
+											}
 											reasoning={inner.reasoning}
 											pendingDelivery={pendingDeliveryEntryIds.has(inner.entry.id)}
 											owner={owner}
@@ -557,6 +573,10 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
 			) : (
 				<MessageBubble
 					entry={block.entry}
+					enter={
+						optimisticEntryIds.has(block.entry.id) ||
+						Boolean(isLiveTail && block.entry.type !== "user")
+					}
 					reasoning={block.reasoning}
 					pendingDelivery={pendingDeliveryEntryIds.has(block.entry.id)}
 					owner={owner}
@@ -575,6 +595,8 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
 			key,
 			anchorId: renderBlockAnchor(block, key),
 			entryIds: entriesInBlock.map((entry) => entry.id),
+			arrivalAliases: transcriptArrivalAliases(entriesInBlock),
+			measureVersion: transcriptMeasureVersion(entriesInBlock),
 			estimateSize: renderBlockEstimate(block),
 			// A footer overlaps the answer above it, so its margin belongs to the
 			// measured wrapper rather than inside the contained row.
@@ -655,20 +677,47 @@ function IndexedTranscriptBlocks(props: Props) {
 		(atom): atom is Extract<IndexedTimelineAtom, { kind: "range" }> =>
 			atom.kind === "range",
 	);
+	const tailRangeAtom = rangeAtoms[rangeAtoms.length - 1];
 	for (const entry of entries) {
 		if (typeof entry.seq === "number" || indexedIds.has(entry.id)) continue;
 		const timestampMs = Date.parse(entry.timestamp) || 0;
 		if (optimisticIds.has(entry.id) && rangeAtoms.length > 0) {
-			// A prompt can paint before its durable user row while live tool frames
-			// are already arriving. Put it into the range those tools occupy, then
-			// order that range by the immutable seq spine plus this timestamp. If no
-			// range reaches its send time yet, the durable tail is still the correct
-			// predecessor for a new turn.
+			// Keep the prompt in the structural range that was current when it was
+			// sent. Wall clocks are deliberately absent here: a browser clock ahead
+			// of the server used to place later assistant/tool rows above the prompt.
+			const optimistic = entry as OptimisticTranscriptEntry;
+			const anchorId = optimistic.optimisticAfterEntryId;
+			const anchorSeq = optimistic.optimisticAfterSeq;
 			const rangeAtom =
-				rangeAtoms.find((atom) => atom.range.endTimestampMs >= timestampMs) ??
+				(anchorId !== undefined && anchorId !== null
+					? rangeAtoms.find(
+							(atom) =>
+								atom.range.entryIds.includes(anchorId) ||
+								atom.range.entryIds.includes(`outbox-${anchorId}`),
+						)
+					: undefined) ??
+				(anchorSeq !== undefined
+					? rangeAtoms.findLast(
+							(atom) => atom.range.firstSeq <= anchorSeq,
+						)
+					: undefined) ??
 				rangeAtoms[rangeAtoms.length - 1]!;
 			rangeAtom.continuationEntryIds.push(entry.id);
 			rangeAtom.timestampMs = Math.max(rangeAtom.timestampMs, timestampMs);
+			continue;
+		}
+		// Live turn frames arrive before their durable sequence numbers. They are
+		// causally after the loaded tail regardless of wall-clock timestamps or
+		// synthetic decorations (for example a model switch) between them. Attach
+		// them directly instead of timestamp-sorting them as standalone rows: that
+		// sort could transiently put assistant output above its optimistic prompt
+		// when the browser clock ran ahead of the server.
+		if (tailRangeAtom && isTurnContinuationEntry(entry)) {
+			tailRangeAtom.continuationEntryIds.push(entry.id);
+			tailRangeAtom.timestampMs = Math.max(
+				tailRangeAtom.timestampMs,
+				timestampMs,
+			);
 			continue;
 		}
 		atoms.push({
@@ -676,30 +725,6 @@ function IndexedTranscriptBlocks(props: Props) {
 			entry,
 			timestampMs,
 		});
-	}
-	atoms = sortIndexedTimelineAtoms(atoms);
-	// Live turn frames arrive before their durable sequence numbers. Keep a
-	// separate overlay on the durable tail range so one assistant turn cannot
-	// temporarily split into a settled Worked group and loose calls. Assistant
-	// narration must join the overlay too: it commonly arrives immediately before
-	// a batch of tools, and leaving it standalone prevents every following tool
-	// from reaching the tail range. The range bounds and entry IDs stay
-	// durable-only for sparse hydration requests.
-	const tailRange = ranges[ranges.length - 1];
-	for (let index = 1; index < atoms.length; index++) {
-		const atom = atoms[index]!;
-		const previous = atoms[index - 1]!;
-		if (
-			atom.kind !== "entry" ||
-			previous.kind !== "range" ||
-			previous.range !== tailRange ||
-			!isTurnContinuationEntry(atom.entry)
-		)
-			continue;
-		previous.continuationEntryIds.push(atom.entry.id);
-		previous.timestampMs = Math.max(previous.timestampMs, atom.timestampMs);
-		atoms.splice(index, 1);
-		index--;
 	}
 	for (const note of notes ?? []) {
 		const containing = atoms.find(
@@ -817,11 +842,18 @@ function IndexedTranscriptBlocks(props: Props) {
 	const items: VirtualTranscriptItem[] = renderedTimeline.map(
 		({ item, index }, position) => {
 			const entryIds = indexedItemEntryIds(item);
-			const itemEntries = orderTranscriptEntries(
-				entryIds.flatMap((id) => {
-					const entry = payloadById.get(id);
-					return entry ? [entry] : [];
-				}),
+			const rangeEntries = entryIds.flatMap((id) => {
+				const entry = payloadById.get(id);
+				return entry ? [entry] : [];
+			});
+			const optimisticRangeEntries = rangeEntries.filter(
+				(entry): entry is OptimisticTranscriptEntry => optimisticIds.has(entry.id),
+			);
+			const itemEntries = mergeOptimisticTranscriptEntries(
+				orderTranscriptEntries(
+					rangeEntries.filter((entry) => !optimisticIds.has(entry.id)),
+				),
+				optimisticRangeEntries,
 			);
 			// Keys come from the full-outline position so a row keeps its identity
 			// while older siblings hydrate in above it.
@@ -832,6 +864,12 @@ function IndexedTranscriptBlocks(props: Props) {
 				key,
 				anchorId: key,
 				entryIds,
+				arrivalAliases: transcriptArrivalAliases(
+					item.kind === "entry" ? [item.entry] : itemEntries,
+				),
+				measureVersion: transcriptMeasureVersion(
+					item.kind === "entry" ? [item.entry] : itemEntries,
+				),
 				estimateSize,
 				measure: true,
 				content:
@@ -1093,6 +1131,8 @@ function ReviewTurnSteps({
 			<MessageBubble
 				key={section.entry.id}
 				entry={section.entry}
+				enter={live && section.entry.type !== "user"}
+				reasoning={isLegacyReasoningHeading(section.entry.content)}
 				owner={owner}
 				sessionId={sessionId}
 			/>

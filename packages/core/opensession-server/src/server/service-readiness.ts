@@ -1,5 +1,7 @@
 export type ServiceReadinessPhase = "booting" | "recovering" | "ready" | "draining" | "failed";
 type State = { phase: ServiceReadinessPhase; error?: string; changedAt: string };
+// Readiness belongs to one gateway child; the supervisor only switches which
+// private backend receives new connections.
 const globalState = globalThis as typeof globalThis & { __opensessionReadiness?: State };
 const state = (globalState.__opensessionReadiness ??= {
   phase: "booting",

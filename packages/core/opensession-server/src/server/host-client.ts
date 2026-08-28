@@ -18,12 +18,12 @@
  *  - registers steer/interrupt/cancel controls in host-registry so the normal
  *    steerAgentRun/cancelAgentRun/isAgentSessionBusy paths treat hosted runs
  *    like in-process ones,
- *  - reconnects on socket drops, transparently respawns a crashed host to
- *    resume its engine session, and falls back to an in-process runAgent when
- *    spawning is impossible (or the kill-switch file is present).
+ *  - reconnects on socket drops and transparently respawns a crashed host to
+ *    resume its engine session.
  *
- * Kill switch: `touch ~/.opensession-sessions/disable-run-hosts` — checked per run,
- * no restart needed; new runs go back in-process (old hosts finish normally).
+ * Kill switch: `touch ~/.opensession-sessions/disable-run-hosts` — checked per
+ * run. On a systemd host it fails new runs closed instead of moving agent work
+ * into the gateway control-plane cgroup; old hosts finish normally.
  */
 
 import type { McpScope } from "./runner-shared";
@@ -53,7 +53,10 @@ import {
   type ImageInput,
 } from "./run-events";
 import type { TranscriptEntry } from "./types";
-import { applyForwardedTranscriptStrict } from "./transcript-persistence";
+import {
+  appendTranscriptEntries,
+  applyForwardedTranscriptStrict,
+} from "./transcript-persistence";
 import { sameProcess } from "./process-identity";
 import type { GitIdentity } from "./shared/user-mappings";
 import { modelSupportsSteer, providerFor } from "./models";
@@ -98,6 +101,10 @@ const HOSTED_KERNEL_RETRY_ATTEMPTS = 3;
 // Wait just beyond it so a retry reaches the recovered lane instead of failing
 // immediately against the same open breaker.
 const HOSTED_KERNEL_RETRY_DELAY_MS = 10_100;
+// Hosts from before the catchup_complete frame resend transcript history
+// immediately after an ended hello. Keep that rolling-deploy path open long
+// enough to consume the local replay instead of closing on the hello itself.
+const ENDED_HELLO_CATCHUP_FALLBACK_MS = 2_000;
 
 export async function retryHostedKernelCall<T>(
   call: () => T | Promise<T>,
@@ -183,27 +190,6 @@ function runHostsEnabled(): boolean {
   return localRunHostsSupported() && !existsSync(DISABLE_FILE);
 }
 
-// ── Bounded spawn-failure fallback ─────────────────────────────────────────
-// When run hosts are the configured path, an in-process fallback is meant to
-// save the occasional run from a transient launch hiccup. At fleet scale it
-// inverts: exactly when the executor is unhealthy, every launch would migrate
-// its engine INTO the gateway process, multiplying gateway memory/CPU at the
-// worst possible moment. Cap concurrent fallback runs; beyond the cap the
-// launch fails visibly (lastRunError + queue restore) instead of silently
-// overloading the process every other session depends on. Platforms without
-// run hosts are exempt — there, in-process is the normal path, not a fallback.
-const MAX_IN_PROCESS_FALLBACK_RUNS = (() => {
-  const raw = Number(process.env.OPENSESSION_MAX_INPROCESS_FALLBACKS ?? 8);
-  return Number.isInteger(raw) && raw >= 1 ? raw : 8;
-})();
-const activeInProcessFallbackRuns: Set<string> = ((globalThis as any)
-  .__activeInProcessFallbackRuns ??= new Set());
-
-/** Exported for tests. */
-export function inProcessFallbackSaturated(): boolean {
-  return activeInProcessFallbackRuns.size >= MAX_IN_PROCESS_FALLBACK_RUNS;
-}
-
 /** Options for a hosted run: RunAgentOpts minus the non-serializable bits,
  *  plus the host/session context. */
 export interface HostedRunOpts {
@@ -239,6 +225,8 @@ export interface HostedRunOpts {
   author?: GitIdentity | null;
   user?: string;
   fallbackModel?: string;
+  /** Stable provider-account affinity for internal fan-out workers. */
+  accountAffinityKey?: string;
   /** Reasoning effort / service tier / account pinning for the run (see the
    *  matching RunHostSpec fields). */
   effort?: string;
@@ -260,99 +248,147 @@ export interface HostedRunOpts {
   shouldCancel?: () => boolean;
   /** A steer arrived too late at the host — queue it so it isn't dropped. */
   onSteerFailed?: (text: string) => void;
-  /** Rebuilds the in-process SDK MCP servers if we fall back to runAgent. */
+  /** Builds SDK MCP servers only on platforms without detached run hosts. */
   fallbackInProcessMcp?: () => Record<string, unknown> | undefined;
 }
 
 /**
  * Run a prompt in a detached run host, yielding the same StreamEvents as
- * runAgent. Falls back to an in-process runAgent when hosts are disabled or
- * the spawn fails — a run should never be lost to infrastructure.
+ * runAgent. A Linux host never falls back into the gateway: launch failure is
+ * visible and retryable, while non-systemd platforms retain in-process mode.
  */
 export async function* runAgentHosted(opts: HostedRunOpts): AsyncGenerator<StreamEvent> {
   if (opts.shouldCancel?.()) return;
-  if (runHostsEnabled()) {
-    // Machine-capacity admission before the engine process exists. Waits with
-    // backoff while the host is full (the queue claim and journal are already
-    // durable, so a crash mid-wait re-admits the turn) and fails closed after
-    // the configured patience: an in-process fallback would consume the same
-    // scarce memory, so RunHostAdmissionError deliberately propagates.
-    const admission = Symbol(opts.osSessionId);
-    if (
-      (await waitForRunHostAdmission({
-        sessionId: opts.osSessionId,
-        activeHosts: activeRunHostCount,
-        pendingHosts: () => pendingRunHostAdmissions.size,
-        onAdmit: () => pendingRunHostAdmissions.add(admission),
-        shouldCancel: opts.shouldCancel,
-      })) === "cancelled"
-    )
-      return;
-    if (opts.shouldCancel?.()) {
-      pendingRunHostAdmissions.delete(admission);
-      return;
-    }
-    let spawned: { handle: HostHandle; spec: RunHostSpec } | null = null;
-    try {
-      // spawnHostRun reserves activeHostedRunKeys synchronously before its first
-      // await. Transfer the admission reservation without opening a race.
-      const launch = spawnHostRun(opts);
-      pendingRunHostAdmissions.delete(admission);
-      spawned = await launch;
-    } catch (e) {
-      pendingRunHostAdmissions.delete(admission);
-      if (e instanceof ExecutorProtocolError && e.ambiguousLaunch) throw e;
-      console.error("[host-client] spawn failed — falling back to in-process run:", e);
-    }
-    if (spawned) {
-      try {
-        if (opts.shouldCancel?.()) {
-          spawned.handle.requestCancel();
-          // Drain through the host's `end`, not merely its terminal event: the
-          // source owns cleanup and may still be waiting to close its transport.
-          for await (const _event of spawned.handle.events()) {}
-          return;
-        }
-        yield* hostedEventsWithJournal(spawned.handle, spawned.spec);
-      } finally {
-        activeHostedRunKeys.delete(spawned.spec.hostId);
-      }
-      return;
-    }
-    // Spawn-failure fallback: bounded so a sick executor degrades launches
-    // instead of migrating the whole fleet's engines into the gateway.
-    if (inProcessFallbackSaturated()) {
-      audit({
-        msg: "in_process_fallback_rejected",
-        session_id: opts.osSessionId,
-        active: activeInProcessFallbackRuns.size,
-        limit: MAX_IN_PROCESS_FALLBACK_RUNS,
-      });
+  if (!runHostsEnabled()) {
+    if (localRunHostsSupported()) {
       throw new Error(
-        `Run host launch failed and ${activeInProcessFallbackRuns.size} in-process fallback runs are already active (limit ${MAX_IN_PROCESS_FALLBACK_RUNS}). Not absorbing this run into the gateway; retry when run hosts recover.`,
+        "Detached run hosts are disabled; refusing to run agent work inside the gateway",
       );
     }
-    const fallbackKey = `${opts.osSessionId}:${crypto.randomUUID()}`;
-    activeInProcessFallbackRuns.add(fallbackKey);
-    audit({
-      msg: "in_process_fallback_started",
-      session_id: opts.osSessionId,
-      active: activeInProcessFallbackRuns.size,
-      limit: MAX_IN_PROCESS_FALLBACK_RUNS,
-    });
-    try {
-      yield* runAgentInProcess(opts);
-    } finally {
-      activeInProcessFallbackRuns.delete(fallbackKey);
-    }
+    yield* runAgentInProcess(opts);
     return;
   }
-  yield* runAgentInProcess(opts);
+
+  // Machine-capacity admission before the engine process exists. Waits with
+  // backoff while the host is full and fails closed after the configured
+  // patience. In-process execution would consume the control plane's reserve.
+  const admission = Symbol(opts.osSessionId);
+  if (
+    (await waitForRunHostAdmission({
+      sessionId: opts.osSessionId,
+      activeHosts: activeRunHostCount,
+      pendingHosts: () => pendingRunHostAdmissions.size,
+      onAdmit: () => pendingRunHostAdmissions.add(admission),
+      shouldCancel: opts.shouldCancel,
+    })) === "cancelled"
+  ) return;
+  if (opts.shouldCancel?.()) {
+    pendingRunHostAdmissions.delete(admission);
+    return;
+  }
+
+  let spawned: { handle: HostHandle; spec: RunHostSpec };
+  try {
+    // spawnHostRun reserves activeHostedRunKeys synchronously before its first
+    // await. Transfer the admission reservation without opening a race.
+    const launch = spawnHostRun(opts);
+    pendingRunHostAdmissions.delete(admission);
+    spawned = await launch;
+  } catch (error) {
+    pendingRunHostAdmissions.delete(admission);
+    throw error;
+  }
+
+  try {
+    if (opts.shouldCancel?.()) {
+      spawned.handle.requestCancel();
+      // Drain through the host's `end`, not merely its terminal event: the
+      // source owns cleanup and may still be waiting to close its transport.
+      for await (const _event of spawned.handle.events()) {}
+      return;
+    }
+    yield* hostedEventsWithJournal(spawned.handle, spawned.spec);
+  } finally {
+    activeHostedRunKeys.delete(spawned.spec.hostId);
+  }
 }
 
-/** The shared in-process execution tail: the normal path on platforms without
- *  run hosts, and the (bounded) fallback when a host spawn fails. */
-async function* runAgentInProcess(opts: HostedRunOpts): AsyncGenerator<StreamEvent> {
+export interface AuxiliaryHostedRunOpts extends HostedRunOpts {
+  /** Auxiliary workers keep either their standalone engine transcript or, for
+   *  session-like background jobs, project onto the parent session. */
+  transcriptTarget?: "session" | "engine" | "none";
+  signal?: AbortSignal;
+}
+
+/**
+ * Run internal fan-out work in the same workload-isolated transient units as
+ * ordinary turns, without claiming the parent session's authoritative run
+ * slot. Linux hosts fail closed if detached execution is deliberately disabled
+ * or cannot launch; absorbing workers into the gateway would defeat the
+ * control-plane cgroup boundary this API exists to preserve.
+ */
+export async function* runAuxiliaryAgentHosted(
+  opts: AuxiliaryHostedRunOpts,
+): AsyncGenerator<StreamEvent> {
+  const shouldCancel = () => Boolean(opts.signal?.aborted || opts.shouldCancel?.());
+  if (!runHostsEnabled()) {
+    if (localRunHostsSupported()) {
+      throw new Error(
+        "Detached run hosts are disabled; refusing to run auxiliary agent work inside the gateway",
+      );
+    }
+    yield* runAgentInProcess({ ...opts, shouldCancel }, "auxiliary");
+    return;
+  }
+  if (shouldCancel()) return;
+
+  const admission = Symbol(opts.osSessionId);
+  if (
+    (await waitForRunHostAdmission({
+      sessionId: opts.osSessionId,
+      activeHosts: activeRunHostCount,
+      pendingHosts: () => pendingRunHostAdmissions.size,
+      onAdmit: () => pendingRunHostAdmissions.add(admission),
+      shouldCancel,
+    })) === "cancelled"
+  ) return;
+  if (shouldCancel()) {
+    pendingRunHostAdmissions.delete(admission);
+    return;
+  }
+
+  let spawned: { handle: HostHandle; spec: RunHostSpec };
+  try {
+    const launch = spawnHostRun(
+      { ...opts, shouldCancel },
+      "auxiliary",
+      opts.transcriptTarget ?? "none",
+    );
+    pendingRunHostAdmissions.delete(admission);
+    spawned = await launch;
+  } catch (error) {
+    pendingRunHostAdmissions.delete(admission);
+    throw error;
+  }
+
+  const cancel = () => spawned.handle.requestCancel();
+  opts.signal?.addEventListener("abort", cancel, { once: true });
+  let completed = false;
+  try {
+    if (shouldCancel()) cancel();
+    for await (const event of spawned.handle.events()) yield event;
+    completed = true;
+  } finally {
+    opts.signal?.removeEventListener("abort", cancel);
+    if (!completed && !spawned.handle.ended) cancel();
+  }
+}
+
+/** The in-process execution tail for platforms without local run-host support. */
+async function* runAgentInProcess(
+  opts: HostedRunOpts,
+  lifecycle: "session" | "auxiliary" = "session",
+): AsyncGenerator<StreamEvent> {
   yield* runAgent({
     prompt: opts.prompt,
     promptEntryId: opts.promptEntryId,
@@ -377,6 +413,7 @@ async function* runAgentInProcess(opts: HostedRunOpts): AsyncGenerator<StreamEve
     author: opts.author,
     user: opts.user,
     fallbackModel: opts.fallbackModel,
+    accountAffinityKey: opts.accountAffinityKey,
     effort: opts.effort,
     fastMode: opts.fastMode,
     accountId: opts.accountId,
@@ -384,7 +421,7 @@ async function* runAgentInProcess(opts: HostedRunOpts): AsyncGenerator<StreamEve
     usageCredits: opts.usageCredits,
     prReviewer: opts.prReviewer,
     journal: {
-      osSessionId: opts.osSessionId,
+      ...(lifecycle === "auxiliary" ? {} : { osSessionId: opts.osSessionId }),
       kind: opts.journalKind || "prompt",
       firstJournaledAt: opts.firstJournaledAt,
       resumeAttempts: opts.resumeAttempts,
@@ -515,6 +552,8 @@ function hostedRunRecord(spec: RunHostSpec): ActiveRunRecord {
 
 async function spawnHostRun(
   opts: HostedRunOpts,
+  lifecycle: "session" | "auxiliary" = "session",
+  transcriptTarget: "session" | "engine" | "none" = "session",
 ): Promise<{ handle: HostHandle; spec: RunHostSpec }> {
   const hostId = opts.startToken || `rh-${Bun.randomUUIDv7()}`;
   const dir = `${HOSTS_DIR}/${hostId}`;
@@ -524,6 +563,7 @@ async function spawnHostRun(
   const spec: RunHostSpec = {
     hostId,
     osSessionId: opts.osSessionId,
+    ...(lifecycle === "auxiliary" ? { lifecycle, transcriptTarget } : {}),
     prompt: opts.prompt,
     promptEntryId: opts.promptEntryId,
     seedTranscriptEntries: opts.seedTranscriptEntries,
@@ -547,6 +587,7 @@ async function spawnHostRun(
     author: opts.author,
     user: opts.user,
     fallbackModel: opts.fallbackModel,
+    accountAffinityKey: opts.accountAffinityKey,
     effort: opts.effort,
     fastMode: opts.fastMode,
     accountId: opts.accountId,
@@ -564,13 +605,16 @@ async function spawnHostRun(
 
   let handle: HostHandle | undefined;
   let launchCompleted = false;
-  // Reserve before journalSet. The server accepts prompts while boot recovery
-  // is starting, and the sweep must not adopt a host launched by this process.
-  activeHostedRunKeys.add(hostId);
+  // Session-owned hosts enter the shared recovery journal. Auxiliary workers
+  // are owned by their caller's workflow journal instead: registering them as
+  // the parent session's physical run would race its real run generation.
+  if (lifecycle === "session") activeHostedRunKeys.add(hostId);
   try {
-    // Persist before launch. If opensession restarts between systemd-run and
-    // socket attachment, the boot sweep can still find the surviving host.
-    await journalSet(hostedRunRecord(spec));
+    if (lifecycle === "session") {
+      // Persist before launch. If opensession restarts between systemd-run and
+      // socket attachment, the boot sweep can still find the surviving host.
+      await journalSet(hostedRunRecord(spec));
+    }
     try {
       await launchHostUnit(hostId, dir);
     } catch (error) {
@@ -605,11 +649,11 @@ async function spawnHostRun(
       }
     }
     if (!(error instanceof ExecutorProtocolError && error.ambiguousLaunch)) {
-      activeHostedRunKeys.delete(hostId);
+      if (lifecycle === "session") activeHostedRunKeys.delete(hostId);
       // The HostHandle ctor registered its host-registry control. Drop it only
       // after absence is proven; uncertain launches must remain visibly busy.
       handle?.abandon();
-      journalClear(spec.hostId);
+      if (lifecycle === "session") journalClear(spec.hostId);
       unregisterRunToken(rpcToken);
       try {
         rmSync(dir, { recursive: true, force: true });
@@ -883,6 +927,8 @@ export class HostHandle {
   private endedClean = false;
   private sawTerminal = false;
   private terminalEvent?: StreamEvent;
+  private pendingEndedHello = false;
+  private endedHelloFallback?: ReturnType<typeof setTimeout>;
   private connectedBefore = false;
   private reportedSelectedModel?: string;
   private effectiveModel?: string;
@@ -941,7 +987,12 @@ export class HostHandle {
       cancel: () => this.cancelHost(),
     };
     registerHostRun(
-      [logicalRunId, spec.hostId, spec.osSessionId, spec.engineSessionId],
+      [
+        logicalRunId,
+        spec.hostId,
+        ...(spec.lifecycle === "auxiliary" ? [] : [spec.osSessionId]),
+        spec.engineSessionId,
+      ],
       this.ctl,
     );
     if (spec.engineSessionId) this.engineSessionId = spec.engineSessionId;
@@ -1142,6 +1193,7 @@ export class HostHandle {
   }
 
   private acceptsSideEffectFrame(frameType: string): boolean {
+    if (this.spec.lifecycle === "auxiliary") return true;
     const kernel = sessionKernel(this.spec.osSessionId);
     if (kernel.isCurrentRunProjection(this.logicalRunId)) return true;
     // Transcript frames are idempotent uuid-keyed upserts of history the host
@@ -1240,16 +1292,43 @@ export class HostHandle {
     });
   }
 
+  private deferEndedHelloFinish(): void {
+    this.pendingEndedHello = true;
+    if (this.endedHelloFallback) clearTimeout(this.endedHelloFallback);
+    this.endedHelloFallback = setTimeout(() => {
+      this.endedHelloFallback = undefined;
+      // Older hosts have no catchup_complete marker. Their socket replay is
+      // synchronous, so an idle window after the last transcript frame is the
+      // compatibility fence. Still serialize cleanup behind every projection
+      // received before that window closed. A frame arriving while those
+      // projections drain re-arms the timer and cancels this cleanup attempt.
+      this.enqueueProjectionFrame(() => {
+        if (this.pendingEndedHello && !this.endedHelloFallback) this.finish();
+      }, true);
+    }, ENDED_HELLO_CATCHUP_FALLBACK_MS);
+  }
+
+  private clearEndedHelloFallback(): void {
+    if (this.endedHelloFallback) clearTimeout(this.endedHelloFallback);
+    this.endedHelloFallback = undefined;
+    this.pendingEndedHello = false;
+  }
+
   private handleMsg(msg: HostToClientMsg): void {
+    if (msg.t === "transcript" && this.pendingEndedHello) {
+      this.deferEndedHelloFinish();
+    }
     if (
       msg.t !== "transcript" &&
       (this.projectionTail || this.projectionFailure)
     ) {
-      // End is cleanup, not another projection. It must close the stream even
-      // when the transcript projection ahead of it failed. Every other frame
-      // remains fenced after the failed tail settles: projectionFailure is a
-      // permanent authority failure for this handle, not just queue state.
-      this.enqueueProjectionFrame(() => this.handleMsgNow(msg), msg.t === "end");
+      // Terminal frames are cleanup, not another projection. They must close
+      // the stream even when the transcript projection ahead of them failed.
+      // Every other frame remains fenced after the failed tail settles:
+      // projectionFailure is a permanent authority failure for this handle,
+      // not just queue state.
+      const cleanupFrame = msg.t === "end" || msg.t === "catchup_complete";
+      this.enqueueProjectionFrame(() => this.handleMsgNow(msg), cleanupFrame);
       return;
     }
     this.handleMsgNow(msg);
@@ -1294,7 +1373,11 @@ export class HostHandle {
             this.terminalEvent = msg.done;
             this.queue.push(msg.done);
           }
-          this.finish();
+          // A detached host sends hello before replaying transcript frames.
+          // Finishing here closes the socket and discards summaries produced
+          // while the gateway was down. catchup_complete is the exact fence;
+          // the timer only supports hosts from before that frame existed.
+          this.deferEndedHelloFinish();
         }
         break;
       }
@@ -1323,13 +1406,17 @@ export class HostHandle {
         // Transcript frames bypass the StreamEvent queue, so fence them here
         // against the same run generation as ordinary host events.
         if (!this.acceptsSideEffectFrame("transcript")) break;
-        this.enqueueProjectionFrame(() =>
-          applyForwardedTranscriptStrict(
-            this.spec.osSessionId,
-            msg.engineSessionId,
-            this.alignSteerTranscriptIds(msg.lines),
-          )
-        );
+        this.enqueueProjectionFrame(() => {
+          const lines = this.alignSteerTranscriptIds(msg.lines);
+          if (this.spec.transcriptTarget === "none") return;
+          return this.spec.transcriptTarget === "engine"
+            ? appendTranscriptEntries(msg.engineSessionId, lines)
+            : applyForwardedTranscriptStrict(
+                this.spec.osSessionId,
+                msg.engineSessionId,
+                lines,
+              );
+        });
         break;
       case "steer_failed":
         if (this.acceptsSideEffectFrame("steer_failed")) {
@@ -1363,6 +1450,9 @@ export class HostHandle {
         this.finish();
         break;
       }
+      case "catchup_complete":
+        if (this.pendingEndedHello) this.finish();
+        break;
     }
   }
 
@@ -1405,6 +1495,7 @@ export class HostHandle {
   abandon(): void {
     if (this.endedClean) return;
     this.endedClean = true;
+    this.clearEndedHelloFallback();
     this.queue.end();
     this.settleSteerRetractions();
     unregisterHostRun(this.ctl);
@@ -1416,6 +1507,7 @@ export class HostHandle {
   private finish(): void {
     if (this.endedClean) return;
     this.endedClean = true;
+    this.clearEndedHelloFallback();
     this.send({ t: "shutdown" });
     this.queue.end();
     this.settleSteerRetractions();

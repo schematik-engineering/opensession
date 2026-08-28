@@ -85,13 +85,6 @@ describe("sandbox project environments", () => {
       }),
     ).rejects.toMatchObject({ code: "MACHINE_SETTINGS_INVALID" });
 
-    connectSandboxProvider("microvm", {});
-    setSandboxConnectionQualification("microvm", { status: "ready" });
-    await expect(
-      prepareSandboxEnvironment(repo, "microvm", {
-        settings: { cpu: 3, memoryMb: 4_096, diskGb: 25 },
-      }),
-    ).rejects.toMatchObject({ code: "MACHINE_SETTINGS_INVALID" });
   });
 
   test("marks every reusable provider template stale after a default-branch update", async () => {
@@ -101,7 +94,7 @@ describe("sandbox project environments", () => {
       path,
       JSON.stringify({
         version: 1,
-        environments: ["daytona", "box", "modal", "microvm"].map((provider) => ({
+        environments: ["daytona", "box", "modal"].map((provider) => ({
           repo,
           provider,
           state: "ready",
@@ -112,7 +105,7 @@ describe("sandbox project environments", () => {
     );
     await invalidateSandboxEnvironmentsForRepo(repo);
     const stored = JSON.parse(readFileSync(path, "utf-8"));
-    expect(stored.environments).toHaveLength(4);
+    expect(stored.environments).toHaveLength(3);
     expect(stored.environments.every((environment: any) => environment.state === "stale")).toBe(true);
   });
 });

@@ -215,6 +215,29 @@ describe("remote repo lifecycle", () => {
 		expect(scrub?.command).not.toContain("short-lived");
 	});
 
+	test("source verification skips private seed files and lifecycle hooks", async () => {
+		const d = driver([
+			{ exitCode: 0, stdout: "none\n" },
+			{ exitCode: 0 },
+			{ exitCode: 0, stdout: "main\n" },
+			{ exitCode: 0 },
+		]);
+		await setupRemoteWorkspace(
+			d.value,
+			"/work/public-review",
+			"https://github.com/tellahq/opensession.git",
+			"main",
+			"main",
+			"opensession",
+			{ sandboxId: "sbx-test", provider: "daytona", repoId: "opensession" },
+			{ seedPrivateFiles: false, runLifecycleHooks: false },
+		);
+
+		expect(d.commands).toHaveLength(4);
+		expect(d.commands.some(({ command }) => command.includes(".agents/setup"))).toBe(false);
+		expect(d.commands.some(({ command }) => command.includes("opensession/lifecycle"))).toBe(false);
+	});
+
 	test("cleans up a failed warm attach before cold-cloning", async () => {
 		const d = driver([
 			{ exitCode: 0, stdout: "warm\n" },

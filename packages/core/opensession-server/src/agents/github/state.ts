@@ -47,6 +47,23 @@ export interface LastReviewState {
   at: string;
 }
 
+interface PendingReviewCommon {
+  /** Optional only while loading state written before generation fencing shipped. */
+  generation?: string;
+  headRef: string;
+  headSha: string;
+  title: string;
+  firstPushAt: string;
+  dueAt: string;
+  attempts?: number;
+  lastError?: string;
+}
+
+export type PendingReviewState =
+  | (PendingReviewCommon & { phase?: "queued"; claimedAt?: never; exhaustedAt?: never })
+  | (PendingReviewCommon & { phase: "running"; claimedAt: string; exhaustedAt?: never })
+  | (PendingReviewCommon & { phase: "exhausted"; exhaustedAt: string; claimedAt?: never });
+
 export interface GithubPrState {
   prNumber: number;
   headRef: string;
@@ -66,6 +83,9 @@ export interface GithubPrState {
     requestedBy: string;
     receivedAt: string;
   };
+  /** Desired review work retained until this exact generation is recorded.
+   * The timer is only a wake-up hint and may be rebuilt after a restart. */
+  pendingReview?: PendingReviewState;
   /** Review → owning-session fix rounds (handoff.ts); cleared when a review
    *  comes back satisfied or the PR closes. */
   handoff?: HandoffState;
@@ -187,6 +207,18 @@ export function updatePrState(
   const s = getOrInitPrState(prNumber, headRef, ghRepo);
   patch(s);
   writePrState(s);
+  return s;
+}
+
+/** Generation-fenced variant for races where a stale callback should do no I/O. */
+export function updatePrStateIf(
+  prNumber: number,
+  headRef: string,
+  patch: (s: GithubPrState) => boolean,
+  ghRepo?: string,
+): GithubPrState {
+  const s = getOrInitPrState(prNumber, headRef, ghRepo);
+  if (patch(s)) writePrState(s);
   return s;
 }
 

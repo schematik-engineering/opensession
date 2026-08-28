@@ -20,6 +20,7 @@ import {
 } from "../../lib/sidebar-classes";
 import { isClaimed, mineStatus, pinnedLane, runNeedsAttention, stripPrTitlePrefix } from "../../lib/sidebar-lanes";
 import { sessionWasAgentStarted } from "../../lib/sidebar-placement";
+import { shouldEmphasizeUnread } from "../../lib/sidebar-unread-session";
 import { LONG_PRESS_MS, LONG_PRESS_SLOP, SWIPE_AXIS_LOCK_PX, SWIPE_COMMIT_MS, SWIPE_OPEN_THRESHOLD, SWIPE_REVEAL_PX, clampSwipe, fullSwipeThreshold, swipeCommitOffset, type SwipeAction } from "../../lib/sidebar-swipe";
 import type { LaneChoice } from "../../lib/sidebar-types";
 import type { UnifiedSession } from "../../lib/types";
@@ -29,6 +30,7 @@ import { BottomSheet, SheetBody, SheetItem, SheetSeparator, SheetTitle } from ".
 import { Tooltip } from "../../ui/tooltip";
 import { RowCardPopup, useRowHoverCard } from "../SidebarRowCards";
 import { AutoCreatedMark } from "./AutoCreatedMark";
+import { KeepInSidebarMark } from "./KeepInSidebarMark";
 import {
 	LanePickerPage,
 	LaneStatusMark,
@@ -71,17 +73,19 @@ export const SIDEBAR_ROW =
 
 /** A row's title: one line that fades smoothly at the available edge instead
  *  of ending in an ellipsis. Read conversations stay quiet; unread ones
- *  brighten like Slack, a blocked one bolds under its blue wash. */
-/* Pin + archive, hover-revealed on desktop: on hover they take the metadata's
-   place at the far right so they don't crowd the title. Long titles run under
+ *  brighten immediately, then bold once the agent finishes. A blocked one
+ *  also bolds because it needs a person. */
+/* Pin + one trailing action, hover-revealed on desktop: Archive for your own
+   sessions, Keep for somebody else's. They take the metadata's place at the
+   far right so they don't crowd the title. Long titles run under
    that spot, and what used to cover them was an opaque plate per button — which
    only ever worked because the row it sat on was opaque too. Now that a row's
    states are translucent ink, a solid chip cuts a hole in the material behind
    it, so the row reserves the space instead (`hover:pr-[68px]` below) and the
    buttons carry nothing but their own hover wash.
    The reveal is `group-hover`, which Tailwind gates to real hover devices for
-   us; on touch these actions live behind the swipe gesture and the long-press
-   sheet. */
+   us. Team's add action is the exception: it stays visible with a 44px touch
+   target because every row there is waiting to be added. */
 const ROW_ACTION = cn(
 	"absolute top-1/2 hidden size-[var(--sidebar-row-action,26px)] -translate-y-1/2 items-center justify-center rounded-md text-[15px] leading-none text-faint group-hover:flex hover:text-fg",
 	// Not a wash — a lid. See SIDEBAR_ROW_CHIP.
@@ -89,7 +93,7 @@ const ROW_ACTION = cn(
 );
 
 export const SIDEBAR_ROW_TITLE =
-	"min-w-0 flex-1 overflow-hidden whitespace-nowrap [-webkit-mask-image:linear-gradient(to_right,#000_calc(100%_-_24px),transparent)] [mask-image:linear-gradient(to_right,#000_calc(100%_-_24px),transparent)] text-body font-medium leading-[1.35] text-dim desktop:text-item-title group-data-[selected]:text-fg group-data-[waiting]:font-semibold group-data-[unread]:font-semibold group-data-[unread]:text-fg";
+	"min-w-0 flex-1 overflow-hidden whitespace-nowrap [-webkit-mask-image:linear-gradient(to_right,#000_calc(100%_-_24px),transparent)] [mask-image:linear-gradient(to_right,#000_calc(100%_-_24px),transparent)] text-body font-medium leading-[1.35] text-dim desktop:text-item-title group-data-[selected]:text-fg group-data-[waiting]:font-semibold group-data-[finished-unread]:font-semibold group-data-[unread]:text-fg";
 
 export function SidebarItem({
 	session,
@@ -98,6 +102,7 @@ export function SidebarItem({
 	mention,
 	mine,
 	showOwner = !mine,
+	alwaysShowAddToSidebar = false,
 	onClick,
 	onArchive: onArchiveRequest,
 	pinned,
@@ -121,6 +126,8 @@ export function SidebarItem({
 	/** Show the starter below the title. Person-group rows set this false because
 	    their heading already names the starter without claiming the session as mine. */
 	showOwner?: boolean;
+	/** Team rows are all unkept work, so their add affordance stays visible. */
+	alwaysShowAddToSidebar?: boolean;
 	onClick: () => void;
 	onArchive: (current: HTMLButtonElement | null) => void;
 	pinned: boolean;
@@ -138,6 +145,7 @@ export function SidebarItem({
 	const archiveKeys = useShortcutKeys("session-archive");
 	const waitingForInput = !!session.waitingForInput;
 	const failed = runNeedsAttention(session);
+	const canKeepInSidebar = !!onSetStatus && !mine && !isClaimed(session);
 	const [editing, setEditing] = useState(false);
 	const [draft, setDraft] = useState("");
 	// Desktop right-click menu (mobile long-press opens the action sheet).
@@ -225,16 +233,18 @@ export function SidebarItem({
 		if (swipeO && !longPressed.current) {
 			const dx = t.clientX - swipeO.x;
 			const dy = t.clientY - swipeO.y;
+			const swipeDx = canKeepInSidebar && dx < 0 ? 0 : dx;
 			if (
 				swiping.current ||
-				(Math.abs(dx) > SWIPE_AXIS_LOCK_PX && Math.abs(dx) > Math.abs(dy))
+				(Math.abs(swipeDx) > SWIPE_AXIS_LOCK_PX &&
+					Math.abs(swipeDx) > Math.abs(dy))
 			) {
 				swiping.current = true;
 				moved.current = true;
 				setDragging(true);
 				clearPress();
 				e.preventDefault();
-				const offset = clampSwipe(dx, swipeO.width);
+				const offset = clampSwipe(swipeDx, swipeO.width);
 				swipeOffsetRef.current = offset;
 				setSwipeOffset(offset);
 				return;
@@ -355,7 +365,7 @@ export function SidebarItem({
 					: undefined
 			}
 		>
-			{isPhone && (
+			{isPhone && !canKeepInSidebar && (
 				<button
 					className={cn(
 						SIDEBAR_SWIPE_ACTION,
@@ -408,16 +418,18 @@ export function SidebarItem({
 						// replacing them (see SIDEBAR_HOVER_LAYER).
 						"z-1 mt-0 block touch-pan-y",
 						SIDEBAR_HOVER_LAYER,
-						// On hover the row gives up its right end to the pin +
-						// archive pair floating there, the same reserve workspace
-						// rows make (SIDEBAR_WS_ROW). It used to be the buttons'
-						// own opaque plate that kept a long title out of the way;
-						// a solid chip can't sit on a translucent row. `hover:`, not
+						// The row gives up its right end to the pin plus one trailing
+						// action, the same reserve workspace rows make (SIDEBAR_WS_ROW).
+						// Team's add action is standing, so its first chip is reserved
+						// even at rest. Other actions remain hover-only. `hover:`, not
 						// `group-hover:` — this element is the group itself.
-						// Two chips' worth while the pin is there to unpin; one
-						// chip less (26px + the 4px gap) on an unpinned row, which
-						// reveals archive alone.
-						pinned ? "hover:pr-[68px]" : "hover:pr-[38px]",
+						alwaysShowAddToSidebar
+							? pinned
+								? "pr-[38px] hover:pr-[68px] phone:pr-[52px]"
+								: "pr-[38px] phone:pr-[52px]"
+							: pinned
+								? "hover:pr-[68px]"
+								: "hover:pr-[38px]",
 						// No trim here for other people's sessions, which stack a meta
 						// line under the title. That used to re-state `py-[7px]` against
 						// a 9px base; the base is now the shared `--sidebar-row-pad`, and
@@ -443,6 +455,9 @@ export function SidebarItem({
 					data-failed={failed || undefined}
 					data-running={session.isRunning || undefined}
 					data-unread={unread || undefined}
+					data-finished-unread={
+						shouldEmphasizeUnread(unread, session.isRunning) || undefined
+					}
 					style={
 						visibleSwipeOffset
 							? { transform: `translateX(${visibleSwipeOffset}px)` }
@@ -543,8 +558,8 @@ export function SidebarItem({
 						{stripPrTitlePrefix(session.title)}
 					</span>
 				)}
-				{/* Nobody started this one in a composer. The same quiet mark covers
-				    automation runs, report tasks, and sessions an agent minted itself. */}
+				{/* Machine origin stays passive beside the title. Keep belongs with
+				    the row's other actions at the right edge. */}
 				{!editing && sessionWasAgentStarted(session) && <AutoCreatedMark />}
 				{/* Started somewhere else: a Slack thread, a Linear issue. Same slot
 				    and ink as the mark above, since both answer "where did this row
@@ -570,8 +585,7 @@ export function SidebarItem({
 				)}
 				{/* Own sessions collapse to one line: the timestamp (+ any PR/Linear
 				    badge) rides to the right of the title, flush with the row edge. On
-				    hover it fades and the archive button takes its place — but not on a
-				    phone, where there is no archive button. */}
+				    hover it fades and the trailing action takes its place. */}
 				{compactMeta && !editing && metaParts.length > 0 && (
 					<span
 						className={cn(
@@ -611,7 +625,7 @@ export function SidebarItem({
 				</div>
 			)}
 			{/* Pin is not one of the row's standing actions. An unpinned row
-			    reveals archive alone, and pinning stays on the context menu, the
+			    reveals Archive or Keep alone, and pinning stays on the context menu, the
 			    keyboard chord and the swipe. A pinned row gets the chip back,
 			    because unpinning has to be reachable from the thing it marks. */}
 			{!isPhone && pinned && (
@@ -641,7 +655,7 @@ export function SidebarItem({
 				</span>
 			</Tooltip>
 			)}
-			{!isPhone && (
+			{!isPhone && !canKeepInSidebar && (
 			<Tooltip
 				label="Archive session"
 				shortcut={selected ? (archiveKeys ?? undefined) : undefined}
@@ -670,6 +684,18 @@ export function SidebarItem({
 					</svg>
 				</span>
 			</Tooltip>
+			)}
+			{(!isPhone || alwaysShowAddToSidebar) && canKeepInSidebar && (
+				<KeepInSidebarMark
+					label="Add to your sidebar"
+					className={cn(
+						ROW_ACTION,
+						"right-[7px]",
+						alwaysShowAddToSidebar && "flex phone:right-0 phone:size-11",
+					)}
+					onMouseEnter={closeHover}
+					onKeep={() => onSetStatus?.("mine")}
+				/>
 			)}
 		</Popover.Trigger>
 		</div>
@@ -726,8 +752,8 @@ export function SidebarItem({
 													kind: "item",
 													icon: <IconInbox size={20} />,
 													label: isClaimed(session)
-														? "Remove from my workspaces"
-														: "Add to my workspaces",
+														? "Stop keeping in sidebar"
+														: "Add to your sidebar",
 													onClick: () =>
 														onSetStatus(isClaimed(session) ? null : "mine"),
 												} as const,
@@ -749,13 +775,17 @@ export function SidebarItem({
 								setEditing(true);
 							},
 						},
-						{ kind: "sep" },
-						{
-							kind: "item",
-							icon: <IconArchive size={20} />,
-							label: "Archive",
-							onClick: onArchive,
-						},
+						...(!canKeepInSidebar
+							? [
+									{ kind: "sep" } as const,
+									{
+										kind: "item",
+										icon: <IconArchive size={20} />,
+										label: "Archive",
+										onClick: onArchive,
+									} as const,
+								]
+							: []),
 					]}
 				/>
 			)}
@@ -764,7 +794,7 @@ export function SidebarItem({
 }
 
 // The bottom sheet raised by long-pressing a session row on touch. It gathers
-// the per-session actions (rename, archive) into thumb-sized rows on the shared
+// the available per-session actions into thumb-sized rows on the shared
 // `BottomSheet` — backdrop, grabber, drag-to-dismiss and focus handling come
 // from the primitive.
 function MobileActionSheet({
@@ -787,6 +817,7 @@ function MobileActionSheet({
 	const [page, setPage] = useState<"actions" | "status">("actions");
 	const currentLane = pinnedLane(session) ?? null;
 	const displayedLane = currentLane ?? mineStatus(session);
+	const canKeepInSidebar = !!onSetStatus && !mine && !isClaimed(session);
 	// Lock the page behind the sheet so a scroll drags the list, not the page.
 	useEffect(() => {
 		const prev = document.body.style.overflow;
@@ -842,8 +873,8 @@ function MobileActionSheet({
 						>
 							<IconInbox size={22} />
 							{isClaimed(session)
-								? "Remove from my workspaces"
-								: "Add to my workspaces"}
+								? "Stop keeping in sidebar"
+								: "Add to your sidebar"}
 						</SheetItem>
 					)}
 					{onSetStatus && (
@@ -854,28 +885,32 @@ function MobileActionSheet({
 							onClick={() => setPage("status")}
 						/>
 					)}
-					<SheetSeparator />
-					<SheetItem
-						tone="danger"
-						onClick={() => {
-							onArchive();
-							dismiss();
-						}}
-					>
-						<svg
-							width="20"
-							height="20"
-							viewBox="0 0 16 16"
-							fill="none"
-							stroke="currentColor"
-							strokeWidth="1.4"
-						>
-							<rect x="2.25" y="2.75" width="11.5" height="3" rx="0.6" />
-							<path d="M3.25 5.75v6.5a1 1 0 0 0 1 1h7.5a1 1 0 0 0 1-1v-6.5" />
-							<path d="M6.5 8.5h3" strokeLinecap="round" />
-						</svg>
-						Archive
-					</SheetItem>
+					{!canKeepInSidebar && (
+						<>
+							<SheetSeparator />
+							<SheetItem
+								tone="danger"
+								onClick={() => {
+									onArchive();
+									dismiss();
+								}}
+							>
+								<svg
+									width="20"
+									height="20"
+									viewBox="0 0 16 16"
+									fill="none"
+									stroke="currentColor"
+									strokeWidth="1.4"
+								>
+									<rect x="2.25" y="2.75" width="11.5" height="3" rx="0.6" />
+									<path d="M3.25 5.75v6.5a1 1 0 0 0 1 1h7.5a1 1 0 0 0 1-1v-6.5" />
+									<path d="M6.5 8.5h3" strokeLinecap="round" />
+								</svg>
+								Archive
+							</SheetItem>
+						</>
+					)}
 				</SheetBody>
 				);
 			}}

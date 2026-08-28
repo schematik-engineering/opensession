@@ -213,7 +213,7 @@ export interface SandboxStatusInfo {
 	enabled: boolean;
 	defaultProvider: string;
 	providers: Array<{
-		id: "docker" | "daytona" | "e2b" | "box" | "modal" | "microvm" | "lambda-microvm";
+		id: "docker" | "daytona" | "e2b" | "box" | "modal" | "lambda-microvm";
 		configured: boolean;
 		certified: boolean;
 		lastPassedAt?: string;
@@ -242,7 +242,7 @@ export type SandboxConnectionState =
 
 export interface SandboxConnectionInfo {
 	id: string;
-	provider: "docker" | "daytona" | "box" | "modal" | "microvm";
+	provider: "docker" | "daytona" | "box" | "modal";
 	enabled: boolean;
 	settings: Record<string, string | number | boolean | undefined>;
 	qualification?: {

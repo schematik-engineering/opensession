@@ -77,6 +77,49 @@ export interface PendingSessionPatch {
   runtimeRevision?: number;
 }
 
+export interface StickySession {
+  session: UnifiedSession;
+  /** The selected-session projection has returned an authoritative copy. */
+  serverSeen: boolean;
+}
+
+/**
+ * Keep a just-created row available while its session is selected. The sidebar
+ * endpoint explicitly includes the selected session, but its cached/indexed
+ * projections can briefly disagree while creation settles. Seeing the row once
+ * therefore updates the fallback rather than retiring it. Once navigation
+ * leaves the session, the current projection is authoritative again.
+ */
+export function reconcileStickySessions(
+  sessions: UnifiedSession[],
+  sticky: Map<string, StickySession>,
+  selectedSessionId?: string,
+): UnifiedSession[] {
+  if (sticky.size === 0) return sessions;
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  const extras: UnifiedSession[] = [];
+  for (const [id, pending] of sticky) {
+    const serverSession = byId.get(id);
+    if (serverSession) {
+      if (selectedSessionId === id) {
+        // If a later indexed snapshot briefly loses this row, fall back to the
+        // freshest server shape rather than the original incomplete shell.
+        pending.session = serverSession;
+        pending.serverSeen = true;
+      } else {
+        sticky.delete(id);
+      }
+      continue;
+    }
+    if (pending.serverSeen && selectedSessionId !== id) {
+      sticky.delete(id);
+      continue;
+    }
+    extras.push(pending.session);
+  }
+  return extras.length ? [...sessions, ...extras] : sessions;
+}
+
 export function reconcilePendingSessionPatches(
   sessions: UnifiedSession[],
   pendingPatches: Map<string, PendingSessionPatch>,
@@ -209,9 +252,10 @@ export function useSessions({
   // Optimistically-injected sessions the server hasn't caught up to yet (a
   // just-created workspace/session). A plain poll replaces the whole array and
   // would drop the injected copy — flashing a loading placeholder until the
-  // create lands seconds later. Keep these merged into every poll result until
-  // the server's own copy shows up (auto-cleared here) or `unstick` drops it.
-  const stickyRef = useRef<Map<string, UnifiedSession>>(new Map());
+  // create lands seconds later. A selected row stays available through
+  // temporarily inconsistent server projections; background creates retire as
+  // soon as the server returns them.
+  const stickyRef = useRef<Map<string, StickySession>>(new Map());
   // Optimistic changes that must survive an older poll already in flight.
   // Archive fields wait for value acknowledgement; runtime fields yield to the
   // first snapshot started after their WebSocket frame.
@@ -221,23 +265,29 @@ export function useSessions({
   // server snapshot without relying on wall-clock timing.
   const runtimeRevisionRef = useRef(0);
 
-  const applyServer = (parsed: UnifiedSession[], snapshotRuntimeRevision: number) => {
+  const applyServer = (
+    parsed: UnifiedSession[],
+    snapshotRuntimeRevision: number,
+    requestQuery: string,
+  ) => {
       const reconciled = reconcilePendingSessionPatches(
         parsed,
         pendingPatchRef.current,
         snapshotRuntimeRevision,
       );
-      setLive((previous) => {
-        const next = reconciled;
-        if (stickyRef.current.size === 0) return next;
-        const present = new Set(next.map((s) => s.id));
-        const extras: UnifiedSession[] = [];
-        for (const [id, s] of stickyRef.current) {
-          if (present.has(id)) stickyRef.current.delete(id);
-          else extras.push(s);
-        }
-        return extras.length ? [...next, ...extras] : next;
-      });
+      const selectedSessionId = new URLSearchParams(
+        requestQuery.startsWith("?") ? requestQuery.slice(1) : requestQuery,
+      ).get("session") ?? undefined;
+      // Reconcile refs before scheduling state. React may replay state updaters
+      // in development, so mutating stickyRef from inside one can acknowledge a
+      // single server snapshot twice and retire the fallback too early.
+      setLive(
+        reconcileStickySessions(
+          reconciled,
+          stickyRef.current,
+          selectedSessionId,
+        ),
+      );
     };
 
   // Stable per query: refs, setters and module fns otherwise. The polling
@@ -278,7 +328,11 @@ const snapshot = await fetchSessionsSnapshot({
           etagRef.current = snapshot.etag;
           if (snapshot.text !== lastTextRef.current) {
             lastTextRef.current = snapshot.text;
-            applyServer(JSON.parse(snapshot.text), snapshotRuntimeRevision);
+            applyServer(
+              JSON.parse(snapshot.text),
+              snapshotRuntimeRevision,
+              requestQuery,
+            );
           }
         }
         liveAtRef.current = startedAt;
@@ -500,7 +554,13 @@ const snapshot = await fetchSessionsSnapshot({
       // poll to apply (it reconciles the injected copy, same as before).
       lastTextRef.current = null;
       etagRef.current = null;
-      if (opts?.sticky) stickyRef.current.set(session.id, session);
+      const pending = stickyRef.current.get(session.id);
+      if (opts?.sticky)
+        stickyRef.current.set(session.id, {
+          session,
+          serverSeen: pending?.serverSeen ?? false,
+        });
+      else if (pending) pending.session = session;
       setLive((prev) =>
         prev.some((s) => s.id === session.id)
           ? prev.map((s) => (s.id === session.id ? session : s))
@@ -520,6 +580,8 @@ const snapshot = await fetchSessionsSnapshot({
   const patch = (id: string, patch: Partial<UnifiedSession>) => {
       lastTextRef.current = null;
       etagRef.current = null;
+      const sticky = stickyRef.current.get(id);
+      if (sticky) sticky.session = { ...sticky.session, ...patch };
       if (sessionPatchNeedsAcknowledgement(patch)) {
         const previous = pendingPatchRef.current.get(id);
         const runtimeRevision =

@@ -17,11 +17,10 @@ import {
 } from "./transcript-protocol";
 
 const CENTRAL_STORE_FAILURE = "SESSION_KERNEL_CENTRAL_STORE_FAILURE";
-// Global runtime turns share the actor service with latency-sensitive session
-// commands. Keep every turn small: the cursor makes progress across calls,
-// while a bounded slice prevents startup recovery from opening hundreds of
-// SQLite databases behind one global barrier.
-const RUNTIME_WAKE_CANDIDATE_BATCH = 16;
+// Catalog discovery returns ids only. Each candidate then claims work on its
+// own session lane, and this bound prevents crash recovery from flooding those
+// latency-sensitive mailboxes in one tick.
+const RUNTIME_WAKE_CANDIDATE_BATCH = 4;
 
 export type SessionKernelStoreHostMetrics = {
   kernelStoreCacheMisses: number;
@@ -499,20 +498,108 @@ export class SessionKernelStoreHost {
     );
   }
 
-  runtimeWork(
+  runtimeCatalogWork(
     now: number,
     timerKinds: string[],
     effectKinds: string[],
     limit: number,
+    additionalOutboxGroups: Array<{
+      effectKinds: string[];
+      limit: number;
+    }> = [],
+    activeOutbox: Array<{ id: number; sessionId: string }> = [],
+  ): { sessionIds: string[]; timers: DurableTimer[]; outbox: DurableOutboxItem[] } {
+    const outboxGroups = [
+      { effectKinds, limit },
+      ...additionalOutboxGroups,
+    ].map((group) => ({ ...group, items: [] as DurableOutboxItem[] }));
+    const largestLimit = Math.max(limit, ...outboxGroups.map((group) => group.limit));
+    const sessionIds = this.runtimeCandidates(now, largestLimit);
+    const quota = (groupLimit: number) =>
+      Math.max(1, Math.ceil(groupLimit / (sessionIds.length + 1)));
+    const timers = this.central.dueTimers(
+      now,
+      Math.min(quota(limit), limit),
+      timerKinds,
+    );
+    const activeIds = activeOutbox.map((item) => item.id);
+    for (const group of outboxGroups) {
+      group.items.push(...this.central.pendingOutbox(
+        now,
+        Math.min(quota(group.limit), group.limit),
+        group.effectKinds,
+        activeIds,
+      ));
+    }
+    const outbox = new Map<number, DurableOutboxItem>();
+    for (const group of outboxGroups)
+      for (const item of group.items) outbox.set(item.id, item);
+    return { sessionIds, timers, outbox: [...outbox.values()] };
+  }
+
+  runtimeSessionWork(
+    sessionId: string,
+    candidateCount: number,
+    now: number,
+    timerKinds: string[],
+    effectKinds: string[],
+    limit: number,
+    additionalOutboxGroups: Array<{
+      effectKinds: string[];
+      limit: number;
+    }> = [],
+    activeOutbox: Array<{ id: number; sessionId: string }> = [],
+    activeOutboxRecheckAt = now,
   ): { timers: DurableTimer[]; outbox: DurableOutboxItem[] } {
+    const divisor = Math.max(1, Math.floor(candidateCount) + 1);
+    const quota = (groupLimit: number) =>
+      Math.max(1, Math.ceil(groupLimit / divisor));
+    const activeIds = activeOutbox
+      .filter((item) => item.sessionId === sessionId)
+      .map((item) => item.id);
+    const scanned = this.containIsolated(sessionId, "runtime:scan", () => {
+      const store = this.openIsolated(sessionId);
+      return {
+        timers: store.dueTimers(
+          now,
+          Math.min(quota(limit), limit),
+          timerKinds,
+        ),
+        outbox: [
+          { effectKinds, limit },
+          ...additionalOutboxGroups,
+        ].flatMap((group) => store.pendingOutbox(
+          now,
+          Math.min(quota(group.limit), group.limit),
+          group.effectKinds,
+          activeIds,
+        )),
+        nextTimerWakeAt: store.nextTimerWakeAt(),
+        nextOutboxWakeAt: store.nextOutboxWakeAt(
+          activeIds,
+          activeOutboxRecheckAt,
+        ),
+      };
+    });
+    if (!scanned.ok) return { timers: [], outbox: [] };
+    this.centralOperation(() => this.central.settleIsolatedSessionWake(
+      sessionId,
+      scanned.value.nextTimerWakeAt,
+      scanned.value.nextOutboxWakeAt,
+    ));
+    const outbox = new Map<number, DurableOutboxItem>();
+    for (const item of scanned.value.outbox) outbox.set(item.id, item);
+    return { timers: scanned.value.timers, outbox: [...outbox.values()] };
+  }
+
+  private runtimeCandidates(now: number, limit: number): string[] {
     const candidateLimit = Math.max(
       1,
       Math.min(RUNTIME_WAKE_CANDIDATE_BATCH, limit),
     );
-    // Reserve a small part of every batch for the most recently dirtied actors
-    // and the oldest already-indexed due work. This keeps both new creates and
-    // retrying effects responsive while the cursor continues a large
-    // conservative migration or crash-recovery sweep.
+    // Reserve half the batch for the most recently dirtied actors and the
+    // oldest already-indexed due work. The remaining cursor slots repair a
+    // conservative migration or crash-recovery backlog without fleet fanout.
     const priorityLimit = Math.min(4, candidateLimit);
     const recentLimit = Math.ceil(priorityLimit / 2);
     const dueLimit = priorityLimit - recentLimit;
@@ -557,34 +644,7 @@ export class SessionKernelStoreHost {
     appendFairCandidates(this.runtimeCursor);
     if (candidates.length < candidateLimit && this.runtimeCursor)
       appendFairCandidates();
-    const quota = Math.max(1, Math.ceil(limit / (candidates.length + 1)));
-    const timers = this.central.dueTimers(now, Math.min(quota, limit), timerKinds);
-    const outbox = this.central.pendingOutbox(now, Math.min(quota, limit), effectKinds);
-    for (const sessionId of candidates) {
-      const scanned = this.containIsolated(sessionId, "runtime:scan", () => {
-        const store = this.openIsolated(sessionId);
-        return {
-          timers: timers.length < limit
-            ? store.dueTimers(now, Math.min(quota, limit - timers.length), timerKinds)
-            : [],
-          outbox: outbox.length < limit
-            ? store.pendingOutbox(now, Math.min(quota, limit - outbox.length), effectKinds)
-            : [],
-          nextTimerWakeAt: store.nextTimerWakeAt(),
-          nextOutboxWakeAt: store.nextOutboxWakeAt(),
-        };
-      });
-      if (!scanned.ok) continue;
-      timers.push(...scanned.value.timers);
-      outbox.push(...scanned.value.outbox);
-      this.central.settleIsolatedSessionWake(
-        sessionId,
-        scanned.value.nextTimerWakeAt,
-        scanned.value.nextOutboxWakeAt,
-      );
-      if (timers.length >= limit && outbox.length >= limit) break;
-    }
-    return { timers, outbox };
+    return candidates;
   }
 
   stats(): ReturnType<SessionKernelStoreApi["stats"]> {

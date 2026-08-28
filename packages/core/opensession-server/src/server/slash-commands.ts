@@ -1,5 +1,5 @@
 /**
- * Open Session-native slash commands (/pstack /goal /loop /model /account /compact /help) —
+ * Open Session-native slash commands (/pstack /poteto-mode /goal /loop /model /account /compact /help) —
  * consumed by the WS prompt path, the opensession-sessions send_to_session tool,
  * and interactive resumes. Returns a notice string when the message was handled
  * as a command, or null to send it to the engine as a normal prompt.
@@ -68,7 +68,8 @@ export function handleSlashCommand(
 		return [
 			`${productName()} commands:`,
 			"/pstack <task> — enable rigorous pstack mode and start the task",
-			"/pstack off — disable pstack mode",
+			"/poteto-mode <task> — alias for /pstack",
+			"/pstack off or /poteto-mode off — disable the mode",
 			"/goal <text> — pin a goal, appended to every prompt until cleared",
 			"/goal clear — remove the goal",
 			"/loop <interval> <prompt> — re-run a prompt on an interval (e.g. /loop 30m check CI and fix failures)",
@@ -86,8 +87,8 @@ export function handleSlashCommand(
 		const input = pstackCommandInput(text);
 		if (!input || ["show", "status"].includes(input.toLowerCase())) {
 			return session.pstackMode
-				? "Pstack mode is on. Use /pstack off to disable it."
-				: "Pstack mode is off. Use /pstack <task> to enable it.";
+				? "Pstack mode is on. Use /pstack off or /poteto-mode off to disable it."
+				: "Pstack mode is off. Use /pstack <task> or /poteto-mode <task> to enable it.";
 		}
 		if (["off", "disable", "stop"].includes(input.toLowerCase())) {
 			touchNativeSession(session.id, { pstackMode: undefined });

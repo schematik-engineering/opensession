@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type { UnifiedSession } from "./types";
-import { pickUnreadWorkspaceSession } from "./sidebar-unread-session";
+import {
+	pickUnreadWorkspaceSession,
+	shouldEmphasizeUnread,
+} from "./sidebar-unread-session";
 
 function session(over: Partial<UnifiedSession>): UnifiedSession {
 	return {
@@ -21,6 +24,14 @@ const READS = {
 	selected: "2026-08-20T10:00:00.000Z",
 	worker: "2026-08-20T10:00:00.000Z",
 };
+
+describe("shouldEmphasizeUnread", () => {
+	test("waits until unread agent work has finished", () => {
+		expect(shouldEmphasizeUnread(true, true)).toBe(false);
+		expect(shouldEmphasizeUnread(true, false)).toBe(true);
+		expect(shouldEmphasizeUnread(false, false)).toBe(false);
+	});
+});
 
 describe("pickUnreadWorkspaceSession", () => {
 	test("opens the unread tab with the newest activity", () => {

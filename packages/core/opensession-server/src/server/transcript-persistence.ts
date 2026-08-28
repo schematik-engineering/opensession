@@ -156,12 +156,14 @@ export function transcriptLineUser(
   text: string,
   id?: string,
   ts?: string,
-  images?: ImageInput[]
+  images?: ImageInput[],
+  sourceMessageIds?: string[],
 ): JsonlLine {
   return {
     type: "user",
     uuid: id || crypto.randomUUID(),
     timestamp: ts || new Date().toISOString(),
+    ...(sourceMessageIds?.length ? { sourceMessageIds } : {}),
     message: {
       role: "user",
       content: [

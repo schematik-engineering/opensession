@@ -138,6 +138,7 @@ export async function getPrAutomationDetails(
     baseRefName: pr.base?.ref || "",
     headRefName: pr.head?.ref || "",
     headRefOid: pr.head?.sha || "",
+    headRepo: pr.head?.repo?.full_name || cached?.headRepo,
     additions: Number(pr.additions) || cached?.additions || 0,
     deletions: Number(pr.deletions) || cached?.deletions || 0,
     changedFiles: Number(pr.changed_files) || cached?.changedFiles || 0,

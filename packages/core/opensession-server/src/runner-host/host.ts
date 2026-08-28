@@ -190,7 +190,7 @@ const transcriptRelay = new TranscriptRelay();
   const { setTranscriptForwarder } = await import("../server/transcript-forward");
   let warnedOverflow = false;
   setTranscriptForwarder((engineSessionId, lines) => {
-    if (!RUN_WS_URL && !transcriptRelay.record(engineSessionId, lines) && !warnedOverflow) {
+    if (!transcriptRelay.record(engineSessionId, lines) && !warnedOverflow) {
       warnedOverflow = true;
       log(
         "transcript history exceeded its byte budget; reattach resend will be partial (live frames unaffected)",
@@ -233,9 +233,12 @@ function sendHello(): void {
     done: ended ? terminal : undefined,
   });
   // Socket mode is live-only: re-send the transcript history so a
-  // reattaching server upserts anything it missed while detached.
+  // reattaching server upserts anything it missed while detached. The marker
+  // is the terminal fence: an ended hello cannot close the connection before
+  // these replay frames have been consumed.
   if (!RUN_WS_URL) {
     for (const batch of transcriptRelay.replay()) send({ t: "transcript", ...batch });
+    send({ t: "catchup_complete" });
   }
 }
 
@@ -358,15 +361,25 @@ if (RUN_WS_URL) {
     }
     let openSeq = 0;
     let ackTimer: ReturnType<typeof setTimeout> | null = null;
-    /** Replay everything after `after`, then open the live tap. */
-    const beginStream = (after: number): void => {
+    /** Replay everything after `after`, then open the live tap. A fresh server
+     *  epoch has no safe event watermark, so recover its idempotent transcript
+     *  projection separately from the bounded transcript history. */
+    const beginStream = (after: number, freshServer: boolean): void => {
       const { gap, lines } = buf.replayFrom(after);
       try {
+        if (freshServer) {
+          for (const batch of transcriptRelay.replay()) {
+            sock.send(JSON.stringify({ t: "transcript", ...batch }));
+          }
+        }
         if (gap) {
           log(`replay gap: frames ${gap.from}..${gap.to} were dropped (buffer overflow)`);
           sock.send(JSON.stringify({ t: "gap", ...gap }));
         }
         for (const line of lines) sock.send(line);
+        // Connection-specific and deliberately unsequenced: it fences both
+        // transcript catch-up and the sequenced replay from this handshake.
+        sock.send(JSON.stringify({ t: "catchup_complete" }));
       } catch (e) {
         log("ws replay failed (frames stay buffered):", e);
       }
@@ -384,7 +397,7 @@ if (RUN_WS_URL) {
       openSeq = buf.lastSeq;
       // A pre-ack opensession never acks: fall back to live-only streaming from
       // this connection onward (the old semantics) so mixed versions still run.
-      ackTimer = setTimeout(() => beginStream(openSeq), 3_000);
+      ackTimer = setTimeout(() => beginStream(openSeq, true), 3_000);
     };
     sock.onmessage = (ev) => {
       let msg: any;
@@ -398,9 +411,10 @@ if (RUN_WS_URL) {
         const ack = { seq: Number(msg.seq) || 0, epoch: typeof msg.epoch === "string" ? msg.epoch : undefined };
         if (!streaming) {
           if (ackTimer) clearTimeout(ackTimer);
+          const freshServer = !ack.epoch || ack.epoch !== lastEpoch;
           const from = replayStartFor(ack, lastEpoch, openSeq);
           lastEpoch = ack.epoch ?? null;
-          beginStream(from);
+          beginStream(from, freshServer);
         } else {
           buf.ack(ack.seq); // periodic watermark — release delivered frames
         }
@@ -565,6 +579,7 @@ try {
     author: spec.author,
     user: spec.user,
     fallbackModel: spec.fallbackModel,
+    accountAffinityKey: spec.accountAffinityKey,
     effort: spec.effort,
     fastMode: spec.fastMode,
     accountId: spec.accountId,
@@ -572,7 +587,7 @@ try {
     usageCredits: spec.usageCredits,
     prReviewer: spec.prReviewer,
     journal: {
-      osSessionId: spec.osSessionId,
+      ...(spec.lifecycle === "auxiliary" ? {} : { osSessionId: spec.osSessionId }),
       kind: spec.journalKind || "prompt",
       firstJournaledAt: spec.firstJournaledAt,
       resumeAttempts: spec.resumeAttempts,

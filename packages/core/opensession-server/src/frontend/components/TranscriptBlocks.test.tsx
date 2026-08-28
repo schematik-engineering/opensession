@@ -210,6 +210,45 @@ describe("TranscriptBlocks sent message actions", () => {
 		);
 		expect(html.match(/aria-label="Edit and send again"/g)).toHaveLength(1);
 	});
+
+	test("does not animate a sent message when delivery settles", () => {
+		const html = renderToStaticMarkup(
+			<TranscriptBlocks
+				entries={[
+					{
+						id: "pending-message",
+						type: "user",
+						content: "Keep the handoff still",
+						timestamp: "2026-08-12T12:00:00Z",
+					},
+				]}
+				pendingDeliveryIds={["pending-message"]}
+			/>,
+		);
+		expect(html).toContain("opacity-70");
+		expect(html).not.toContain("opacity-70 transition-opacity");
+	});
+
+	test("reserves action clearance before the durable row arrives", () => {
+		const html = renderToStaticMarkup(
+			<TranscriptBlocks
+				entries={[]}
+				onEditMessage={() => {}}
+				optimisticEntries={[
+					{
+						id: "outbox-client-prompt",
+						type: "user",
+						content: "Keep this row still",
+						timestamp: "2026-08-12T12:00:00Z",
+					},
+				]}
+			/>,
+		);
+		const rowClass = html.match(
+			/class="([^"]+)"[^>]*data-eid="outbox-client-prompt"/,
+		)?.[1];
+		expect(rowClass?.split(" ")).toContain("mb-8.75");
+	});
 });
 
 describe("TranscriptBlocks compact tool runs", () => {
@@ -243,6 +282,22 @@ describe("TranscriptBlocks compact tool runs", () => {
 		expect(html).not.toContain("Show 2 grouped steps");
 		expect(html).not.toContain("git status");
 		expect(html).not.toContain("package.json");
+	});
+
+	test("opens tool-only work directly without repeating its group", () => {
+		setTurnPrefs("open", "folded");
+		const html = renderToStaticMarkup(
+			<TranscriptBlocks live entries={toolEntries} />,
+		);
+
+		expect(html).toContain('aria-expanded="true"');
+		expect(html).toContain(">Working</span>");
+		expect(html).toContain("2 steps</span>");
+		expect(html).not.toContain('data-tool-run="true"');
+		expect(html).not.toContain("Show 2 grouped steps");
+		expect(html).toContain("git status");
+		expect(html).toContain("package.json");
+		setTurnPrefs(null);
 	});
 
 	test("keeps a lone live call behind its Working row", () => {
@@ -422,7 +477,7 @@ describe("TranscriptBlocks compact tool runs", () => {
 		setTurnPrefs(null);
 	});
 
-	test("keeps intermediate messages between compact runs", () => {
+	test("keeps intermediate messages and tool runs in one worker", () => {
 		setTurnPrefs(null);
 		const html = renderToStaticMarkup(
 			<TranscriptBlocks
@@ -437,7 +492,12 @@ describe("TranscriptBlocks compact tool runs", () => {
 		);
 
 		expect(html).toContain("The repository is clean.");
+		expect(html).toContain('data-narration=""');
+		expect(html.match(/>Working<\/span>/g)).toHaveLength(1);
 		expect(html.match(/data-tool-run="true"/g)).toHaveLength(2);
+		expect(html).not.toContain("git status");
+		expect(html).not.toContain("bun test");
+		expect(html).not.toContain("git diff");
 	});
 
 	test("keeps incidental media status without repeating failures on the compact row", () => {
@@ -502,7 +562,7 @@ describe("TranscriptBlocks turn work and tool call preferences", () => {
 		{ id: "verify-result", type: "tool_result", toolUseId: "verify-call", content: "ok", timestamp: "2026-08-19T06:00:07Z" },
 	];
 
-	test("keeps grouped calls closed inside steps that stay open", () => {
+	test("keeps grouped calls folded inside open narrated work", () => {
 		setTurnPrefs("open", "folded");
 		const html = renderToStaticMarkup(<TranscriptBlocks entries={narratedTurn} />);
 
@@ -535,54 +595,139 @@ describe("TranscriptBlocks turn work and tool call preferences", () => {
 		setTurnPrefs(null);
 	});
 
-	test("keeps every model message visible when work is folded", () => {
+	test("folds intermediate narration but never the final output", () => {
 		setTurnPrefs("folded", "open");
 		const html = renderToStaticMarkup(<TranscriptBlocks entries={narratedTurn} />);
 
-		expect(html).toContain("Worked");
-		expect(html).toContain("The repository is clean.");
+		expect(html.match(/>Worked<\/span>/g)).toHaveLength(1);
+		expect(html).not.toContain("The repository is clean.");
 		expect(html).not.toContain("git status");
 		expect(html).toContain("All good.");
 		setTurnPrefs(null);
 	});
 
-	test("never folds model output before or between tool runs", () => {
+	test("shows narration while working and folds it when the turn settles", () => {
 		setTurnPrefs("running", "folded");
 		const running = renderToStaticMarkup(
 			<TranscriptBlocks live entries={liveNarratedTurn} />,
 		);
+		expect(running.match(/>Working<\/span>/g)).toHaveLength(1);
 		expect(running).toContain("The repository is clean.");
+		expect(running).toContain('data-narration=""');
 		expect(running).toContain('data-tool-run="true"');
+		expect(running).not.toContain("git status");
+		expect(running).toContain("bun test");
 
 		const settled = renderToStaticMarkup(
 			<TranscriptBlocks entries={narratedTurn} />,
 		);
-		expect(settled).toContain("The repository is clean.");
+		expect(settled).not.toContain("The repository is clean.");
 		expect(settled).toContain("All good.");
 		expect(settled).not.toContain("git status");
 		setTurnPrefs(null);
 	});
 
-	test("renders reasoning headings as quiet regular text", () => {
+	test("keeps a title-shaped final output outside the fold", () => {
 		setTurnPrefs("folded", "folded");
 		const html = renderToStaticMarkup(
 			<TranscriptBlocks
 				entries={[
-					{ id: "prompt", type: "user", content: "Check it", timestamp: "2026-08-28T06:00:00Z" },
-					{ id: "reasoning", type: "assistant", content: "**Checking deployment status**", isReasoning: true, timestamp: "2026-08-28T06:00:01Z" },
-					{ id: "tool", type: "tool_use", toolUseId: "tool-call", toolName: "bash", toolInput: { command: "git status" }, content: "Using bash", timestamp: "2026-08-28T06:00:02Z" },
-					{ id: "legacy-reasoning", type: "assistant", content: "**Verifying the release**", timestamp: "2026-08-28T06:00:03Z" },
-					{ id: "tool-2", type: "tool_use", toolUseId: "tool-call-2", toolName: "bash", toolInput: { command: "git diff" }, content: "Using bash", timestamp: "2026-08-28T06:00:04Z" },
-					{ id: "answer", type: "assistant", content: "Done.", timestamp: "2026-08-28T06:00:05Z" },
+					...narratedTurn.slice(0, -1),
+					{ id: "bold-answer", type: "assistant", content: "**All good**", timestamp: "2026-08-19T06:00:06Z" },
 				]}
 			/>,
 		);
 
+		expect(html).toContain("<strong>All good</strong>");
+		expect(html).not.toContain("The repository is clean.");
+		setTurnPrefs(null);
+	});
+
+	test("keeps completed output visible across a background wake", () => {
+		setTurnPrefs("folded", "folded");
+		const html = renderToStaticMarkup(
+			<TranscriptBlocks
+				entries={[
+					{ id: "prompt", type: "user", content: "Ship it", timestamp: "2026-08-19T06:00:00Z" },
+					{ id: "first-tool", type: "tool_use", toolUseId: "first-call", toolName: "bash", toolInput: { command: "bun test" }, content: "Using bash", timestamp: "2026-08-19T06:00:01Z" },
+					{ id: "status", type: "assistant", content: "Implemented and committed. Deployment is running.", timestamp: "2026-08-19T06:00:02Z" },
+					{ id: "wait-boundary", type: "user", content: "", timestamp: "2026-08-19T06:01:30Z", turnBoundary: true },
+					{ id: "verify-tool", type: "tool_use", toolUseId: "verify-call", toolName: "bash", toolInput: { command: "curl /health" }, content: "Using bash", timestamp: "2026-08-19T06:01:31Z" },
+					{ id: "final", type: "assistant", content: "Deployment verified.", timestamp: "2026-08-19T06:01:32Z" },
+				]}
+			/>,
+		);
+
+		expect(html).toContain("Implemented and committed. Deployment is running.");
+		expect(html).toContain("Deployment verified.");
+		expect(html.match(/>Worked<\/span>/g)).toHaveLength(2);
+		expect(html).not.toContain("wait-boundary");
+		setTurnPrefs(null);
+	});
+
+	test("coalesces consecutive reasoning revisions into their latest visible step", () => {
+		const entries: TranscriptEntry[] = [
+			{ id: "prompt", type: "user", content: "Check it", timestamp: "2026-08-28T05:00:00Z" },
+			{ id: "reasoning-1", type: "assistant", content: "**Inspecting the current state**\n\nThe first probe found an older release.", isReasoning: true, timestamp: "2026-08-28T05:00:01Z" },
+			{ id: "reasoning-2", type: "assistant", content: "**Checking deployment status**", isReasoning: true, timestamp: "2026-08-28T05:00:02Z" },
+			{ id: "tool", type: "tool_use", toolUseId: "tool-call", toolName: "bash", toolInput: { command: "git status" }, content: "Using bash", timestamp: "2026-08-28T05:00:03Z" },
+			{ id: "reasoning-3", type: "assistant", content: "**Verifying the release**", isReasoning: true, timestamp: "2026-08-28T05:00:04Z" },
+			{ id: "answer", type: "assistant", content: "Done.", timestamp: "2026-08-28T05:00:05Z" },
+		];
+		setTurnPrefs("open", "folded");
+		const html = renderToStaticMarkup(<TranscriptBlocks entries={entries} />);
+
 		expect(html.match(/data-reasoning=""/g)).toHaveLength(2);
+		expect(html).not.toContain("Inspecting the current state");
+		expect(html).toContain("The first probe found an older release.");
 		expect(html).toContain("Checking deployment status");
 		expect(html).toContain("Verifying the release");
+		setTurnPrefs(null);
+	});
+
+	test("keeps reasoning quiet inside one work disclosure", () => {
+		const entries: TranscriptEntry[] = [
+			{ id: "prompt", type: "user", content: "Check it", timestamp: "2026-08-28T06:00:00Z" },
+			{ id: "reasoning", type: "assistant", content: "**Checking deployment status**\n\n**Inspecting the release**", isReasoning: true, timestamp: "2026-08-28T06:00:01Z" },
+			{ id: "tool", type: "tool_use", toolUseId: "tool-call", toolName: "bash", toolInput: { command: "git status" }, content: "Using bash", timestamp: "2026-08-28T06:00:02Z" },
+			{ id: "legacy-reasoning", type: "assistant", content: "**Verifying the release**", timestamp: "2026-08-28T06:00:03Z" },
+			{ id: "tool-2", type: "tool_use", toolUseId: "tool-call-2", toolName: "bash", toolInput: { command: "git diff" }, content: "Using bash", timestamp: "2026-08-28T06:00:04Z" },
+			{ id: "answer", type: "assistant", content: "Done.", timestamp: "2026-08-28T06:00:05Z" },
+		];
+		setTurnPrefs("folded", "folded");
+		const folded = renderToStaticMarkup(<TranscriptBlocks entries={entries} />);
+		expect(folded.match(/>Worked<\/span>/g)).toHaveLength(1);
+		expect(folded).toContain("2 steps");
+		expect(folded).not.toContain("Checking deployment status");
+
+		setTurnPrefs("open", "folded");
+		const html = renderToStaticMarkup(<TranscriptBlocks entries={entries} />);
+		expect(html.match(/data-reasoning=""/g)).toHaveLength(2);
+		expect(html).not.toContain("Checking deployment status");
+		expect(html).toContain("Inspecting the release");
+		expect(html).toContain("Verifying the release");
 		expect(html).not.toContain("<strong>Checking deployment status</strong>");
+		expect(html).not.toContain("<strong>Inspecting the release</strong>");
 		expect(html).not.toContain("<strong>Verifying the release</strong>");
+
+		setTurnPrefs("running", "folded");
+		const running = renderToStaticMarkup(<TranscriptBlocks live entries={entries} />);
+		expect(running).toContain('aria-expanded="true"');
+		expect(running).toContain("reasoning-shimmer_3s_ease_0.5s_infinite");
+
+		const proseReasoning = renderToStaticMarkup(
+			<TranscriptBlocks
+				live
+				entries={[
+					{ id: "prompt-2", type: "user", content: "Check it", timestamp: "2026-08-28T07:00:00Z" },
+					{ id: "reasoning-2", type: "assistant", content: "I should inspect the current state first.", isReasoning: true, timestamp: "2026-08-28T07:00:01Z" },
+					{ id: "tool-3", type: "tool_use", toolUseId: "tool-call-3", toolName: "read", toolInput: { path: "README.md" }, content: "Using read", timestamp: "2026-08-28T07:00:02Z" },
+				]}
+			/>,
+		);
+		expect(proseReasoning).toContain(">Thinking</div>");
+		expect(proseReasoning).toContain("I should inspect the current state first.");
+		expect(proseReasoning).toContain("reasoning-shimmer_3s_ease_0.5s_infinite");
 		setTurnPrefs(null);
 	});
 });
@@ -957,12 +1102,20 @@ describe("TranscriptBlocks indexed ranges", () => {
 		);
 	});
 
-	test("places an optimistic prompt before tool calls that landed first", () => {
+	test("places an optimistic prompt before later tools despite clock skew", () => {
 		setTurnPrefs("open", "open");
 		const html = renderToStaticMarkup(
 			<TranscriptBlocks
-				transcriptIndex={[indexRow(2, "tool_use")]}
+				transcriptIndex={[indexRow(1, "assistant"), indexRow(2, "tool_use")]}
 				entries={[
+					{
+						id: "indexed-1",
+						seq: 1,
+						changeSeq: 1,
+						type: "assistant",
+						content: "Earlier answer",
+						timestamp: "2026-08-12T12:00:01Z",
+					},
 					{
 						id: "indexed-2",
 						seq: 2,
@@ -979,7 +1132,10 @@ describe("TranscriptBlocks indexed ranges", () => {
 						id: "outbox-prompt",
 						type: "user",
 						content: "Question before tools",
-						timestamp: "2026-08-12T12:00:01Z",
+						// Browser clock is eight seconds ahead of the server.
+						timestamp: "2026-08-12T12:00:10Z",
+						optimisticAfterEntryId: "indexed-1",
+						optimisticAfterSeq: 1,
 					},
 				]}
 			/>,
@@ -988,6 +1144,51 @@ describe("TranscriptBlocks indexed ranges", () => {
 			html.indexOf("git status"),
 		);
 		setTurnPrefs(null);
+	});
+
+	test("keeps live assistant output below its optimistic prompt across a model switch", () => {
+		const html = renderToStaticMarkup(
+			<TranscriptBlocks
+				live
+				transcriptIndex={[indexRow(1, "assistant")]}
+				entries={[
+					{
+						id: "indexed-1",
+						seq: 1,
+						changeSeq: 1,
+						type: "assistant",
+						content: "Earlier answer",
+						timestamp: "2026-08-12T12:00:01Z",
+					},
+					{
+						id: "model-switch",
+						type: "system",
+						content: "Switched model",
+						timestamp: "2026-08-12T12:00:09Z",
+					},
+					{
+						id: "live-assistant",
+						type: "assistant",
+						content: "Later assistant output",
+						// The server clock is behind the browser that sent the prompt.
+						timestamp: "2026-08-12T12:00:02Z",
+					},
+				]}
+				optimisticEntries={[
+					{
+						id: "outbox-prompt",
+						type: "user",
+						content: "Does this work?",
+						timestamp: "2026-08-12T12:00:10Z",
+						optimisticAfterEntryId: "model-switch",
+						optimisticAfterSeq: 1,
+					},
+				]}
+			/>,
+		);
+		expect(html.indexOf("Does this work?")).toBeLessThan(
+			html.indexOf("Later assistant output"),
+		);
 	});
 
 	test("keeps a partial opening range visible while its prefix hydrates", () => {

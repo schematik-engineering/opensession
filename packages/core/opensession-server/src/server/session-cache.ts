@@ -12,6 +12,7 @@ import {
 	getAllSessionsAsync,
 	readNativeSession,
 	readNativeSessionListRow,
+	readSlackSession,
 	type SessionArchiveSlice,
 } from "./sessions";
 import {
@@ -120,6 +121,7 @@ export function invalidateSessionsCache(): void {
 export interface SessionRuntimeSnapshot {
 	runStarts: Map<string, string>;
 	journalBusy: Set<string>;
+	claimedJournalSessions: Set<string>;
 }
 
 /** Capture shared run-journal state once for a whole list projection. */
@@ -129,7 +131,9 @@ export function sessionRuntimeSnapshot(): SessionRuntimeSnapshot {
 	// its bks id and its engine session id across records; key on both).
 	const runStarts = new Map<string, string>();
 	const journalBusy = new Set<string>();
+	const claimedJournalSessions = new Set<string>();
 	for (const r of activeRunRecords()) {
+		if (r.claimedAt && r.osSessionId) claimedJournalSessions.add(r.osSessionId);
 		if (!r.startedAt) continue;
 		for (const key of [r.osSessionId, r.claudeSessionId]) {
 			if (!key) continue;
@@ -138,7 +142,7 @@ export function sessionRuntimeSnapshot(): SessionRuntimeSnapshot {
 			if (!prev || r.startedAt < prev) runStarts.set(key, r.startedAt);
 		}
 	}
-	return { runStarts, journalBusy };
+	return { runStarts, journalBusy, claimedJournalSessions };
 }
 
 export function enrichSessionRuntime(
@@ -308,7 +312,10 @@ export async function getCachedSessionsAsync(
 export async function getSessionListSnapshotAsync(
 	slice: SessionArchiveSlice = "include",
 ): Promise<UnifiedSession[]> {
-	return indexedSessions(slice) ?? getAllSessionsAsync(slice);
+	// Share the cache's cooperative fallback instead of starting an independent
+	// full scan. This also persists coverage in the list projection, so boot
+	// maintenance cannot rescan every historical session again 90 seconds later.
+	return indexedSessions(slice) ?? getCachedSessionsAsync(slice);
 }
 
 /**
@@ -503,8 +510,8 @@ export function findSession(sessionId: string): UnifiedSession | undefined {
 	// Native ids map directly to the one session file we own. Detail and run
 	// paths should not depend on a materialized list snapshot having observed a
 	// newly created session, and they should never scan the list to open one.
-	const native = readNativeSession(sessionId);
-	if (native) return enrichSessionRuntime([native])[0];
+	const direct = readNativeSession(sessionId) ?? readSlackSession(sessionId);
+	if (direct) return enrichSessionRuntime([direct])[0];
 	return getCachedSessions().find(
 		(s) => s.id === sessionId || s.aliasIds?.includes(sessionId),
 	);
@@ -513,12 +520,11 @@ export function findSession(sessionId: string): UnifiedSession | undefined {
 export async function findSessionAsync(
 	sessionId: string,
 ): Promise<UnifiedSession | undefined> {
-	// Native ids map one-to-one to files we own. Reading that file lets a deep
-	// link and its transcript watch open while the sidebar's cold list scan runs
-	// in parallel. External and historical alias ids still need the full merged
-	// scan because only that scan knows which source won deduplication.
-	const native = readNativeSession(sessionId);
-	if (native) return enrichSessionRuntime([native])[0];
+	// Native ids and exact Slack deep links map one-to-one to files. Reading that
+	// file lets a newly announced conversation open before the materialized list
+	// projection has observed it. Historical aliases still need the merged list.
+	const direct = readNativeSession(sessionId) ?? readSlackSession(sessionId);
+	if (direct) return enrichSessionRuntime([direct])[0];
 	return (await getCachedSessionsAsync()).find(
 		(s) => s.id === sessionId || s.aliasIds?.includes(sessionId),
 	);

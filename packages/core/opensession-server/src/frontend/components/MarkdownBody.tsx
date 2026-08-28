@@ -66,9 +66,14 @@ export function useMarkdownRepo(): string | undefined {
 export function MarkdownBody({
 	html,
 	className,
+	enhance = true,
 }: {
 	html: string;
 	className?: string;
+	/** Mermaid and syntax highlighting are landed-content enhancements. A live
+	 * stream keeps the cheap, readable marked output and upgrades once its
+	 * durable message replaces it. */
+	enhance?: boolean;
 }) {
 	const ref = useRef<HTMLDivElement>(null);
 	const [theme, setTheme] = useState<EffectiveTheme>(effectiveTheme);
@@ -85,8 +90,12 @@ export function MarkdownBody({
 	// the lazy-upgrade window. Keyed on the element too: a React remount gives
 	// a fresh node with pristine fences that must upgrade again.
 	const upgradedRef = useRef<{ el: HTMLDivElement; key: string } | null>(null);
-	useEffect(() => onThemeChanged(() => setTheme(effectiveTheme())), []);
 	useEffect(() => {
+		if (!enhance) return;
+		return onThemeChanged(() => setTheme(effectiveTheme()));
+	}, [enhance]);
+	useEffect(() => {
+		if (!enhance) return;
 		const node = ref.current;
 		if (!node || typeof IntersectionObserver === "undefined") {
 			setVisible(true);
@@ -99,11 +108,11 @@ export function MarkdownBody({
 		);
 		observer.observe(node);
 		return () => observer.disconnect();
-	}, []);
+	}, [enhance]);
 
 	useEffect(() => {
 		// marked emits <code class="language-x"> only for tagged fences.
-		if (!visible || !html.includes('<code class="language-')) return;
+		if (!enhance || !visible || !html.includes('<code class="language-')) return;
 		const el = ref.current;
 		if (!el) return;
 		const upgradeKey = `${theme}\u0000${html}`;
@@ -197,7 +206,7 @@ export function MarkdownBody({
 		return () => {
 			alive = false;
 		};
-	}, [html, theme, visible]);
+	}, [enhance, html, theme, visible]);
 
 	// The copy control on each fence (lib/code-copy.ts). Declared AFTER the
 	// upgrade effect on purpose: that one restores the pristine markdown into
@@ -206,15 +215,17 @@ export function MarkdownBody({
 	// put back. The upgrades that follow are `pre.replaceWith(...)` INSIDE the
 	// wrapper this creates, so the button survives them without being rebuilt.
 	useEffect(() => {
+		if (!enhance) return;
 		const el = ref.current;
 		if (!el || !html.includes("<pre")) return;
 		decorateCodeBlocks(el);
-	}, [html, theme, visible]);
+	}, [enhance, html, theme, visible]);
 
 	useEffect(() => {
+		if (!enhance) return;
 		const el = ref.current;
 		return el ? attachCodeCopy(el) : undefined;
-	}, []);
+	}, [enhance]);
 
 	return (
 		<div ref={ref} className={className} dangerouslySetInnerHTML={innerHtml} />

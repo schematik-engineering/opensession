@@ -20,6 +20,10 @@ export interface PromptOutboxItem {
 	busyMode?: "queue" | "steer";
 	contextSessions?: string[];
 	user?: string;
+	/** UI-only causal anchor for the optimistic transcript bubble. Never sent to
+	 *  the prompt endpoint; persisted so a reload keeps the same placement. */
+	transcriptAfterEntryId?: string | null;
+	transcriptAfterSeq?: number;
 	state: PromptOutboxState;
 	attempts: number;
 	createdAt: number;
@@ -243,7 +247,17 @@ export class PromptOutbox {
 	}
 
 	private body(item: PromptOutboxItem) {
-		const { sessionId: _sessionId, state: _state, attempts: _attempts, createdAt: _createdAt, nextAttemptAt: _nextAttemptAt, error: _error, ...body } = item;
+		const {
+			sessionId: _sessionId,
+			state: _state,
+			attempts: _attempts,
+			createdAt: _createdAt,
+			nextAttemptAt: _nextAttemptAt,
+			error: _error,
+			transcriptAfterEntryId: _transcriptAfterEntryId,
+			transcriptAfterSeq: _transcriptAfterSeq,
+			...body
+		} = item;
 		return body;
 	}
 

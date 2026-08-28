@@ -21,9 +21,11 @@ import { READ_METHODS } from "./store-routing";
 import { workerEntry } from "../../runner-host/exe";
 import { chooseSessionLane, type LaneLoad } from "./lane-placement";
 import type { SessionKernelStoreHostMetrics } from "./store-host";
+import { runtimeGeneration } from "../runtime-generation";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 3849;
+const RUNTIME_GENERATION = runtimeGeneration();
 // Must remain below the gateway transport's 8s fail-stop budget, including
 // quarantine/restart bookkeeping after an ambiguous lane turn.
 const ACTOR_RESPONSE_TIMEOUT_MS = 5_000;
@@ -56,6 +58,18 @@ type Pending = {
   criticalSessionId?: string;
   /** When the turn started executing on the worker (lane busy-time metric). */
   startedAt: number;
+};
+
+type RuntimeWorkRequest = {
+  t: "runtime_work";
+  rpcId: string;
+  now: number;
+  timerKinds: string[];
+  effectKinds: string[];
+  limit: number;
+  additionalOutboxGroups?: Array<{ effectKinds: string[]; limit: number }>;
+  activeOutbox?: Array<{ id: number; sessionId: string }>;
+  activeOutboxRecheckAt?: number;
 };
 
 type SlotTurn = {
@@ -200,6 +214,7 @@ function json(value: unknown, init: ResponseInit = {}): Response {
 }
 
 function actorFatal(response: KernelActorResponse): boolean {
+  if (response.t === "error") return response.fatal === true;
   if (response.t !== "call_result" || !response.body) return false;
   try {
     return (JSON.parse(response.body) as { code?: string }).code === "actor_fatal";
@@ -210,7 +225,7 @@ function actorFatal(response: KernelActorResponse): boolean {
 
 export async function startSessionKernelService(
   options: SessionKernelServiceOptions = {},
-): Promise<{ stop(): void; url: string }> {
+): Promise<{ stop(options?: { terminateWorkers?: boolean }): void; url: string }> {
   const host = options.host ?? process.env.OPENSESSION_SESSION_KERNEL_HOST ?? DEFAULT_HOST;
   const port = options.port ?? Number(process.env.OPENSESSION_SESSION_KERNEL_PORT ?? DEFAULT_PORT);
   if (host !== DEFAULT_HOST)
@@ -316,7 +331,11 @@ export async function startSessionKernelService(
   function isReadOnlyRequest(
     request: KernelActorTransportEnvelope["request"],
   ): boolean {
-    if (request.t === "hello" || request.t === "stats") return true;
+    if (
+      request.t === "hello" ||
+      request.t === "stats" ||
+      request.t === "runtime_catalog_work"
+    ) return true;
     if (request.t !== "call") return false;
     return request.request.t === "store"
       ? READ_METHODS.has(request.request.method)
@@ -732,9 +751,64 @@ export async function startSessionKernelService(
     return body.result;
   }
 
+  async function runtimeWorkRequest(
+    request: RuntimeWorkRequest,
+  ): Promise<KernelActorResponse> {
+    const catalog = await sendToSlot(slots[0], {
+      ...request,
+      t: "runtime_catalog_work",
+      rpcId: crypto.randomUUID(),
+    });
+    if (catalog.t !== "runtime_catalog_work_result")
+      throw new RetryableActorHostError(
+        catalog.t === "error" ? catalog.error : "Invalid runtime catalog response",
+      );
+
+    const activeBySession = new Map<string, Array<{ id: number; sessionId: string }>>();
+    for (const item of request.activeOutbox ?? []) {
+      const active = activeBySession.get(item.sessionId) ?? [];
+      active.push(item);
+      activeBySession.set(item.sessionId, active);
+    }
+    const sessionResults = await Promise.all(catalog.sessionIds.map((sessionId) =>
+      enqueueSession(sessionId, {
+        t: "runtime_session_work",
+        rpcId: crypto.randomUUID(),
+        sessionId,
+        candidateCount: catalog.sessionIds.length,
+        now: request.now,
+        timerKinds: request.timerKinds,
+        effectKinds: request.effectKinds,
+        limit: request.limit,
+        additionalOutboxGroups: request.additionalOutboxGroups,
+        activeOutbox: activeBySession.get(sessionId) ?? [],
+        activeOutboxRecheckAt: request.activeOutboxRecheckAt,
+      }, true)
+    ));
+
+    const timers = [...catalog.timers];
+    const outbox = new Map(catalog.outbox.map((item) => [item.id, item]));
+    for (const result of sessionResults) {
+      if (result.t !== "runtime_session_work_result")
+        throw new RetryableActorHostError(
+          result.t === "error" ? result.error : "Invalid session runtime response",
+        );
+      timers.push(...result.timers);
+      for (const item of result.outbox) outbox.set(item.id, item);
+    }
+    return {
+      t: "runtime_work_result",
+      rpcId: request.rpcId,
+      timers: timers.slice(0, request.limit),
+      outbox: [...outbox.values()],
+    };
+  }
+
   async function actorRequest(
     request: KernelActorTransportEnvelope["request"],
   ): Promise<KernelActorResponse> {
+    if (request.t === "runtime_work")
+      return runtimeWorkRequest(request as RuntimeWorkRequest);
     const route = sessionActorServiceRoute(request);
     if (route.scope === "session")
       return enqueueSession(route.sessionId, request, route.mutation);
@@ -814,6 +888,8 @@ export async function startSessionKernelService(
             ready,
             actorVersion: SESSION_KERNEL_ACTOR_VERSION,
             transportVersion: SESSION_KERNEL_TRANSPORT_VERSION,
+            generation: RUNTIME_GENERATION,
+            component: "session-kernel",
             workers: {
               ready: sessionSlots.filter((slot) => slot.ready).length,
               capacity: sessionSlots.length,
@@ -911,10 +987,11 @@ export async function startSessionKernelService(
   const runningServer = server;
   return {
     url: runningServer.url.origin,
-    stop() {
+    stop(stopOptions = {}) {
       if (stopping) return;
       stopping = true;
       runningServer.stop(true);
+      if (stopOptions.terminateWorkers === false) return;
       const error = new Error("Session kernel service stopped");
       for (const slot of slots) stopSlot(slot, error);
     },

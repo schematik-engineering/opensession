@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { UnifiedSession } from "../lib/types";
+import type { UnifiedSession, WSServerMessage } from "../lib/types";
 import { fetchHomeStats, fetchRecentPrs, type HomeStats, type RecentPr } from "../lib/api";
 import { prStatusMark } from "../lib/pr-status";
 import {
@@ -54,6 +54,8 @@ import {
 interface Props {
   sessions: UnifiedSession[];
   onSelect: (session: UnifiedSession) => void;
+  send: (msg: any) => void;
+  addHandler: (handler: (msg: WSServerMessage) => void) => () => void;
   onNewSession: () => void;
   onShowArchived: () => void;
   onOpenAnalytics?: () => void;
@@ -246,6 +248,8 @@ function StateIcon({ state }: { state: WorktreeRow["state"] }) {
 export function Prs({
   sessions,
   onSelect,
+  send,
+  addHandler,
   onNewSession,
   onShowArchived,
   onOpenAnalytics,
@@ -783,6 +787,8 @@ setAddingToSidebar(false);
                 repo={preview.repo}
                 branch={preview.branch}
                 sessions={sessions}
+                send={send}
+                addHandler={addHandler}
                 onOpenSession={(id) => {
                   const session = sessions.find((item) => item.id === id);
                   if (session) onSelect(session);
