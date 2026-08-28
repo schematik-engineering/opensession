@@ -124,6 +124,7 @@ export interface GatewaySupervisorDependencies {
     precheckPeers?: boolean,
   ): ManagedGateway;
   waitReady(gateway: ManagedGateway): Promise<void>;
+  waitLive?(gateway: ManagedGateway): Promise<void>;
   validateRelease(releaseRoot: string, sha: string): string;
   promoteCurrent(releaseRoot: string): void;
   onUnexpectedExit?(gateway: ManagedGateway, code: number): void;
@@ -190,6 +191,10 @@ export class GatewaySupervisor {
     return gateway.peerGenerations ?? { kernel: fallback, executor: fallback };
   }
 
+  private waitLive(gateway: ManagedGateway): Promise<void> {
+    return this.dependencies.waitLive?.(gateway) ?? Promise.resolve();
+  }
+
   activeGateway(): ManagedGateway {
     return this.active;
   }
@@ -230,6 +235,12 @@ export class GatewaySupervisor {
     this.recordCoordinated();
     try {
       pending.candidate.activate!(pending.nonce);
+      await timeout(
+        this.waitLive(pending.candidate),
+        10_000,
+        "candidate gateway did not become live in time",
+      );
+      this.routeToActive = true;
       await timeout(
         this.dependencies.waitReady(pending.candidate),
         READY_TIMEOUT_MS,
@@ -288,8 +299,9 @@ export class GatewaySupervisor {
       this.peerGenerations(pending.previous),
     );
     this.selectActive(rollback);
-    this.routeToActive = true;
     try {
+      await timeout(this.waitLive(rollback), 10_000, "rollback gateway did not become live");
+      this.routeToActive = true;
       await timeout(
         this.dependencies.waitReady(rollback),
         READY_TIMEOUT_MS,
@@ -421,7 +433,6 @@ export class GatewaySupervisor {
       previousExited = true;
       this.dependencies.promoteCurrent(releaseRoot);
       this.selectActive(candidate);
-      this.routeToActive = true;
       const expiry = setTimeout(() => {
         // Pointer authority already names the target. Do not guess that the old
         // gateway is still protocol-compatible after an abandoned peer update;
@@ -534,6 +545,11 @@ export class GatewaySupervisor {
       });
       candidate.activate(nonce);
       this.selectActive(candidate);
+      await timeout(
+        this.waitLive(candidate),
+        10_000,
+        "candidate gateway did not become live in time",
+      );
       this.routeToActive = true;
       await timeout(
         this.dependencies.waitReady(candidate),
@@ -568,8 +584,9 @@ export class GatewaySupervisor {
         this.peerGenerations(previous),
       );
       this.selectActive(rollback);
-      this.routeToActive = true;
       try {
+        await timeout(this.waitLive(rollback), 10_000, "rollback gateway did not become live");
+        this.routeToActive = true;
         await timeout(
           this.dependencies.waitReady(rollback),
           READY_TIMEOUT_MS,
@@ -758,6 +775,25 @@ export function validateGatewayRelease(
     throw new Error("candidate frontend was not prepared");
   }
   return root;
+}
+
+async function waitForGatewayLive(gateway: ManagedGateway): Promise<void> {
+  for (;;) {
+    const state = await Promise.race([
+      gateway.exited.then((code) => ({ exited: code } as const)),
+      fetch(`http://${BACKEND_HOST}:${gateway.backendPort}/live`, {
+        signal: AbortSignal.timeout(1_000),
+      })
+        .then(async (response) => {
+          const body = await response.json() as { ok?: boolean };
+          return { live: response.ok && body.ok === true } as const;
+        })
+        .catch(() => ({ live: false } as const)),
+    ]);
+    if ("exited" in state) throw new Error(`gateway exited before liveness (${state.exited})`);
+    if (state.live) return;
+    await Bun.sleep(50);
+  }
 }
 
 async function waitForGatewayReady(gateway: ManagedGateway): Promise<void> {
@@ -953,6 +989,7 @@ async function runSupervisor(): Promise<void> {
   const supervisor = new GatewaySupervisor(active, {
     spawn: spawnGateway,
     waitReady: waitForGatewayReady,
+    waitLive: waitForGatewayLive,
     validateRelease: validateGatewayRelease,
     promoteCurrent: promoteGatewayCurrent,
     recordTransaction: writeGatewayHandoffTransaction,

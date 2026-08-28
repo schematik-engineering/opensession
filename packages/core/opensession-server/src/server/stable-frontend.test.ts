@@ -28,8 +28,10 @@ function fixture() {
   return { state };
 }
 
-function request(path: string, accept = "text/html"): Buffer {
-  return Buffer.from(`GET ${path} HTTP/1.1\r\nHost: os.test\r\nAccept: ${accept}\r\n\r\n`);
+function request(path: string, accept = "text/html", userAgent = "OS1 test browser"): Buffer {
+  return Buffer.from(
+    `GET ${path} HTTP/1.1\r\nHost: os.test\r\nAccept: ${accept}\r\nUser-Agent: ${userAgent}\r\n\r\n`,
+  );
 }
 
 function body(response: Buffer): string {
@@ -59,6 +61,10 @@ describe("stable frontend ingress", () => {
     expect(stableFrontendHttpResponse(state, request("/ready", "*/*"))).toBeNull();
     expect(stableFrontendHttpResponse(state, request("/api/sessions", "application/json"))).toBeNull();
     expect(stableFrontendHttpResponse(state, request("/../secret.js", "*/*"))).toBeNull();
+    expect(stableFrontendHttpResponse(
+      state,
+      request("/session/social-preview", "text/html", "Slackbot-LinkExpanding 1.0"),
+    )).toBeNull();
     expect(stableFrontendHttpResponse(
       state,
       Buffer.from("POST /workspace HTTP/1.1\r\nHost: os.test\r\n\r\n"),

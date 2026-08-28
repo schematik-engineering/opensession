@@ -181,7 +181,11 @@ function startInheritedGatewayTcpProxy(
       }
       if (state.timer) clearTimeout(state.timer);
     });
-    connect();
+    state.timer = setTimeout(() => {
+      state.timer = undefined;
+      connect();
+    }, options.fallbackHttp ? 2 : 0);
+    state.timer.unref?.();
   });
   server.listen({ fd: options.listenFd });
   return {
@@ -335,7 +339,11 @@ export function startGatewayTcpProxy(
         clients.set(client, state);
         metrics.accepted++;
         metrics.pending++;
-        connect(client, Date.now() + connectDeadlineMs);
+        state.retry = setTimeout(() => {
+          state.retry = undefined;
+          connect(client, Date.now() + connectDeadlineMs);
+        }, options.fallbackHttp ? 2 : 0);
+        state.retry.unref?.();
       },
       data(client, data) {
         const state = clients.get(client);

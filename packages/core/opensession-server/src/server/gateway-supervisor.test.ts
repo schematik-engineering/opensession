@@ -96,11 +96,14 @@ describe("gateway supervisor", () => {
     const old = controlledGateway(1, "/releases/old");
     const candidate = controlledGateway(2, "/releases/new", true);
     const order: string[] = [];
+    let markLive!: () => void;
+    const live = new Promise<void>((resolve) => { markLive = resolve; });
     const supervisor = new GatewaySupervisor(old.gateway, {
       spawn() {
         order.push("spawn-standby");
         return candidate.gateway;
       },
+      waitLive: () => live,
       async waitReady() {
         order.push("ready");
       },
@@ -129,6 +132,10 @@ describe("gateway supervisor", () => {
 
     order.push("old-exited");
     old.finish(0);
+    await Bun.sleep(0);
+    expect(candidate.events[0]?.startsWith("activate:")).toBe(true);
+    expect(supervisor.backendPort()).toBe(0);
+    markLive();
     const result = await handoff;
     expect(result.ok).toBe(true);
     expect(candidate.events[0]?.startsWith("activate:")).toBe(true);

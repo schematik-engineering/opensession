@@ -17,6 +17,7 @@ import { startRunnerPortalReaper } from "./src/server/runner-portals";
 import { startTodoReminderTicker } from "./src/server/todos";
 import { startGeneratedTitleSweep } from "./src/server/generated-titles";
 import { startLiveActivitySync } from "./src/server/live-activities";
+import { startSessionListRuntimeSync } from "./src/server/session-list-runtime-sync";
 import {
 	drainPendingTranscriptWakeBatch,
 	drainPendingTranscriptWakesAfter,
@@ -655,6 +656,7 @@ if (!g.__opensessionBooted) {
 	// or steal live runs. State writes are additionally isolated (the
 	// devInstanceBootError guard at the top of this file enforces it).
 	const devInstance = isDevInstance();
+	startSessionListRuntimeSync();
 	if (!devInstance) {
 	startLiveActivitySync();
 

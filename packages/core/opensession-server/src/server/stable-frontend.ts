@@ -77,6 +77,7 @@ function parsedRequest(request: Buffer): {
   method: "GET" | "HEAD";
   pathname: string;
   acceptsHtml: boolean;
+  socialCrawler: boolean;
 } | null {
   if (request.byteLength > 64 * 1024) return null;
   const text = request.toString("latin1");
@@ -92,10 +93,12 @@ function parsedRequest(request: Buffer): {
     return null;
   }
   const accept = lines.find((line) => /^accept:/i.test(line))?.slice(7).trim() || "";
+  const userAgent = lines.find((line) => /^user-agent:/i.test(line))?.slice(11).trim() || "";
   return {
     method: match[1] as "GET" | "HEAD",
     pathname,
     acceptsHtml: accept.includes("text/html") || accept.includes("*/*"),
+    socialCrawler: /bot|crawler|spider|slackbot|facebookexternalhit|twitterbot|linkedinbot/i.test(userAgent),
   };
 }
 
@@ -156,7 +159,10 @@ export function stableFrontendHttpResponse(
       );
     }
   }
-  if (!parsed.acceptsHtml || /\.[a-z0-9]{1,8}$/i.test(parsed.pathname)) return null;
+  if (
+    !parsed.acceptsHtml || parsed.socialCrawler ||
+    /\.[a-z0-9]{1,8}$/i.test(parsed.pathname)
+  ) return null;
   return response(
     "200 OK",
     Buffer.from(snapshot.indexHtml),
