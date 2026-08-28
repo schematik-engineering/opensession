@@ -22,10 +22,14 @@ function authPath(): string {
 }
 
 function sessionStatePath(sessionId: string): string {
-  const root = join(
-    process.env.HOME || "",
-    provider === "grok" ? ".grok/sessions" : ".cursor/acp-sessions",
-  );
+  const root =
+    provider === "grok"
+      ? join(process.env.HOME || "", ".grok/sessions")
+      : join(
+          process.env.XDG_CONFIG_HOME ||
+            join(process.env.HOME || "", ".config"),
+          "cursor/acp-sessions",
+        );
   return join(root, `${sessionId}.state`);
 }
 

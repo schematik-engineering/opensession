@@ -233,7 +233,7 @@ function linkProviderSessionState(
   if (!unifiedSessionId) return;
   const providerState = acpProviderStateDir(unifiedSessionId, provider);
   const relative =
-    provider === "grok" ? ".grok/sessions" : ".cursor/acp-sessions";
+    provider === "grok" ? ".grok/sessions" : ".config/cursor/acp-sessions";
   const destination = join(home, relative);
   mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
   symlinkSync(providerState, destination, "dir");
