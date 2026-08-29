@@ -41,7 +41,7 @@ describe("private workspace seed files", () => {
       "utf8",
     );
     const sessionSetup = source.slice(
-      source.indexOf("async function seedAndInstallWorktree"),
+      source.indexOf("function seedAndInstallWorktree"),
       source.indexOf("export async function installWorktreeDeps"),
     );
     const sharedSetup = source.slice(
@@ -50,6 +50,17 @@ describe("private workspace seed files", () => {
     );
     expect(sessionSetup).toContain(
       "materializeHostWorkspaceSeedFiles(repo, wtPath)",
+    );
+    expect(sessionSetup).toContain(
+      "return seedAndInstallWorktreeAfterPrivateSeeds(",
+    );
+    expect(sessionSetup).not.toContain(
+      "async function seedAndInstallWorktree(",
+    );
+    expect(
+      sessionSetup.indexOf("materializeHostWorkspaceSeedFiles(repo, wtPath)"),
+    ).toBeLessThan(
+      sessionSetup.indexOf("return seedAndInstallWorktreeAfterPrivateSeeds("),
     );
     expect(sharedSetup).not.toContain("materializeHostWorkspaceSeedFiles");
   });

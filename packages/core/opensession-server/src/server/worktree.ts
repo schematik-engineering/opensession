@@ -324,7 +324,25 @@ export interface WorktreeInfo {
  * seeded tree). Both halves are best-effort; a cold install is always the
  * fallback.
  */
-async function seedAndInstallWorktree(
+function seedAndInstallWorktree(
+  repo: Repo,
+  wtPath: string,
+  branchLabel: string,
+): Promise<void> {
+  // This function is deliberately synchronous until the private files are in
+  // place. Interactive create paths intentionally do not await the slower
+  // warm-template/dependency phase, but the opening agent turn must never race
+  // required local configuration from `.agents/environment.json`.
+  const seeded = materializeHostWorkspaceSeedFiles(repo, wtPath);
+  if (seeded) {
+    console.log(
+      `[worktree] projected ${seeded} private workspace file(s) for ${branchLabel}`,
+    );
+  }
+  return seedAndInstallWorktreeAfterPrivateSeeds(repo, wtPath, branchLabel);
+}
+
+async function seedAndInstallWorktreeAfterPrivateSeeds(
   repo: Repo,
   wtPath: string,
   branchLabel: string,
@@ -336,16 +354,6 @@ async function seedAndInstallWorktree(
     console.warn(
       `[worktree] warm-template seeding failed for ${branchLabel} (continuing):`,
       e,
-    );
-  }
-  // A manifest entry is an explicit operator requirement, unlike the
-  // best-effort dependency hook below. Project it only into the actual
-  // session worktree: warm templates and shared read-only checkouts must never
-  // become another resting place for private configuration.
-  const seeded = materializeHostWorkspaceSeedFiles(repo, wtPath);
-  if (seeded) {
-    console.log(
-      `[worktree] projected ${seeded} private workspace file(s) for ${branchLabel}`,
     );
   }
   await installWorktreeDeps(repo, wtPath, branchLabel);
