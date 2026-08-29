@@ -103,6 +103,7 @@ struct NotificationsSettingsView: View {
 /// (Settings → Preferences). Haptics is the device-local exception.
 struct PreferencesSettingsView: View {
     @AppStorage("os1.composer.defaultRepo") private var nativeDefaultRepo = ""
+    @AppStorage(NativePreferences.sessionCheckoutsStorageKey) private var nativeSessionCheckouts = ""
     @AppStorage("os1.composer.defaultModel") private var nativeDefaultModel = ""
     @AppStorage("os1.composer.defaultEngine") private var nativeDefaultEngine = ""
     @AppStorage("os1.composer.sendKey") private var nativeSendKey = "enter"
@@ -123,6 +124,7 @@ struct PreferencesSettingsView: View {
     @State private var models: [SettingsModelOption]
     @State private var engines: [ModelEngineOption]
     @State private var defaultRepo: String
+    @State private var sessionCheckouts: String
     @State private var defaultModel: String
     @State private var defaultEngine: String
     @State private var sendKey: String
@@ -160,6 +162,9 @@ struct PreferencesSettingsView: View {
             "default-repo": NativePreferences.normalizedDefaultRepository(
                 defaults.string(forKey: "os1.composer.defaultRepo")
             ) ?? "",
+            "session-checkouts": NativePreferences.validatedSessionCheckouts(
+                defaults.string(forKey: NativePreferences.sessionCheckoutsStorageKey)
+            ) ?? "",
             "default-model": defaults.string(forKey: "os1.composer.defaultModel") ?? "",
             "default-engine": defaults.string(forKey: "os1.composer.defaultEngine") ?? "",
             "send-key": defaults.string(forKey: "os1.composer.sendKey") ?? "enter",
@@ -173,6 +178,7 @@ struct PreferencesSettingsView: View {
         ]
         _seededPrefs = State(initialValue: seeded)
         _defaultRepo = State(initialValue: seeded["default-repo"] ?? "")
+        _sessionCheckouts = State(initialValue: seeded["session-checkouts"] ?? "")
         _defaultModel = State(initialValue: seeded["default-model"] ?? "")
         _defaultEngine = State(initialValue: seeded["default-engine"] ?? "")
         _sendKey = State(initialValue: seeded["send-key"] ?? "enter")
@@ -222,6 +228,16 @@ struct PreferencesSettingsView: View {
                             Text(repo.label ?? repo.id).tag(repo.id)
                         }
                     }
+                    ForEach(repos) { repo in
+                        Picker(
+                            "\(repo.label ?? repo.id) workspace",
+                            selection: sessionCheckoutBinding(for: repo.id)
+                        ) {
+                            Text("Default").tag("default")
+                            Text("Local checkout").tag("checkout")
+                            Text("Separate worktree").tag("worktree")
+                        }
+                    }
                 }
                 // The catalogs are the only things here with no complete local
                 // mirror to open on, so a first visit waits for these rows and
@@ -252,8 +268,8 @@ struct PreferencesSettingsView: View {
             } footer: {
                 Text(
                     selectableEngines.count > 1
-                        ? "New sessions use this repository, model, and engine when available. No preference uses the workspace defaults."
-                        : "New sessions use this repository and model when available. No preference uses the workspace defaults."
+                        ? "New sessions use this repository, model, engine, and code workspace when available. Default uses each repository's setting."
+                        : "New sessions use this repository, model, and code workspace when available. Default uses each repository's setting."
                 )
             }
 
@@ -354,6 +370,7 @@ struct PreferencesSettingsView: View {
         #endif
         .task { await load() }
         .onChange(of: defaultRepo) { _, _ in commit() }
+        .onChange(of: sessionCheckouts) { _, _ in commit() }
         .onChange(of: defaultModel) { _, _ in commit() }
         .onChange(of: defaultEngine) { _, _ in commit() }
         .onChange(of: sendKey) { _, _ in commit() }
@@ -405,6 +422,9 @@ struct PreferencesSettingsView: View {
                 "default-repo": NativePreferences.normalizedDefaultRepository(
                     prefs["default-repo"]
                 ) ?? "",
+                "session-checkouts": NativePreferences.validatedSessionCheckouts(
+                    prefs["session-checkouts"]
+                ) ?? "",
                 "default-model": prefs["default-model"] ?? nativeDefaultModel,
                 "default-engine": prefs["default-engine"] ?? nativeDefaultEngine,
                 "send-key": prefs["send-key"] == "mod-enter" ? "mod-enter" : "enter",
@@ -432,6 +452,9 @@ struct PreferencesSettingsView: View {
             // only the ones still sitting on their seed adopt the server's.
             // The `commit()` below then pushes whatever they changed.
             if defaultRepo == seededPrefs["default-repo"] { defaultRepo = server["default-repo"] ?? defaultRepo }
+            if sessionCheckouts == seededPrefs["session-checkouts"] {
+                sessionCheckouts = server["session-checkouts"] ?? sessionCheckouts
+            }
             if defaultModel == seededPrefs["default-model"] { defaultModel = server["default-model"] ?? defaultModel }
             if defaultEngine == seededPrefs["default-engine"] { defaultEngine = server["default-engine"] ?? defaultEngine }
             if sendKey == seededPrefs["send-key"] { sendKey = server["send-key"] ?? sendKey }
@@ -450,6 +473,7 @@ struct PreferencesSettingsView: View {
             }
             seededPrefs = server
             nativeDefaultRepo = defaultRepo
+            nativeSessionCheckouts = sessionCheckouts
             #if os(macOS)
             nativeSendKey = sendKey
             #endif
@@ -535,6 +559,9 @@ struct PreferencesSettingsView: View {
             var confirmed = savedPrefs
             for (key, value) in current where patch.keys.contains(key) { confirmed[key] = value }
             confirmed.merge(response) { _, server in server }
+            confirmed["session-checkouts"] = NativePreferences.validatedSessionCheckouts(
+                confirmed["session-checkouts"]
+            ) ?? ""
             guard NativePreferences.apply(confirmed, for: requestContext) else {
                 self.error = "Connection changed before preferences finished saving."
                 saving = false
@@ -546,6 +573,9 @@ struct PreferencesSettingsView: View {
             if !defaultRepo.isEmpty, !repos.contains(where: { $0.id == defaultRepo }) {
                 defaultRepo = ""
             }
+            sessionCheckouts = NativePreferences.validatedSessionCheckouts(
+                confirmed["session-checkouts"]
+            ) ?? ""
             defaultModel = confirmed["default-model"] ?? defaultModel
             defaultEngine = confirmed["default-engine"] ?? defaultEngine
             sendKey = confirmed["send-key"] == "mod-enter" ? "mod-enter" : "enter"
@@ -563,6 +593,7 @@ struct PreferencesSettingsView: View {
                 confirmed["live-typing"]
             ) ?? liveTyping
             nativeDefaultRepo = defaultRepo
+            nativeSessionCheckouts = sessionCheckouts
             nativeDefaultModel = defaultModel
             nativeDefaultEngine = defaultEngine
             #if os(macOS)
@@ -586,9 +617,28 @@ struct PreferencesSettingsView: View {
         }
     }
 
+    private func sessionCheckoutBinding(for repository: String) -> Binding<String> {
+        Binding(
+            get: {
+                NativePreferences.sessionCheckoutMode(
+                    for: repository,
+                    in: sessionCheckouts
+                )
+            },
+            set: { mode in
+                sessionCheckouts = NativePreferences.settingSessionCheckout(
+                    mode,
+                    for: repository,
+                    in: sessionCheckouts
+                )
+            }
+        )
+    }
+
     private var currentPrefs: [String: String] {
         [
             "default-repo": defaultRepo,
+            "session-checkouts": sessionCheckouts,
             "default-model": defaultModel,
             "default-engine": defaultEngine,
             "send-key": sendKey,

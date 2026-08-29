@@ -352,6 +352,13 @@ struct SessionsListView: View {
 
     var body: some View {
         navigationContainer
+            #if DEBUG
+            .overlay {
+                if ProcessInfo.processInfo.environment["OS1_PR_REVIEW_CARDS_FIXTURE"] == "1" {
+                    PrReviewCardsScreenshot()
+                }
+            }
+            #endif
             // Session-id links in agent output (SessionLinks) are ordinary
             // markdown links on a private scheme; catching them here — above
             // the navigation container — is what lets a transcript push the

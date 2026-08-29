@@ -3,22 +3,29 @@ import { expect, test } from "bun:test";
 const HTML = new URL("../index.html", import.meta.url);
 const CSS = new URL("./base.css", import.meta.url);
 const USER_PICKER = new URL("../components/UserPicker.tsx", import.meta.url);
-const APP = new URL("../App.tsx", import.meta.url);
+const APP_SHELL = new URL("../components/AppShell.tsx", import.meta.url);
 const FIRST_MILE = new URL("../components/FirstMile.tsx", import.meta.url);
 const SETTINGS = new URL("../components/Settings.tsx", import.meta.url);
 const SETTINGS_CLASSES = new URL("../lib/settings-classes.ts", import.meta.url);
 
 test("Electron titlebar drag regions do not depend on WCO visibility", async () => {
-  const [html, css, userPicker, app, firstMile, settings, settingsClasses] =
-    await Promise.all([
-      Bun.file(HTML).text(),
-      Bun.file(CSS).text(),
-      Bun.file(USER_PICKER).text(),
-      Bun.file(APP).text(),
-      Bun.file(FIRST_MILE).text(),
-      Bun.file(SETTINGS).text(),
-      Bun.file(SETTINGS_CLASSES).text(),
-    ]);
+  const [
+    html,
+    css,
+    userPicker,
+    appShell,
+    firstMile,
+    settings,
+    settingsClasses,
+  ] = await Promise.all([
+    Bun.file(HTML).text(),
+    Bun.file(CSS).text(),
+    Bun.file(USER_PICKER).text(),
+    Bun.file(APP_SHELL).text(),
+    Bun.file(FIRST_MILE).text(),
+    Bun.file(SETTINGS).text(),
+    Bun.file(SETTINGS_CLASSES).text(),
+  ]);
 
   expect(html).toContain("window.os1.desktop === true");
   expect(html).toContain('classList.add("desktop-shell")');
@@ -35,7 +42,7 @@ test("Electron titlebar drag regions do not depend on WCO visibility", async () 
   expect(userPicker).toContain(
     "[html.desktop-shell_&]:[-webkit-app-region:drag]",
   );
-  expect(app).toContain('className="wco-collapsed-drag-handle"');
+  expect(appShell).toContain('className="wco-collapsed-drag-handle"');
   expect(css).toMatch(
     /\.app-body\.sidebar-collapsed\s+\.wco-collapsed-drag-handle/,
   );
