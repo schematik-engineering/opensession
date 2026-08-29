@@ -324,7 +324,25 @@ export interface WorktreeInfo {
  * seeded tree). Both halves are best-effort; a cold install is always the
  * fallback.
  */
-async function seedAndInstallWorktree(
+function seedAndInstallWorktree(
+  repo: Repo,
+  wtPath: string,
+  branchLabel: string,
+): Promise<void> {
+  // This function is deliberately synchronous until the private files are in
+  // place. Interactive create paths intentionally do not await the slower
+  // warm-template/dependency phase, but the opening agent turn must never race
+  // required local configuration from `.agents/environment.json`.
+  const seeded = materializeHostWorkspaceSeedFiles(repo, wtPath);
+  if (seeded) {
+    console.log(
+      `[worktree] projected ${seeded} private workspace file(s) for ${branchLabel}`,
+    );
+  }
+  return seedAndInstallWorktreeAfterPrivateSeeds(repo, wtPath, branchLabel);
+}
+
+async function seedAndInstallWorktreeAfterPrivateSeeds(
   repo: Repo,
   wtPath: string,
   branchLabel: string,
@@ -336,16 +354,6 @@ async function seedAndInstallWorktree(
     console.warn(
       `[worktree] warm-template seeding failed for ${branchLabel} (continuing):`,
       e,
-    );
-  }
-  // A manifest entry is an explicit operator requirement, unlike the
-  // best-effort dependency hook below. Project it only into the actual
-  // session worktree: warm templates and shared read-only checkouts must never
-  // become another resting place for private configuration.
-  const seeded = materializeHostWorkspaceSeedFiles(repo, wtPath);
-  if (seeded) {
-    console.log(
-      `[worktree] projected ${seeded} private workspace file(s) for ${branchLabel}`,
     );
   }
   await installWorktreeDeps(repo, wtPath, branchLabel);
@@ -482,8 +490,10 @@ async function refreshAskCheckoutLocked(
   repo: Repo,
   dir: string,
 ): Promise<void> {
+  const gitEnv = await githubServiceGitEnv(repo.ghRepo);
   const fetch =
     await $`git -C ${dir} fetch origin ${repo.defaultBranch} --quiet`
+      .env(gitEnv)
       .quiet()
       .nothrow();
   if (fetch.exitCode !== 0) {
@@ -558,7 +568,9 @@ export async function ensureAskCheckout(repoId?: string): Promise<string> {
       }
       return dir;
     }
-    await $`git -C ${repo.repo} fetch origin ${repo.defaultBranch} --quiet`.nothrow();
+    await $`git -C ${repo.repo} fetch origin ${repo.defaultBranch} --quiet`
+      .env(await githubServiceGitEnv(repo.ghRepo))
+      .nothrow();
     await $`git -C ${repo.repo} worktree prune`.quiet().nothrow();
     const add =
       await $`git -C ${repo.repo} worktree add --detach ${dir} origin/${repo.defaultBranch}`
@@ -692,6 +704,7 @@ export async function reviveWorktree(
   if (existsSync(wtPath)) return wtPath;
 
   return withGitLock(async () => {
+    const gitEnv = await githubServiceGitEnv(repo.ghRepo);
     await $`git -C ${repo.repo} worktree prune`.quiet();
     if (existsSync(wtPath)) return wtPath;
     const owner = (await listWorktrees(repo.id)).find(
@@ -714,6 +727,7 @@ export async function reviveWorktree(
     } else {
       const fetchBranch =
         await $`git -C ${repo.repo} fetch origin +refs/heads/${branch}:refs/remotes/origin/${branch} --quiet`
+          .env(gitEnv)
           .quiet()
           .nothrow();
       const hasRemote =
@@ -722,7 +736,9 @@ export async function reviveWorktree(
           await $`git -C ${repo.repo} show-ref --verify --quiet refs/remotes/origin/${branch}`.nothrow()
         ).exitCode === 0;
       if (!hasRemote) {
-        await $`git -C ${repo.repo} fetch origin ${repo.defaultBranch} --quiet`;
+        await $`git -C ${repo.repo} fetch origin ${repo.defaultBranch} --quiet`.env(
+          gitEnv,
+        );
       }
       const startPoint = hasRemote
         ? `origin/${branch}`
@@ -755,7 +771,7 @@ export async function reviveWorktree(
  * Explicit refspecs bypass the remote config. Found on a repo cloned
  * single-branch during node provisioning; `--unshallow` fixes depth, not this.
  */
-async function githubServiceGitEnv(ghRepo: string | undefined) {
+export async function githubServiceGitEnv(ghRepo: string | undefined) {
   const { githubServiceCredentialEnv } = await import("./github-app");
   return { ...process.env, ...(await githubServiceCredentialEnv(ghRepo)) };
 }
@@ -885,10 +901,13 @@ export async function createWorktreeForFollowup(
   if (existing) return existing.path;
 
   const wtPath = `${worktreesDir()}/${repo.wtPrefix}-${branch}`;
+  const gitEnv = await githubServiceGitEnv(repo.ghRepo);
   await withGitLock(async () => {
     await $`git -C ${repo.repo} worktree prune`.quiet();
     if (existsSync(wtPath)) return; // pruned stale registration; dir already usable
-    await $`git -C ${repo.repo} fetch origin ${baseRef} --quiet`.nothrow();
+    await $`git -C ${repo.repo} fetch origin ${baseRef} --quiet`
+      .env(gitEnv)
+      .nothrow();
     const startPoint =
       (
         await $`git -C ${repo.repo} rev-parse --verify --quiet origin/${baseRef}`.nothrow()
@@ -922,7 +941,11 @@ export async function createWorktreeForExistingBranch(
   gitEnv?: Record<string, string>,
 ): Promise<string> {
   const repo = getRepo(repoId);
-  const shell = gitEnv ? $.env({ ...process.env, ...gitEnv }) : $;
+  const shell = $.env(
+    gitEnv
+      ? { ...process.env, ...gitEnv }
+      : await githubServiceGitEnv(repo.ghRepo),
+  );
   const existing = (await listWorktrees(repo.id)).find(
     (w) => w.branch === branch,
   );
@@ -1073,7 +1096,6 @@ export async function createWorktree(
   opts?: { base?: string; isolated?: boolean; gitEnv?: Record<string, string> },
 ): Promise<string> {
   const repo = getRepo(repoId);
-  const shell = opts?.gitEnv ? $.env({ ...process.env, ...opts.gitEnv }) : $;
 
   // Shared-checkout repos (opensession) don't get a per-session worktree: the
   // session works in the live main checkout on the default branch so its edits
@@ -1085,6 +1107,12 @@ export async function createWorktree(
   // createWorktreeForExistingBranch). Config `selfDev: "worktree"` opts the
   // whole instance out the same way (sharedCheckoutForNewSessions).
   if (sharedCheckoutForNewSessions(repo) && !opts?.isolated) return repo.repo;
+
+  const shell = $.env(
+    opts?.gitEnv
+      ? { ...process.env, ...opts.gitEnv }
+      : await githubServiceGitEnv(repo.ghRepo),
+  );
 
   const wtPath = `${worktreesDir()}/${repo.wtPrefix}-${branch}`;
   const base = opts?.base;

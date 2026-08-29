@@ -396,7 +396,9 @@ async function doRefresh(repoId: string, force: boolean): Promise<void> {
     );
     // Lazy import: worktree.ts imports back into this module's consumers —
     // keep the static graph acyclic.
-    const { withGitLock, installWorktreeDeps } = await import("./worktree");
+    const { withGitLock, installWorktreeDeps, githubServiceGitEnv } =
+      await import("./worktree");
+    const gitEnv = await githubServiceGitEnv(repo.ghRepo);
 
     // 1. Ensure the detached template worktree exists.
     if (!existsSync(dir)) {
@@ -406,14 +408,18 @@ async function doRefresh(repoId: string, force: boolean): Promise<void> {
       await withGitLock(async () => {
         await $`git -C ${repo.repo} worktree prune`.quiet().nothrow();
         if (existsSync(dir)) return;
-        await $`git -C ${repo.repo} fetch origin ${repo.defaultBranch} --quiet`.nothrow();
+        await $`git -C ${repo.repo} fetch origin ${repo.defaultBranch} --quiet`
+          .env(gitEnv)
+          .nothrow();
         await $`git -C ${repo.repo} worktree add --detach ${dir} origin/${repo.defaultBranch}`;
       });
     }
 
     // 2. Fetch; skip the expensive rebuild when nothing moved and the last
     //    refresh was good.
-    await $`git -C ${dir} fetch origin ${repo.defaultBranch} --quiet`.nothrow();
+    await $`git -C ${dir} fetch origin ${repo.defaultBranch} --quiet`
+      .env(gitEnv)
+      .nothrow();
     const sha = (
       await $`git -C ${dir} rev-parse --short origin/${repo.defaultBranch}`
         .nothrow()
