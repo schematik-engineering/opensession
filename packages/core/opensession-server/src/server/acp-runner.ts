@@ -498,11 +498,42 @@ export async function* runAcp(
   for (const key of Object.keys(env))
     if (env[key] === undefined) delete env[key];
   const command = acpProviderCommand(provider);
-  const child: ChildProcessWithoutNullStreams = spawn(
-    command[0],
-    command.slice(1),
-    { cwd: opts.cwd, env, stdio: ["pipe", "pipe", "pipe"], shell: false },
-  );
+  let child: ChildProcessWithoutNullStreams;
+  try {
+    child = spawn(command[0], command.slice(1), {
+      cwd: opts.cwd,
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+      shell: false,
+    });
+  } catch (error) {
+    // Bun throws synchronously when an executable is absent. Keep that
+    // operator/configuration error inside the run stream: escaping this async
+    // generator terminates the gateway and makes every other provider and
+    // integration unavailable. Authentication was already projected above,
+    // so clean it up before returning the ordinary terminal error event.
+    auth.destroy();
+    try {
+      rmSync(toolHome, { recursive: true, force: true });
+    } catch {}
+    yield {
+      type: "error",
+      content: `${provider}: ${cleanError(error)}`,
+      provider,
+      model,
+    };
+    return;
+  }
+  let rejectSpawnError!: (error: Error) => void;
+  const spawnError = new Promise<never>((_, reject) => {
+    rejectSpawnError = reject;
+  });
+  // Node reports a missing executable asynchronously. Bun currently throws
+  // above, but handling both contracts keeps the gateway process-safe across
+  // runtimes. Mark the promise handled immediately; the task races it below.
+  void spawnError.catch(() => {});
+  const onSpawnError = (error: Error) => rejectSpawnError(error);
+  child.once("error", onSpawnError);
   let stderr = "";
   child.stderr.on("data", (chunk: Buffer) => {
     stderr = (stderr + chunk.toString("utf8")).slice(-MAX_STDERR_BYTES);
@@ -635,11 +666,14 @@ export async function* runAcp(
 
   const task = (async () => {
     try {
-      const initialized = await connection.initialize({
-        protocolVersion: PROTOCOL_VERSION,
-        clientCapabilities: { terminal: provider === "grok" },
-        clientInfo: { name: "OpenSession", version: "1" },
-      });
+      const initialized = await Promise.race([
+        connection.initialize({
+          protocolVersion: PROTOCOL_VERSION,
+          clientCapabilities: { terminal: provider === "grok" },
+          clientInfo: { name: "OpenSession", version: "1" },
+        }),
+        spawnError,
+      ]);
       if (initialized.protocolVersion !== PROTOCOL_VERSION)
         throw new Error(
           `${provider} ACP protocol ${initialized.protocolVersion} is incompatible with ${PROTOCOL_VERSION}`,
@@ -776,6 +810,7 @@ export async function* runAcp(
       });
     } finally {
       acceptUpdates = false;
+      child.off("error", onSpawnError);
       await terminal.close();
       try {
         child.kill("SIGTERM");
