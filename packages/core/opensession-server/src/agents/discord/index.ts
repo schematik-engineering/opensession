@@ -107,7 +107,7 @@ export const DISCORD_COMMANDS: DiscordApplicationCommand[] = [
           {
             type: 3,
             name: "mode",
-            description: "Ask is read-only; code gets an isolated worktree",
+            description: "Code is default; Ask is explicitly read-only",
             choices: [
               { name: "Ask", value: "ask" },
               { name: "Code", value: "code" },
@@ -708,7 +708,13 @@ export class DiscordAgent implements AgentModule {
       if (delivered.status === "error") throw new Error(delivered.message);
       sessionId = existing.id;
     } else {
-      const mode = conversation?.mode || "ask";
+      // Discord is an internal, team-role-gated surface. Start its sessions in
+      // OpenSession's native Code mode so ordinary ACP tools are approved by
+      // the existing permission engine instead of pausing the thread for each
+      // call. An explicit `/os ask ... mode:Ask` still opts into read-only,
+      // confirmation-gated behavior; hard-denied and confirm-gated tools keep
+      // their global policy.
+      const mode = conversation?.mode || "code";
       const model = conversation?.model || this.requireConfig().defaultModel;
       const created = await control.createSession({
         prompt: input.prompt,
