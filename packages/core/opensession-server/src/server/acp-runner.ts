@@ -44,6 +44,7 @@ import {
   acpAuthSource,
   isAcpProvider,
   projectedAcpBootstrapFiles,
+  refreshAcpAuthSource,
   type AcpProvider,
 } from "./acp-config";
 import { providerFor } from "./models";
@@ -479,6 +480,7 @@ export async function* runAcp(
   const queue = new EventQueue();
   const unifiedSessionId =
     opts.journal?.osSessionId || opts.transcriptSessionId;
+  if (!projectedAcpBootstrapFiles()) await refreshAcpAuthSource(provider);
   const auth = prepareAuth(provider, unifiedSessionId);
   const toolHome = mkdtempSync(join(tmpdir(), "opensession-acp-tools-"));
   chmodSync(toolHome, 0o700);

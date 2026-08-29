@@ -41,6 +41,7 @@ function config(overrides: Partial<DiscordConfig> = {}): DiscordConfig {
     token: "test-token",
     guildIds: ["1542925450790305904"],
     channelIds: [],
+    roleIds: [],
     userIds: ["1542925450790305909"],
     defaultModel: "grok/grok-4.6",
     sandbox: "docker",
@@ -57,10 +58,12 @@ describe("Discord config and state", () => {
     process.env.DISCORD_APPLICATION_ID = "1542925450790305903";
     process.env.DISCORD_BOT_TOKEN_FILE = tokenFile;
     process.env.DISCORD_GUILD_IDS = "1542925450790305904";
+    process.env.DISCORD_ROLE_IDS = "1542925450790305906";
     delete process.env.DISCORD_BOT_TOKEN;
     const loaded = loadDiscordConfig();
     expect(loaded.token).toBe("secret-value");
     expect(loaded.guildIds).toEqual(["1542925450790305904"]);
+    expect(loaded.roleIds).toEqual(["1542925450790305906"]);
 
     delete process.env.DISCORD_GUILD_IDS;
     expect(() => loadDiscordConfig()).toThrow("fails closed");
@@ -290,6 +293,7 @@ describe("Discord agent", () => {
     const creates: any[] = [];
     const deliveries: Array<{ prompt: string; user?: string }> = [];
     const cfg = config({
+      roleIds: ["1542925450790305905"],
       userIds: ["1542925450790305909", "1542925450790305916"],
     });
     const parentChannel = "1542925450790305908";
@@ -384,6 +388,7 @@ describe("Discord agent", () => {
       guild_id: cfg.guildIds[0],
       content: `<@${cfg.applicationId}> use Grok`,
       author: { id: "1542925450790305909", username: "jack" },
+      member: { roles: cfg.roleIds },
       mentions: [{ id: cfg.applicationId, username: "OpenSession", bot: true }],
       attachments: [],
     };
@@ -419,6 +424,7 @@ describe("Discord agent", () => {
         username: "alex",
         global_name: "Alex",
       },
+      member: { roles: cfg.roleIds },
       mentions: [],
       attachments: [],
     };
@@ -436,14 +442,15 @@ describe("Discord agent", () => {
     await agent.shutdown();
   });
 
-  test("rejects wrong users, guilds, and channels before session control", async () => {
+  test("rejects wrong roles, guilds, and channels before session control", async () => {
     const state = new DiscordStateStore(join(tempDir(), "state.json"));
     const callbacks: any[] = [];
     let creates = 0;
     let dispatch: (name: string, data: any) => void = () => {};
     const cfg = config({
       channelIds: ["1542925450790305910"],
-      userIds: ["1542925450790305909"],
+      roleIds: ["1542925450790305906"],
+      userIds: [],
     });
     const control: SessionControl = {
       listSessions: () => [],
@@ -495,7 +502,8 @@ describe("Discord agent", () => {
       channel_id: cfg.channelIds[0],
       guild_id: cfg.guildIds[0],
       content: `<@${cfg.applicationId}> do not run`,
-      author: { id: cfg.userIds[0], username: "jack" },
+      author: { id: "1542925450790305909", username: "jack" },
+      member: { roles: cfg.roleIds },
       mentions: [{ id: cfg.applicationId, username: "OpenSession", bot: true }],
       attachments: [],
     };
@@ -512,7 +520,8 @@ describe("Discord agent", () => {
     dispatch("MESSAGE_CREATE", {
       ...message,
       id: "1542925450790305914",
-      author: { id: "1542925450790305997", username: "intruder" },
+      author: { id: "1542925450790305997", username: "non-team" },
+      member: { roles: ["1542925450790305996"] },
     });
     await Bun.sleep(30);
     expect(creates).toBe(0);
@@ -524,7 +533,8 @@ describe("Discord agent", () => {
       guild_id: cfg.guildIds[0],
       channel_id: cfg.channelIds[0],
       member: {
-        user: { id: "1542925450790305997", username: "intruder" },
+        user: { id: "1542925450790305997", username: "non-team" },
+        roles: ["1542925450790305996"],
       },
       data: { name: "os", options: [{ type: 1, name: "status" }] },
     });
@@ -536,6 +546,92 @@ describe("Discord agent", () => {
     });
     expect(callbacks[0][2].data.content).toContain("not enabled for you");
     expect(creates).toBe(0);
+    await agent.shutdown();
+  });
+
+  test("surfaces a new terminal run error promptly and deduplicates the event", async () => {
+    const state = new DiscordStateStore(join(tempDir(), "state.json"));
+    const edits: string[] = [];
+    const cfg = config();
+    let dispatch: (name: string, data: any) => void = () => {};
+    const control: SessionControl = {
+      listSessions: () => [],
+      getSession: (id) =>
+        ({
+          id,
+          state: "idle",
+          title: "Failed Discord request",
+          lastRunError: {
+            message: "Grok subscription sign-in expired; run grok login again",
+            at: "2026-08-29T07:47:04.380Z",
+          },
+        }) as any,
+      transcriptTail: async () => [],
+      answerQuestion: () => false,
+      deliverToSession: async () => ({ status: "started", message: "started" }),
+      cancelSession: () => false,
+      createSession: async () => ({
+        id: "os-discord-failed",
+        createdBy: "Mattia",
+        createdAt: new Date().toISOString(),
+      }),
+    };
+    const rest = {
+      currentBot: async () => ({
+        id: cfg.applicationId,
+        username: "OpenSession",
+      }),
+      currentGuilds: async () => [{ id: cfg.guildIds[0], name: "Schematik" }],
+      syncGuildCommand: async () => ({}),
+      gatewayBot: async () => ({ url: "wss://gateway.discord.gg", shards: 1 }),
+      channel: async (id: string) => ({ id, type: 0 }),
+      startThread: async () => ({ id: "1542925450790305927", type: 11 }),
+      sendMessage: async (channelId: string, content: string) => ({
+        id: "status",
+        channel_id: channelId,
+        content,
+      }),
+      editMessage: async (
+        _channelId: string,
+        _messageId: string,
+        content: string,
+      ) => {
+        edits.push(content);
+        return { id: "status", channel_id: "1542925450790305927", content };
+      },
+    };
+    const agent = new DiscordAgent({
+      loadConfig: () => cfg,
+      state,
+      control: () => control,
+      rest: () => rest as unknown as DiscordRest,
+      gateway: (options) => {
+        dispatch = (name, data) => void options.onDispatch(name, data);
+        return {
+          start() {},
+          stop() {},
+          health: () => ({ status: "ready", ready: true }),
+        } as unknown as DiscordGateway;
+      },
+    });
+    await agent.startup();
+    const event = {
+      id: "1542925450790305926",
+      channel_id: "1542925450790305925",
+      guild_id: cfg.guildIds[0],
+      content: `<@${cfg.applicationId}> test`,
+      author: { id: cfg.userIds[0], username: "mattia" },
+      mentions: [{ id: cfg.applicationId, username: "OpenSession", bot: true }],
+      attachments: [],
+    };
+    dispatch("MESSAGE_CREATE", event);
+    for (let i = 0; i < 100 && !state.wasProcessed(event.id); i++)
+      await Bun.sleep(5);
+    expect(state.wasProcessed(event.id)).toBe(true);
+    expect(edits.at(-1)).toBe(
+      "OpenSession failed: Grok subscription sign-in expired; run grok login again",
+    );
+    expect(edits.some((value) => value.includes("idle"))).toBe(false);
     await agent.shutdown();
   });
 

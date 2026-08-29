@@ -41,6 +41,7 @@ type DiscordMessage = {
   guild_id?: string;
   content?: string;
   author?: DiscordUser;
+  member?: { roles?: string[] };
   mentions?: DiscordUser[];
   attachments?: DiscordAttachment[];
 };
@@ -58,7 +59,7 @@ type DiscordInteraction = {
   type: number;
   guild_id?: string;
   channel_id?: string;
-  member?: { user?: DiscordUser };
+  member?: { user?: DiscordUser; roles?: string[] };
   user?: DiscordUser;
   data?: { name?: string; options?: InteractionOption[] };
 };
@@ -392,6 +393,7 @@ export class DiscordAgent implements AgentModule {
         message.guild_id,
         message.channel_id,
         message.author.id,
+        message.member?.roles,
       ))
     )
       return;
@@ -457,11 +459,15 @@ export class DiscordAgent implements AgentModule {
           await this.finishMessage(outputChannel, status.id, result);
           this.state.markProcessed(message.id);
         } catch (error) {
-          await this.requireRest().editMessage(
-            outputChannel,
-            status.id,
-            `OpenSession failed: ${safeError(error)}`,
-          );
+          try {
+            await this.requireRest().editMessage(
+              outputChannel,
+              status.id,
+              `OpenSession failed: ${safeError(error)}`,
+            );
+          } finally {
+            this.state.markProcessed(message.id);
+          }
         }
       });
     } finally {
@@ -486,6 +492,7 @@ export class DiscordAgent implements AgentModule {
       interaction.guild_id,
       interaction.channel_id,
       user.id,
+      interaction.member?.roles,
     );
     if (!allowed) {
       await this.requireRest().interactionCallback(
@@ -572,10 +579,14 @@ export class DiscordAgent implements AgentModule {
           await this.finishInteraction(interaction.token, result);
           this.state.markProcessed(interaction.id);
         } catch (error) {
-          await this.requireRest().editOriginalInteraction(
-            interaction.token,
-            `OpenSession failed: ${safeError(error)}`,
-          );
+          try {
+            await this.requireRest().editOriginalInteraction(
+              interaction.token,
+              `OpenSession failed: ${safeError(error)}`,
+            );
+          } finally {
+            this.state.markProcessed(interaction.id);
+          }
         }
       });
     } finally {
@@ -660,6 +671,9 @@ export class DiscordAgent implements AgentModule {
       ? await control.transcriptTail(existing.id, 200)
       : [];
     const baseline = new Set(baselineEntries.map((entry) => entry.id));
+    const baselineRunError = existing?.lastRunError
+      ? `${existing.lastRunError.at}\0${existing.lastRunError.message}`
+      : undefined;
     let sessionId: string;
     if (existing?.state === "waiting_question" && existing.pendingQuestion) {
       const answers = answerMap(existing.pendingQuestion, input.prompt);
@@ -721,6 +735,7 @@ export class DiscordAgent implements AgentModule {
       baseline,
       input.timeoutMs || this.requireConfig().responseTimeoutMs,
       input.onProgress,
+      baselineRunError,
     );
   }
 
@@ -729,6 +744,7 @@ export class DiscordAgent implements AgentModule {
     baseline: Set<string>,
     timeoutMs: number,
     onProgress: (text: string) => Promise<unknown>,
+    baselineRunError?: string,
   ): Promise<string> {
     const control = this.requireControl();
     const started = Date.now();
@@ -740,6 +756,17 @@ export class DiscordAgent implements AgentModule {
       const answer = latestAssistant(entries, baseline);
       if (summary?.state === "waiting_question" && summary.pendingQuestion) {
         return describeQuestion(summary.pendingQuestion);
+      }
+      const currentRunError = summary?.lastRunError
+        ? `${summary.lastRunError.at}\0${summary.lastRunError.message}`
+        : undefined;
+      if (
+        currentRunError &&
+        currentRunError !== baselineRunError &&
+        summary &&
+        !["running", "queued", "waiting_question"].includes(summary.state)
+      ) {
+        throw new Error(summary.lastRunError!.message);
       }
       if (
         summary &&
@@ -809,11 +836,17 @@ export class DiscordAgent implements AgentModule {
     guildId: string | undefined,
     channelId: string,
     userId: string,
+    memberRoleIds: string[] = [],
   ): Promise<boolean> {
     const config = this.requireConfig();
     if (config.userIds.length && !config.userIds.includes(userId)) return false;
     if (!guildId) return config.userIds.includes(userId);
     if (!config.guildIds.includes(guildId)) return false;
+    if (
+      config.roleIds.length &&
+      !memberRoleIds.some((roleId) => config.roleIds.includes(roleId))
+    )
+      return false;
     if (!config.channelIds.length || config.channelIds.includes(channelId))
       return true;
     try {

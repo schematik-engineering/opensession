@@ -9,6 +9,7 @@ export interface DiscordConfig {
   token: string;
   guildIds: string[];
   channelIds: string[];
+  roleIds: string[];
   userIds: string[];
   defaultModel?: string;
   sandbox: "docker";
@@ -104,6 +105,7 @@ export function loadDiscordConfig(): DiscordConfig {
     token,
     guildIds,
     channelIds: listValue("DISCORD_CHANNEL_IDS", cfg.channelIds),
+    roleIds: listValue("DISCORD_ROLE_IDS", cfg.roleIds),
     userIds: listValue("DISCORD_USER_IDS", cfg.userIds),
     defaultModel:
       stringValue(process.env.DISCORD_DEFAULT_MODEL) ||
