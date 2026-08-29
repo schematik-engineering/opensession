@@ -188,7 +188,7 @@ describe("worktree reaper wiring", () => {
       "utf8",
     );
     expect(boot).toContain(
-      "startWorktreeReaper(() => enrichSessionRuntime(getCachedSessions()))",
+      'enrichSessionRuntime(indexedSessions("include") ?? getCachedSessions())',
     );
   });
 });

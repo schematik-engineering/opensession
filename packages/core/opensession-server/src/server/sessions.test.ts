@@ -17,6 +17,7 @@ beforeAll(async () => {
   process.env.HOME = home;
   mkdirSync(join(home, ".opensession-sessions"), { recursive: true });
   mkdirSync(join(home, ".slack-sessions"), { recursive: true });
+  mkdirSync(join(home, ".linear-sessions"), { recursive: true });
   // The PR-cache assertions need a repo that actually carries a ghRepo:
   // prRepos() filters those out, and the only BUILT-IN repo is `opensession`
   // with an empty ghRepo (the registry became config-driven), so with no
@@ -112,6 +113,16 @@ function writeSlackSession(id: string, data: Record<string, unknown>): void {
   );
 }
 
+function writeLinearSession(
+  branch: string,
+  data: Record<string, unknown>,
+): void {
+  writeFileSync(
+    join(home, ".linear-sessions", `${branch}.json`),
+    JSON.stringify({ branch, ...data }, null, 2),
+  );
+}
+
 function uuidV7ForDate(iso: string): string {
   const hex = Date.parse(iso).toString(16).padStart(12, "0");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-7000-8000-000000000000`;
@@ -167,6 +178,33 @@ describe("getAllSessions", () => {
       slackThread: { channel: "C123", threadTs: key.slice("C123-".length) },
     });
     expect(readSlackSession("slack-../message-queue")).toBeNull();
+  });
+
+  it("resolves a newly announced Linear deep link directly from its owning file", async () => {
+    const branch = `linear-direct-${Date.now()}`;
+    writeLinearSession(branch, {
+      claudeSessionId: null,
+      issueIdentifier: "SCH-274",
+      issueTitle: "Check open PRs",
+      worktreeDir: `/tmp/${branch}`,
+      issueUrl: "https://linear.app/example/issue/SCH-274",
+      updatedAt: "2026-08-29T12:14:45.000Z",
+    });
+
+    const { readLinearSession } = await import(
+      `./sessions.ts?linear-direct=${crypto.randomUUID()}`
+    );
+    expect(readLinearSession(`linear-${branch}`)).toMatchObject({
+      id: `linear-${branch}`,
+      source: "linear",
+      title: "SCH-274: Check open PRs",
+      worktreeDir: `/tmp/${branch}`,
+      linearIssue: {
+        identifier: "SCH-274",
+        url: "https://linear.app/example/issue/SCH-274",
+      },
+    });
+    expect(readLinearSession("linear-../session")).toBeNull();
   });
 
   it("refreshes the legacy transcript index without blocking sync reads", async () => {

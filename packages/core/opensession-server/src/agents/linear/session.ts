@@ -15,8 +15,9 @@ import { writeJsonAtomic } from "../../server/shared/atomic-write";
 import {
   createWorktree as createRepoWorktree,
   removeWorktree,
+  reviveWorktree,
 } from "../../server/worktree";
-import { unlinkSync } from "fs";
+import { existsSync, unlinkSync } from "fs";
 import { homeDir } from "../../server/paths";
 import {
   gitIdentityFor,
@@ -25,6 +26,12 @@ import {
 import { createAgentActivity } from "./api";
 import type { LinearTokens } from "./oauth";
 import { getValidToken } from "./oauth";
+import { readLinearSession } from "../../server/sessions";
+import {
+  removeIndexedSession,
+  upsertIndexedSession,
+} from "../../server/session-list-store";
+import { invalidateSessionsCache } from "../../server/session-cache";
 
 const SESSION_DIR = `${process.env.HOME}/.linear-sessions`;
 
@@ -261,6 +268,14 @@ export async function saveSessionInfo(
     updatedAt: new Date().toISOString(),
   };
   writeJsonAtomic(`${SESSION_DIR}/${branch}.json`, data);
+  // Agent-owned session files sit outside the native session writer. Project
+  // the exact row immediately: otherwise a covered SQLite list stays blind to
+  // the new session, its freshly published deep link misses, and the first
+  // worktree-reaper pass can mistake the checkout for an unowned zero-commit
+  // tree and delete it while Linear is awaiting input.
+  const projected = readLinearSession(`linear-${branch}`);
+  if (projected) upsertIndexedSession(projected);
+  invalidateSessionsCache();
 }
 
 export async function loadSessionInfo(
@@ -280,6 +295,8 @@ export async function loadSessionInfo(
 export function deleteSessionFile(branch: string): void {
   try {
     unlinkSync(`${SESSION_DIR}/${branch}.json`);
+    removeIndexedSession(`linear-${branch}`);
+    invalidateSessionsCache();
     console.log(`[linear] Deleted session file: ${SESSION_DIR}/${branch}.json`);
   } catch {
     // File might not exist
@@ -409,6 +426,23 @@ function makeActionStreamer(accessToken: string, linearSessionId: string) {
 
 // --- Headless agent runner (pi engine) ---
 
+/** Recreate an awaiting Linear session's checkout before its next turn. The
+ * indexed-session fix prevents new sessions from being mistaken for orphans;
+ * this recovery arm repairs sessions already reaped by an older release. */
+export async function ensureLinearWorktree(
+  worktreeDir: string,
+  session?: Pick<ActiveSession, "branch" | "worktreeDir">,
+  revive: (branch: string, repoId?: string) => Promise<string> = reviveWorktree,
+): Promise<string> {
+  if (!session?.branch || existsSync(worktreeDir)) return worktreeDir;
+  console.log(
+    `[linear] Worktree ${session.branch} was cleaned up; recreating before the turn`,
+  );
+  const revived = await revive(session.branch, defaultRepo().id);
+  session.worktreeDir = revived;
+  return revived;
+}
+
 export async function runAgentHeadless(
   worktreeDir: string,
   prompt: string,
@@ -417,6 +451,7 @@ export async function runAgentHeadless(
   resumeClaudeId?: string,
   session?: ActiveSession,
 ): Promise<{ result: string; claudeSessionId: string }> {
+  worktreeDir = await ensureLinearWorktree(worktreeDir, session);
   console.log(
     `[linear] Running agent in ${worktreeDir}${resumeClaudeId ? ` (resuming ${resumeClaudeId})` : ""}`,
   );
