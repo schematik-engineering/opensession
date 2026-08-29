@@ -18,6 +18,7 @@ import { startTodoReminderTicker } from "./src/server/todos";
 import { startGeneratedTitleSweep } from "./src/server/generated-titles";
 import { startLiveActivitySync } from "./src/server/live-activities";
 import { startSessionListRuntimeSync } from "./src/server/session-list-runtime-sync";
+import { indexedSessions } from "./src/server/session-list-store";
 import {
   drainPendingTranscriptWakeBatch,
   drainPendingTranscriptWakesAfter,
@@ -801,7 +802,13 @@ if (!g.__opensessionBooted) {
     // Remove worktrees whose work is merged / PR closed, sweep removal husks.
     // Re-enrich the cached rows on every pass: stored session rows do not carry
     // live Pi/actor run state, and reaping an old-but-running session is destructive.
-    startWorktreeReaper(() => enrichSessionRuntime(getCachedSessions()));
+    // The list cache may intentionally serve a complete snapshot for 10s
+    // after an agent-owned file write. Destructive cleanup cannot accept that
+    // staleness: Linear publishes a worktree and then waits for human input,
+    // so a sweep in that gap must read the synchronously upserted index row.
+    startWorktreeReaper(() =>
+      enrichSessionRuntime(indexedSessions("include") ?? getCachedSessions()),
+    );
 
     // Portal processes survive a coordinator restart by design. Reconcile their
     // durable owner records immediately and keep reaping deleted-session husks.

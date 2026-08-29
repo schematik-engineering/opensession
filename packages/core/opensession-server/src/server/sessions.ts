@@ -844,58 +844,79 @@ function scanSlackSessions(): UnifiedSession[] {
   return [...slackSessionRows()];
 }
 
+function linearSessionRow(file: string): UnifiedSession | null {
+  if (!file.endsWith(".json")) return null;
+  const path = `${LINEAR_SESSIONS_DIR}/${file}`;
+  const data = readJsonSafe<LinearSessionFile>(path);
+  if (!data) return null;
+
+  const rawName =
+    data.participants?.[0]?.name || data.lastActiveUser?.name || null;
+  // Clean up email-style names (e.g. "john@example.com" → "John")
+  const startedBy = rawName?.includes("@")
+    ? rawName.split("@")[0].charAt(0).toUpperCase() +
+      rawName.split("@")[0].slice(1)
+    : rawName;
+
+  const title = data.issueIdentifier
+    ? `${data.issueIdentifier}: ${data.issueTitle || data.branch}`
+    : data.branch;
+
+  const id = `linear-${data.branch}`;
+  const archived = isArchivedId(id);
+
+  return overlaySidecarExtras({
+    id,
+    claudeSessionId: data.claudeSessionId,
+    source: "linear",
+    branch: data.branch,
+    worktreeDir: data.worktreeDir || null,
+    createdBy: startedBy,
+    startedBy,
+    title,
+    lastActivity: data.updatedAt || getFileMtime(path),
+    createdAt: getFileMtime(path),
+    isRunning: false,
+    transcriptPath: null,
+    linearIssue: data.issueIdentifier
+      ? {
+          identifier: data.issueIdentifier,
+          title: data.issueTitle || data.branch,
+          url: data.issueUrl,
+        }
+      : undefined,
+    model: data.model,
+    // Same pi-slot mapping as the slack scan (agent-session-sync writes it).
+    piSessionId: data.piSessionId || undefined,
+    archived: archived || undefined,
+    archivedReason: archived ? getArchiveReason(id) || "manual" : undefined,
+  });
+}
+
+/** Resolve a newly written Linear-owned session without waiting for a list
+ * index rebuild. Linear publishes its OpenSession deep link immediately after
+ * the file lands, and the worktree reaper must see that same row before its
+ * first destructive sweep. */
+export function readLinearSession(sessionId: string): UnifiedSession | null {
+  if (!sessionId.startsWith("linear-")) return null;
+  const branch = sessionId.slice("linear-".length);
+  if (!branch || branch.includes("/") || branch.includes("\\")) return null;
+  const session = linearSessionRow(`${branch}.json`);
+  if (!session) return null;
+  session.transcriptPath = resolveTranscriptPath(
+    findTranscriptPath(session.worktreeDir, session.claudeSessionId),
+    session.codexThreadId,
+    session.model,
+  );
+  return session;
+}
+
 function* linearSessionRows(): Generator<UnifiedSession> {
   if (!existsSync(LINEAR_SESSIONS_DIR)) return [];
 
   for (const file of readdirSync(LINEAR_SESSIONS_DIR)) {
-    if (!file.endsWith(".json")) continue;
-    const data = readJsonSafe<LinearSessionFile>(
-      `${LINEAR_SESSIONS_DIR}/${file}`,
-    );
-    if (!data) continue;
-
-    const rawName =
-      data.participants?.[0]?.name || data.lastActiveUser?.name || null;
-    // Clean up email-style names (e.g. "john@example.com" → "John")
-    const startedBy = rawName?.includes("@")
-      ? rawName.split("@")[0].charAt(0).toUpperCase() +
-        rawName.split("@")[0].slice(1)
-      : rawName;
-
-    const title = data.issueIdentifier
-      ? `${data.issueIdentifier}: ${data.issueTitle || data.branch}`
-      : data.branch;
-
-    const id = `linear-${data.branch}`;
-    const archived = isArchivedId(id);
-
-    yield overlaySidecarExtras({
-      id,
-      claudeSessionId: data.claudeSessionId,
-      source: "linear",
-      branch: data.branch,
-      worktreeDir: data.worktreeDir || null,
-      createdBy: startedBy,
-      startedBy,
-      title,
-      lastActivity:
-        data.updatedAt || getFileMtime(`${LINEAR_SESSIONS_DIR}/${file}`),
-      createdAt: getFileMtime(`${LINEAR_SESSIONS_DIR}/${file}`),
-      isRunning: false,
-      transcriptPath: null,
-      linearIssue: data.issueIdentifier
-        ? {
-            identifier: data.issueIdentifier,
-            title: data.issueTitle || data.branch,
-            url: data.issueUrl,
-          }
-        : undefined,
-      model: data.model,
-      // Same pi-slot mapping as the slack scan (agent-session-sync writes it).
-      piSessionId: data.piSessionId || undefined,
-      archived: archived || undefined,
-      archivedReason: archived ? getArchiveReason(id) || "manual" : undefined,
-    });
+    const session = linearSessionRow(file);
+    if (session) yield session;
   }
 }
 
