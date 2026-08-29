@@ -292,11 +292,12 @@ describe("Discord agent", () => {
     const edits: string[] = [];
     const creates: any[] = [];
     const deliveries: Array<{ prompt: string; user?: string }> = [];
+    const parentChannel = "1542925450790305908";
     const cfg = config({
+      channelIds: [parentChannel],
       roleIds: ["1542925450790305905"],
       userIds: ["1542925450790305909", "1542925450790305916"],
     });
-    const parentChannel = "1542925450790305908";
     const threadChannel = "1542925450790305906";
     state.setConversation(`guild:${cfg.guildIds[0]}:channel:${parentChannel}`, {
       sessionId: "old-slash-session",
@@ -352,7 +353,11 @@ describe("Discord agent", () => {
         id,
         type: id === threadChannel ? 11 : 0,
       }),
-      startThread: async () => ({ id: threadChannel, type: 11 }),
+      startThread: async () => ({
+        id: threadChannel,
+        type: 11,
+        parent_id: parentChannel,
+      }),
       sendMessage: async (channelId: string, content: string) => ({
         id: "status",
         channel_id: channelId,
