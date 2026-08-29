@@ -23,7 +23,9 @@ describe("running close confirmation ownership", () => {
     expect(appSource).toContain(
       "confirmRunningClose(s, () => void closeSessionNow(s))",
     );
-    expect(appSource).toContain("confirmRunningCloses(members, () => {");
+    expect(appSource).toContain(
+      "confirmRunningCloses(sessions, () => void archive())",
+    );
   });
 
   test("confirms synchronously when no session is running", () => {
