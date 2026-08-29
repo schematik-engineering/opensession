@@ -8,6 +8,7 @@ import {
   requestCreationOpening,
   requestCreationSandbox,
   requestCreationWorkspace,
+  safeCreationFailureMessage,
   settleCreationCancelled,
   settleCreationFailed,
 } from "./creation-intents";
@@ -107,6 +108,10 @@ describe("creation lifecycle intents", () => {
         kernel,
       );
       expect(failed.state).toBe("failed");
+      expect(failed.failureMessage).toBe("workspace refused");
+      expect(
+        store.creationState("create-failed-lifecycle")?.failureMessage,
+      ).toBe("workspace refused");
       expect(
         (
           await settleCreationFailed(
@@ -120,6 +125,16 @@ describe("creation lifecycle intents", () => {
     } finally {
       store.close();
     }
+  });
+
+  test("redacts credentials before retaining a terminal failure", () => {
+    expect(
+      safeCreationFailureMessage(
+        "clone https://person:password@example.com failed with Bearer abc.def and GROK_API_KEY=very-secret",
+      ),
+    ).toBe(
+      "clone https://example.com failed with [redacted] and GROK_API_KEY=[redacted]",
+    );
   });
 });
 

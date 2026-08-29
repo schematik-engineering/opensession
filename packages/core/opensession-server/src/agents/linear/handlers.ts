@@ -25,6 +25,8 @@ import {
 } from "./prompts";
 import {
   activeSessions,
+  activeSessionForIssue,
+  adoptActiveSessionIdentity,
   processedSessions,
   buildParticipantSections,
   createPrWithAttribution,
@@ -297,7 +299,13 @@ export async function handleAgentSession(
     console.log(
       `[linear] Stop signal for issue: ${agentSession.issue.identifier}`,
     );
-    const session = activeSessions.get(agentSession.id);
+    const session =
+      activeSessions.get(agentSession.id) ||
+      adoptActiveSessionIdentity(
+        agentSession.id,
+        agentSession.issue.id,
+        agentSession.issue.identifier,
+      )?.session;
     if (session) {
       if (session.abortController) {
         session.abortController.abort();
@@ -312,7 +320,13 @@ export async function handleAgentSession(
     const prompt = webhook.agentActivity.content.body;
     console.log(`[linear] Prompt from Linear: ${prompt.substring(0, 50)}...`);
 
-    let session = activeSessions.get(agentSession.id);
+    let session =
+      activeSessions.get(agentSession.id) ||
+      adoptActiveSessionIdentity(
+        agentSession.id,
+        agentSession.issue.id,
+        agentSession.issue.identifier,
+      )?.session;
 
     // Recover from disk
     if (!session) {
@@ -657,10 +671,11 @@ Help with whatever they're asking. You have a worktree ready at ${session.worktr
     console.log(
       `[linear] Session ${action} for issue: ${agentSession.issue.identifier}`,
     );
-    const branch = await generateBranchName(
-      agentSession.issue.title,
-      agentSession.issue.identifier,
-    );
+    const exact = activeSessions.get(agentSession.id);
+    if (!exact) {
+      return Response.json({ ok: true, skipped: true, stale: true });
+    }
+    const branch = exact.branch;
     try {
       deleteWorktree(branch);
       deleteSessionFile(branch);
@@ -690,6 +705,10 @@ Help with whatever they're asking. You have a worktree ready at ${session.worktr
   }
 
   const { issue } = agentSession;
+  const existingIssueSession = activeSessionForIssue(
+    issue.id,
+    issue.identifier,
+  );
   console.log(
     `[linear] New session for issue: ${issue.identifier} - ${issue.title}`,
   );
@@ -712,6 +731,51 @@ Help with whatever they're asking. You have a worktree ready at ${session.worktr
   // minutes, so authorizing immediately still left the assignment ignored.
   processedSessions.add(sessionId);
   setTimeout(() => processedSessions.delete(sessionId), 5 * 60 * 1000);
+
+  if (existingIssueSession) {
+    const adopted = adoptActiveSessionIdentity(
+      sessionId,
+      issue.id,
+      issue.identifier,
+    );
+    const existing = adopted!.session;
+    existing.accessToken = accessToken;
+    existing.issueTitle = issue.title;
+    existing.issueDescription = issue.description || existing.issueDescription;
+    existing.issueUrl = issue.url;
+    existing.issueId = issue.id;
+    existing.issueIdentifier = issue.identifier;
+    await saveSessionInfo(existing.branch, {
+      claudeSessionId: existing.claudeSessionId,
+      issueIdentifier: existing.issueIdentifier,
+      issueTitle: existing.issueTitle,
+      worktreeDir: existing.worktreeDir,
+      linearSessionId: sessionId,
+      phase: existing.phase,
+      issueId: existing.issueId,
+      issueUrl: existing.issueUrl,
+      participants: existing.participants,
+      lastActiveUser: existing.lastActiveUser,
+      issueCreator: existing.issueCreator,
+      model: existing.model,
+    });
+    await updateAgentSession(accessToken, sessionId, {
+      addedExternalUrls: [
+        {
+          url: opensessionSessionUrl(existing.branch),
+          label: `Open in ${personaName()}`,
+        },
+      ],
+    }).catch(() => {});
+    await createAgentActivity(accessToken, sessionId, {
+      type: "elicitation",
+      body: `I found the existing ${personaName()} workspace for ${issue.identifier}. Reply here to continue it, or open the linked session.`,
+    });
+    console.log(
+      `[linear] Rebound ${issue.identifier} to ${sessionId}; replaced ${adopted!.previousIds.join(", ")}`,
+    );
+    return Response.json({ ok: true, resumed: true });
+  }
 
   const { teamId } = await getIssueStatus(accessToken, issue.id);
   const issueDetails = await getIssueDetails(accessToken, issue.id);

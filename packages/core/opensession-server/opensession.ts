@@ -106,6 +106,7 @@ import {
 import { getSessionControl } from "./src/server/session-control";
 import { buildReposNote } from "./src/server/session-repos";
 import { destroySessionSandbox } from "./src/server/session-sandbox";
+import { reconcileSandboxOperationsOnStartup } from "./src/server/sandbox/operations";
 import { getAllSessions } from "./src/server/sessions";
 import {
   crossSiteViolation,
@@ -703,6 +704,7 @@ if (!g.__opensessionBooted) {
   startSessionListRuntimeSync();
   if (!devInstance) {
     startLiveActivitySync();
+    reconcileSandboxOperationsOnStartup();
 
     // Restore completed sandbox prewarms and maintain any explicit keep-ready
     // targets. This is a boot hook rather than a module-scope side effect.
@@ -714,6 +716,13 @@ if (!g.__opensessionBooted) {
         const { startSandboxEnvironmentMaintenance } =
           await import("./src/server/sandbox/environments");
         startSandboxEnvironmentMaintenance();
+        // Modal has no docker daemon to piggyback on: its idle stop is a
+        // server-owned sweep (checkpoint → terminate → lifecycle sleeping).
+        // Armed here so an idle sandbox left by a previous process is still
+        // stopped even if no new ensure/get ever runs.
+        const { ensureModalIdleSweep } =
+          await import("./src/server/sandbox/adapters/modal");
+        ensureModalIdleSweep();
         await poolStartup;
       })
       .catch((e) => console.error("[sandbox-prewarm] startup failed:", e));

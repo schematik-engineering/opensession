@@ -9,6 +9,10 @@ const liveOperations: Set<string> = ((
   globalThis as any
 ).__sandboxLiveOperations ??= new Set());
 
+const MAX_FAILED_OPERATIONS = 10;
+const MAX_RESTART_FAILURES = 3;
+const MAX_SUCCEEDED_OPERATIONS = 10;
+
 export type SandboxOperationStatus = "running" | "succeeded" | "failed";
 
 export interface SandboxOperation {
@@ -43,29 +47,67 @@ function readOperations(): SandboxOperation[] {
   }
 }
 
+export function compactSandboxOperations(
+  operations: SandboxOperation[],
+  live: ReadonlySet<string> = liveOperations,
+): SandboxOperation[] {
+  let failures = 0;
+  let restartFailures = 0;
+  let successes = 0;
+  const compacted: SandboxOperation[] = [];
+  for (const source of [...operations].sort(
+    (a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt),
+  )) {
+    const operation =
+      source.status === "running" && !live.has(source.id)
+        ? {
+            ...source,
+            status: "failed" as const,
+            stage: "Interrupted",
+            updatedAt: source.updatedAt || source.createdAt,
+            failureCode: "SERVER_RESTARTED",
+            failureSummary:
+              "The server restarted during this operation. Test again.",
+          }
+        : source;
+    if (operation.status === "failed") {
+      if (failures >= MAX_FAILED_OPERATIONS) continue;
+      if (operation.failureCode === "SERVER_RESTARTED") {
+        if (restartFailures >= MAX_RESTART_FAILURES) continue;
+        restartFailures += 1;
+      }
+      failures += 1;
+    } else if (operation.status === "succeeded") {
+      if (successes >= MAX_SUCCEEDED_OPERATIONS) continue;
+      successes += 1;
+    }
+    compacted.push(operation);
+  }
+  return compacted;
+}
+
+export function reconcileSandboxOperationsOnStartup(): void {
+  const before = readOperations();
+  const operations = compactSandboxOperations(before, new Set());
+  if (JSON.stringify(before) !== JSON.stringify(operations)) {
+    writeJsonAtomic(storePath(), { version: 1, operations });
+  }
+}
+
 function persist(operation: SandboxOperation): void {
   const all = readOperations().filter(
     (candidate) => candidate.id !== operation.id,
   );
   all.push(operation);
-  all.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-  writeJsonAtomic(storePath(), { version: 1, operations: all.slice(0, 100) });
+  writeJsonAtomic(storePath(), {
+    version: 1,
+    operations: compactSandboxOperations(all),
+  });
   broadcastToAll({ type: "sandbox_operation", operation });
 }
 
 export function listSandboxOperations(): SandboxOperation[] {
-  return readOperations().map((operation) =>
-    operation.status === "running" && !liveOperations.has(operation.id)
-      ? {
-          ...operation,
-          status: "failed" as const,
-          stage: "Interrupted",
-          failureCode: "SERVER_RESTARTED",
-          failureSummary:
-            "The server restarted during this operation. Test again.",
-        }
-      : operation,
-  );
+  return compactSandboxOperations(readOperations());
 }
 
 export function startSandboxOperation(

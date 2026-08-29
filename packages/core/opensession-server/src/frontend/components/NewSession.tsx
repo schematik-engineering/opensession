@@ -63,7 +63,11 @@ import {
   getSessionCheckoutPrefs,
   onSessionCheckoutPrefChanged,
 } from "../lib/session-checkout-pref";
-import { repoSelectionHint, toggleRepoSelection } from "../lib/repo-selection";
+import {
+  repoSelectionHint,
+  specificRepoSelection,
+  toggleRepoSelection,
+} from "../lib/repo-selection";
 import { fallbackBranchName } from "../lib/workspace-draft";
 import { newSessionDefaultRepo } from "../lib/new-session-repo";
 import {
@@ -95,6 +99,7 @@ import type {
 import { findPrWorkspaceId } from "../lib/pr-workspace";
 import { newClientSessionId } from "../lib/session-id";
 import { errorMatchesPendingCreate } from "../lib/new-session-navigation";
+import { withMutationRequestId } from "../lib/ws-request-id";
 import {
   consumeNewSessionWorkspaceDraft,
   forgetParkedNewSessionWorkspace,
@@ -446,7 +451,9 @@ function filteredRepo(): string | null {
     const v = JSON.parse(
       localStorage.getItem("opensession-sidebar-filter") || "{}",
     );
-    return typeof v.repo === "string" ? v.repo : null;
+    return typeof v.repo === "string"
+      ? specificRepoSelection(v.repo) || null
+      : null;
   } catch {
     return null;
   }
@@ -460,7 +467,7 @@ function readPrefill() {
   // filter. The configured default is applied once `/repos` resolves.
   const rawRepoParam = params.get("repo") ?? params.get("project");
   // "auto" was a short-lived picker sentinel, never a repository id.
-  const repoParam = rawRepoParam === "auto" ? "" : rawRepoParam;
+  const repoParam = specificRepoSelection(rawRepoParam);
   const mode =
     params.get("mode") === "ask" ? ("ask" as const) : ("code" as const);
   // `?repo=none` is honored in either mode: Ask with no repo reads nothing,
@@ -557,7 +564,9 @@ export function NewSession({
   // `forceMode: "scratch"` (a feed workspace) is a repo-less create, so it
   // arrives here as the repo rather than as a mode.
   const [repo, setRepo] = useState(
-    forceMode === "scratch" ? NO_REPO : forceRepo || prefill.repo,
+    forceMode === "scratch"
+      ? NO_REPO
+      : specificRepoSelection(forceRepo) || prefill.repo,
   );
   // Exactly one start point owns the branch semantics. A PR is not merely an
   // existing worktree: it must send `fromPr` so the server checks out the
@@ -591,7 +600,8 @@ export function NewSession({
     // nowhere to put a second repo. Drop them on the way in rather than
     // carrying a selection the create would have to refuse.
     if (next === "ask") setExtraRepos([]);
-    if (forceRepo || startPoint.kind === "pull-request") return;
+    if (specificRepoSelection(forceRepo) || startPoint.kind === "pull-request")
+      return;
     if (next === "ask") setRepo(NO_REPO);
     else if (repo === NO_REPO)
       setRepo(migratedRepoPref() || configuredDefaultRepo || NO_REPO);
@@ -669,8 +679,9 @@ export function NewSession({
       // fails the `repos.some(...)` membership test below and gets replaced by
       // the configured default the moment /repos lands.
       if (forceRepo === NO_REPO || current === NO_REPO) return current;
-      if (forceRepo && repos.some((item) => item.id === forceRepo))
-        return forceRepo;
+      const scopedRepo = specificRepoSelection(forceRepo);
+      if (scopedRepo && repos.some((item) => item.id === scopedRepo))
+        return scopedRepo;
       if (repos.some((item) => item.id === current)) return current;
       return configuredDefaultRepo;
     });
@@ -1277,7 +1288,7 @@ export function NewSession({
   function handleCreate() {
     if (!canCreate) return;
     const prompt = promptText.current.trim();
-    const createRepo = repo;
+    const createRepo = specificRepoSelection(repo) || configuredDefaultRepo;
     const branch =
       startPoint.kind === "pull-request"
         ? startPoint.pullRequest.branch
@@ -1337,7 +1348,7 @@ export function NewSession({
       ...(createAction === "open" ? { openImmediately: true } : {}),
       ...(createAction === "background" ? { background: true } : {}),
     };
-    const createMessage = {
+    const createMessage = withMutationRequestId({
       type: "create_session",
       clientSessionId,
       mode: createMode,
@@ -1384,7 +1395,7 @@ export function NewSession({
             ),
           }
         : {}),
-    } as WSClientMessage;
+    } as WSClientMessage);
     createSessionIdRef.current = clientSessionId;
     createMessageRef.current = createMessage;
     // A globally selected PR adopts its workspace, but its composer draft did

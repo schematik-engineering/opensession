@@ -166,6 +166,7 @@ import { authedRemoteUrl } from "../codestorage/auth";
 import { parseCsRemote } from "../codestorage/remote";
 import { redactUrl } from "../shared/redact";
 import { createWorkloadIdentityEnv } from "../workload-identity";
+import { loadWorkspaceSeedFiles } from "../workspace-seed-files";
 import { isAcpProvider, refreshAcpAuthSource } from "../acp-config";
 import { pickAcpAccount } from "../acp-accounts";
 import {
@@ -265,6 +266,9 @@ interface DockerSandboxState {
   /** Whether the `.agents/setup` lifecycle hook already ran (or was
    *  skipped — snapshot restore / script absent). One-shot per sandbox. */
   setupRan?: boolean;
+  /** Explicit registered-checkout seed files were projected into this volume.
+   *  Absent on older state, which intentionally causes one repair projection. */
+  privateSeedsApplied?: boolean;
   /** How the current container came to exist: fresh create vs snapshot
    *  restore. Lifecycle scripts receive it as OPENSESSION_BOOT_MODE. */
   bootMode?: "fresh" | "snapshot-restore";
@@ -332,19 +336,61 @@ function sessionRunsDir(sessionId: string): string {
 /** Run `docker <args>` (argv array — nothing is shell-interpolated). */
 async function docker(
   args: string[],
-  opts?: { timeoutMs?: number },
+  opts?: { timeoutMs?: number; stdin?: string },
 ): Promise<ExecResult> {
   const proc = Bun.spawn(["docker", ...args], {
+    stdin: opts?.stdin === undefined ? undefined : "pipe",
     stdout: "pipe",
     stderr: "pipe",
     timeout: opts?.timeoutMs ?? 120_000,
   });
+  if (opts?.stdin !== undefined) {
+    proc.stdin.write(opts.stdin);
+    proc.stdin.end();
+  }
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
     proc.exited,
   ]);
   return { exitCode, stdout, stderr };
+}
+
+/** Project declared ignored files without placing their contents in argv,
+ * logs, container layers, or the repository. Docker receives bytes on stdin
+ * and the destination is created mode 0600 as the unprivileged workspace user. */
+async function materializeDockerWorkspaceSeedFiles(
+  name: string,
+  cwd: string,
+  repo: Repo,
+): Promise<number> {
+  const files = loadWorkspaceSeedFiles(repo);
+  for (const file of files) {
+    const target = assertSafePath(`${cwd}/${file.path}`);
+    const parent = assertSafePath(dirname(target));
+    const result = await docker(
+      [
+        "exec",
+        "-i",
+        "-u",
+        "1000:1000",
+        name,
+        "sh",
+        "-c",
+        'umask 077; mkdir -p -- "$1"; cat > "$2"; chmod 600 -- "$2"',
+        "opensession-seed",
+        parent,
+        target,
+      ],
+      { stdin: file.content },
+    );
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `could not project private workspace file ${repo.id}:${file.path}`,
+      );
+    }
+  }
+  return files.length;
 }
 
 async function containerStatus(name: string): Promise<SandboxStatus> {
@@ -1593,6 +1639,21 @@ function makeDockerSandbox(
 
 // ── Idle-stop sweep ───────────────────────────────────────────────────────────
 
+export function stoppedSandboxIsDisposable(input: {
+  busy: boolean;
+  idleForMs: number;
+  idleThresholdMs: number;
+  snapshotsEnabled: boolean;
+  hasSnapshot: boolean;
+}): boolean {
+  return (
+    !input.busy &&
+    input.idleForMs >= input.idleThresholdMs &&
+    input.snapshotsEnabled &&
+    input.hasSnapshot
+  );
+}
+
 /** Exported for the verify suite, which backdates a state file and calls it
  *  directly to exercise the real snapshot-then-stop ordering. `onlySandboxId`
  *  scopes the sweep to one sandbox (verify must never snapshot/stop the live
@@ -1614,16 +1675,38 @@ export async function sweepIdleSandboxes(
     if (!state) continue;
     if (onlySandboxId && state.sandboxId !== onlySandboxId) continue;
     try {
-      if ((await containerStatus(state.sandboxId)) !== "running") continue;
+      const status = await containerStatus(state.sandboxId);
+      if (status === "gone") continue;
       // Idle = no active run for the session (host-registry has a live control
       // handle for every attached run) and no activity inside the window.
       if (hostRunBusy(state.sessionId)) continue;
       const last = Date.parse(state.lastActivityAt || state.createdAt) || 0;
-      if (Date.now() - last < idleMs) continue;
+      const idleForMs = Date.now() - last;
+      if (idleForMs < idleMs) continue;
+      const snaps = sandboxSnapshots();
+      if (status === "stopped") {
+        const hasSnapshot = !!(
+          snaps.enabled && (await latestSnapshotImage(state.sandboxId))
+        );
+        if (
+          stoppedSandboxIsDisposable({
+            busy: false,
+            idleForMs,
+            idleThresholdMs: idleMs,
+            snapshotsEnabled: snaps.enabled,
+            hasSnapshot,
+          })
+        ) {
+          console.log(
+            `[sandbox] removing stopped container ${state.sandboxId}; durable state and snapshot are retained`,
+          );
+          await docker(["rm", state.sandboxId]);
+        }
+        continue;
+      }
       // Snapshot BEFORE the stop (warm-restore pattern). A failure logs and
       // never blocks the stop; snapshotSandboxImage itself refuses while a run
       // is active (defense — the busy check above already covered it).
-      const snaps = sandboxSnapshots();
       if (snaps.enabled && snaps.onIdle) {
         try {
           const img = await snapshotSandboxImage(state.sandboxId);
@@ -1643,9 +1726,20 @@ export async function sweepIdleSandboxes(
       console.log(
         `[sandbox] stopping idle container ${state.sandboxId} (idle > ${idleMs / 60_000}m)`,
       );
-      await docker(["stop", "-t", "10", state.sandboxId], {
+      const stopped = await docker(["stop", "-t", "10", state.sandboxId], {
         timeoutMs: 60_000,
       });
+      if (stopped.exitCode !== 0) {
+        throw new Error(
+          `docker stop ${state.sandboxId} failed: ${stopped.stderr.trim().slice(0, 300)}`,
+        );
+      }
+      if (snaps.enabled && (await latestSnapshotImage(state.sandboxId))) {
+        console.log(
+          `[sandbox] removing stopped container ${state.sandboxId}; durable state and snapshot are retained`,
+        );
+        await docker(["rm", state.sandboxId]);
+      }
     } catch (e) {
       console.warn(`[sandbox] idle sweep failed for ${state.sandboxId}:`, e);
     }
@@ -1901,6 +1995,20 @@ export class DockerProvider implements SandboxProvider {
     // One-shot `.agents/setup` lifecycle hook (skipped on snapshot
     // restore; never retried once settled — see runWorkspaceSetup).
     let setupRan = existing?.setupRan === true;
+    let privateSeedsApplied = existing?.privateSeedsApplied === true;
+    if (workspace === "volume" && !privateSeedsApplied) {
+      const seeded = await materializeDockerWorkspaceSeedFiles(name, cwd, repo);
+      privateSeedsApplied = true;
+      if (seeded) {
+        // Old state may have marked a previously failed setup as settled. The
+        // first seed projection repairs that state and gives the hook one run
+        // with its now-present inputs.
+        setupRan = false;
+        console.log(
+          `[sandbox] ${name}: projected ${seeded} private workspace file(s)`,
+        );
+      }
+    }
     if (!setupRan) {
       setupRan = await runWorkspaceSetup(
         name,
@@ -1923,6 +2031,7 @@ export class DockerProvider implements SandboxProvider {
       transport,
       bootMode,
       ...(setupRan ? { setupRan } : {}),
+      ...(privateSeedsApplied ? { privateSeedsApplied } : {}),
       ...(branch ? { branch } : {}),
       ...(attachedDirs.length ? { attachedDirs } : {}),
     });

@@ -450,7 +450,9 @@ describe("single session ownership", () => {
     expect(wiring.indexOf("completedCreate?.piSessionId")).toBeLessThan(
       wiring.indexOf("actorCreationSetupPlan(bksId, createIdentity)"),
     );
-    expect(create).toContain("failCreate(error instanceof Error");
+    expect(create).toContain("terminal replay (${durableCreation.state})");
+    expect(create).toContain("failCreate(message)");
+    expect(create).not.toContain("failCreate(message);\n      throw error");
     expect(create).toContain("if (projected) return projected");
     expect(create.indexOf("if (projected) return projected")).toBeLessThan(
       create.indexOf('if (state.state === "failed")'),

@@ -19,6 +19,7 @@ import {
   type Repo,
 } from "./config";
 import { stateDir } from "./paths";
+import { materializeHostWorkspaceSeedFiles } from "./workspace-seed-files";
 
 // The Repo type + registry defaults live in config.ts now. Re-exported so existing
 // `import { type Repo } from "./worktree"` call sites keep working.
@@ -335,6 +336,16 @@ async function seedAndInstallWorktree(
     console.warn(
       `[worktree] warm-template seeding failed for ${branchLabel} (continuing):`,
       e,
+    );
+  }
+  // A manifest entry is an explicit operator requirement, unlike the
+  // best-effort dependency hook below. Project it only into the actual
+  // session worktree: warm templates and shared read-only checkouts must never
+  // become another resting place for private configuration.
+  const seeded = materializeHostWorkspaceSeedFiles(repo, wtPath);
+  if (seeded) {
+    console.log(
+      `[worktree] projected ${seeded} private workspace file(s) for ${branchLabel}`,
     );
   }
   await installWorktreeDeps(repo, wtPath, branchLabel);

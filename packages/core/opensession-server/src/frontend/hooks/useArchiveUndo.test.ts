@@ -15,9 +15,7 @@ describe("archive undo ownership", () => {
 
   test("keeps archive and reopen call sites in App", () => {
     expect(appSource).toContain("rememberArchived([s.id])");
-    expect(appSource).toContain(
-      "rememberArchived(members.map((member) => member.id))",
-    );
+    expect(appSource).toContain("rememberArchived(sessions.map((c) => c.id))");
     expect(appSource).toContain("rememberArchived([viewerSession.id])");
     expect(appSource).toContain("unarchiveSession(currentSession)");
     expect(appSource).toContain("void reopenLastArchivedRef.current()");

@@ -128,6 +128,9 @@ describe("Pi-only model routing", () => {
     expect(toPiModel("pi/openrouter/stealth/ox-alpha")).toBe(
       "pi/openrouter/z-ai/glm-5.3",
     );
+    expect(toPiModel("pi/vercel/zai/glm-5.3-flash")).toBe(
+      "pi/vercel-ai-gateway/zai/glm-5.3-flash",
+    );
     expect(piModelLabel("pi/openrouter/stealth/ox-alpha")).toBe("GLM-5.3");
     expect(modelEfforts("pi/openrouter/stealth/ox-alpha")).toEqual([
       "low",

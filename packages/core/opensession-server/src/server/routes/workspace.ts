@@ -167,6 +167,10 @@ function findNativeSessionForFileMentions(
   }
 }
 
+export function worktreeRepoQuery(value: string | null): string | undefined {
+  return value && value !== "all" ? value : undefined;
+}
+
 export async function handleWorkspaceRoutes(
   ctx: RouteContext,
 ): Promise<Response | undefined> {
@@ -174,9 +178,15 @@ export async function handleWorkspaceRoutes(
 
   // List worktrees (optionally for a specific repo)
   if (path === "/api/worktrees" && req.method === "GET") {
-    return Response.json(
-      await listWorktrees(url.searchParams.get("repo") || undefined),
-    );
+    const repo = worktreeRepoQuery(url.searchParams.get("repo"));
+    try {
+      return Response.json(await listWorktrees(repo));
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("Unknown repo")) {
+        return Response.json({ error: error.message }, { status: 400 });
+      }
+      throw error;
+    }
   }
 
   // File/folder-mention autocomplete ("@" in the composer). Searches the

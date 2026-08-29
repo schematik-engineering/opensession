@@ -12,6 +12,13 @@ const PRESET_HEADS = ["dial/", "orchestrator/", "workspace-preset/"];
 const isPresetId = (id: string) =>
   PRESET_HEADS.some((head) => id.startsWith(head));
 
+/** Canonicalize ids retained in browser preferences across provider renames. */
+export function canonicalModelId(id: string): string {
+  return id.startsWith("pi/vercel/")
+    ? `pi/vercel-ai-gateway/${id.slice("pi/vercel/".length)}`
+    : id;
+}
+
 export function modelEngine(id: string): EngineId {
   if (id.startsWith("grok/")) return "grok";
   if (id.startsWith("cursor/")) return "cursor";

@@ -43,9 +43,13 @@ export const GLM_5_3_MODEL_ID = "z-ai/glm-5.3";
 
 /** Canonicalize picker ids retained from GLM-5.3's pre-release alias. */
 export function canonicalProviderPickerModelId(id: string): string {
-  return id === "pi/openrouter/stealth/ox-alpha"
-    ? `pi/openrouter/${GLM_5_3_MODEL_ID}`
-    : id;
+  if (id === "pi/openrouter/stealth/ox-alpha")
+    return `pi/openrouter/${GLM_5_3_MODEL_ID}`;
+  // Vercel renamed the route exposed by the Pi bridge. Preferences and
+  // sessions created before that rename resume through the current provider.
+  if (id.startsWith("pi/vercel/"))
+    return `pi/vercel-ai-gateway/${id.slice("pi/vercel/".length)}`;
+  return id;
 }
 
 /** The reasoning levels Wafer's `reasoning_effort` accepts (docs.wafer.ai

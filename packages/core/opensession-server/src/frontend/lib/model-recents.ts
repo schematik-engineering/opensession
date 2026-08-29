@@ -4,6 +4,7 @@
 // leave gaps when a workspace exposes a smaller catalog.
 
 import { makeUserPref, type UserPref } from "./user-pref";
+import { canonicalModelId } from "./model-engine";
 
 const LOCAL_KEY = "opensession-recent-models";
 const PREF_KEY = "recent-models";
@@ -20,9 +21,9 @@ export function decodeRecentModels(
     if (!Array.isArray(value)) return null;
     return [
       ...new Set(
-        value.filter(
-          (id): id is string => typeof id === "string" && id.length > 0,
-        ),
+        value
+          .filter((id): id is string => typeof id === "string" && id.length > 0)
+          .map(canonicalModelId),
       ),
     ].slice(0, RECENT_MODEL_LIMIT);
   } catch {
@@ -32,10 +33,11 @@ export function decodeRecentModels(
 
 export function addRecentModel(models: string[], id: string): string[] {
   if (!id) return models.slice(0, RECENT_MODEL_LIMIT);
-  return [id, ...models.filter((model) => model !== id)].slice(
-    0,
-    RECENT_MODEL_LIMIT,
-  );
+  const canonical = canonicalModelId(id);
+  return [
+    canonical,
+    ...models.filter((model) => canonicalModelId(model) !== canonical),
+  ].slice(0, RECENT_MODEL_LIMIT);
 }
 
 let store: UserPref<string> | undefined;

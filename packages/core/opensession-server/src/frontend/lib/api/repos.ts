@@ -1,6 +1,7 @@
 import { API_BASE, ApiError, request } from "./request";
 import { rememberRepoColors } from "../repo-colors";
 import { rememberRepoCount } from "../repo-count";
+import { specificRepoSelection } from "../repo-selection";
 import {
   cachedNewSessionRepo,
   cachedRepos,
@@ -282,7 +283,8 @@ export async function switchPrimaryRepoApi(
 }
 
 export async function fetchWorktrees(repo?: string) {
-  const qs = repo ? `?repo=${encodeURIComponent(repo)}` : "";
+  const selected = specificRepoSelection(repo);
+  const qs = selected ? `?repo=${encodeURIComponent(selected)}` : "";
   return request<any>(`/worktrees${qs}`, {
     label: "Failed to fetch worktrees",
   });
