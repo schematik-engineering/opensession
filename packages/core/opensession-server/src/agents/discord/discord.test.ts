@@ -287,7 +287,7 @@ describe("Discord Gateway", () => {
 });
 
 describe("Discord agent", () => {
-  test("starts a fresh thread on mention, attributes teammate replies, and deduplicates", async () => {
+  test("starts a fresh code-mode thread on mention, attributes teammate replies, and deduplicates", async () => {
     const state = new DiscordStateStore(join(tempDir(), "state.json"));
     const edits: string[] = [];
     const creates: any[] = [];
@@ -405,7 +405,7 @@ describe("Discord agent", () => {
     expect(creates[0]).toMatchObject({
       prompt: "use Grok",
       model: "grok/grok-4.6",
-      mode: "ask",
+      mode: "code",
       sandbox: "docker",
       requestId: `discord:${event.id}:create`,
     });
