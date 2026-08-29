@@ -93,6 +93,17 @@ const inFlightPrompts: Set<string> = ((
   globalThis as any
 ).__linearInFlightPrompts ??= new Set<string>());
 
+function unavailableUntilAuthorized(): Response {
+  return Response.json(
+    {
+      error:
+        "Linear workspace is not authorized. Complete the OpenSession Linear OAuth connection and retry.",
+      retryable: true,
+    },
+    { status: 503, headers: { "Retry-After": "30" } },
+  );
+}
+
 // --- Issue status change → auto-implement ---
 
 export async function handleIssueUpdate(
@@ -629,6 +640,11 @@ Help with whatever they're asking. You have a worktree ready at ${session.worktr
             inFlightPrompts.delete(issueId);
           }
         })();
+      } else {
+        console.error(
+          `[linear] Prompted session ${agentSession.id} cannot run: organization ${organizationId} has no OAuth grant`,
+        );
+        return unavailableUntilAuthorized();
       }
     } else {
       console.log(`[linear] No active session found for ${agentSession.id}`);
@@ -661,15 +677,16 @@ Help with whatever they're asking. You have a worktree ready at ${session.worktr
   }
 
   const sessionId = agentSession.id;
-  if (processedSessions.has(sessionId)) {
+  if (processedSessions.has(sessionId) || activeSessions.has(sessionId)) {
     return Response.json({ ok: true, skipped: true });
   }
-  processedSessions.add(sessionId);
-  setTimeout(() => processedSessions.delete(sessionId), 5 * 60 * 1000);
 
   const accessToken = await getValidToken(organizationId, tokens);
   if (!accessToken) {
-    return Response.json({ error: "Not authorized" }, { status: 401 });
+    console.error(
+      `[linear] Created session ${sessionId} cannot start: organization ${organizationId} has no OAuth grant`,
+    );
+    return unavailableUntilAuthorized();
   }
 
   const { issue } = agentSession;
@@ -677,10 +694,24 @@ Help with whatever they're asking. You have a worktree ready at ${session.worktr
     `[linear] New session for issue: ${issue.identifier} - ${issue.title}`,
   );
 
-  await createAgentActivity(accessToken, agentSession.id, {
+  const acknowledged = await createAgentActivity(accessToken, agentSession.id, {
     type: "thought",
     body: MESSAGES.starting,
   });
+  if (!acknowledged) {
+    return Response.json(
+      {
+        error: "Could not acknowledge the Linear agent session",
+        retryable: true,
+      },
+      { status: 502, headers: { "Retry-After": "10" } },
+    );
+  }
+  // Only suppress redelivery after authorization and the first activity both
+  // succeeded. Previously a missing OAuth grant poisoned this set for five
+  // minutes, so authorizing immediately still left the assignment ignored.
+  processedSessions.add(sessionId);
+  setTimeout(() => processedSessions.delete(sessionId), 5 * 60 * 1000);
 
   const { teamId } = await getIssueStatus(accessToken, issue.id);
   const issueDetails = await getIssueDetails(accessToken, issue.id);

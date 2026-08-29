@@ -230,7 +230,7 @@ export interface RunAgentOpts {
    * workers should use distinct keys while retries of one worker reuse it. */
   accountAffinityKey?: string;
   /**
-   * Pinned account in the active model provider's Claude or Codex pool. The
+   * Pinned account in the active model provider's subscription pool. The
    * provider runner prefers it and falls back to the pool on exhaustion.
    * Journaled for resume.
    */

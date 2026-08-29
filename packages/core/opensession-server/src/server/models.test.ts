@@ -141,6 +141,8 @@ describe("Pi-only model routing", () => {
       "claude",
     );
     expect(accountProviderForModel("pi/openai/gpt-5.6-sol")).toBe("codex");
+    expect(accountProviderForModel("grok/grok-4.6")).toBe("grok");
+    expect(accountProviderForModel("cursor/auto")).toBe("cursor");
     expect(accountProviderForModel("pi/wafer/glm-5.2")).toBeUndefined();
   });
 

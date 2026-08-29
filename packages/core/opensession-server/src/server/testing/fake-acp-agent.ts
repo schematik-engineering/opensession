@@ -13,6 +13,7 @@ const provider = process.argv[2] || "grok";
 let nextRequestId = 10_000;
 const pending = new Map<number, (value: any) => void>();
 const promptRequests = new Map<string, number>();
+let authFixture = "";
 
 function authPath(): string {
   return join(
@@ -128,7 +129,10 @@ async function runPrompt(id: number, params: any): Promise<void> {
     return;
   }
   if (text === "hang") return;
-  if (text === "usage failure") {
+  if (
+    text === "usage failure" ||
+    (text === "usage first account" && authFixture.includes("first-account"))
+  ) {
     send({
       jsonrpc: "2.0",
       id,
@@ -260,6 +264,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         });
         break;
       }
+      authFixture = readFileSync(authPath(), "utf8");
       writeFileSync(
         `${authPath()}.fake.tmp`,
         readFileSync(authPath(), "utf8"),

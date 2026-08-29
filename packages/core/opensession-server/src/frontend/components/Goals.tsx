@@ -591,6 +591,8 @@ function formatNext(iso: string): string {
 function accountPoolSuffix(m: ModelOption): string {
   if (m.accountProvider === "codex") return " (OpenAI Codex)";
   if (m.accountProvider === "claude") return " (Claude)";
+  if (m.accountProvider === "grok") return " (SuperGrok)";
+  if (m.accountProvider === "cursor") return " (Cursor)";
   return "";
 }
 

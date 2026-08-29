@@ -215,7 +215,7 @@ export interface UnifiedSession {
   fastMode?: boolean;
   /**
    * Pinned provider account for runs in this session. The id belongs to the
-   * active model's Claude or Codex pool. Unset = auto (personal-first, shared
+   * active model's managed subscription pool. Unset = auto (personal-first, shared
    * pool fallback); an exhausted soft pin falls back to another eligible account.
    */
   accountId?: string;
@@ -593,7 +593,7 @@ export interface NativeSessionFile {
   pstackMode?: boolean; // sticky pstack engineering mode, toggled with /pstack or /poteto-mode
   effort?: string; // Pi reasoning variant for this session's runs; unset = model default
   fastMode?: boolean; // OpenAI priority service tier for ChatGPT OAuth Codex runs
-  accountId?: string; // pinned Claude/Codex provider account; unset = auto pool
+  accountId?: string; // pinned provider subscription account; unset = auto pool
   codexThreadId?: string; // codex thread id once the session has run on a codex model
   piSessionId?: string; // pi engine session id (uuid) once the session has run on a pi/* model
   grokSessionId?: string; // Grok ACP session id

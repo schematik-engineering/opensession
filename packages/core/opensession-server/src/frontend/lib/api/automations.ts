@@ -11,7 +11,7 @@ export interface ModelOption {
   /** Presets fix the lead model's effort instead of offering a ladder. */
   fixedEffort?: string;
   /** Provider account pool available to this model, if any. */
-  accountProvider?: "claude" | "codex";
+  accountProvider?: "claude" | "codex" | "grok" | "cursor";
   /** Picker section override ("dial" = The Dial presets). */
   group?: string;
   /** One-line subtitle shown under the label (dial presets). */
@@ -77,7 +77,7 @@ export interface ProviderAccountOption {
   id: string;
   name: string;
   email?: string;
-  provider: "claude" | "codex";
+  provider: "claude" | "codex" | "grok" | "cursor";
   /** Personal-sub owner, if any (else it's a shared-pool account). */
   owner?: string;
   /** False when the account is currently exhausted / over its cap. */
@@ -98,7 +98,10 @@ interface ProviderAccountRecord {
 export async function fetchProviderAccounts(): Promise<
   ProviderAccountOption[]
 > {
-  const fetchPool = async (provider: "claude" | "codex", path: string) => {
+  const fetchPool = async (
+    provider: "claude" | "codex" | "grok" | "cursor",
+    path: string,
+  ) => {
     try {
       const data = await request<{ accounts?: ProviderAccountRecord[] }>(path);
       return (data?.accounts ?? []).map((account) => ({
@@ -114,11 +117,33 @@ export async function fetchProviderAccounts(): Promise<
       return [];
     }
   };
-  const [claude, codex] = await Promise.all([
+  const [claude, codex, acp] = await Promise.all([
     fetchPool("claude", "/claude-accounts"),
     fetchPool("codex", "/codex-accounts"),
+    request<{ accounts?: (ProviderAccountRecord & { provider?: unknown })[] }>(
+      "/acp-accounts",
+    )
+      .then((data) =>
+        (data.accounts || [])
+          .filter(
+            (account) =>
+              account.provider === "grok" || account.provider === "cursor",
+          )
+          .map((account) => ({
+            id: account.id,
+            name: account.name,
+            email:
+              typeof account.email === "string" ? account.email : undefined,
+            provider: account.provider as "grok" | "cursor",
+            owner:
+              typeof account.owner === "string" ? account.owner : undefined,
+            usable: account.usable !== false,
+            kind: "subscription",
+          })),
+      )
+      .catch(() => []),
   ]);
-  return [...claude, ...codex];
+  return [...claude, ...codex, ...acp];
 }
 
 export interface AutomationRun {

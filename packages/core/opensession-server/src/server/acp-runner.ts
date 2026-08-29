@@ -40,17 +40,26 @@ import { transcriptForwarder } from "./transcript-forward";
 import {
   ACP_PROVIDER_DEFINITIONS,
   acpProviderCommand,
-  acpAgentIdSource,
-  acpAuthSource,
   isAcpProvider,
   projectedAcpBootstrapFiles,
   refreshAcpAuthSource,
   type AcpProvider,
 } from "./acp-config";
+import {
+  markAcpAccountExhausted,
+  listAcpAccounts,
+  pickAcpAccount,
+  type AcpAccount,
+} from "./acp-accounts";
 import { providerFor } from "./models";
 import { AcpTerminalManager } from "./acp-terminal";
 import { filterMcpServers } from "./runner-shared";
-import { acpProviderStateDir } from "./acp-state";
+import {
+  acpProviderStateDir,
+  readAcpAccountBinding,
+  recordAcpSessionAccountExhausted,
+  writeAcpAccountBinding,
+} from "./acp-state";
 
 const DEFAULT_TURN_TIMEOUT_MS = 30 * 60_000;
 const MAX_STDERR_BYTES = 8_192;
@@ -243,13 +252,18 @@ function linkProviderSessionState(
 function prepareAuth(
   provider: AcpProvider,
   unifiedSessionId: string | undefined,
+  account?: Pick<AcpAccount, "authPath" | "agentIdPath">,
 ): PreparedAuth {
   const definition = ACP_PROVIDER_DEFINITIONS[provider];
   const projected = projectedAcpBootstrapFiles();
   const source =
     projected && existsSync(projected.auth)
       ? projected.auth
-      : acpAuthSource(provider);
+      : account?.authPath;
+  if (!source)
+    throw new Error(
+      `${provider} subscription authentication is not configured`,
+    );
   if (!existsSync(source))
     throw new Error(
       `${provider} subscription authentication is not configured`,
@@ -269,7 +283,7 @@ function prepareAuth(
     const agentSource =
       projected && existsSync(projected.agentId)
         ? projected.agentId
-        : acpAgentIdSource(provider);
+        : account?.agentIdPath;
     if (agentSource && existsSync(agentSource)) {
       copyPrivate(agentSource, agentIdDestination);
       if (projected && agentSource === projected.agentId)
@@ -467,7 +481,7 @@ function isUsageFailure(message: string): boolean {
   );
 }
 
-export async function* runAcp(
+async function* runAcpAttempt(
   opts: RunAgentOpts,
   model: string,
 ): AsyncGenerator<StreamEvent> {
@@ -480,8 +494,39 @@ export async function* runAcp(
   const queue = new EventQueue();
   const unifiedSessionId =
     opts.journal?.osSessionId || opts.transcriptSessionId;
-  if (!projectedAcpBootstrapFiles()) await refreshAcpAuthSource(provider);
-  const auth = prepareAuth(provider, unifiedSessionId);
+  const projected = projectedAcpBootstrapFiles();
+  const boundAccountId = unifiedSessionId
+    ? readAcpAccountBinding(unifiedSessionId, provider)
+    : undefined;
+  const account = projected
+    ? undefined
+    : pickAcpAccount(provider, {
+        sessionKey: opts.accountAffinityKey || unifiedSessionId || opts.cwd,
+        accountId: opts.accountId || boundAccountId,
+        strict: opts.accountStrict,
+        user: opts.user,
+      });
+  if (!projected && !account) {
+    yield {
+      type: "error",
+      content: `${provider}: no usable subscription account is available`,
+      provider,
+      model,
+      usageLimitExhausted: true,
+    };
+    return;
+  }
+  if (account) await refreshAcpAuthSource(provider, account.authPath);
+  const auth = prepareAuth(provider, unifiedSessionId, account);
+  const selectedAccountId =
+    account?.id || process.env.OPENSESSION_ACP_ACCOUNT_ID || "projected";
+  // Provider-native session ids are account-owned. When a spent/removed pin
+  // rotates to another subscription, begin a fresh ACP session and let the
+  // OpenSession transcript handoff preserve the visible conversation.
+  const resumeSessionId =
+    boundAccountId && boundAccountId !== selectedAccountId
+      ? undefined
+      : opts.sessionId;
   const toolHome = mkdtempSync(join(tmpdir(), "opensession-acp-tools-"));
   chmodSync(toolHome, 0o700);
   const terminal = new AcpTerminalManager(opts.cwd, toolHome);
@@ -540,7 +585,7 @@ export async function* runAcp(
   });
 
   let connection: ClientSideConnection;
-  let engineSessionId = opts.sessionId;
+  let engineSessionId = resumeSessionId;
   let acceptUpdates = false;
   // Some ACP agents (Grok Build today) omit messageId on streamed chunks. A
   // provider-native session spans many OpenSession turns, so an engine-only
@@ -556,7 +601,7 @@ export async function* runAcp(
       opts.startToken,
       opts.journal?.osSessionId,
       opts.transcriptSessionId,
-      opts.sessionId,
+      resumeSessionId,
     ].filter((id): id is string => !!id),
   );
   const register = (id: string | undefined, control: AcpControl) => {
@@ -690,17 +735,17 @@ export async function* runAcp(
       const mcpServers = acpMcpServers(opts);
       const agentCapabilities = initialized.agentCapabilities || {};
       let resumedWithoutState = false;
-      const setup = opts.sessionId
+      const setup = resumeSessionId
         ? agentCapabilities.loadSession
           ? await connection.loadSession({
-              sessionId: opts.sessionId,
+              sessionId: resumeSessionId,
               cwd: opts.cwd,
               mcpServers,
             })
           : agentCapabilities.sessionCapabilities?.resume != null
             ? ((resumedWithoutState = true),
               await connection.resumeSession({
-                sessionId: opts.sessionId,
+                sessionId: resumeSessionId,
                 cwd: opts.cwd,
                 mcpServers,
               }))
@@ -710,7 +755,9 @@ export async function* runAcp(
                 );
               })()
         : await connection.newSession({ cwd: opts.cwd, mcpServers });
-      engineSessionId = opts.sessionId || (setup as any)?.sessionId;
+      engineSessionId = resumeSessionId || (setup as any)?.sessionId;
+      if (unifiedSessionId)
+        writeAcpAccountBinding(unifiedSessionId, provider, selectedAccountId);
       if (!engineSessionId)
         throw new Error(`${provider} ACP returned no session id`);
       register(engineSessionId, control);
@@ -808,6 +855,15 @@ export async function* runAcp(
         usageLimitExhausted: isUsageFailure(content) || undefined,
         noticePersisted: !!engineSessionId,
       });
+      if (isUsageFailure(content)) {
+        if (!projected && account) markAcpAccountExhausted(account.id);
+        if (unifiedSessionId)
+          recordAcpSessionAccountExhausted(
+            unifiedSessionId,
+            provider,
+            selectedAccountId,
+          );
+      }
     } finally {
       acceptUpdates = false;
       child.off("error", onSpawnError);
@@ -836,4 +892,53 @@ export async function* runAcp(
     if (!cancelled) control.cancel();
     await task.catch(() => {});
   }
+}
+
+/**
+ * Rotate through subscription accounts when a provider refuses a turn for a
+ * usage limit before producing any model-visible work. A Docker run receives
+ * one credential-minimal projection, so it records the exhausted account and
+ * rotates on the next run; host runs can retry immediately from the pool.
+ */
+export async function* runAcp(
+  opts: RunAgentOpts,
+  model: string,
+): AsyncGenerator<StreamEvent> {
+  const provider = providerFor(model);
+  if (
+    !isAcpProvider(provider) ||
+    projectedAcpBootstrapFiles() ||
+    opts.accountStrict
+  ) {
+    yield* runAcpAttempt(opts, model);
+    return;
+  }
+
+  const maxAttempts = Math.max(1, listAcpAccounts(provider).length);
+  let lastFailure: StreamEvent | null = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const prefix: StreamEvent[] = [];
+    let visible = false;
+    let retry = false;
+    for await (const event of runAcpAttempt(opts, model)) {
+      if (!visible && event.type === "init") {
+        prefix.push(event);
+        continue;
+      }
+      if (
+        !visible &&
+        event.type === "error" &&
+        event.usageLimitExhausted === true
+      ) {
+        lastFailure = event;
+        retry = true;
+        break;
+      }
+      for (const buffered of prefix.splice(0)) yield buffered;
+      yield event;
+      if (event.type !== "done" && event.type !== "error") visible = true;
+    }
+    if (!retry) return;
+  }
+  if (lastFailure) yield lastFailure;
 }

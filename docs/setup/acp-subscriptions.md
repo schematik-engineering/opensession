@@ -4,7 +4,8 @@ OpenSession runs Grok and Cursor through each vendor's official
 [Agent Client Protocol](https://agentclientprotocol.com/) command. This uses
 the existing SuperGrok and Cursor subscriptions; it does not proxy the consumer
 subscription through an OpenAI-compatible API, add API-key billing, or fall
-back to a different provider on exhaustion.
+back to a different provider on exhaustion. Multiple subscriptions for the
+same provider can be pooled and rotated before model fallback begins.
 
 The Docker runner image pins:
 
@@ -19,8 +20,17 @@ the affected turn reports a provider error without terminating the gateway.
 
 ## Credential projection
 
-Authenticate the official CLIs once on a trusted operator machine, then copy
-only their native auth artifacts into the OpenSession state directory:
+The normal path is **Settings → Providers → Subscriptions → Add account**.
+Choose SuperGrok or Cursor, choose whether the subscription is shared or owned
+by one teammate, and complete the official browser sign-in. Grok uses its
+device-code flow; Cursor provides its official one-time browser link. Each
+completed login is copied into an isolated, mode-0700 account directory with a
+mode-0600 auth file. The UI receives account metadata only, never credential
+paths or tokens.
+
+An existing operator-managed host login remains supported and appears as a
+protected account in the same list. To provision that initial login manually,
+copy only the native auth artifacts into the OpenSession state directory:
 
 ```text
 ~/.grok/auth.json             → ~/.opensession/acp/grok/auth.json
@@ -38,7 +48,7 @@ Directories must be mode 0700 and files mode 0600. Enable the providers in
 }
 ```
 
-`authPath` and Grok's `agentIdPath` may override those source paths. The source
+`authPath` and Grok's `agentIdPath` may override those host-account paths. The source
 credential never enters a session file, run spec, environment variable,
 command argument, transcript, or log. For a Docker turn, OpenSession refreshes
 an expired native Grok OIDC token at the host-only source and atomically stores
@@ -48,6 +58,16 @@ unlinks that copy, authenticates the vendor CLI, then deletes the CLI auth file
 before the first model-visible prompt. Tool processes receive a separate empty
 HOME and a filtered environment.
 
+Shared accounts use durable session affinity: an OpenSession thread resumes on
+the subscription that owns its provider-native session. Personal accounts are
+eligible only for their configured teammate and are preferred for that
+person's runs. A usage-limit failure sidelines the account for an hour. A host
+run retries immediately on another eligible account before the cross-model
+fallback chain; a credential-minimal Docker run records the exhausted account
+and selects another subscription on its next run. Switching subscriptions
+starts a fresh provider-native session rather than loading one account's native
+session under another account.
+
 If the refresh grant is revoked or invalid, the run fails explicitly and asks
 an operator to run `grok login` again on the OpenSession host. It never falls
 back to an xAI API key or separate usage billing.
@@ -56,8 +76,9 @@ back to an xAI API key or separate usage billing.
 
 Grok exposes `grok/grok-4.6` and `grok/grok-4.5`. Cursor exposes
 `cursor/auto` plus the curated subscription models shown by OpenSession's model
-picker. A session retains the provider-native ACP session ID, so follow-up
-turns load the same vendor conversation without replaying transcript text.
+picker. A session retains the provider-native ACP session ID while its account
+binding is unchanged, so follow-up turns load the same vendor conversation
+without replaying transcript text.
 
 External MCP servers are filtered by the normal OpenSession allowlist and
 per-user identity policy, then supplied through ACP session setup. In a Docker

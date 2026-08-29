@@ -1126,7 +1126,7 @@ export function routeModel(
   };
 }
 
-export type AccountProvider = "claude" | "codex";
+export type AccountProvider = "claude" | "codex" | "grok" | "cursor";
 
 /** Account pool used by a model after resolving presets and legacy ids. */
 export function accountProviderForModel(
@@ -1137,6 +1137,8 @@ export function accountProviderForModel(
   // Presets resolve to their main model before selecting an account pool.
   const piPreset = modelPreset(resolved);
   if (piPreset) return accountProviderForModel(piPreset.model);
+  const engine = providerFor(resolved);
+  if (engine === "grok" || engine === "cursor") return engine;
   const upstream = resolved.match(ENGINE_UPSTREAM_RE)?.[1];
   if (upstream === "anthropic" || resolved.startsWith("claude-"))
     return "claude";
