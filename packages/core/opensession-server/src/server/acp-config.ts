@@ -83,7 +83,27 @@ export function isAcpProvider(provider: Provider): provider is AcpProvider {
 export function acpProviderConfigured(provider: AcpProvider): boolean {
   const config = settings()[provider];
   if (config?.enabled === false) return false;
-  return config?.enabled === true && existsSync(acpAuthSource(provider));
+  if (config?.enabled !== true) return false;
+  if (existsSync(acpAuthSource(provider))) return true;
+  // New sign-ins live in the managed ACP account pool rather than replacing
+  // the original host credential. Read only the narrow path metadata here to
+  // avoid a config↔account-pool module cycle.
+  try {
+    const parsed = JSON.parse(
+      readFileSync(stateDir("acp-accounts.json"), "utf8"),
+    );
+    return Array.isArray(parsed?.accounts)
+      ? parsed.accounts.some(
+          (account: any) =>
+            account?.provider === provider &&
+            account?.source === "managed" &&
+            typeof account?.authPath === "string" &&
+            existsSync(account.authPath),
+        )
+      : false;
+  } catch {
+    return false;
+  }
 }
 
 export function configuredAcpProviders(): Set<AcpProvider> {
@@ -258,8 +278,9 @@ export async function refreshGrokAuthFile(
 /** Host-side source, refreshed once per process at a time before projection. */
 export async function refreshAcpAuthSource(
   provider: AcpProvider,
+  sourceOverride?: string,
 ): Promise<string> {
-  const source = acpAuthSource(provider);
+  const source = sourceOverride || acpAuthSource(provider);
   if (provider !== "grok") return source;
   const inflight = grokRefreshes.get(source);
   if (inflight) return await inflight;

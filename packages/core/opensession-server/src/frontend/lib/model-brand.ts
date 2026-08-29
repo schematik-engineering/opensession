@@ -20,6 +20,8 @@ export function modelBrandKey(id: string, provider?: string): string | null {
   if (provider === "claude" || id.startsWith("claude-")) return "claude";
   if (provider === "codex" || id.startsWith("gpt-") || id.startsWith("codex-"))
     return "codex";
+  if (provider === "grok" || id.startsWith("grok/")) return "xai";
+  if (provider === "cursor" || id.startsWith("cursor/")) return "cursor";
   return null;
 }
 

@@ -36,11 +36,72 @@ import {
   completeClaudeLogin,
   startClaudeLogin,
 } from "../claude-oauth-login";
+import {
+  listAcpAccountsPublic,
+  removeAcpAccount,
+  setAcpAccountOwner,
+} from "../acp-accounts";
+import { cancelAcpLogin, getAcpLogin, startAcpLogin } from "../acp-login";
 
 export async function handleAccountsRoutes(
   ctx: RouteContext,
 ): Promise<Response | undefined> {
   const { req, url, path, publicPrefix } = ctx;
+
+  // ── Grok + Cursor official-CLI subscription pools ──
+  if (path === "/api/acp-accounts" && req.method === "GET") {
+    return Response.json({ accounts: listAcpAccountsPublic() });
+  }
+  if (path === "/api/acp-accounts/login" && req.method === "POST") {
+    const body = await req.json().catch(() => null);
+    if (body?.provider !== "grok" && body?.provider !== "cursor") {
+      return Response.json(
+        { error: "provider must be grok or cursor" },
+        { status: 400 },
+      );
+    }
+    let result = startAcpLogin(
+      body.provider,
+      typeof body?.owner === "string" ? body.owner : undefined,
+    );
+    if (!("id" in result)) return Response.json(result, { status: 400 });
+    for (let i = 0; i < 25 && result.state === "starting"; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 160));
+      result = getAcpLogin(result.id) ?? result;
+    }
+    return Response.json(result);
+  }
+  const acpLoginMatch = path.match(/^\/api\/acp-accounts\/login\/([^/]+)$/);
+  if (acpLoginMatch && req.method === "GET") {
+    const login = getAcpLogin(decodeURIComponent(acpLoginMatch[1]));
+    return login
+      ? Response.json(login)
+      : Response.json({ error: "Not found" }, { status: 404 });
+  }
+  if (acpLoginMatch && req.method === "DELETE") {
+    return cancelAcpLogin(decodeURIComponent(acpLoginMatch[1]))
+      ? Response.json({ ok: true })
+      : Response.json({ error: "Not found" }, { status: 404 });
+  }
+  const acpAccountMatch = path.match(/^\/api\/acp-accounts\/([^/]+)$/);
+  if (acpAccountMatch && req.method === "DELETE") {
+    return removeAcpAccount(decodeURIComponent(acpAccountMatch[1]))
+      ? Response.json({ ok: true })
+      : Response.json(
+          { error: "Account not found or is the protected host login" },
+          { status: 404 },
+        );
+  }
+  if (acpAccountMatch && req.method === "PUT") {
+    const body = await req.json().catch(() => null);
+    const updated = setAcpAccountOwner(
+      decodeURIComponent(acpAccountMatch[1]),
+      typeof body?.owner === "string" ? body.owner : undefined,
+    );
+    return updated
+      ? Response.json(updated)
+      : Response.json({ error: "Account not found" }, { status: 404 });
+  }
 
   // ── Claude account pool (tokens are never sent back, only masked) ──
   if (path === "/api/claude-accounts" && req.method === "GET") {

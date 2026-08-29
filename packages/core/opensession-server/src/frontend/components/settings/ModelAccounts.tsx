@@ -109,6 +109,19 @@ interface CodexAccountInfo {
   } | null;
 }
 
+interface AcpAccountInfo {
+  id: string;
+  provider: "grok" | "cursor";
+  name: string;
+  email?: string;
+  owner?: string;
+  mode: "shared" | "personal";
+  source: "host" | "managed";
+  createdAt: string;
+  exhaustedUntil: string | null;
+  usable: boolean;
+}
+
 interface CodexUsageBucket {
   id: string;
   label?: string;
@@ -202,10 +215,14 @@ function OwnerSelect({
 
 /** A provider mark keeps mixed account rows scannable without repeating a
  * column of colored tiles beside provider names that are already written out. */
-function AccountProviderMark({ name }: { name: "claude" | "codex" }) {
+function AccountProviderMark({
+  name,
+}: {
+  name: "claude" | "codex" | "grok" | "cursor";
+}) {
   return (
     <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center text-faint">
-      <BrandMark name={name} size={18} />
+      <BrandMark name={name === "grok" ? "xai" : name} size={18} />
     </span>
   );
 }
@@ -236,6 +253,7 @@ function usageTone(pct: number | null): keyof typeof usageToneClasses {
 }
 
 const statusToneClasses = {
+  neutral: { dot: "bg-faint", text: "text-faint" },
   red: { dot: "bg-red", text: "text-red" },
   yellow: { dot: "bg-yellow", text: "text-yellow" },
   muted: {
@@ -1049,6 +1067,150 @@ export function CodexAccountsSection({
   );
 }
 
+// ── Grok + Cursor ACP accounts ─────────────────────────────────────────────
+
+function useAcpAccounts() {
+  const [accounts, setAccounts] = useState<AcpAccountInfo[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const result = await request<{ accounts: AcpAccountInfo[] }>(
+        "/acp-accounts",
+        { label: "Could not load Grok and Cursor accounts" },
+      );
+      setAccounts(result.accounts);
+      setError(null);
+    } catch (cause) {
+      setError(errorMessage(cause, "Could not load Grok and Cursor accounts"));
+      setAccounts((current) => current ?? []);
+    }
+  }, []);
+
+  useEffect(() => void load(), [load]);
+
+  async function setOwner(account: AcpAccountInfo, owner: string) {
+    try {
+      await request(`/acp-accounts/${encodeURIComponent(account.id)}`, {
+        method: "PUT",
+        body: { owner },
+        label: `Could not update ${account.provider} account`,
+      });
+      await load();
+    } catch (cause) {
+      setError(errorMessage(cause, "Could not update account owner"));
+    }
+  }
+
+  async function remove(account: AcpAccountInfo) {
+    if (
+      !window.confirm(
+        `Remove ${account.provider === "grok" ? "Grok" : "Cursor"} account "${providerAccountLabel(account)}"? Runs will stop using it.`,
+      )
+    )
+      return;
+    try {
+      await request(`/acp-accounts/${encodeURIComponent(account.id)}`, {
+        method: "DELETE",
+        label: `Could not remove ${account.provider} account`,
+      });
+      await load();
+    } catch (cause) {
+      setError(errorMessage(cause, "Could not remove account"));
+    }
+  }
+
+  return { accounts, error, setError, load, setOwner, remove };
+}
+
+type AcpAccountsState = ReturnType<typeof useAcpAccounts>;
+
+function AcpAccountRows({
+  state,
+  provider,
+}: {
+  state: AcpAccountsState;
+  provider?: "grok" | "cursor";
+}) {
+  return (
+    <>
+      {(state.accounts || [])
+        .filter((account) => !provider || account.provider === provider)
+        .sort(
+          (left, right) =>
+            left.provider.localeCompare(right.provider) ||
+            providerAccountLabel(left).localeCompare(
+              providerAccountLabel(right),
+            ),
+        )
+        .map((account) => (
+          <SettingRow
+            key={account.id}
+            className="items-start gap-x-3 phone:px-4"
+          >
+            <AccountProviderMark name={account.provider} />
+            <SettingRowText>
+              <div className="flex min-w-0 items-center gap-2">
+                <SettingRowTitle className="truncate">
+                  {providerAccountLabel(account)}
+                </SettingRowTitle>
+                <AccountStatus
+                  tone={account.usable ? "neutral" : "red"}
+                  title={account.exhaustedUntil || undefined}
+                >
+                  {account.usable ? "In rotation" : "Rate limited"}
+                </AccountStatus>
+              </div>
+              <SettingRowDescription className="truncate text-meta">
+                {account.provider === "grok" ? "SuperGrok" : "Cursor"} ·
+                official subscription login
+                {account.source === "host" ? " · existing host account" : ""}
+              </SettingRowDescription>
+            </SettingRowText>
+            <SettingRowControl className="flex items-center gap-1.5 phone:mt-1 phone:ml-0 phone:w-full phone:basis-full phone:gap-2.5 phone:pl-10">
+              <span className="hidden shrink-0 text-meta text-faint phone:inline">
+                Used by
+              </span>
+              <OwnerSelect
+                value={account.owner || ""}
+                onChange={(owner) => state.setOwner(account, owner)}
+                label={`Owner of ${providerAccountLabel(account)}`}
+                quiet
+                className="phone:ml-auto"
+                title={
+                  account.owner
+                    ? `${account.owner}'s personal subscription.`
+                    : "Shared pool account, used by everyone and by automations."
+                }
+              />
+              {account.source === "managed" ? (
+                <Menu.Root>
+                  <Menu.Trigger
+                    className={rowMenuTriggerClasses}
+                    aria-label={`Manage ${providerAccountLabel(account)}`}
+                  >
+                    <IconDotsHorizontal size={18} />
+                  </Menu.Trigger>
+                  <Menu.Popup align="end" sideOffset={4}>
+                    <Menu.Item
+                      onClick={() => state.remove(account)}
+                      className="text-red data-[highlighted]:bg-red-soft"
+                    >
+                      <IconTrash size={16} />
+                      Remove account
+                    </Menu.Item>
+                  </Menu.Popup>
+                </Menu.Root>
+              ) : (
+                <span className="text-meta text-faint">Host login</span>
+              )}
+            </SettingRowControl>
+          </SettingRow>
+        ))}
+    </>
+  );
+}
+
 /** One provider, collapsed: how many accounts it has and how many can take a
  * run right now. The accounts themselves stay one click away, so a pool of a
  * dozen reads as two rows instead of a page of meters. */
@@ -1061,7 +1223,7 @@ function ProviderSummaryRow({
   onAdd,
   children,
 }: {
-  mark: "claude" | "codex";
+  mark: "claude" | "codex" | "xai" | "cursor";
   title: string;
   accounts: { usable: boolean; exhaustedUntil: string | null }[];
   expanded: boolean;
@@ -1130,12 +1292,20 @@ export function ProviderAccountsSection({
 } = {}) {
   const claude = useClaudeAccounts();
   const codex = useCodexAccounts();
-  const [adding, setAdding] = useState<"claude" | "codex" | null>(null);
+  const acp = useAcpAccounts();
+  type SubscriptionProvider = "claude" | "codex" | "grok" | "cursor";
+  const [adding, setAdding] = useState<SubscriptionProvider | null>(null);
   const [view, setView] = useState<"providers" | "accounts">("providers");
-  const [expanded, setExpanded] = useState<"claude" | "codex" | null>(null);
-  const loading = claude.accounts === null || codex.accounts === null;
+  const [expanded, setExpanded] = useState<SubscriptionProvider | null>(null);
+  const loading =
+    claude.accounts === null ||
+    codex.accounts === null ||
+    acp.accounts === null;
   const empty =
-    !loading && claude.accounts?.length === 0 && codex.accounts?.length === 0;
+    !loading &&
+    claude.accounts?.length === 0 &&
+    codex.accounts?.length === 0 &&
+    acp.accounts?.length === 0;
   const refreshing = claude.refreshing || codex.refreshing;
 
   function refreshUsage() {
@@ -1194,6 +1364,14 @@ export function ProviderAccountsSection({
                   <IconTile name="codex" size={18} />
                   OpenAI account
                 </Menu.Item>
+                <Menu.Item onClick={() => setAdding("grok")}>
+                  <IconTile name="xai" size={18} />
+                  SuperGrok account
+                </Menu.Item>
+                <Menu.Item onClick={() => setAdding("cursor")}>
+                  <IconTile name="cursor" size={18} />
+                  Cursor account
+                </Menu.Item>
               </Menu.Popup>
             </Menu.Root>
           </>
@@ -1227,6 +1405,11 @@ export function ProviderAccountsSection({
           {codex.error}
         </InlineAlert>
       )}
+      {acp.error && (
+        <InlineAlert className="mb-2" onDismiss={() => acp.setError(null)}>
+          {acp.error}
+        </InlineAlert>
+      )}
 
       <Modal.Root
         open={adding === "claude"}
@@ -1240,6 +1423,23 @@ export function ProviderAccountsSection({
             }}
             onDone={() => setAdding(null)}
           />
+        </Modal.Content>
+      </Modal.Root>
+      <Modal.Root
+        open={adding === "grok" || adding === "cursor"}
+        onOpenChange={(open) => !open && setAdding(null)}
+      >
+        <Modal.Content>
+          {(adding === "grok" || adding === "cursor") && (
+            <AddAcpAccountForm
+              provider={adding}
+              onAdded={() => {
+                setAdding(null);
+                void acp.load();
+                void onChanged?.();
+              }}
+            />
+          )}
         </Modal.Content>
       </Modal.Root>
       <Modal.Root
@@ -1264,7 +1464,7 @@ export function ProviderAccountsSection({
           <EmptyState placement="row">
             {onboarding
               ? "Connect a Claude or OpenAI account to use its subscription."
-              : "No accounts yet. Runs use this server's Claude and Codex sign-ins until you add an Anthropic or OpenAI account."}
+              : "No accounts yet. Connect Claude, OpenAI, SuperGrok, or Cursor subscriptions to build the shared pool."}
           </EmptyState>
         ) : view === "providers" ? (
           <>
@@ -1292,11 +1492,38 @@ export function ProviderAccountsSection({
             >
               <CodexAccountRows state={codex} />
             </ProviderSummaryRow>
+            <ProviderSummaryRow
+              mark="xai"
+              title="SuperGrok"
+              accounts={(acp.accounts || []).filter(
+                (account) => account.provider === "grok",
+              )}
+              expanded={expanded === "grok"}
+              onToggle={() => setExpanded(expanded === "grok" ? null : "grok")}
+              onAdd={() => setAdding("grok")}
+            >
+              <AcpAccountRows state={acp} provider="grok" />
+            </ProviderSummaryRow>
+            <ProviderSummaryRow
+              mark="cursor"
+              title="Cursor"
+              accounts={(acp.accounts || []).filter(
+                (account) => account.provider === "cursor",
+              )}
+              expanded={expanded === "cursor"}
+              onToggle={() =>
+                setExpanded(expanded === "cursor" ? null : "cursor")
+              }
+              onAdd={() => setAdding("cursor")}
+            >
+              <AcpAccountRows state={acp} provider="cursor" />
+            </ProviderSummaryRow>
           </>
         ) : (
           <>
             <ClaudeAccountRows state={claude} />
             <CodexAccountRows state={codex} />
+            <AcpAccountRows state={acp} />
           </>
         )}
       </SettingCard>
@@ -1309,6 +1536,187 @@ export function ProviderAccountsSection({
 }
 
 // ── Add forms ──────────────────────────────────────────────────────────────
+
+interface AcpSubscriptionLogin {
+  id: string;
+  provider: "grok" | "cursor";
+  state: "starting" | "awaiting_authorization" | "done" | "error" | "cancelled";
+  url?: string;
+  code?: string;
+  error?: string;
+  account?: AcpAccountInfo;
+}
+
+function AddAcpAccountForm({
+  provider,
+  onAdded,
+}: {
+  provider: "grok" | "cursor";
+  onAdded: () => void;
+}) {
+  const [owner, setOwner] = useState("");
+  const [login, setLogin] = useState<AcpSubscriptionLogin | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const finished = useRef(false);
+  const title = provider === "grok" ? "SuperGrok" : "Cursor";
+
+  const cleanup = useEffectEvent(() => {
+    if (finished.current || !login?.id) return;
+    void request(`/acp-accounts/login/${encodeURIComponent(login.id)}`, {
+      method: "DELETE",
+      label: `Could not cancel ${title} sign-in`,
+    }).catch(() => undefined);
+  });
+  useEffect(() => () => cleanup(), []);
+
+  const poll = useEffectEvent(async () => {
+    if (!login?.id) return;
+    try {
+      const next = await request<AcpSubscriptionLogin>(
+        `/acp-accounts/login/${encodeURIComponent(login.id)}`,
+        { label: `Could not refresh ${title} sign-in` },
+      );
+      setLogin(next);
+      if (next.state === "done") {
+        finished.current = true;
+        toast(`${title} account added to the subscription pool`);
+        onAdded();
+      }
+    } catch {
+      // The CLI owns the login lifetime; a transient poll failure is harmless.
+    }
+  });
+  useEffect(() => {
+    if (
+      !login?.id ||
+      login.state === "done" ||
+      login.state === "error" ||
+      login.state === "cancelled"
+    )
+      return;
+    const timer = setInterval(() => void poll(), 2000);
+    return () => clearInterval(timer);
+  }, [login?.id, login?.state]);
+
+  async function start() {
+    setSaving(true);
+    setError(null);
+    try {
+      const next = await request<AcpSubscriptionLogin>("/acp-accounts/login", {
+        method: "POST",
+        body: {
+          provider,
+          ...(owner.trim() ? { owner: owner.trim() } : {}),
+        },
+        label: `Could not start ${title} sign-in`,
+      });
+      setLogin(next);
+    } catch (cause) {
+      setError(errorMessage(cause, `Could not start ${title} sign-in`));
+    }
+    setSaving(false);
+  }
+
+  const pending =
+    login?.state === "starting" || login?.state === "awaiting_authorization";
+  return (
+    <>
+      <Modal.Header
+        title={`Add ${title} account`}
+        description={`Sign in with an existing ${title} subscription. OpenSession keeps each login isolated and rotates shared accounts when one reaches its limit.`}
+      />
+      <form
+        className="flex flex-col gap-5"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!saving && !pending && login?.state !== "done") void start();
+        }}
+      >
+        <Field
+          label="Owner"
+          title="Personal subscriptions are only used for that teammate. Shared pool subscriptions can serve the whole team."
+        >
+          <OwnerSelect
+            value={owner}
+            onChange={setOwner}
+            label="Owner"
+            disabled={!!login}
+          />
+        </Field>
+
+        {login && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="rounded-md bg-surface px-4 py-3 text-supporting"
+          >
+            {login.state === "starting" && (
+              <div className="text-dim">Starting secure sign-in…</div>
+            )}
+            {login.state === "awaiting_authorization" && login.url && (
+              <>
+                <div>
+                  Open{" "}
+                  <a
+                    href={login.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-link underline"
+                  >
+                    the {title} sign-in
+                  </a>
+                  {login.code ? " and confirm this one-time code:" : "."}
+                </div>
+                {login.code && (
+                  <div className="my-2">
+                    <DeviceCode
+                      code={login.code}
+                      className="text-section-title"
+                    />
+                  </div>
+                )}
+                <div className="mt-1 text-dim">
+                  Waiting for authorization… this panel updates itself.
+                </div>
+              </>
+            )}
+            {login.state === "done" && <div>Account connected.</div>}
+            {login.state === "error" && (
+              <InlineAlert
+                onRetry={() => setLogin(null)}
+                retryLabel="Try again"
+              >
+                {login.error || "Sign-in failed."}
+              </InlineAlert>
+            )}
+          </div>
+        )}
+        {error && <InlineAlert>{error}</InlineAlert>}
+        <Modal.Footer>
+          <Modal.Close
+            render={
+              <Button variant="ghost">
+                {pending ? "Cancel sign-in" : "Cancel"}
+              </Button>
+            }
+          />
+          <Button
+            variant="primary"
+            type="submit"
+            disabled={saving || pending || login?.state === "done"}
+          >
+            {saving
+              ? "Starting…"
+              : pending
+                ? "Waiting for sign-in…"
+                : `Sign in with ${title}`}
+          </Button>
+        </Modal.Footer>
+      </form>
+    </>
+  );
+}
 
 function AddClaudeAccountForm({
   onAccountAdded,

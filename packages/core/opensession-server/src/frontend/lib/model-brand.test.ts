@@ -12,6 +12,8 @@ describe("modelBrandKey", () => {
   test("maps legacy direct-SDK models from their provider", () => {
     expect(modelBrandKey("claude-opus-5", "claude")).toBe("claude");
     expect(modelBrandKey("gpt-5.6-sol", "codex")).toBe("codex");
+    expect(modelBrandKey("grok/grok-4.6", "grok")).toBe("xai");
+    expect(modelBrandKey("cursor/auto", "cursor")).toBe("cursor");
   });
 
   test("maps every distinct vendor in combo compositions", () => {

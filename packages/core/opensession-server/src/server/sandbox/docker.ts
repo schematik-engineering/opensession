@@ -166,11 +166,12 @@ import { authedRemoteUrl } from "../codestorage/auth";
 import { parseCsRemote } from "../codestorage/remote";
 import { redactUrl } from "../shared/redact";
 import { createWorkloadIdentityEnv } from "../workload-identity";
+import { isAcpProvider, refreshAcpAuthSource } from "../acp-config";
+import { pickAcpAccount } from "../acp-accounts";
 import {
-  acpAgentIdSource,
-  isAcpProvider,
-  refreshAcpAuthSource,
-} from "../acp-config";
+  acpSessionExhaustedAccounts,
+  readAcpAccountBinding,
+} from "../acp-state";
 import {
   REPOS,
   getRepo,
@@ -1172,8 +1173,30 @@ function makeDockerLauncher(
       const spec = readJsonSafe<RunHostSpec>(`${dir}/${HOST_SPEC_NAME}`);
       const acpProvider = providerFor(spec?.model);
       const projectedAcpPaths: string[] = [];
+      let projectedAcpAccountId: string | undefined;
       if (isAcpProvider(acpProvider)) {
-        const authSource = await refreshAcpAuthSource(acpProvider);
+        const account = pickAcpAccount(acpProvider, {
+          exclude: spec?.osSessionId
+            ? acpSessionExhaustedAccounts(spec.osSessionId, acpProvider)
+            : undefined,
+          sessionKey: spec?.accountAffinityKey || spec?.osSessionId,
+          accountId:
+            spec?.accountId ||
+            (spec?.osSessionId
+              ? readAcpAccountBinding(spec.osSessionId, acpProvider)
+              : undefined),
+          strict: spec?.accountStrict,
+          user: spec?.user,
+        });
+        if (!account)
+          throw new HostLaunchNotDispatchedError(
+            `${acpProvider} has no usable subscription account`,
+          );
+        projectedAcpAccountId = account.id;
+        const authSource = await refreshAcpAuthSource(
+          acpProvider,
+          account.authPath,
+        );
         if (!existsSync(authSource))
           throw new HostLaunchNotDispatchedError(
             `${acpProvider} subscription authentication is not configured`,
@@ -1182,7 +1205,7 @@ function makeDockerLauncher(
         copyFileSync(authSource, authDestination);
         chmodSync(authDestination, 0o600);
         projectedAcpPaths.push(authDestination);
-        const agentIdSource = acpAgentIdSource(acpProvider);
+        const agentIdSource = account.agentIdPath;
         if (agentIdSource && existsSync(agentIdSource)) {
           const agentIdDestination = `${dir}/acp-agent-id`;
           copyFileSync(agentIdSource, agentIdDestination);
@@ -1225,6 +1248,9 @@ function makeDockerLauncher(
           : []),
         ...(process.env.OPENSESSION_UI_BASE
           ? env(`OPENSESSION_UI_BASE=${process.env.OPENSESSION_UI_BASE}`)
+          : []),
+        ...(projectedAcpAccountId
+          ? env(`OPENSESSION_ACP_ACCOUNT_ID=${projectedAcpAccountId}`)
           : []),
         ...wsEnv,
         container,

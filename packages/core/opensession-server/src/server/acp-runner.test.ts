@@ -19,9 +19,14 @@ import {
 import {
   acpProviderStateDir,
   acpSessionStateDir,
+  readAcpAccountBinding,
   removeAcpSessionState,
 } from "./acp-state";
 import { __setAcpProviderCommandForTest } from "./acp-config";
+import {
+  __setAcpAccountsPathForTest,
+  addAcpAccountFromHome,
+} from "./acp-accounts";
 import type { RunAgentOpts } from "./agent-runner";
 
 const fakeAgent = fileURLToPath(
@@ -31,6 +36,7 @@ let scratch: string;
 let previousJournal: string | undefined;
 let previousTimeout: string | undefined;
 let previousSessionsDir: string | undefined;
+let previousAcpAccountsPath: string;
 
 function stageAuth(value = "test-subscription-auth"): string {
   const runDir = join(scratch, "run");
@@ -71,6 +77,9 @@ beforeEach(() => {
   previousTimeout = process.env.OPENSESSION_ACP_TURN_TIMEOUT_MS;
   previousSessionsDir = process.env.OPENSESSION_SESSIONS_DIR;
   process.env.OPENSESSION_SESSIONS_DIR = join(scratch, "sessions");
+  previousAcpAccountsPath = __setAcpAccountsPathForTest(
+    join(scratch, "acp-accounts.json"),
+  ).store;
   __setAcpProviderCommandForTest("grok", [process.execPath, fakeAgent, "grok"]);
   __setAcpProviderCommandForTest("cursor", [
     process.execPath,
@@ -90,6 +99,7 @@ afterEach(() => {
   if (previousSessionsDir === undefined)
     delete process.env.OPENSESSION_SESSIONS_DIR;
   else process.env.OPENSESSION_SESSIONS_DIR = previousSessionsDir;
+  __setAcpAccountsPathForTest(previousAcpAccountsPath);
   rmSync(scratch, { recursive: true, force: true });
 });
 
@@ -336,5 +346,48 @@ describe("ACP runner", () => {
       usageLimitExhausted: true,
     });
     expect(events.some((event) => event.type === "model_switch")).toBe(false);
+  });
+
+  test("rotates a host run to the next Grok subscription before model fallback", async () => {
+    delete process.env.OPENSESSION_RUN_JOURNAL;
+    const add = (name: string) => {
+      const home = join(scratch, name);
+      const auth = join(home, ".grok/auth.json");
+      mkdirSync(join(home, ".grok"), { recursive: true, mode: 0o700 });
+      writeFileSync(
+        auth,
+        JSON.stringify({
+          issuer: {
+            key: name,
+            email: `${name}@example.test`,
+            auth_mode: "oidc",
+            oidc_issuer: "https://auth.x.ai",
+            expires_at: "2099-01-01T00:00:00.000Z",
+          },
+        }),
+        { mode: 0o600 },
+      );
+      chmodSync(auth, 0o600);
+      const result = addAcpAccountFromHome("grok", home);
+      if ("error" in result) throw new Error(result.error);
+      return result;
+    };
+    const first = add("first-account");
+    const second = add("second-account");
+    const runOpts = {
+      ...opts("usage first account", undefined, "os-grok-pool-rotation"),
+      accountId: first.id,
+    };
+
+    const events = await collect(runAcp(runOpts, "grok/grok-4.6"));
+    expect(events.filter((event) => event.type === "init")).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      provider: "grok",
+      result: "hello from ACP",
+    });
+    expect(readAcpAccountBinding("os-grok-pool-rotation", "grok")).toBe(
+      second.id,
+    );
   });
 });

@@ -19,7 +19,20 @@ async function gql(
     },
     body: JSON.stringify({ query, variables }),
   });
-  return response.json();
+  if (!response.ok) {
+    throw new Error(`Linear GraphQL request failed (HTTP ${response.status})`);
+  }
+  const body = await response.json();
+  if (Array.isArray(body?.errors) && body.errors.length > 0) {
+    const message = body.errors
+      .map((error: any) =>
+        typeof error?.message === "string" ? error.message : "unknown error",
+      )
+      .join("; ")
+      .slice(0, 500);
+    throw new Error(`Linear GraphQL error: ${message}`);
+  }
+  return body;
 }
 
 /** Fetch a Linear user's details */
@@ -64,29 +77,64 @@ export async function createAgentActivity(
   sessionId: string,
   content: AgentActivityContent,
   ephemeral?: boolean,
-): Promise<void> {
-  const result = await gql(
-    accessToken,
-    `
-    mutation CreateAgentActivity($input: AgentActivityCreateInput!) {
-      agentActivityCreate(input: $input) {
-        success
-        agentActivity { id }
-      }
-    }
-  `,
-    {
-      input: {
-        agentSessionId: sessionId,
-        content,
-        ...(ephemeral ? { ephemeral: true } : {}),
-      },
-    },
-  );
+  activityId = crypto.randomUUID(),
+): Promise<boolean> {
+  // Linear expects agent sessions to be acknowledged promptly. A short retry
+  // absorbs transient API failures while still keeping the webhook handler
+  // inside Linear's five-second response budget. Callers can distinguish a
+  // delivered activity from a logged failure instead of silently proceeding.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const result = await gql(
+        accessToken,
+        `
+        mutation CreateAgentActivity($input: AgentActivityCreateInput!) {
+          agentActivityCreate(input: $input) {
+            success
+            agentActivity { id }
+          }
+        }
+      `,
+        {
+          input: {
+            id: activityId,
+            agentSessionId: sessionId,
+            content,
+            ...(ephemeral ? { ephemeral: true } : {}),
+          },
+        },
+      );
 
-  if (!result.data?.agentActivityCreate?.success) {
-    console.error("[linear] Failed to create agent activity:", result);
+      if (result.data?.agentActivityCreate?.success) return true;
+      console.error(
+        `[linear] Failed to create agent activity (attempt ${attempt}/3)`,
+      );
+    } catch (error) {
+      console.error(
+        `[linear] Failed to create agent activity (attempt ${attempt}/3):`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    // Linear accepts caller-supplied UUIDs for agent activities. If it
+    // committed the mutation but the response was lost, reconcile that exact
+    // UUID before retrying so a transient network failure cannot duplicate a
+    // response in the issue timeline.
+    try {
+      const existing = await gql(
+        accessToken,
+        `
+        query GetAgentActivity($id: String!) {
+          agentActivity(id: $id) { id }
+        }
+      `,
+        { id: activityId },
+      );
+      if (existing.data?.agentActivity?.id === activityId) return true;
+    } catch {}
+    if (attempt < 3)
+      await new Promise((resolve) => setTimeout(resolve, attempt * 200));
   }
+  return false;
 }
 
 export interface PlanStep {

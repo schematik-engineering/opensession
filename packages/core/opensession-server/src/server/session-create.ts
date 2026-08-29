@@ -38,6 +38,7 @@ import {
 import { makeAskHandler } from "./asks";
 import { getAccountById } from "./claude-accounts";
 import { getCodexAccountById } from "./codex-accounts";
+import { getAcpAccountById } from "./acp-accounts";
 import { buildForkHandoffNote } from "./fork-handoff";
 import { ensureGeneratedTitle } from "./generated-titles";
 import { nameKnownSessionReferencesForTitle } from "./session-reference-title";
@@ -302,7 +303,9 @@ export function resolvePinnedAccountId(
         ? getCodexAccountById(accountId)
         : provider === "claude"
           ? getAccountById(accountId)
-          : undefined
+          : provider === "grok" || provider === "cursor"
+            ? getAcpAccountById(accountId)
+            : undefined
       : undefined;
   return requested &&
     (!requested.owner || (!!user && userMatchesAny(user, [requested.owner])))

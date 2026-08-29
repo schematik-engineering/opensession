@@ -119,15 +119,23 @@ export const INTEGRATIONS: IntegrationSpec[] = [
     env: [
       {
         name: "LINEAR_API_KEY",
-        required: true,
-        description: "API key for issue reads/writes",
+        description: "optional Plain fallback for issue creation",
       },
       {
         name: "LINEAR_WEBHOOK_SECRET",
+        required: true,
         description: "verifies inbound webhook signatures",
       },
-      { name: "LINEAR_CLIENT_ID", description: "OAuth app client id" },
-      { name: "LINEAR_CLIENT_SECRET", description: "OAuth app client secret" },
+      {
+        name: "LINEAR_CLIENT_ID",
+        required: true,
+        description: "OAuth app client id",
+      },
+      {
+        name: "LINEAR_CLIENT_SECRET",
+        required: true,
+        description: "OAuth app client secret",
+      },
     ],
     links: [
       {

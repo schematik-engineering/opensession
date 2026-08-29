@@ -47,11 +47,10 @@ The agent is off by default. If `ENABLE_LINEAR_AGENT` is unset, enable it with
 wins when present. See [boot guards](integrations-misc.md#boot-guards).
 Restart Open Session after changing the flag or credentials.
 
-The current Settings form marks `LINEAR_API_KEY` as required before its switch
-can be enabled, even though the Linear agent runtime does not use that key. If
-you do not use Plain's issue-creation fallback, enable Linear directly through
-`ENABLE_LINEAR_AGENT=true` or `integrations.linear.enabled` instead of adding an
-unneeded personal API key.
+Settings requires the OAuth client ID, OAuth client secret, and webhook signing
+secret before enabling the agent. `LINEAR_API_KEY` stays optional and is shown
+only for Plain's issue-creation fallback; the Linear agent-session runtime does
+not use it.
 
 ## OAuth app setup
 
@@ -71,7 +70,11 @@ OAuth routes:
 - `GET /oauth/authorize` redirects to Linear's consent page.
 - `GET /oauth/callback` exchanges the code. Grants are stored by organization
   in `~/.linear-agent-tokens.json`, written atomically and refreshed when an
-  agent API call finds a token within five minutes of expiry.
+  agent API call finds a token within five minutes of expiry. The file is mode
+
+600.  A webhook received before authorization returns a retryable 503 and is
+      not added to the created-session dedup set, so completing OAuth does not leave
+      the assignment silently suppressed for five minutes.
 
 The OAuth `redirect_uri` is `integrations.linear.oauthRedirectUrl` when that
 value is non-empty. Otherwise it is
@@ -108,6 +111,12 @@ and `handlers.ts`):
     Session viewer, and asks for plan, implement, or another instruction.
   - `prompted` runs planning, implementation, or a free-form coding turn.
     `signal: "stop"` cancels the current engine run.
+  - Agent activities retry short transient Linear API failures and expose a
+    failed acknowledgement as a retryable webhook error instead of recording
+    an undelivered assignment as processed.
+  - Activity retries reuse one caller-supplied UUID. After an ambiguous network
+    response, Open Session reads that UUID back before retrying, preventing a
+    duplicate response when Linear committed the first request.
   - Planning completion posts a `# Implementation Plan` issue comment, moves
     the issue to `Ready`, and waits. The next reply starts implementation, as
     does a later move to `In Progress`.

@@ -45,7 +45,7 @@ export async function loadTokens(): Promise<LinearTokens> {
 }
 
 export async function saveTokens(tokens: LinearTokens): Promise<void> {
-  writeJsonAtomic(TOKENS_FILE, tokens);
+  writeJsonAtomic(TOKENS_FILE, tokens, true, 0o600);
 }
 
 export async function refreshToken(
