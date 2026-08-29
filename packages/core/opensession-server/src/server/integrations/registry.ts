@@ -208,6 +208,10 @@ export const INTEGRATIONS: IntegrationSpec[] = [
         description: "optional channel and parent-channel allowlist",
       },
       {
+        name: "DISCORD_ROLE_IDS",
+        description: "optional guild role allowlist",
+      },
+      {
         name: "DISCORD_USER_IDS",
         description: "optional user allowlist; required for direct messages",
       },

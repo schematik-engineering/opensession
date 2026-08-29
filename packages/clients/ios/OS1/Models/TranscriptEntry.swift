@@ -82,6 +82,9 @@ struct TranscriptEntry: Identifiable, Decodable, Equatable, Sendable {
     /// Content-free marker separating a completed response from a later
     /// system-triggered turn. It affects grouping but never renders a row.
     var turnBoundary: Bool?
+    /// Provider-supplied reasoning summary. Optional so transcripts from older
+    /// servers keep decoding; only `true` changes presentation.
+    var isReasoning: Bool?
     var isError: Bool?
     var model: String?
     var agentId: String?

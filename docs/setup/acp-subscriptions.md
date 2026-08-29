@@ -8,7 +8,7 @@ back to a different provider on exhaustion.
 
 The Docker runner image pins:
 
-- Grok CLI `1.0.5`, invoked as `grok agent stdio`.
+- Grok CLI `1.0.13`, invoked as `grok agent stdio`.
 - Cursor Agent build `2026.08.25-3e8eec8`, invoked as `cursor-agent acp`.
 
 ## Credential projection
@@ -34,11 +34,17 @@ Directories must be mode 0700 and files mode 0600. Enable the providers in
 
 `authPath` and Grok's `agentIdPath` may override those source paths. The source
 credential never enters a session file, run spec, environment variable,
-command argument, transcript, or log. For a Docker turn, the launcher copies
-it into the private per-run directory; the ACP adapter consumes and unlinks
-that copy, authenticates the vendor CLI, then deletes the CLI auth file before
-the first model-visible prompt. Tool processes receive a separate empty HOME
-and a filtered environment.
+command argument, transcript, or log. For a Docker turn, OpenSession refreshes
+an expired native Grok OIDC token at the host-only source and atomically stores
+any rotated refresh token with mode 0600. The launcher then copies the
+credential into the private per-run directory; the ACP adapter consumes and
+unlinks that copy, authenticates the vendor CLI, then deletes the CLI auth file
+before the first model-visible prompt. Tool processes receive a separate empty
+HOME and a filtered environment.
+
+If the refresh grant is revoked or invalid, the run fails explicitly and asks
+an operator to run `grok login` again on the OpenSession host. It never falls
+back to an xAI API key or separate usage billing.
 
 ## Models
 

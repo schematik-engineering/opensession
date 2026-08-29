@@ -57,6 +57,8 @@ struct TranscriptRow: View {
                     onEditUnsent: onEditUnsent,
                     onDeleteUnsent: onDeleteUnsent
                 )
+            } else if entry.isAssistant, entry.isReasoning == true {
+                ReasoningSummaryRow(entry: entry)
             } else if entry.isAssistant {
                 AssistantMessage(
                     entry: entry,
@@ -508,6 +510,43 @@ private struct OutboxMessageStatus: View {
     }
 }
 
+/// Provider reasoning is visible activity, not an answer. A generated bold
+/// heading is normalized to regular-weight quiet text; any body keeps markdown
+/// structure at the same dimmed hierarchy.
+struct ReasoningSummaryRow: View {
+    let entry: TranscriptEntry
+
+    private var display: ReasoningSummaryDisplay {
+        ReasoningSummaryDisplay(entry.text)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if !display.title.isEmpty {
+                Text(display.title)
+                    .font(.body)
+                    .foregroundStyle(OS1VisualStyle.textDim)
+            }
+            if !display.body.isEmpty {
+                MarkdownBody(display.body, dimmed: true)
+            }
+        }
+        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .textSelection(.enabled)
+        .contextMenu {
+            Button {
+                copyToPasteboard(entry.text)
+            } label: {
+                Label("Copy reasoning summary", systemImage: "doc.on.doc")
+            }
+            TimestampLabel(date: entry.timestampDate)
+        }
+        .accessibilityLabel("Reasoning summary")
+        .accessibilityValue(entry.text)
+    }
+}
+
 /// The agent's answer renders plain — no bubble, the shape modern AI chat
 /// apps converge on, since only the person's own messages need containing.
 struct AssistantMessage: View {
@@ -842,9 +881,18 @@ struct StreamingBubble: View {
     let text: String
 
     var body: some View {
-        StreamingMarkdownBody(text)
-            .padding(.vertical, 2)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        Group {
+            if let heading = ReasoningSummaryDisplay.liveHeading(text) {
+                Text(heading)
+                    .font(.body)
+                    .foregroundStyle(OS1VisualStyle.textDim)
+                    .accessibilityLabel("Reasoning summary")
+            } else {
+                StreamingMarkdownBody(text)
+            }
+        }
+        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

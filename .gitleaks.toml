@@ -12,6 +12,8 @@ description = "Known public identifiers and synthetic test values misclassified 
 regexTarget = "secret"
 regexes = [
   '''^123456789012345678$''',
+  '''^234567890123456789$''',
+  '''^345678901234567890$''',
   '''^ED25519_PKCS8_BYTES$''',
   '''^C0BE8KVFBEX\-1786887720\.562319$''',
   '''^os1\.liveActivities\.enabled$''',

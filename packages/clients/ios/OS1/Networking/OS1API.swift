@@ -1610,6 +1610,7 @@ enum OS1API {
         prompt: String,
         repo: String,
         mode: String,
+        checkoutMode: String = "default",
         model: String? = nil,
         effort: String? = nil,
         fastMode: Bool = false,
@@ -1624,6 +1625,7 @@ enum OS1API {
             prompt: prompt,
             repo: repo,
             mode: mode,
+            checkoutMode: checkoutMode,
             model: model,
             effort: effort,
             fastMode: fastMode,
@@ -1653,6 +1655,7 @@ enum OS1API {
         prompt: String,
         repo: String,
         mode: String,
+        checkoutMode: String = "default",
         model: String? = nil,
         effort: String? = nil,
         fastMode: Bool = false,
@@ -1663,7 +1666,13 @@ enum OS1API {
         user: String,
         requestId: String? = nil
     ) -> [String: Any] {
-        var body: [String: Any] = ["prompt": prompt, "mode": mode]
+        var body: [String: Any] = [
+            "prompt": prompt,
+            "mode": mode,
+            "checkoutMode": checkoutMode == "checkout" || checkoutMode == "worktree"
+                ? checkoutMode
+                : "default",
+        ]
         if let requestId, !requestId.isEmpty { body["requestId"] = requestId }
         // Sent only when the composer actually offered the choice. Omitting it
         // lets the instance's own sandbox default decide, which is the right

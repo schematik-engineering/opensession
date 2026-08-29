@@ -29,6 +29,11 @@ struct TurnBlockView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
+            ForEach(turn.reasoningSummaries) { entry in
+                ReasoningSummaryRow(entry: entry)
+                    .padding(.bottom, 4)
+            }
+
             Button {
                 withAnimation(.snappy(duration: 0.22, extraBounce: 0)) {
                     state.toggle()
@@ -434,11 +439,16 @@ struct TurnStepsView: View {
             ForEach(sections) { section in
                 switch section {
                 case .message(let entry):
-                    // Narration is prose to read, just like the final answer.
-                    // The fold and its indent distinguish it; only tool rows
-                    // keep the dimmed treatment.
-                    MarkdownBody(entry.text)
-                        .padding(.trailing, 16)
+                    if entry.isReasoning == true {
+                        ReasoningSummaryRow(entry: entry)
+                            .padding(.trailing, 16)
+                    } else {
+                        // Narration is prose to read, just like the final answer.
+                        // The fold and its indent distinguish it; only tool rows
+                        // keep the dimmed treatment.
+                        MarkdownBody(entry.text)
+                            .padding(.trailing, 16)
+                    }
                 case .tools(let calls, let kind):
                     if showsTools {
                         if rendersToolCallsInPlace {

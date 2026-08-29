@@ -146,6 +146,95 @@ final class TranscriptGroupingTests: XCTestCase {
         XCTAssertEqual(entry.turnBoundary, true)
     }
 
+    func testTranscriptEntryTolerantlyDecodesReasoningFlag() throws {
+        let marked = try JSONDecoder().decode(
+            TranscriptEntry.self,
+            from: Data(
+                #"{"id":"r1","type":"assistant","content":"Thinking","isReasoning":true,"futureField":{"x":1}}"#.utf8
+            )
+        )
+        let older = try JSONDecoder().decode(
+            TranscriptEntry.self,
+            from: Data(#"{"id":"a1","type":"assistant","content":"Done"}"#.utf8)
+        )
+
+        XCTAssertEqual(marked.isReasoning, true)
+        XCTAssertNil(older.isReasoning)
+    }
+
+    func testReasoningSummariesStayVisibleOutsideWorkAndFinalAnswer() {
+        append([
+            TranscriptEntry(id: "u1", type: "user", content: "check it"),
+            TranscriptEntry(
+                id: "r1", type: "assistant",
+                content: "**Checking deployment status**\n\nThe release is moving.",
+                isReasoning: true
+            ),
+            toolUse("t1", name: "Bash"),
+            TranscriptEntry(id: "a1", type: "assistant", content: "Deployed."),
+        ])
+
+        guard case .work(let turn) = viewModel.displayBlocks[1] else {
+            return XCTFail("reasoning and the tool should remain one work turn")
+        }
+        XCTAssertEqual(turn.reasoningSummaries.map(\.id), ["r1"])
+        XCTAssertFalse(turn.items.contains { item in
+            if case .message(let entry) = item { return entry.id == "r1" }
+            return false
+        })
+        guard case .message(let answer) = viewModel.displayBlocks[2] else {
+            return XCTFail("the final answer should retain answer hierarchy")
+        }
+        XCTAssertEqual(answer.id, "a1")
+
+        let display = ReasoningSummaryDisplay(turn.reasoningSummaries[0].text)
+        XCTAssertEqual(display.title, "Checking deployment status")
+        XCTAssertEqual(display.body, "The release is moving.")
+    }
+
+    func testLegacyBoldIntermediateSummaryIsNormalizedButBoldFinalIsNot() {
+        append([
+            TranscriptEntry(id: "u1", type: "user", content: "check it"),
+            TranscriptEntry(
+                id: "legacy", type: "assistant",
+                content: "**Verifying the release**"
+            ),
+            toolUse("t1", name: "Bash"),
+            TranscriptEntry(id: "final", type: "assistant", content: "**Done**"),
+        ])
+
+        guard case .work(let turn) = viewModel.displayBlocks[1] else {
+            return XCTFail("expected one work turn")
+        }
+        XCTAssertEqual(turn.reasoningSummaries.map(\.id), ["legacy"])
+        XCTAssertEqual(turn.reasoningSummaries.first?.isReasoning, true)
+        guard case .message(let answer) = viewModel.displayBlocks[2] else {
+            return XCTFail("a bold final row is still the answer")
+        }
+        XCTAssertNil(answer.isReasoning)
+    }
+
+    func testTrailingExplicitReasoningNeverBecomesTheFinalAnswer() {
+        append([
+            TranscriptEntry(id: "u1", type: "user", content: "check it"),
+            toolUse("t1", name: "Bash"),
+            TranscriptEntry(
+                id: "r1", type: "assistant",
+                content: "**Still checking**", isReasoning: true
+            ),
+        ])
+
+        guard case .work(let turn) = viewModel.displayBlocks[1] else {
+            return XCTFail("expected one work turn")
+        }
+        XCTAssertEqual(turn.reasoningSummaries.map(\.id), ["r1"])
+        XCTAssertFalse(viewModel.displayBlocks.contains { block in
+            if case .message(let entry) = block { return entry.id == "r1" }
+            if case .footer(let footer) = block { return footer.entryId == "r1" }
+            return false
+        })
+    }
+
     func testFoldProjectsOnlyExplicitlyFeaturedMediaAndDeduplicatesIt() {
         var first = toolResult("t1", text: "captured")
         first.images = ["/media?path=incidental.png", "/media?path=after.png"]

@@ -109,6 +109,7 @@ struct NewSessionView: View {
     /// Ask. A fresh universal composer starts from the cross-device default.
     @AppStorage("os1.newSession.repo") private var lastRepo = ""
     @AppStorage("os1.composer.defaultRepo") private var preferredRepo = ""
+    @AppStorage(NativePreferences.sessionCheckoutsStorageKey) private var sessionCheckouts = ""
     @AppStorage("os1.composer.defaultModel") private var preferredModel = ""
     @AppStorage("os1.composer.defaultEngine") private var preferredEngine = ""
 
@@ -987,6 +988,11 @@ struct NewSessionView: View {
             NativePreferences.normalizedDefaultRepository($0["default-repo"]) ?? ""
         } ?? preferredRepo
         preferredRepo = livePreferredRepo
+        if let livePrefs {
+            sessionCheckouts = NativePreferences.validatedSessionCheckouts(
+                livePrefs["session-checkouts"]
+            ) ?? ""
+        }
         repos = fetchedRepos
         repo = Self.startingRepository(
             in: fetchedRepos,
@@ -1182,6 +1188,10 @@ struct NewSessionView: View {
                     prompt: text,
                     repo: repo,
                     mode: mode,
+                    checkoutMode: NativePreferences.sessionCheckoutMode(
+                        for: repo,
+                        in: sessionCheckouts
+                    ),
                     model: model.isEmpty ? nil : model,
                     effort: effort.isEmpty ? nil : effort,
                     fastMode: fastMode,

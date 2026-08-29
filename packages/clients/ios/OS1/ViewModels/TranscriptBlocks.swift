@@ -58,7 +58,8 @@ enum TranscriptBlock: Identifiable, Equatable {
         switch self {
         case .message(let entry): [entry.id]
         case .tool(let item): [item.use?.id, item.result?.id].compactMap { $0 }
-        case .work(let turn): turn.items.flatMap(\.entryIds)
+        case .work(let turn):
+            turn.reasoningSummaries.map(\.id) + turn.items.flatMap(\.entryIds)
         case .footer(let footer): [footer.entryId]
         // A walkthrough is not a transcript entry, so it can never be a
         // scroll anchor.
@@ -272,6 +273,9 @@ enum TurnItem: Identifiable, Equatable {
 struct WorkTurn: Identifiable, Equatable {
     var id: String
     var anchorId: String
+    /// Reasoning summaries stay visible above the fold. They describe the
+    /// work, but hiding them would make durable provider output disappear.
+    var reasoningSummaries: [TranscriptEntry] = []
     var items: [TurnItem]
     /// The turn is still producing output — the header says "Working".
     var isLive: Bool
@@ -330,6 +334,58 @@ struct TurnFooter: Identifiable, Equatable {
 
     var isEmpty: Bool {
         duration == nil && model == nil && files.isEmpty && assets.isEmpty
+    }
+}
+
+/// Display text for provider reasoning summaries. Generated leading bold is
+/// chrome, not answer emphasis, so it becomes a regular-weight title while a
+/// longer body retains markdown.
+struct ReasoningSummaryDisplay: Equatable {
+    let title: String
+    let body: String
+
+    init(_ content: String) {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("**"),
+              let close = trimmed.dropFirst(2).range(of: "**"),
+              !trimmed[trimmed.index(trimmed.startIndex, offsetBy: 2)..<close.lowerBound]
+                .contains("\n")
+        else {
+            title = ""
+            body = trimmed
+            return
+        }
+        let after = trimmed[close.upperBound...]
+        guard after.isEmpty || after.first?.isWhitespace == true else {
+            title = ""
+            body = trimmed
+            return
+        }
+        title = String(
+            trimmed[trimmed.index(trimmed.startIndex, offsetBy: 2)..<close.lowerBound]
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        body = String(after).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// A tolerant compatibility check for the old bold-heading-only shape.
+    static func isLegacyHeading(_ content: String) -> Bool {
+        // Generated headings are short. Reject normal prose before trimming or
+        // parsing it so the O(n) grouping pass never repeatedly copies a large
+        // durable answer while new stream snapshots arrive.
+        guard content.utf8.count <= 4_096 else { return false }
+        let display = ReasoningSummaryDisplay(content)
+        return !display.title.isEmpty && display.body.isEmpty
+    }
+
+    /// A streamed generated heading may not have received its closing `**`
+    /// yet. Multiline output is normal answer markdown, not this live state.
+    static func liveHeading(_ content: String) -> String? {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("**"), !trimmed.contains("\n") else { return nil }
+        var heading = String(trimmed.dropFirst(2))
+        if heading.hasSuffix("**") { heading.removeLast(2) }
+        heading = heading.trimmingCharacters(in: .whitespacesAndNewlines)
+        return heading.isEmpty ? nil : heading
     }
 }
 
@@ -400,13 +456,32 @@ enum TranscriptGrouping {
         func flush(isTrailing: Bool) {
             defer { turn = [] }
             guard !turn.isEmpty else { return }
-            let tools = turn.compactMap { item -> ToolCallItem? in
+
+            // Before the protocol carried `isReasoning`, providers persisted
+            // intermediate summaries as one bold-only assistant row. The last
+            // row remains an answer because a real final answer can be short
+            // and bold; only an intermediate row has enough context to infer.
+            let lastMessageIndex = turn.lastIndex {
+                if case .message = $0 { return true }
+                return false
+            }
+            var normalized = turn
+            for index in normalized.indices where index != lastMessageIndex {
+                guard case .message(var entry) = normalized[index],
+                      entry.isReasoning == nil,
+                      ReasoningSummaryDisplay.isLegacyHeading(entry.text)
+                else { continue }
+                entry.isReasoning = true
+                normalized[index] = .message(entry)
+            }
+
+            let tools = normalized.compactMap { item -> ToolCallItem? in
                 if case .tool(let call) = item { return call }
                 return nil
             }
             // No tools: nothing worth hiding, so every message stands alone.
             guard !tools.isEmpty else {
-                blocks.append(contentsOf: turn.map { item in
+                blocks.append(contentsOf: normalized.map { item in
                     switch item {
                     case .message(let entry): TranscriptBlock.message(entry)
                     case .tool(let call): TranscriptBlock.tool(call)
@@ -414,19 +489,33 @@ enum TranscriptGrouping {
                 })
                 return
             }
-            // The answer is the last item only when it is prose; a turn that
-            // ended mid-tools folds entirely.
+            // An explicit reasoning summary is activity even at the tail. It
+            // must never acquire answer metadata or answer hierarchy.
             var final: TranscriptEntry?
-            if case .message(let entry)? = turn.last { final = entry }
-            let folded = final == nil ? turn : Array(turn.dropLast())
+            if case .message(let entry)? = normalized.last,
+               entry.isReasoning != true {
+                final = entry
+            }
+            let folded = final == nil ? normalized : Array(normalized.dropLast())
+            let reasoning = folded.compactMap { item -> TranscriptEntry? in
+                guard case .message(let entry) = item, entry.isReasoning == true else {
+                    return nil
+                }
+                return entry
+            }
+            let foldedWork = folded.filter { item in
+                if case .message(let entry) = item { return entry.isReasoning != true }
+                return true
+            }
             let isLive = live && isTrailing
 
             if let first = folded.first, let last = folded.last {
                 blocks.append(.work(makeTurn(
-                    items: folded,
+                    items: foldedWork,
+                    reasoningSummaries: reasoning,
                     firstId: first.id,
                     lastId: last.id,
-                    tools: tools.filter { call in folded.contains { $0.id == call.id } },
+                    tools: tools.filter { call in foldedWork.contains { $0.id == call.id } },
                     isLive: isLive
                 )))
             }
@@ -435,7 +524,7 @@ enum TranscriptGrouping {
             // A running turn's footer would show a duration that is still
             // ticking; wait for it to settle.
             guard !isLive else { return }
-            let start = turn.first.flatMap(startTimestamp)
+            let start = normalized.first.flatMap(startTimestamp)
             let end = final.timestampDate
             let footer = TurnFooter(
                 id: "\(final.id):footer",
@@ -688,6 +777,7 @@ enum TranscriptGrouping {
 
     private static func makeTurn(
         items: [TurnItem],
+        reasoningSummaries: [TranscriptEntry] = [],
         firstId: String,
         lastId: String,
         tools: [ToolCallItem],
@@ -713,6 +803,7 @@ enum TranscriptGrouping {
         return WorkTurn(
             id: firstId,
             anchorId: lastId,
+            reasoningSummaries: reasoningSummaries,
             items: items,
             isLive: isLive,
             duration: isLive ? nil : duration(from: start, to: end),

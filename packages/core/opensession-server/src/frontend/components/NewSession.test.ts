@@ -174,8 +174,9 @@ test("a failed immediate create restores the submitted composer payload", async 
   expect(recovery).toContain("text: draft.prompt");
   expect(recovery).toContain("images: draft.images ?? []");
   expect(recovery).toContain("files: draft.files ?? []");
+  expect(recovery).toContain("restorePalette()");
   expect(recovery.indexOf("saveDraft(NEW_SESSION_DRAFT_KEY")).toBeLessThan(
-    recovery.indexOf("setPaletteState"),
+    recovery.indexOf("restorePalette()"),
   );
 });
 

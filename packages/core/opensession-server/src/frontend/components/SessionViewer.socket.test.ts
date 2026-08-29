@@ -50,12 +50,8 @@ test("SessionViewer receives its socket capabilities from context", async () => 
   expect(app).toContain(
     "const sessionSocket = pendingSocket\n      ? socket.sessionSocketIgnoringMessages\n      : socket.sessionSocket;",
   );
-  expect(app).toContain(
-    "renderSessionPane(\n                                    session,\n                                    socket,",
-  );
-  expect(app).toContain(
-    "renderSessionPane(\n                            currentSession,\n                            mainSocket,",
-  );
+  expect(app).toMatch(/renderSessionPane\(\s+session,\s+socket,/);
+  expect(app).toMatch(/renderSessionPane\(\s+currentSession,\s+mainSocket,/);
 });
 
 test("SessionViewer descendants no longer receive socket props", async () => {

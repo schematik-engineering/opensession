@@ -43,6 +43,8 @@ ENABLE_DISCORD_AGENT=true
 DISCORD_APPLICATION_ID=123456789012345678
 DISCORD_BOT_TOKEN_FILE=/home/ubuntu/.opensession/discord/bot-token
 DISCORD_GUILD_IDS=123456789012345678
+DISCORD_CHANNEL_IDS=123456789012345678,234567890123456789
+DISCORD_ROLE_IDS=345678901234567890
 DISCORD_DEFAULT_MODEL=grok/grok-4.6
 ```
 
@@ -54,12 +56,13 @@ Optional boundaries:
 | Variable                      | Effect                                                                                                                                            |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DISCORD_CHANNEL_IDS`         | Comma-separated parent/channel allowlist. Linked child threads inherit an allowed parent's access. Empty means every channel in an allowed guild. |
+| `DISCORD_ROLE_IDS`            | Comma-separated guild role allowlist. When present, guild messages and commands require at least one listed role. Direct messages fail closed.    |
 | `DISCORD_USER_IDS`            | Comma-separated user allowlist. When present it also restricts guild use; direct messages fail closed unless the sender is listed.                |
 | `DISCORD_DEFAULT_MODEL`       | Model for newly linked sessions. Existing sessions retain their own model.                                                                        |
 | `DISCORD_RESPONSE_TIMEOUT_MS` | How long Discord waits for a final response before linking to the still-running OpenSession (30 minutes by default).                              |
 
 The equivalent config-file keys live under `integrations.discord`, using
-`applicationId`, `botTokenFile`, `guildIds`, `channelIds`, `userIds`,
+`applicationId`, `botTokenFile`, `guildIds`, `channelIds`, `roleIds`, `userIds`,
 `defaultModel`, and `responseTimeoutMs`. Environment variables win.
 
 `DISCORD_BOT_TOKEN` is supported for secret-manager environments that cannot
@@ -72,7 +75,7 @@ specs, transcripts, logs, or command arguments.
 - The primary interaction is conversational: mention the bot in a guild text
   channel to create a fresh linked public thread and Docker-backed OpenSession.
   A prior `/os ask` link on the parent channel is never reused by a new mention.
-- Anyone permitted by the guild/channel/user boundaries can reply in that
+- Anyone permitted by the guild/channel/role/user boundaries can reply in that
   thread to continue the same transcript. Each turn is attributed to that
   Discord user's display name. If the model asks a question, the reply answers
   the pending OpenSession question.

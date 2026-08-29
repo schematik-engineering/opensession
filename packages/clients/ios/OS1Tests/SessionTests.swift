@@ -74,6 +74,29 @@ final class SessionTests: XCTestCase {
     }
 
     @MainActor
+    func testSessionCreationSendsValidatedCheckoutMode() {
+        for mode in ["default", "checkout", "worktree"] {
+            let body = OS1API.createSessionBody(
+                prompt: "Build it",
+                repo: "opensession",
+                mode: "code",
+                checkoutMode: mode,
+                user: "Alice"
+            )
+            XCTAssertEqual(body["checkoutMode"] as? String, mode)
+        }
+
+        let malformed = OS1API.createSessionBody(
+            prompt: "Build it",
+            repo: "opensession",
+            mode: "code",
+            checkoutMode: "future",
+            user: "Alice"
+        )
+        XCTAssertEqual(malformed["checkoutMode"] as? String, "default")
+    }
+
+    @MainActor
     func testRepoLessAskPinsCreationToTheHost() {
         let body = OS1API.createSessionBody(
             prompt: "Check the incident queue",

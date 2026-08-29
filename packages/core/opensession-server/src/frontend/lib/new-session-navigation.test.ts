@@ -90,7 +90,12 @@ describe("shouldOpenCreatedSession", () => {
     expect(start).toBeGreaterThan(-1);
     expect(handler).toContain("if (!started.openImmediately) return;");
     expect(handler).toContain("inject(shell, { sticky: true })");
-    expect(handler).toContain("setPalette({ open: false })");
+    const immediateCreate = handler.slice(
+      handler.indexOf("flushSync(() =>"),
+      handler.indexOf("if (!started.openImmediately) return;"),
+    );
+    expect(immediateCreate).toContain("hidePalette()");
+    expect(immediateCreate).not.toContain("closePalette()");
     expect(handler).toContain("setActiveViewTabState(null)");
     expect(handler).toContain("saveActiveViewTab(started.workspaceId, null)");
     expect(handler).toContain('navigate({ view: "session", id: started.id })');

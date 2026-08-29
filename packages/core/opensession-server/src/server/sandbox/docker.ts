@@ -166,7 +166,11 @@ import { authedRemoteUrl } from "../codestorage/auth";
 import { parseCsRemote } from "../codestorage/remote";
 import { redactUrl } from "../shared/redact";
 import { createWorkloadIdentityEnv } from "../workload-identity";
-import { acpAgentIdSource, acpAuthSource, isAcpProvider } from "../acp-config";
+import {
+  acpAgentIdSource,
+  isAcpProvider,
+  refreshAcpAuthSource,
+} from "../acp-config";
 import {
   REPOS,
   getRepo,
@@ -1169,7 +1173,7 @@ function makeDockerLauncher(
       const acpProvider = providerFor(spec?.model);
       const projectedAcpPaths: string[] = [];
       if (isAcpProvider(acpProvider)) {
-        const authSource = acpAuthSource(acpProvider);
+        const authSource = await refreshAcpAuthSource(acpProvider);
         if (!existsSync(authSource))
           throw new HostLaunchNotDispatchedError(
             `${acpProvider} subscription authentication is not configured`,
