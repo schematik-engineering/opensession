@@ -490,8 +490,10 @@ async function refreshAskCheckoutLocked(
   repo: Repo,
   dir: string,
 ): Promise<void> {
+  const gitEnv = await githubServiceGitEnv(repo.ghRepo);
   const fetch =
     await $`git -C ${dir} fetch origin ${repo.defaultBranch} --quiet`
+      .env(gitEnv)
       .quiet()
       .nothrow();
   if (fetch.exitCode !== 0) {
@@ -566,7 +568,9 @@ export async function ensureAskCheckout(repoId?: string): Promise<string> {
       }
       return dir;
     }
-    await $`git -C ${repo.repo} fetch origin ${repo.defaultBranch} --quiet`.nothrow();
+    await $`git -C ${repo.repo} fetch origin ${repo.defaultBranch} --quiet`
+      .env(await githubServiceGitEnv(repo.ghRepo))
+      .nothrow();
     await $`git -C ${repo.repo} worktree prune`.quiet().nothrow();
     const add =
       await $`git -C ${repo.repo} worktree add --detach ${dir} origin/${repo.defaultBranch}`
@@ -700,6 +704,7 @@ export async function reviveWorktree(
   if (existsSync(wtPath)) return wtPath;
 
   return withGitLock(async () => {
+    const gitEnv = await githubServiceGitEnv(repo.ghRepo);
     await $`git -C ${repo.repo} worktree prune`.quiet();
     if (existsSync(wtPath)) return wtPath;
     const owner = (await listWorktrees(repo.id)).find(
@@ -722,6 +727,7 @@ export async function reviveWorktree(
     } else {
       const fetchBranch =
         await $`git -C ${repo.repo} fetch origin +refs/heads/${branch}:refs/remotes/origin/${branch} --quiet`
+          .env(gitEnv)
           .quiet()
           .nothrow();
       const hasRemote =
@@ -730,7 +736,9 @@ export async function reviveWorktree(
           await $`git -C ${repo.repo} show-ref --verify --quiet refs/remotes/origin/${branch}`.nothrow()
         ).exitCode === 0;
       if (!hasRemote) {
-        await $`git -C ${repo.repo} fetch origin ${repo.defaultBranch} --quiet`;
+        await $`git -C ${repo.repo} fetch origin ${repo.defaultBranch} --quiet`.env(
+          gitEnv,
+        );
       }
       const startPoint = hasRemote
         ? `origin/${branch}`
@@ -763,7 +771,7 @@ export async function reviveWorktree(
  * Explicit refspecs bypass the remote config. Found on a repo cloned
  * single-branch during node provisioning; `--unshallow` fixes depth, not this.
  */
-async function githubServiceGitEnv(ghRepo: string | undefined) {
+export async function githubServiceGitEnv(ghRepo: string | undefined) {
   const { githubServiceCredentialEnv } = await import("./github-app");
   return { ...process.env, ...(await githubServiceCredentialEnv(ghRepo)) };
 }
@@ -893,10 +901,13 @@ export async function createWorktreeForFollowup(
   if (existing) return existing.path;
 
   const wtPath = `${worktreesDir()}/${repo.wtPrefix}-${branch}`;
+  const gitEnv = await githubServiceGitEnv(repo.ghRepo);
   await withGitLock(async () => {
     await $`git -C ${repo.repo} worktree prune`.quiet();
     if (existsSync(wtPath)) return; // pruned stale registration; dir already usable
-    await $`git -C ${repo.repo} fetch origin ${baseRef} --quiet`.nothrow();
+    await $`git -C ${repo.repo} fetch origin ${baseRef} --quiet`
+      .env(gitEnv)
+      .nothrow();
     const startPoint =
       (
         await $`git -C ${repo.repo} rev-parse --verify --quiet origin/${baseRef}`.nothrow()
@@ -930,7 +941,11 @@ export async function createWorktreeForExistingBranch(
   gitEnv?: Record<string, string>,
 ): Promise<string> {
   const repo = getRepo(repoId);
-  const shell = gitEnv ? $.env({ ...process.env, ...gitEnv }) : $;
+  const shell = $.env(
+    gitEnv
+      ? { ...process.env, ...gitEnv }
+      : await githubServiceGitEnv(repo.ghRepo),
+  );
   const existing = (await listWorktrees(repo.id)).find(
     (w) => w.branch === branch,
   );
@@ -1081,7 +1096,6 @@ export async function createWorktree(
   opts?: { base?: string; isolated?: boolean; gitEnv?: Record<string, string> },
 ): Promise<string> {
   const repo = getRepo(repoId);
-  const shell = opts?.gitEnv ? $.env({ ...process.env, ...opts.gitEnv }) : $;
 
   // Shared-checkout repos (opensession) don't get a per-session worktree: the
   // session works in the live main checkout on the default branch so its edits
@@ -1093,6 +1107,12 @@ export async function createWorktree(
   // createWorktreeForExistingBranch). Config `selfDev: "worktree"` opts the
   // whole instance out the same way (sharedCheckoutForNewSessions).
   if (sharedCheckoutForNewSessions(repo) && !opts?.isolated) return repo.repo;
+
+  const shell = $.env(
+    opts?.gitEnv
+      ? { ...process.env, ...opts.gitEnv }
+      : await githubServiceGitEnv(repo.ghRepo),
+  );
 
   const wtPath = `${worktreesDir()}/${repo.wtPrefix}-${branch}`;
   const base = opts?.base;
