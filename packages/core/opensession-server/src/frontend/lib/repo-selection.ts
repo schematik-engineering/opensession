@@ -19,6 +19,12 @@ export interface RepoSelection {
   extras: string[];
 }
 
+/** Aggregate-view and retired picker sentinels are not repository ids. */
+export function specificRepoSelection(repo: string | null | undefined): string {
+  const value = repo?.trim() || "";
+  return value === "all" || value === "auto" ? "" : value;
+}
+
 /**
  * Add or remove a repo from the selection (the picker's modifier-click).
  *

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   baseModelId,
+  canonicalModelId,
   engineModelId,
   isAnthropicModel,
   modelEngine,
@@ -9,6 +10,12 @@ import {
 } from "./model-engine";
 
 describe("Pi model ids", () => {
+  test("migrates the retired Vercel provider route", () => {
+    expect(canonicalModelId("pi/vercel/zai/glm-5.3-flash")).toBe(
+      "pi/vercel-ai-gateway/zai/glm-5.3-flash",
+    );
+  });
+
   test("keeps routed catalog ids stable", () => {
     const id = "pi/anthropic/claude-opus-5";
     expect(modelEngine(id)).toBe("pi");

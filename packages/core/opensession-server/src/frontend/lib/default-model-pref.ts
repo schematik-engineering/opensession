@@ -11,13 +11,14 @@
 
 import { preferredNewSessionModel } from "./new-session-model";
 import { makeUserPref } from "./user-pref";
+import { canonicalModelId } from "./model-engine";
 
 const pref = makeUserPref<string>({
   localKey: "opensession-default-model-pref",
   prefKey: "default-model",
   changeEvent: "opensession-default-model-pref-changed",
   defaultValue: "",
-  decode: (v) => (typeof v === "string" ? v : null),
+  decode: (v) => (typeof v === "string" ? canonicalModelId(v) : null),
   encode: (v) => v,
 });
 

@@ -182,6 +182,7 @@ import {
 import {
   markReplayedCommandResult,
   replayedSessionCreatedResult,
+  terminalCreateCommandResult,
 } from "./command-replay";
 import { sessionIdForRequest } from "./session-request-id";
 import { isClientSessionId } from "./paths";
@@ -557,7 +558,11 @@ export async function waitForCreatedSessionProjection(
     const projected = findSession(sessionId);
     if (projected) return projected;
     if (state.state === "failed")
-      throw new Error("Session creation failed before it was persisted");
+      throw new Error(
+        state.failureMessage
+          ? `Session creation failed: ${state.failureMessage}`
+          : "Session creation failed before it was persisted",
+      );
     if (state.state === "cancelled")
       throw new Error("Session creation was cancelled before it was persisted");
     if (Date.now() >= deadline)
@@ -1834,6 +1839,9 @@ export async function openCreatedSession(
 type WebCreateSocket = ServerWebSocket<WSClientData>;
 interface PendingWebCreate {
   sockets: Set<WebCreateSocket>;
+  /** Every durable browser receipt waiting on each socket. A reconnect can
+   *  briefly deliver both the stored command and the component-level replay. */
+  requestIds?: Map<WebCreateSocket, Set<string>>;
   /** Sockets that joined by replaying an already-admitted create command. */
   replayedSockets?: Set<WebCreateSocket>;
 }
@@ -1852,8 +1860,23 @@ function sendCreateFrame(
         ? markReplayedCommandResult(frame)
         : frame;
       socket.send(JSON.stringify(payload));
+      for (const requestId of attempt.requestIds?.get(socket) ?? []) {
+        const receipt = terminalCreateCommandResult(frame, requestId);
+        if (receipt) socket.send(JSON.stringify(receipt));
+      }
     } catch {}
   }
+}
+
+function registerCreateReceipt(
+  attempt: PendingWebCreate,
+  socket: WebCreateSocket,
+  requestId: string | undefined,
+): void {
+  if (!requestId) return;
+  const ids = attempt.requestIds?.get(socket) ?? new Set<string>();
+  ids.add(requestId);
+  (attempt.requestIds ??= new Map()).set(socket, ids);
 }
 
 /**
@@ -1867,12 +1890,21 @@ export async function handleCreateSessionMessage(
   msg: CreateSessionMessage,
 ): Promise<Record<string, unknown> | undefined> {
   const rawClientSessionId = msg.clientSessionId;
+  const commandRequestId =
+    typeof msg.requestId === "string" && msg.requestId
+      ? msg.requestId.slice(0, 200)
+      : undefined;
   if (
     rawClientSessionId !== undefined &&
     !isClientSessionId(rawClientSessionId)
   ) {
     sendCreateFrame(
-      { sockets: new Set([ws]) },
+      {
+        sockets: new Set([ws]),
+        ...(commandRequestId
+          ? { requestIds: new Map([[ws, new Set([commandRequestId])]]) }
+          : {}),
+      },
       {
         type: "error",
         ...(typeof rawClientSessionId === "string"
@@ -1888,11 +1920,13 @@ export async function handleCreateSessionMessage(
     const pending = pendingWebCreates.get(clientSessionId);
     if (pending) {
       pending.sockets.add(ws);
+      registerCreateReceipt(pending, ws, commandRequestId);
       (pending.replayedSockets ??= new Set()).add(ws);
       return;
     }
   }
   const attempt: PendingWebCreate = { sockets: new Set([ws]) };
+  registerCreateReceipt(attempt, ws, commandRequestId);
   if (clientSessionId) pendingWebCreates.set(clientSessionId, attempt);
   const finishCreate = () => {
     if (clientSessionId && pendingWebCreates.get(clientSessionId) === attempt)
@@ -1912,10 +1946,7 @@ export async function handleCreateSessionMessage(
     typeof msg.titlePrompt === "string"
       ? msg.titlePrompt.slice(0, 2000)
       : prompt;
-  const requestId =
-    typeof msg.requestId === "string" && msg.requestId
-      ? msg.requestId
-      : undefined;
+  const requestId = commandRequestId;
   const bksId =
     clientSessionId ||
     (requestId
@@ -1943,8 +1974,12 @@ export async function handleCreateSessionMessage(
         createIdentity,
       );
     } catch (error) {
-      failCreate(error instanceof Error ? error.message : String(error));
-      throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(
+        `[create_session] ${bksId} terminal replay (${durableCreation.state}): ${message}`,
+      );
+      failCreate(message);
+      return;
     }
     if (
       durableCreation.state === "ready" ||

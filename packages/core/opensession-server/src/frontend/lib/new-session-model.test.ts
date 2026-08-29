@@ -22,6 +22,15 @@ describe("preferredNewSessionModel", () => {
       }),
     ).toBe("pi/anthropic/claude-fable-5");
   });
+  test("migrates a retained Vercel preference onto the current catalog id", () => {
+    expect(
+      preferredNewSessionModel({
+        ...base,
+        models: [{ id: "pi/vercel-ai-gateway/zai/glm-5.3-flash" }],
+        modelPref: "pi/vercel/zai/glm-5.3-flash",
+      }),
+    ).toBe("pi/vercel-ai-gateway/zai/glm-5.3-flash");
+  });
   test("retains a workspace preset default", () => {
     expect(
       preferredNewSessionModel({

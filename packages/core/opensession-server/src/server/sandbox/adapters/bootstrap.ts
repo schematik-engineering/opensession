@@ -52,14 +52,13 @@
 
 import {
   existsSync,
-  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
   rmSync,
   unlinkSync,
 } from "fs";
-import { dirname, isAbsolute, relative, resolve } from "path";
+import { dirname } from "path";
 import { OPENSESSION_SESSIONS_DIR, homeDir, stateDir } from "../../paths";
 import {
   journalSet,
@@ -111,6 +110,10 @@ import {
   runWsConnector,
 } from "../../run-ws";
 import { writeJsonAtomic } from "../../shared/atomic-write";
+import {
+  loadWorkspaceSeedFiles,
+  type WorkspaceSeedFile,
+} from "../../workspace-seed-files";
 import {
   createWorkloadIdentityEnv,
   type WorkloadIdentityContext,
@@ -1205,139 +1208,8 @@ export async function bootstrapRemoteSandbox(
  *  them (warmRemoteWorkspace → setupRemoteWorkspace's mv). */
 const REMOTE_WARM_BASE = `${REMOTE_HOME}/.bks-warm`;
 
-const REMOTE_SEED_MANIFEST = ".agents/environment.json";
-const MAX_REMOTE_SEED_FILE_BYTES = 1024 * 1024;
-const MAX_REMOTE_SEED_TOTAL_BYTES = 4 * 1024 * 1024;
-
-export interface RemoteWorkspaceSeedFile {
-  path: string;
-  content: string;
-}
-
-/**
- * Load the repo-owned list of private workspace files that should accompany a
- * remote clone. The manifest is read from the registered, operator-controlled
- * checkout (not the agent's branch), and every source must be a regular,
- * gitignored file below that checkout. This prevents a branch from requesting
- * arbitrary host files while keeping the zero-copy-path convention simple:
- *
- *   { "seedFiles": ["packages/web/.env.local"] }
- */
-export function loadRemoteWorkspaceSeedFiles(repo: {
-  id: string;
-  repo: string;
-  defaultBranch?: string;
-}): RemoteWorkspaceSeedFile[] {
-  // Registered checkouts can legitimately be parked on another session's
-  // branch. Prefer the trusted remote-tracking default branch so a freshly
-  // merged environment manifest applies immediately and an old branch cannot
-  // keep requesting seed files that default has removed.
-  let manifestText: string | null = null;
-  if (repo.defaultBranch) {
-    const ref = `refs/remotes/origin/${repo.defaultBranch}`;
-    const refExists = Bun.spawnSync({
-      cmd: [
-        "git",
-        "-C",
-        repo.repo,
-        "rev-parse",
-        "--verify",
-        "--quiet",
-        `${ref}^{commit}`,
-      ],
-      stdout: "ignore",
-      stderr: "ignore",
-    });
-    if (refExists.exitCode === 0) {
-      const shown = Bun.spawnSync({
-        cmd: ["git", "-C", repo.repo, "show", `${ref}:${REMOTE_SEED_MANIFEST}`],
-        stdout: "pipe",
-        stderr: "ignore",
-      });
-      if (shown.exitCode !== 0) return [];
-      manifestText = shown.stdout.toString("utf-8");
-    }
-  }
-  if (manifestText == null) {
-    const manifestPath = resolve(repo.repo, REMOTE_SEED_MANIFEST);
-    if (!existsSync(manifestPath)) return [];
-    manifestText = readFileSync(manifestPath, "utf-8");
-  }
-  let raw: unknown;
-  try {
-    raw = JSON.parse(manifestText);
-  } catch (error) {
-    throw new Error(
-      `${repo.id} ${REMOTE_SEED_MANIFEST} is invalid JSON: ${(error as Error).message}`,
-    );
-  }
-  const seedFiles = (raw as { seedFiles?: unknown })?.seedFiles;
-  if (
-    !Array.isArray(seedFiles) ||
-    !seedFiles.every((file) => typeof file === "string")
-  ) {
-    throw new Error(
-      `${repo.id} ${REMOTE_SEED_MANIFEST} must contain a string[] seedFiles`,
-    );
-  }
-
-  const seen = new Set<string>();
-  const loaded: RemoteWorkspaceSeedFile[] = [];
-  let total = 0;
-  for (const path of seedFiles) {
-    if (
-      !path ||
-      isAbsolute(path) ||
-      path.includes("\\") ||
-      path.split("/").some((part) => !part || part === "." || part === "..")
-    ) {
-      throw new Error(
-        `${repo.id} ${REMOTE_SEED_MANIFEST} has unsafe path ${JSON.stringify(path)}`,
-      );
-    }
-    if (seen.has(path)) continue;
-    seen.add(path);
-    const source = resolve(repo.repo, path);
-    const within = relative(repo.repo, source);
-    if (!within || within.startsWith("..") || isAbsolute(within)) {
-      throw new Error(`${repo.id} seed file escapes the checkout: ${path}`);
-    }
-    if (!existsSync(source)) {
-      throw new Error(
-        `${repo.id} requires local seed file ${path}; create it in ${repo.repo} before preparing a sandbox`,
-      );
-    }
-    const stat = lstatSync(source);
-    if (!stat.isFile() || stat.isSymbolicLink()) {
-      throw new Error(
-        `${repo.id} seed file must be a regular file, not a symlink: ${path}`,
-      );
-    }
-    const ignored = Bun.spawnSync({
-      cmd: ["git", "-C", repo.repo, "check-ignore", "-q", "--", path],
-      stdout: "ignore",
-      stderr: "ignore",
-    });
-    if (ignored.exitCode !== 0) {
-      throw new Error(
-        `${repo.id} seed file must be gitignored before upload: ${path}`,
-      );
-    }
-    if (stat.size > MAX_REMOTE_SEED_FILE_BYTES) {
-      throw new Error(`${repo.id} seed file exceeds 1 MiB: ${path}`);
-    }
-    total += stat.size;
-    if (total > MAX_REMOTE_SEED_TOTAL_BYTES) {
-      throw new Error(`${repo.id} seed files exceed the 4 MiB workspace limit`);
-    }
-    const content = readFileSync(source, "utf-8");
-    if (content.includes("\0")) {
-      throw new Error(`${repo.id} seed file must be text: ${path}`);
-    }
-    loaded.push({ path, content });
-  }
-  return loaded;
-}
+export type RemoteWorkspaceSeedFile = WorkspaceSeedFile;
+export const loadRemoteWorkspaceSeedFiles = loadWorkspaceSeedFiles;
 
 async function materializeRemoteWorkspaceSeedFiles(
   driver: RemoteDriver,

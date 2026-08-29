@@ -106,6 +106,7 @@ import {
 import { getSessionControl } from "./src/server/session-control";
 import { buildReposNote } from "./src/server/session-repos";
 import { destroySessionSandbox } from "./src/server/session-sandbox";
+import { reconcileSandboxOperationsOnStartup } from "./src/server/sandbox/operations";
 import { getAllSessions } from "./src/server/sessions";
 import {
   crossSiteViolation,
@@ -703,6 +704,7 @@ if (!g.__opensessionBooted) {
   startSessionListRuntimeSync();
   if (!devInstance) {
     startLiveActivitySync();
+    reconcileSandboxOperationsOnStartup();
 
     // Restore completed sandbox prewarms and maintain any explicit keep-ready
     // targets. This is a boot hook rather than a module-scope side effect.

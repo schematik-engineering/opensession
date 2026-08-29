@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { RouteContext } from "./context";
-import { deleteWorkspaceMemberSessions } from "./workspace";
+import { deleteWorkspaceMemberSessions, worktreeRepoQuery } from "./workspace";
 
 function workspaceDeleteContext(): RouteContext {
   const url = new URL("http://localhost/api/workspaces/ws-1?worktree=true");
@@ -46,4 +46,11 @@ test("workspace deletion ignores a raced 404 but stops on another session failur
 
   expect(calls).toBe(2);
   expect(failure?.status).toBe(409);
+});
+
+test("worktree aggregate selection is never treated as a repository id", () => {
+  expect(worktreeRepoQuery(null)).toBeUndefined();
+  expect(worktreeRepoQuery("")).toBeUndefined();
+  expect(worktreeRepoQuery("all")).toBeUndefined();
+  expect(worktreeRepoQuery("biss-client")).toBe("biss-client");
 });

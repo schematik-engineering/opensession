@@ -971,6 +971,8 @@ export type DurableCreationState = {
   completedEffectIds: string[];
   setupPlan?: Record<string, unknown>;
   openingPlan?: Record<string, unknown>;
+  /** Redacted terminal failure retained for deterministic reconnect replay. */
+  failureMessage?: string;
   changeSeq: number;
   updatedAt: number;
 };
@@ -1194,6 +1196,7 @@ export class SessionKernelStore {
 				completed_effects TEXT NOT NULL DEFAULT '[]',
 				setup_plan TEXT,
 				opening_plan TEXT,
+				failure_message TEXT,
 				change_seq INTEGER NOT NULL DEFAULT 0,
 				updated_at INTEGER NOT NULL
 			);
@@ -1354,6 +1357,10 @@ export class SessionKernelStore {
     if (!creationColumns.has("setup_plan"))
       this.db.exec(
         "ALTER TABLE session_kernel_creation ADD COLUMN setup_plan TEXT",
+      );
+    if (!creationColumns.has("failure_message"))
+      this.db.exec(
+        "ALTER TABLE session_kernel_creation ADD COLUMN failure_message TEXT",
       );
     const commandColumns = new Set(
       (
@@ -2175,7 +2182,7 @@ export class SessionKernelStore {
     const row = this.db
       .query(
         `SELECT identity, state, generation, current_effect_id, completed_effects,
-                setup_plan, opening_plan, change_seq, updated_at
+                setup_plan, opening_plan, failure_message, change_seq, updated_at
          FROM session_kernel_creation WHERE session_id = ?`,
       )
       .get(sessionId) as Record<string, unknown> | null;
@@ -2193,6 +2200,8 @@ export class SessionKernelStore {
       ],
       setupPlan: parsed<Record<string, unknown>>(row.setup_plan as string),
       openingPlan: parsed<Record<string, unknown>>(row.opening_plan as string),
+      failureMessage:
+        row.failure_message == null ? undefined : String(row.failure_message),
       changeSeq: Number(row.change_seq),
       updatedAt: Number(row.updated_at),
     };
@@ -2376,11 +2385,18 @@ export class SessionKernelStore {
         ? undefined
         : (effect?.effectKey ??
           (input.effectId === undefined ? prior?.currentEffectId : undefined));
+      const failureMessage =
+        to === "failed"
+          ? typeof input.detail?.error === "string" && input.detail.error
+            ? input.detail.error
+            : prior?.failureMessage
+          : undefined;
       this.db.run(
         `INSERT INTO session_kernel_creation
           (session_id, identity, state, generation, current_effect_id,
-           completed_effects, setup_plan, opening_plan, change_seq, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           completed_effects, setup_plan, opening_plan, failure_message,
+           change_seq, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(session_id) DO UPDATE SET
           state = excluded.state,
           generation = excluded.generation,
@@ -2388,6 +2404,7 @@ export class SessionKernelStore {
           completed_effects = excluded.completed_effects,
           setup_plan = excluded.setup_plan,
           opening_plan = excluded.opening_plan,
+          failure_message = excluded.failure_message,
           change_seq = excluded.change_seq,
           updated_at = excluded.updated_at`,
         [
@@ -2399,6 +2416,7 @@ export class SessionKernelStore {
           json(completedEffectIds),
           setupPlan === undefined ? null : json(setupPlan),
           openingPlan === undefined ? null : json(openingPlan),
+          failureMessage ?? null,
           changeSeq,
           now,
         ],
@@ -2457,6 +2475,7 @@ export class SessionKernelStore {
         completedEffectIds,
         setupPlan,
         openingPlan,
+        failureMessage,
         changeSeq,
         updatedAt: now,
       };

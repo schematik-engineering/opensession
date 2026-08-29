@@ -3,6 +3,7 @@ import type {
   CreationEventDecisionResult,
   DurableCreationState,
 } from "./store";
+import { redactUrl } from "../shared/redact";
 
 export type CreationWorkspaceIntent = {
   sessionId: string;
@@ -113,6 +114,25 @@ export function isCreationEffectPendingError(
   error: unknown,
 ): error is CreationEffectPendingError {
   return error instanceof CreationEffectPendingError;
+}
+
+/** Keep a useful terminal cause for replay without persisting credentials that
+ * subprocesses sometimes echo in URLs, tokens, or authorization headers. */
+export function safeCreationFailureMessage(error: unknown): string {
+  return redactUrl(error instanceof Error ? error.message : String(error))
+    .replace(
+      /\b(?:gh[oprsu]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)\b/g,
+      "[redacted]",
+    )
+    .replace(/\b(?:Bearer|token)\s+[A-Za-z0-9._~+\/-]+/gi, "[redacted]")
+    .replace(/([?&](?:token|key|secret)=)[^&\s)]+/gi, "$1[redacted]")
+    .replace(
+      /\b([A-Z][A-Z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD))=[^\s]+/g,
+      "$1=[redacted]",
+    )
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 600);
 }
 
 function assertIdentity(state: DurableCreationState, identity: string): void {
@@ -239,7 +259,7 @@ export async function settleCreationFailed(
     identity,
     event: "failed",
     effectId,
-    detail: { error: error instanceof Error ? error.message : String(error) },
+    detail: { error: safeCreationFailureMessage(error) },
   });
   if (!settled.accepted || !settled.state)
     throw new Error(

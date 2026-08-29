@@ -11,9 +11,10 @@
  *   including retries, tool rounds, failed attempts and cache writes.
  * - The session store (~/.opensession-sessions) for who created what: person,
  *   automation, mode, branch, repo.
- * - `gh pr list` for PRs opened/merged in the range, attributed to Open Session
- *   by head-branch ∈ {branches of code-mode sessions} (review sessions are
- *   ask-mode and don't own their branch, so reviewed-only PRs don't count).
+ * - GitHub App-authenticated PR queries for PRs opened/merged in the range,
+ *   attributed to Open Session by head-branch ∈ {branches of code-mode
+ *   sessions} (review sessions are ask-mode and don't own their branch, so
+ *   reviewed-only PRs don't count).
  */
 
 import {
@@ -25,7 +26,6 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { $ } from "bun";
 import {
   isNativeSessionId,
   OPENSESSION_SESSIONS_DIR,
@@ -33,7 +33,7 @@ import {
   statePath,
 } from "./paths";
 import { configuredRepos, defaultRepo, githubBotLogins } from "./config";
-import { noteGithubGraphqlCall } from "./github-budget";
+import { ghJson } from "./pr-host";
 import { readFeedback } from "../agents/github/feedback";
 import type { FeedbackRecord } from "../agents/github/feedback-gates";
 import { gitIdentityFor } from "./shared/user-mappings";
@@ -629,29 +629,25 @@ async function fetchRepoPrs(
   // search ceiling): a busy repo alone can open 400+ PRs in a 30-day window.
   for (const search of [`created:>=${fromDate}`, `merged:>=${fromDate}`]) {
     try {
-      const queryStarted = Date.now();
-      let raw: string;
-      try {
-        raw =
-          await $`gh pr list --repo ${ghRepo} --state all --limit 1000 --search ${search} --json ${fields}`
-            .quiet()
-            .text();
-        noteGithubGraphqlCall(
-          "analytics:pr-list",
-          Date.now() - queryStarted,
-          true,
-          { ambient: true },
-        );
-      } catch (error) {
-        noteGithubGraphqlCall(
-          "analytics:pr-list",
-          Date.now() - queryStarted,
-          false,
-          { ambient: true },
-        );
-        throw error;
-      }
-      for (const pr of JSON.parse(raw)) {
+      const rows = await ghJson<any[]>(
+        [
+          "pr",
+          "list",
+          "--repo",
+          ghRepo,
+          "--state",
+          "all",
+          "--limit",
+          "1000",
+          "--search",
+          search,
+          "--json",
+          fields,
+        ],
+        "analytics:pr-list",
+      );
+      if (!rows) throw new Error("GitHub App PR query failed");
+      for (const pr of rows) {
         seen.set(pr.number, {
           repo: repoId,
           number: pr.number,
@@ -774,26 +770,9 @@ async function fetchRepoFactoryPrs(
         `q=${q}`,
       ];
       if (cursor) args.push("-f", `cursor=${cursor}`);
-      const queryStarted = Date.now();
-      let raw: string;
-      try {
-        raw = await $`gh ${args}`.quiet().text();
-        noteGithubGraphqlCall(
-          "analytics:factory",
-          Date.now() - queryStarted,
-          true,
-          { ambient: true },
-        );
-      } catch (error) {
-        noteGithubGraphqlCall(
-          "analytics:factory",
-          Date.now() - queryStarted,
-          false,
-          { ambient: true },
-        );
-        throw error;
-      }
-      const search = JSON.parse(raw)?.data?.search;
+      const response = await ghJson<any>(args, "analytics:factory");
+      if (!response) throw new Error("GitHub App factory query failed");
+      const search = response?.data?.search;
       for (const pr of search?.nodes || []) {
         if (!pr?.number) continue;
         const author = String(pr.author?.login || "");

@@ -32,6 +32,10 @@ import {
   upsertIndexedSession,
 } from "../../server/session-list-store";
 import { invalidateSessionsCache } from "../../server/session-cache";
+import {
+  resolveGithubCredential,
+  serviceGithubCredential,
+} from "../../server/github-auth";
 
 const SESSION_DIR = `${process.env.HOME}/.linear-sessions`;
 
@@ -102,6 +106,49 @@ export const activeSessions = new Map<string, ActiveSession>();
 
 /** Dedup set for webhook sessions */
 export const processedSessions = new Set<string>();
+
+export function activeSessionForIssue(
+  issueId: string,
+  issueIdentifier: string,
+): ActiveSession | undefined {
+  return [...activeSessions.values()].find(
+    (session) =>
+      (!!issueId && session.issueId === issueId) ||
+      (!!issueIdentifier && session.issueIdentifier === issueIdentifier),
+  );
+}
+
+/** Move one durable issue workspace onto Linear's newest agent-session id.
+ * Linear can replace that id after a restart/reassignment; issue identity and
+ * branch remain the stable owners. Duplicate map entries are collapsed. */
+export function adoptActiveSessionIdentity(
+  linearSessionId: string,
+  issueId: string,
+  issueIdentifier: string,
+): { session: ActiveSession; previousIds: string[] } | undefined {
+  const matches = [...activeSessions.entries()].filter(
+    ([, session]) =>
+      (!!issueId && session.issueId === issueId) ||
+      (!!issueIdentifier && session.issueIdentifier === issueIdentifier),
+  );
+  if (!matches.length) return undefined;
+  const selected =
+    matches.find(([id]) => id === linearSessionId) ??
+    matches.find(([, session]) => !!session.claudeSessionId) ??
+    matches[0]!;
+  const session = selected[1];
+  const previousIds = matches.map(([id]) => id);
+  for (const [id, duplicate] of matches) {
+    if (duplicate.abortController) {
+      duplicate.abortController.abort();
+      duplicate.abortController = undefined;
+    }
+    activeSessions.delete(id);
+  }
+  session.linearSessionId = linearSessionId;
+  activeSessions.set(linearSessionId, session);
+  return { session, previousIds };
+}
 
 // --- Utilities ---
 
@@ -604,6 +651,9 @@ ${participantsLine ? `\n${participantsLine}\n` : ""}
 🤖 Generated with [Claude Code](https://claude.com/claude-code)`;
 
   try {
+    const credential = await resolveGithubCredential(serviceGithubCredential, {
+      write: true,
+    });
     const args = [
       "gh",
       "pr",
@@ -622,6 +672,7 @@ ${participantsLine ? `\n${participantsLine}\n` : ""}
       stderr: "pipe",
       env: {
         ...process.env,
+        ...credential.env,
         PATH: `${homeDir()}/.cargo/bin:${homeDir()}/.bun/bin:${homeDir()}/.local/bin:${homeDir()}/bin:${homeDir()}/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
         HOME: homeDir(),
       },
