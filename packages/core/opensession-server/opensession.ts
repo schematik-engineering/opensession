@@ -720,9 +720,8 @@ if (!g.__opensessionBooted) {
         // server-owned sweep (checkpoint → terminate → lifecycle sleeping).
         // Armed here so an idle sandbox left by a previous process is still
         // stopped even if no new ensure/get ever runs.
-        const { ensureModalIdleSweep } = await import(
-          "./src/server/sandbox/adapters/modal"
-        );
+        const { ensureModalIdleSweep } =
+          await import("./src/server/sandbox/adapters/modal");
         ensureModalIdleSweep();
         await poolStartup;
       })
