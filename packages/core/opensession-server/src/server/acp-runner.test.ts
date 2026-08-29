@@ -152,6 +152,25 @@ describe("ACP runner", () => {
     expect(activeAcpRunCount()).toBe(0);
   });
 
+  test("reports a missing ACP executable without escaping the run stream", async () => {
+    const projected = stageAuth();
+    __setAcpProviderCommandForTest("grok", [
+      join(scratch, "missing-grok-executable"),
+    ]);
+
+    const events = await collect(runAcp(opts("normal"), "grok/grok-4.6"));
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: "error",
+      provider: "grok",
+      model: "grok/grok-4.6",
+    });
+    expect(events[0].content).toContain("missing-grok-executable");
+    expect(existsSync(projected)).toBe(false);
+    expect(activeAcpRunCount()).toBe(0);
+  });
+
   test("persists native state and loads a later turn without replaying history", async () => {
     const osSessionId = "os-grok-resume";
     stageAuth();

@@ -11,6 +11,12 @@ The Docker runner image pins:
 - Grok CLI `1.0.13`, invoked as `grok agent stdio`.
 - Cursor Agent build `2026.08.25-3e8eec8`, invoked as `cursor-agent acp`.
 
+Host-backed sessions require those same executables on the OpenSession system
+service's `PATH`; installing them only in the Docker runner is not sufficient.
+Keep the host and runner versions aligned so switching sandbox targets does not
+change ACP protocol or session-state behavior. If a command is unavailable,
+the affected turn reports a provider error without terminating the gateway.
+
 ## Credential projection
 
 Authenticate the official CLIs once on a trusted operator machine, then copy
