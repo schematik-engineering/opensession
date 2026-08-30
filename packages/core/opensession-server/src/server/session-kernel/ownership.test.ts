@@ -476,7 +476,9 @@ describe("single session ownership", () => {
       2,
     );
     expect(wiring.match(/await requestCreationBranch\(\{/g)?.length).toBe(2);
-    expect(wiring.match(/baseBranch: .*defaultBranch/g)?.length).toBe(2);
+    expect(wiring).toContain("baseBranch: baseRef || repo.defaultBranch");
+    expect(wiring).toContain("restoredSpec.worktreeBaseRef ||");
+    expect(wiring).toContain("getRepo(restoredSpec.repoId!).defaultBranch");
     expect(wiring).not.toMatch(/\bcreateWorkspace\(/);
     expect(wiring).not.toMatch(/\bcreateWorktree\(/);
     const create = read("session-create.ts");

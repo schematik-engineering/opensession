@@ -100,6 +100,7 @@ export interface RunAgentCollectResult {
   text: string;
   model?: string;
   tokens?: { input: number; output: number };
+  toolCalls: number;
   engineSessionId?: string;
   error?: string;
 }
@@ -120,10 +121,11 @@ export async function runAgentCollect(
   let tokens: { input: number; output: number } | undefined;
   let engineSessionId: string | undefined;
   let error: string | undefined;
+  let toolCalls = 0;
   let skipRunnerNotice = false;
 
   // Already cancelled: never start the engine run at all.
-  if (signal?.aborted) return { text, error: "cancelled" };
+  if (signal?.aborted) return { text, toolCalls, error: "cancelled" };
   if (!runner) throw new Error("Workflow agent runner is not configured");
 
   const it = runner(opts)[Symbol.asyncIterator]();
@@ -149,7 +151,14 @@ export async function runAgentCollect(
           } catch {}
         }
         void it.return?.(undefined)?.catch?.(() => {});
-        return { text, model, tokens, engineSessionId, error: "cancelled" };
+        return {
+          text,
+          model,
+          tokens,
+          toolCalls,
+          engineSessionId,
+          error: "cancelled",
+        };
       }
       if (next.done) break;
       const event = next.value;
@@ -178,6 +187,8 @@ export async function runAgentCollect(
           if (event.text.trimStart().startsWith("[runner] ")) continue;
         }
         text += event.text;
+      } else if (event.type === "tool_use") {
+        toolCalls++;
       } else if (event.type === "done") {
         model = event.model || model;
         if (event.usage) {
@@ -193,7 +204,7 @@ export async function runAgentCollect(
   } catch (e) {
     error = e instanceof Error ? e.message : String(e);
   }
-  return { text, model, tokens, engineSessionId, error };
+  return { text, model, tokens, toolCalls, engineSessionId, error };
 }
 
 // ── Fenced-JSON extraction ───────────────────────────────────────────────────
@@ -675,15 +686,19 @@ export const workflowExecutor: WorkflowExecutor = {
           return await withWriteResult({
             ok: false,
             error: res.error === "cancelled" ? cancelError() : res.error,
+            requestedModel: model,
             model: res.model || model,
             tokens: res.tokens,
+            toolCalls: res.toolCalls,
           });
         }
         return await withWriteResult({
           ok: true,
           text: capResult(res.text),
+          requestedModel: model,
           model: res.model || model,
           tokens: res.tokens,
+          toolCalls: res.toolCalls,
         });
       }
 
@@ -693,6 +708,7 @@ export const workflowExecutor: WorkflowExecutor = {
         "\n\nReply with ONLY a fenced ```json block matching this JSON Schema:\n" +
         JSON.stringify(req.opts.schema);
       let tokens: { input: number; output: number } | undefined;
+      let toolCalls = 0;
       let lastModel: string | undefined;
       let lastError = "";
       for (
@@ -720,13 +736,16 @@ export const workflowExecutor: WorkflowExecutor = {
         );
         engineSessionId = res.engineSessionId || engineSessionId;
         tokens = addTokens(tokens, res.tokens);
+        toolCalls += res.toolCalls;
         lastModel = res.model || lastModel;
         if (res.error) {
           return await withWriteResult({
             ok: false,
             error: res.error === "cancelled" ? cancelError() : res.error,
+            requestedModel: model,
             model: lastModel || model,
             tokens,
+            toolCalls,
           });
         }
         const raw = extractLastFencedJson(res.text) ?? res.text.trim();
@@ -743,8 +762,10 @@ export const workflowExecutor: WorkflowExecutor = {
             ok: true,
             text: capResult(res.text),
             structured: parsed,
+            requestedModel: model,
             model: lastModel || model,
             tokens,
+            toolCalls,
           });
         }
         lastError = schemaErrors.join("; ");
@@ -752,8 +773,10 @@ export const workflowExecutor: WorkflowExecutor = {
       return await withWriteResult({
         ok: false,
         error: `schema validation failed after ${WORKFLOW_LIMITS.schemaAttempts} attempts: ${lastError}`,
+        requestedModel: model,
         model: lastModel || model,
         tokens,
+        toolCalls,
       });
     } finally {
       clearTimeout(timer);

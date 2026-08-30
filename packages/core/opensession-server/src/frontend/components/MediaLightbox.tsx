@@ -16,7 +16,8 @@ import {
 } from "../lib/native-file-save";
 import { copyImageToClipboard } from "../lib/image-clipboard";
 import { copyToClipboard } from "../lib/share-link";
-import { chordFromEvent } from "../lib/shortcuts";
+import { isApple } from "../lib/platform";
+import { eventChord } from "../lib/shortcut-chord";
 import { fullTime } from "../lib/time";
 import {
   WALKTHROUGH_LABEL_CLASS,
@@ -2018,7 +2019,7 @@ function MediaLightbox({
         !editingText &&
         !e.repeat &&
         commentable &&
-        chordFromEvent(e) === "c"
+        eventChord(e, isApple) === "c"
       ) {
         e.preventDefault();
         e.stopPropagation();

@@ -23,7 +23,13 @@
 import { createSdkMcpServer, tool } from "../../server/inprocess-mcp";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { z } from "zod";
-import { startWorkflow, cancelWorkflow } from "../../server/workflow-runner";
+import {
+  cancelWorkflow,
+  controlWorkflowAgent,
+  pauseWorkflow,
+  resumeWorkflow,
+  startWorkflow,
+} from "../../server/workflow-runner";
 import {
   getWorkflowRun,
   listWorkflowRunsForSession,
@@ -31,6 +37,7 @@ import {
 } from "../../server/workflow-store";
 import { WORKFLOW_LIMITS } from "../../server/workflow-types";
 import { selectableModels } from "../../server/models";
+import { workflowPhaseStats } from "../../shared/workflow-observability";
 import type {
   WorkflowAgentSnapshot,
   WorkflowRunSnapshot,
@@ -78,8 +85,15 @@ function text(s: string) {
 
 function elapsed(run: WorkflowRunSnapshot): string {
   const start = Date.parse(run.startedAt);
-  const end = run.endedAt ? Date.parse(run.endedAt) : Date.now();
-  const s = Math.max(0, Math.round((end - start) / 1000));
+  const now = Date.now();
+  const end = run.endedAt ? Date.parse(run.endedAt) : now;
+  const currentPause = run.pausedAt
+    ? Math.max(0, now - Date.parse(run.pausedAt))
+    : 0;
+  const s = Math.max(
+    0,
+    Math.round((end - start - (run.totalPausedMs || 0) - currentPause) / 1000),
+  );
   if (s < 60) return `${s}s`;
   return `${Math.floor(s / 60)}m${s % 60 ? ` ${s % 60}s` : ""}`;
 }
@@ -93,94 +107,60 @@ function countByStatus(agents: WorkflowAgentSnapshot[]): string {
     .join(", ");
 }
 
-/** Built per server so the MODEL line lists the CURRENT selectable models
- *  (from the live registry — see selectableModels), never a hardcoded set. */
-function runWorkflowDescription(): string {
+/** Compact enough to stay in every eligible model context. The full API and
+ * examples live in the lazily loaded workflow-authoring skill. */
+export const RUN_WORKFLOW_DESCRIPTION = `Run a model-authored plain-JavaScript workflow for deterministic agent fan-out, direct MCP calls, and durable child sessions. Use it for broad, repetitive work that benefits from parallelism. Progress streams to the Agents panel and workflow_status.
+
+The script must export meta with a short name, then may use top-level await and return. Minimal shape:
+
+export const meta = { name: "audit", phases: [{ title: "Inspect" }] };
+phase("Inspect");
+return await parallel([() => agent("Inspect path A", { label: "A" })]);
+
+Before authoring or revising a non-trivial workflow, load the workflow-authoring skill (or invoke /workflow-authoring) for the complete API, determinism rules, durable-session patterns, and examples. Call workflow_capabilities for the current model ids, defaults, and runtime limits. Agents start with no conversation context and are read-only unless explicitly given write access. Completed agent, MCP, and session calls are journaled for resume/recovery.`;
+
+export function workflowCapabilitiesText(
+  defaultModel = WORKFLOW_DEFAULT_MODEL,
+): string {
   const models = selectableModels();
-  const modelLine = models.length
-    ? `MODEL: pick whichever model fits each agent — pass opts.model with any of the currently available ids: ${models
-        .map((m) => `${m.id} (${m.label})`)
-        .join(
-          ", ",
-        )}. Agents default to ${WORKFLOW_DEFAULT_MODEL} when you don't set one. Choose per task — intelligence and taste first.`
-    : `MODEL: agents default to ${WORKFLOW_DEFAULT_MODEL}; pass opts.model to pick another available model per agent.`;
-  return RUN_WORKFLOW_DESCRIPTION_TEMPLATE.replace("__MODEL_LINE__", modelLine);
+  const modelLines = models.length
+    ? models.map((model) => `- ${model.id} — ${model.label}`)
+    : ["- No selectable models are currently registered."];
+  return [
+    "# Workflow capabilities",
+    "",
+    `Default agent model: ${defaultModel}`,
+    "Selectable agent models (pass as opts.model):",
+    ...modelLines,
+    "",
+    "Runtime limits:",
+    `- Agents: ${WORKFLOW_LIMITS.maxConcurrentAgents} concurrent, ${WORKFLOW_LIMITS.maxAgents} per run, ${Math.round(WORKFLOW_LIMITS.agentTimeoutMs / 60_000)} minutes each`,
+    `- Write agents: ${WORKFLOW_LIMITS.maxConcurrentWriteAgents} concurrent, ${WORKFLOW_LIMITS.maxWriteAgents} per run`,
+    `- Direct MCP: ${WORKFLOW_LIMITS.maxConcurrentMcp} concurrent, ${WORKFLOW_LIMITS.maxMcpCalls} per run, ${Math.round(WORKFLOW_LIMITS.mcpCallTimeoutMs / 1000)} seconds each`,
+    `- Durable sessions: ${WORKFLOW_LIMITS.maxConcurrentSessions} concurrent, ${WORKFLOW_LIMITS.maxSessions} total, ${WORKFLOW_LIMITS.maxSessionDepth} levels deep`,
+    `- Child-session budget: ${WORKFLOW_LIMITS.maxSessionTokens} completed tokens and $${WORKFLOW_LIMITS.maxSessionCostUsd} provider-reported cost`,
+    `- Workflow active time: ${Math.round(WORKFLOW_LIMITS.workflowTimeoutMs / 60_000)} minutes`,
+    "",
+    "Load the workflow-authoring skill (or invoke /workflow-authoring) for the complete API and examples.",
+  ].join("\n");
 }
-
-const RUN_WORKFLOW_DESCRIPTION_TEMPLATE = `Run a dynamic workflow: a JS script YOU author that fans out many lightweight read/analyze agents deterministically and combines their results — map-reduce over a codebase, N-way file audits, comparative research. Progress streams live to this session's Agents panel; poll workflow_status for the outcome.
-
-Script shape — plain JavaScript (NOT TypeScript), no imports; the API below is injected as globals. A meta export is required, then the async body follows (top-level await AND top-level return are allowed):
-
-export const meta = {
-  name: "route-audit",                              // required, short slug
-  description: "Audit every route for auth checks", // optional
-  phases: [{ title: "List" }, { title: "Audit" }],  // optional, pre-seeds the progress UI
-};
-
-Injected globals:
-- agent(prompt, opts?) → Promise — run one focused agent (ask mode: reads files / runs read-only commands in this session's worktree; its final message is the return value). Resolves to the final text; with opts.schema (a JSON Schema) resolves to the parsed, validated object instead; resolves to null when the agent errored — filter with .filter(Boolean). opts: { label, phase, schema, model, effort, write }.
-- parallel([...thunks]) → Promise — run zero-arg thunks concurrently and wait for all; a thrown thunk becomes null, never rejects the batch. E.g. await parallel(files.map(f => () => agent("Audit " + f)))
-- pipeline(items, ...stages) → Promise — per-item stage chain with NO barrier between stages (item B can run stage 1 while item A is in stage 2). Each stage gets (prevResult, originalItem, index); a throwing stage drops that item to null and skips its remaining stages.
-- mcp.<server>.<tool>(args) → Promise — call an MCP tool DIRECTLY from the script (no model turn: one round trip). Resolves to the tool's structured result, or its text auto-parsed as JSON when it parses. REJECTS on failure (unlike agent(), which resolves null) — try/catch it, or let parallel() degrade the throw to null. Also: mcp.call(server, tool, args) (same thing, dynamic names), mcp.servers() → string[], mcp.tools(server) → [{name, description, inputSchema}].
-- phase(title) — set the current progress group for subsequent agent calls.
-- log(message) — narrator line in the progress feed.
-- args — your args_json, parsed, verbatim.
-- budget — { total, spent(), remaining() } in output tokens.
-
-AGENT OR TOOL? An agent() is a model turn — use it when the work needs judgement (reading code, summarizing, ranking, deciding). An mcp.* call is a function call — use it whenever you just need DATA from a connected server. Don't spend an agent on "query Prometheus for X" or "fetch that Linear issue": call the tool, filter the rows in the script, and spend agents only on the parts that need thinking. Tool names and argument shapes are the same ones in your own tool list; mcp.servers() / mcp.tools(server) enumerate them at runtime. The surface is exactly what YOUR runs may use (per-user restrictions apply, confirm-gated servers like stripe are never reachable from a script).
-
-__MODEL_LINE__
-
-EFFORT: pass opts.effort to set one agent's reasoning level. The values are low, medium, high, xhigh and max; each model offers its own ladder, and unset means that model's default. Spend it where judgement lives (a verifier, a ranker, a synthesis step); mechanical extraction and classification do not need it. A level the chosen model does not offer is ignored rather than an error.
-
-Rules:
-- Date.now(), argless new Date(), and Math.random() THROW inside scripts (they break resume replay determinism) — pass timestamps/seeds via args.
-- Agents start fresh with ZERO context from this session — make every prompt self-contained (paths, constraints, what to return).
-- Agents are read-only by default (ask mode). Pass opts.write to let one edit code (see below).
-- Limits: ${WORKFLOW_LIMITS.maxConcurrentAgents} agents run concurrently (extras queue), ${WORKFLOW_LIMITS.maxAgents} agent() calls per run lifetime, ${Math.round(WORKFLOW_LIMITS.agentTimeoutMs / 60_000)}min per agent, ${Math.round(WORKFLOW_LIMITS.workflowTimeoutMs / 60_000)}min per workflow. mcp.* is cheaper and its own lane: ${WORKFLOW_LIMITS.maxConcurrentMcp} concurrent, ${WORKFLOW_LIMITS.maxMcpCalls} per run, ${Math.round(WORKFLOW_LIMITS.mcpCallTimeoutMs / 1000)}s per call.
-- Both agent() and mcp.* calls are journaled, so resume_workflow REPLAYS them instead of re-firing — a resumed script won't create the same Linear issue twice.
-
-Example (no opts.model set → agents run on the default):
-
-export const meta = { name: "route-audit", phases: [{ title: "List" }, { title: "Audit" }, { title: "Rank" }] };
-phase("List");
-const files = await agent(
-  "List every .ts file in packages/core/opensession-server/src/server/routes of this repo. Reply with ONLY the basenames.",
-  { schema: { type: "array", items: { type: "string" } } },
-);
-if (!files) return "listing failed";
-phase("Audit");
-const findings = await pipeline(
-  files,
-  (f) => agent("Read packages/core/opensession-server/src/server/routes/" + f + " and report missing auth/validation checks. Reply 'none' if clean.", { label: f }),
-  (prev, f) => (prev && prev !== "none" ? f + ": " + prev : null),
-);
-log(findings.filter(Boolean).length + " files with findings");
-phase("Rank");
-const real = findings.filter(Boolean);
-if (!real.length) return "all clean";
-return await agent(
-  "Rank these route-audit findings by real-world severity and drop the false positives:\\n" + real.join("\\n"),
-  { label: "rank findings" },
-);
-
-Example of mixing tools and agents (data by tool, judgement by agent):
-
-export const meta = { name: "alert-triage" };
-const alerts = await mcp.grafana.list_alert_groups({ state: "new" });
-const issues = await mcp.linear.list_issues({ team: "ENG", state: "started" });
-// Reduce HERE — every row dropped in the script is a model turn not spent.
-const unclaimed = alerts.filter((a) => !issues.some((i) => i.title.includes(a.title)));
-log(unclaimed.length + " unclaimed of " + alerts.length);
-return await parallel(
-  unclaimed.map((a) => () => agent("Assess this alert and say who should own it: " + JSON.stringify(a), { label: a.id })),
-);`;
 
 export function createWorkflowsMcpServer(ctx: WorkflowsToolContext) {
   const tools = [
     tool(
+      "workflow_capabilities",
+      "List the current workflow agent models, defaults, and runtime limits. Call this only when choosing models or sizing a workflow; load the workflow-authoring skill for the full API and examples.",
+      {},
+      async () =>
+        text(
+          workflowCapabilitiesText(
+            ctx.defaultModel?.() || WORKFLOW_DEFAULT_MODEL,
+          ),
+        ),
+    ),
+    tool(
       "run_workflow",
-      runWorkflowDescription(),
+      RUN_WORKFLOW_DESCRIPTION,
       {
         script: z
           .string()
@@ -269,33 +249,33 @@ export function createWorkflowsMcpServer(ctx: WorkflowsToolContext) {
         const run = getWorkflowRun(args.run_id);
         if (!run) return text(`No workflow run ${args.run_id}.`);
         const lines: string[] = [];
+        const livePhaseStats = workflowPhaseStats(run);
         const totals = countByStatus(run.agents);
         lines.push(
           `${run.name} (${run.runId}): ${run.status} · ${elapsed(run)} · ${run.agents.length} agents${totals ? ` (${totals})` : ""}`,
         );
-        // Per-phase counts, in first-seen order (+ any agents without a phase).
-        const phases = [...run.phases];
-        for (const a of run.agents)
-          if (a.phase && !phases.includes(a.phase)) phases.push(a.phase);
-        const groups: Array<[string, WorkflowAgentSnapshot[]]> = phases.map(
-          (p) => [
-            p,
-            run.agents.filter((a: WorkflowAgentSnapshot) => a.phase === p),
-          ],
-        );
-        const unphased = run.agents.filter(
-          (a: WorkflowAgentSnapshot) => !a.phase,
-        );
-        if (unphased.length) groups.push(["(no phase)", unphased]);
-        for (const [title, agents] of groups) {
-          if (!agents.length) continue;
-          const running = agents
-            .filter((a) => a.status === "running")
-            .map((a) => a.label)
-            .slice(0, 5);
-          lines.push(
-            `  ${title}: ${countByStatus(agents)}${running.length ? ` — running: ${running.join(", ")}` : ""}`,
+        for (const stats of livePhaseStats) {
+          const agents = run.agents.filter(
+            (agent) => (agent.phase || "Other") === stats.title,
           );
+          if (!agents.length && !stats.toolCalls) continue;
+          const running = agents
+            .filter((agent) => agent.status === "running")
+            .map((agent) => agent.label)
+            .slice(0, 5);
+          const counts = countByStatus(agents) || "0 agents";
+          const details = ` · ${stats.tokensIn + stats.tokensOut} tokens · ${stats.toolCalls} tool calls · ${Math.round(stats.durationMs / 1000)}s work time`;
+          lines.push(
+            `  ${stats.title}: ${counts}${details}${running.length ? ` — running: ${running.join(", ")}` : ""}`,
+          );
+        }
+        if (run.sessions?.length) {
+          lines.push("  sessions:");
+          for (const session of run.sessions) {
+            lines.push(
+              `    - ${session.id} — ${session.status} · ${session.repo}:${session.branch}${session.prUrl ? ` · PR ${session.prUrl}` : ""}${session.error ? ` · ${session.error}` : ""}`,
+            );
+          }
         }
         if (run.totals.mcpCalls) {
           const errs = run.totals.mcpErrors || 0;
@@ -316,6 +296,8 @@ export function createWorkflowsMcpServer(ctx: WorkflowsToolContext) {
           for (const f of failures)
             lines.push(`    ✗ ${f.server}.${f.tool}: ${f.error || "failed"}`);
         }
+        for (const warning of run.warnings || [])
+          lines.push(`Warning: ${warning.message}`);
         if (run.error) lines.push(`Error: ${run.error}`);
         if (run.logs.length) {
           lines.push("Recent logs:");
@@ -373,14 +355,14 @@ export function createWorkflowsMcpServer(ctx: WorkflowsToolContext) {
         if (!runs.length) return text("No workflow runs in this session yet.");
         const lines = runs.map(
           (r: WorkflowRunSnapshot) =>
-            `- ${r.runId} ${r.name} — ${r.status}, ${r.agents.length} agents, ${elapsed(r)}, started ${r.startedAt.slice(0, 16).replace("T", " ")}`,
+            `- ${r.runId} ${r.name} — ${r.status}, ${r.agents.length} agents, ${r.sessions?.length || 0} sessions, ${elapsed(r)}, started ${r.startedAt.slice(0, 16).replace("T", " ")}`,
         );
         return text(lines.join("\n"));
       },
     ),
     tool(
       "cancel_workflow",
-      "Cancel a running workflow: aborts in-flight agents, terminates the script, marks the run cancelled.",
+      "Cancel a running workflow: aborts in-flight agents, terminates the script, marks the run cancelled, and applies its configured active-child cancellation policy.",
       {
         run_id: z.string().describe("The wf-… run id to cancel."),
       },
@@ -394,8 +376,36 @@ export function createWorkflowsMcpServer(ctx: WorkflowsToolContext) {
       },
     ),
     tool(
+      "pause_workflow",
+      "Pause a running workflow. Active agents stop cleanly and restart in place when the workflow resumes; completed journal entries are preserved.",
+      {
+        run_id: z.string().describe("The live wf-… run id to pause."),
+      },
+      async (args: { run_id: string }) =>
+        text(
+          pauseWorkflow(args.run_id, "paused by agent")
+            ? `Paused ${args.run_id}.`
+            : `Could not pause ${args.run_id}; it may not be running.`,
+        ),
+    ),
+    tool(
+      "control_workflow_agent",
+      "Skip or retry one pending/running workflow agent without cancelling its siblings. Retry is available only while the agent is running.",
+      {
+        run_id: z.string().describe("The live wf-… run id."),
+        seq: z.number().int().nonnegative().describe("Agent sequence number."),
+        action: z.enum(["skip", "retry"]),
+      },
+      async (args: { run_id: string; seq: number; action: "skip" | "retry" }) =>
+        text(
+          controlWorkflowAgent(args.run_id, args.seq, args.action)
+            ? `${args.action === "retry" ? "Retrying" : "Skipping"} agent ${args.seq} in ${args.run_id}.`
+            : `Could not ${args.action} agent ${args.seq}; it may already be finished.`,
+        ),
+    ),
+    tool(
       "resume_workflow",
-      "Re-launch a done/error/interrupted/cancelled workflow run as a NEW run that replays completed agent() calls from the old run's journal (identical prompt+opts resolve instantly as cached) and only re-executes what changed or never finished. Optionally pass a fixed script — unchanged calls still replay from the journal.",
+      "Resume a paused workflow in place, or re-launch a done/error/interrupted/cancelled workflow as a NEW run that replays completed agent(), mcp.* and session API calls from the old run's journal. Existing child sessions are re-adopted, never duplicated. Optionally pass a fixed script.",
       {
         run_id: z.string().describe("The finished wf-… run id to resume from."),
         script: z
@@ -429,12 +439,24 @@ export function createWorkflowsMcpServer(ctx: WorkflowsToolContext) {
           return text(
             `${args.run_id} is still running — cancel_workflow it first, or wait for it to finish.`,
           );
+        if (
+          old.status === "paused" &&
+          args.script === undefined &&
+          args.args_json === undefined &&
+          args.repo === undefined &&
+          resumeWorkflow(args.run_id)
+        )
+          return text(`Resumed ${args.run_id} in place.`);
+        if (old.status === "paused")
+          return text(
+            `${args.run_id} is paused — resume it unchanged, or cancel it before relaunching with edits.`,
+          );
         const script = args.script ?? readWorkflowScript(args.run_id);
         if (!script)
           return text(
             `Couldn't read the original script for ${args.run_id} — pass one explicitly via the script param.`,
           );
-        let parsedArgs: unknown;
+        let parsedArgs: unknown = old.recovery?.args;
         if (args.args_json !== undefined) {
           try {
             parsedArgs = JSON.parse(args.args_json);

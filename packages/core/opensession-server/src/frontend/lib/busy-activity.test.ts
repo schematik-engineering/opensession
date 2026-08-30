@@ -16,13 +16,13 @@ describe("busyActivityStatus", () => {
     });
   });
 
-  test("sets expectations for an extended run", () => {
+  test("keeps long-running work neutral", () => {
     expect(busyActivityStatus(45_000)).toEqual({
-      label: "Taking longer than usual",
+      label: "Still working",
       elapsed: "45s",
     });
     expect(busyActivityStatus(90_000)).toEqual({
-      label: "Taking longer than usual",
+      label: "Still working",
       elapsed: "1m",
     });
   });

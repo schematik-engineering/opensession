@@ -15,6 +15,7 @@ import { IconChevronDown, IconStack } from "./icons";
 import { cn } from "../ui/cn";
 import { Fold } from "../ui/fold";
 import { TextShimmer } from "../ui/text-shimmer";
+import { Tooltip } from "../ui/tooltip";
 import {
   msgBody,
   msgReasoningBody,
@@ -25,7 +26,7 @@ import {
   isLegacyReasoningHeading,
   reasoningDisplay,
 } from "../lib/reasoning-display";
-import { formatDuration } from "../lib/time";
+import { formatDuration, fullTime } from "../lib/time";
 import {
   getTurnActivityPrefs,
   onTurnActivityChanged,
@@ -141,7 +142,8 @@ export const TurnBlock = function TurnBlock({
     setExpanded(next);
   }
 
-  const duration = blockDuration(items, toolResults);
+  const timing = blockTiming(items, toolResults);
+  const duration = timing.duration;
   const lastTool = tools[tools.length - 1];
 
   // Memoized against the house rule: a live turn re-renders on every stream
@@ -238,9 +240,11 @@ export const TurnBlock = function TurnBlock({
           {live ? "Working" : "Worked"}
         </span>
         {metaLabel && (
-          <span className="min-w-0 truncate text-label leading-4 text-faint">
-            {metaLabel}
-          </span>
+          <Tooltip label={!live ? fullTime(timing.completedAt) : ""}>
+            <span className="min-w-0 truncate text-label leading-4 text-faint">
+              {metaLabel}
+            </span>
+          </Tooltip>
         )}
         {/* Hovering the counts opens what they count: the lines this turn
             wrote, per file, without unfolding it. */}
@@ -822,16 +826,17 @@ function turnBlockPropsEqual(prev: Props, next: Props): boolean {
   return true;
 }
 
-function blockDuration(
+function blockTiming(
   items: TranscriptEntry[],
   toolResults: Map<string, TranscriptEntry>,
-): string | null {
-  if (items.length === 0) return null;
+): { duration: string | null; completedAt: string } {
+  if (items.length === 0) return { duration: null, completedAt: "" };
   const first = new Date(items[0].timestamp).getTime();
   const lastItem = items[items.length - 1];
   const lastResult = lastItem.toolUseId
     ? toolResults.get(lastItem.toolUseId)
     : undefined;
-  const last = new Date((lastResult || lastItem).timestamp).getTime();
-  return formatDuration(last - first);
+  const completedAt = (lastResult || lastItem).timestamp;
+  const last = new Date(completedAt).getTime();
+  return { duration: formatDuration(last - first), completedAt };
 }

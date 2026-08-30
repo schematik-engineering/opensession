@@ -24,12 +24,22 @@ import {
 import {
   COMPOSER_HIGHLIGHT_MAX_CHARS,
   composerHighlightHtml,
+  composerImageAttachmentRanges,
   paintPillHover,
 } from "../lib/composer-highlight";
+import {
+  appendImageAttachmentComment,
+  deleteImageAttachmentComment,
+  parseImageAttachmentComments,
+  rebaseImageAttachmentReferences,
+  updateImageAttachmentComment,
+} from "../lib/image-attachment-comment";
+import type { ImageRegion } from "../lib/image-region-comment";
 import { noAutofill } from "../lib/composer-autofill";
 import { useSessionNameProjection } from "../hooks/useSessionNameProjection";
 import { useFileMentions } from "./useFileMentions";
 import { ImageThumbs } from "./ImageThumbs";
+import type { ImageRegionAnnotation } from "./MediaLightbox";
 import { FileChips } from "./FileChips";
 import { cn } from "../ui/cn";
 import { getCurrentUser } from "./UserPicker";
@@ -254,18 +264,20 @@ export function NewSessionPrompt({
     setText,
     textareaRef,
   });
-  // Only session references paint here. The palette has no `inline code` tint
-  // and no mention pills, and a reference is the one thing in this field whose
-  // text is not what will be sent, so it is the one thing that has to say so.
+  // Session and image references paint here. The palette has no `inline code`
+  // tint and no mention pills; these references are the only parts of the field
+  // that carry meaning beyond their literal text, so they are the parts that
+  // need to read as tokens.
   const hlRef = useRef<HTMLDivElement>(null);
   const hoveredPill = useRef<HTMLElement | null>(null);
   // Same cap the session composer's mirror takes: this one is rebuilt and
   // re-parsed on every keystroke too, so past that length the pill costs more
   // than it is worth and the plain field takes over.
-  const sessionPill =
-    sessionNames.sessions.length > 0 &&
+  const promptHighlight =
+    (sessionNames.sessions.length > 0 ||
+      composerImageAttachmentRanges(sessionNames.displayText).length > 0) &&
     sessionNames.displayText.length <= COMPOSER_HIGHLIGHT_MAX_CHARS;
-  const sessionHighlightHtml = sessionPill
+  const promptHighlightHtml = promptHighlight
     ? composerHighlightHtml(sessionNames.displayText, [], sessionNames.sessions)
     : "";
   // Every keystroke rewrites the mirror's innerHTML, so the hovered span is a
@@ -273,7 +285,7 @@ export function NewSessionPrompt({
   useEffect(() => {
     hoveredPill.current = null;
     if (textareaRef.current) textareaRef.current.style.cursor = "";
-  }, [sessionHighlightHtml, textareaRef]);
+  }, [promptHighlightHtml, textareaRef]);
   const mentions = useFileMentions({
     value: sessionNames.displayText,
     onChange: sessionNames.setDisplayText,
@@ -303,6 +315,45 @@ export function NewSessionPrompt({
   useEffect(() => {
     callbacks.current.onMentionOpenChange(mentions.open);
   }, [mentions.open]);
+
+  const imageComments = parseImageAttachmentComments(text);
+  const commitText = (next: string) => {
+    draft.current = { text: next };
+    setText(next);
+  };
+  const commentOnImage = (
+    imageIndex: number,
+    region: ImageRegion,
+    comment: string,
+    _keepOpen: boolean,
+    existing?: ImageRegionAnnotation,
+  ) => {
+    const current = draft.current.text;
+    commitText(
+      existing
+        ? updateImageAttachmentComment(
+            current,
+            { ...existing, imageIndex },
+            region,
+            comment,
+          )
+        : appendImageAttachmentComment(current, imageIndex, region, comment),
+    );
+  };
+  const deleteCommentOnImage = (
+    imageIndex: number,
+    annotation: ImageRegionAnnotation,
+  ) =>
+    commitText(
+      deleteImageAttachmentComment(draft.current.text, {
+        ...annotation,
+        imageIndex,
+      }),
+    );
+  const removeImage = (imageIndex: number) => {
+    commitText(rebaseImageAttachmentReferences(draft.current.text, imageIndex));
+    onRemoveImage(imageIndex);
+  };
 
   // The prompt grows naturally; once the palette reaches its viewport cap the
   // BODY becomes the single scroller, carrying attachments with the text. Each
@@ -375,7 +426,7 @@ export function NewSessionPrompt({
     >
       {mentions.popup}
       <div className="relative">
-        {sessionPill && (
+        {promptHighlight && (
           // `composer-hl` stays as a hook: the pill spans inside this
           // mirror are written as innerHTML by lib/composer-highlight.ts,
           // so their rules can only be reached through it. Same trick as
@@ -400,7 +451,7 @@ export function NewSessionPrompt({
               "-mx-[4px] w-[calc(100%+8px)] px-[6px] py-[2px]",
             )}
             aria-hidden="true"
-            dangerouslySetInnerHTML={{ __html: sessionHighlightHtml }}
+            dangerouslySetInnerHTML={{ __html: promptHighlightHtml }}
           />
         )}
         <textarea
@@ -408,7 +459,7 @@ export function NewSessionPrompt({
           {...mentions.inputProps}
           className={cn(
             TEXTAREA,
-            sessionPill &&
+            promptHighlight &&
               "relative z-[1] break-words text-transparent caret-[var(--text)]",
           )}
           value={sessionNames.displayText}
@@ -484,7 +535,7 @@ export function NewSessionPrompt({
           }}
           onKeyUp={mentions.sync}
           onClick={(e) => {
-            // Pressing a reference removes it, the way the pill says it will.
+            // Pressing a session reference removes it, the way the pill says it will.
             if (sessionNames.removeTokenAtCaret(e.currentTarget)) return;
             mentions.sync();
           }}
@@ -498,7 +549,10 @@ export function NewSessionPrompt({
       <ImageThumbs
         images={images}
         pending={staging.images}
-        onRemove={onRemoveImage}
+        onRemove={removeImage}
+        comments={imageComments}
+        onComment={commentOnImage}
+        onDeleteComment={deleteCommentOnImage}
         onRemovePending={onRemovePendingImage}
         disabled={disabled}
       />

@@ -2,8 +2,12 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { PANEL_RESIZE } from "../lib/session-panel-classes";
 import {
   SIDE_PANEL_OPEN_KEY,
+  SIDE_PANEL_PAGE_KEY,
   sidePanelOpen,
+  sidePanelPage,
   storeSidePanelOpen,
+  storeSidePanelPage,
+  type SidePanelPage,
 } from "../lib/side-panel-open";
 import { suppressLayoutAnimations } from "../ui/motion";
 
@@ -11,15 +15,17 @@ import { suppressLayoutAnimations } from "../ui/motion";
  * The right side panel's open state and width, shared by every surface that
  * shows one: the session viewer and the session-less workspace route.
  *
- * Open state is a browser-wide view choice. The summary card is the default;
- * once the person opens the panel, it stays open as they move between
- * workspaces or reload. A window event keeps simultaneous panel hosts in sync,
- * while the storage event does the same across tabs.
+ * Open state and selected tool are browser-wide view choices. The summary card
+ * and Changes are the defaults; once the person opens the panel or changes its
+ * tab, that choice follows them between sessions, workspaces, and reloads. A
+ * window event keeps simultaneous panel hosts in sync, while the storage event
+ * does the same across browser tabs.
  *
  * Width also remains in localStorage. The handle drags from the panel's left
  * edge, so its width is the pointer's distance from the container's right side.
  */
 const OPEN_CHANGE_EVENT = "opensession-panel-open-changed";
+const PAGE_CHANGE_EVENT = "opensession-panel-page-changed";
 const WIDTH_KEY = "opensession-panel-w";
 const MIN_W = 320;
 const MAX_W = 2400;
@@ -27,6 +33,8 @@ const MAX_W = 2400;
 export interface SidePanel {
   open: boolean;
   setOpen: (open: boolean) => void;
+  page: SidePanelPage;
+  setPage: (page: SidePanelPage) => void;
   /** `--panel-w` for PANEL_SHELL; undefined while no width is stored. */
   style: React.CSSProperties | undefined;
   /** The panel's left-edge drag handle — render it inside PANEL_SHELL. */
@@ -55,6 +63,36 @@ export function useSidePanel(): SidePanel {
     setOpenState(next);
     storeSidePanelOpen(next);
     window.dispatchEvent(new CustomEvent(OPEN_CHANGE_EVENT, { detail: next }));
+  }
+
+  const [page, setPageState] = useState(sidePanelPage);
+  useEffect(() => {
+    const syncPage = (event: Event) => {
+      if (!(event instanceof CustomEvent)) return;
+      const next = event.detail as SidePanelPage;
+      if (
+        next !== "changes" &&
+        next !== "portals" &&
+        next !== "agents" &&
+        next !== "terminal"
+      )
+        return;
+      setPageState(next);
+    };
+    const syncStorage = (event: StorageEvent) => {
+      if (event.key === SIDE_PANEL_PAGE_KEY) setPageState(sidePanelPage());
+    };
+    window.addEventListener(PAGE_CHANGE_EVENT, syncPage);
+    window.addEventListener("storage", syncStorage);
+    return () => {
+      window.removeEventListener(PAGE_CHANGE_EVENT, syncPage);
+      window.removeEventListener("storage", syncStorage);
+    };
+  }, []);
+  function setPage(next: SidePanelPage) {
+    setPageState(next);
+    storeSidePanelPage(next);
+    window.dispatchEvent(new CustomEvent(PAGE_CHANGE_EVENT, { detail: next }));
   }
 
   const [width, setWidth] = useState<number>(() => {
@@ -100,6 +138,8 @@ export function useSidePanel(): SidePanel {
   return {
     open,
     setOpen,
+    page,
+    setPage,
     style: width
       ? ({ "--panel-w": `${width}px` } as React.CSSProperties)
       : undefined,

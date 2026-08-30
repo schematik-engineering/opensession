@@ -1,10 +1,9 @@
 import { elapsedSince } from "./time";
 
 const STILL_WORKING_MS = 10_000;
-const LONG_RUNNING_MS = 45_000;
 
 export interface BusyActivityStatus {
-  label: "Working" | "Still working" | "Taking longer than usual";
+  label: "Working" | "Still working";
   elapsed: string | null;
 }
 
@@ -17,10 +16,7 @@ export function busyActivityStatus(elapsedMs: number): BusyActivityStatus {
     return { label: "Working", elapsed: null };
   }
   return {
-    label:
-      safeElapsedMs >= LONG_RUNNING_MS
-        ? "Taking longer than usual"
-        : "Still working",
+    label: "Still working",
     elapsed: elapsedSince(0, safeElapsedMs),
   };
 }

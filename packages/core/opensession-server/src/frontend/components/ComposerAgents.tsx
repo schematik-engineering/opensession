@@ -245,7 +245,7 @@ export function ComposerAgents({ runs, subagents, plan, onOpenPanel }: Props) {
                 {single
                   ? single.name
                   : runs.length > 0
-                    ? `${runs.length} workflows running`
+                    ? `${runs.length} workflows active`
                     : "Sub-agents"}
               </div>
 

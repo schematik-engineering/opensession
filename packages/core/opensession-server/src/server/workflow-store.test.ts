@@ -18,12 +18,16 @@ import { join } from "path";
 import {
   appendWorkflowJournal,
   cancelLiveWorkflow,
+  controlLiveWorkflowAgent,
   createWorkflowRun,
   getWorkflowRun,
   listWorkflowRunsForSession,
   markInterruptedWorkflows,
+  pauseLiveWorkflow,
   readWorkflowJournal,
+  recoverableWorkflowRunIds,
   registerLiveWorkflow,
+  resumeLiveWorkflow,
   unregisterLiveWorkflow,
   updateWorkflowRun,
 } from "./workflow-store";
@@ -196,18 +200,26 @@ describe("workflow store", () => {
     expect(listWorkflowRunsForSession("bks-nobody")).toEqual([]);
   });
 
-  test("registerLiveWorkflow / cancelLiveWorkflow wiring", () => {
+  test("registerLiveWorkflow exposes run and agent controls", () => {
     const snapshot = makeRun();
-    let cancelled = 0;
-    registerLiveWorkflow(snapshot.runId, () => cancelled++);
+    const calls: string[] = [];
+    registerLiveWorkflow(snapshot.runId, {
+      cancel: () => calls.push("cancel"),
+      pause: () => (calls.push("pause"), true),
+      resume: () => (calls.push("resume"), true),
+      controlAgent: (seq, action) => (calls.push(`${action}:${seq}`), true),
+    });
+    expect(pauseLiveWorkflow(snapshot.runId)).toBe(true);
+    expect(resumeLiveWorkflow(snapshot.runId)).toBe(true);
+    expect(controlLiveWorkflowAgent(snapshot.runId, 7, "retry")).toBe(true);
     expect(cancelLiveWorkflow(snapshot.runId)).toBe(true);
-    expect(cancelled).toBe(1);
+    expect(calls).toEqual(["pause", "resume", "retry:7", "cancel"]);
     unregisterLiveWorkflow(snapshot.runId);
     expect(cancelLiveWorkflow(snapshot.runId)).toBe(false);
   });
 
   test("markInterruptedWorkflows flips dead running runs, leaves live ones", () => {
-    const dead = makeRun();
+    const dead = makeRun({ recovery: { autoResume: true } });
     updateWorkflowRun(dead.runId, (s) => {
       s.agents.push({
         seq: 0,
@@ -230,6 +242,7 @@ describe("workflow store", () => {
     expect(deadNow.status).toBe("interrupted");
     expect(deadNow.endedAt).toBeTruthy();
     expect(deadNow.agents[0].status).toBe("cancelled");
+    expect(recoverableWorkflowRunIds()).toContain(dead.runId);
     expect(getWorkflowRun(live.runId)?.status).toBe("running");
     expect(getWorkflowRun(finished.runId)?.status).toBe("done");
   });

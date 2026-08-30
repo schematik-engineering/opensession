@@ -10,8 +10,9 @@
  * env-scrubbed and de-fanged, but exposure gating is the real trust boundary);
  * `agent()` calls bridge to the parent process, which executes them as plain
  * pi runs (kind "workflow") via runAgent and returns the result into the
- * script. Heavier, steerable work (code mode + PR) stays on spawn_task — a
- * workflow agent is a focused, mostly read/analyze/report worker.
+ * script. A workflow agent remains a focused read/analyze/report worker;
+ * heavier code + PR work uses spawnSession(), which delegates to the existing
+ * durable SessionControl code-session infrastructure.
  *
  * Consumers:
  *  - workflow-runner.ts  — orchestration (worker lifecycle, semaphore, journal)
@@ -38,8 +39,13 @@ export const WORKFLOW_LIMITS = {
   maxWriteAgents: 40,
   /** Per-agent wall clock before the run is failed. */
   agentTimeoutMs: 15 * 60_000,
-  /** Whole-workflow wall clock before the worker is terminated. */
+  /** Whole-workflow active wall clock before the worker is terminated. Time
+   * spent paused does not consume this allowance. */
   workflowTimeoutMs: 60 * 60_000,
+  /** Advisory threshold surfaced in the UI and telemetry. */
+  largeWorkflowAgents: 25,
+  /** Advisory combined input/output-token threshold. */
+  largeWorkflowTokens: 1_500_000,
   /** Schema-validation attempts per agent() call (1 initial + retries). */
   schemaAttempts: 3,
   /** Cap on stored/returned agent result text. */
@@ -66,6 +72,18 @@ export const WORKFLOW_LIMITS = {
   maxMcpResultChars: 250_000,
   /** MCP calls kept on the snapshot (newest last) for the UI/status tail. */
   maxMcpSnapshotCalls: 50,
+  // ── durable child sessions ──
+  /** Maximum active code sessions supervised by one workflow. */
+  maxConcurrentSessions: 4,
+  /** Lifetime child-session creations per workflow. */
+  maxSessions: 20,
+  /** Maximum parent/child hops from a human-created session. */
+  maxSessionDepth: 2,
+  /** Aggregate completed token spend across child sessions. Provider account
+   * quotas remain an additional hard boundary. */
+  maxSessionTokens: 2_000_000,
+  /** Aggregate provider-reported child-session cost. */
+  maxSessionCostUsd: 100,
 } as const;
 
 // ── Script surface ───────────────────────────────────────────────────────────
@@ -100,6 +118,94 @@ export interface WorkflowAgentOpts {
    *  collisions against sibling agents. Its work is auto-committed on its own
    *  branch; `merge()` lands selected branches back on the session's branch. */
   write?: boolean;
+}
+
+/** Options accepted by the script's spawnSession(). Child code sessions use
+ * the normal SessionControl create path; isolated worktrees merely opt out of
+ * the usual same-workspace sharing rule. */
+export interface WorkflowSpawnSessionOpts {
+  prompt: string;
+  repo: string;
+  mode?: "ask" | "code";
+  workspace?: {
+    type: "isolated-worktree";
+    /** Start from a committed local/remote Git ref. */
+    baseRef?: string;
+    /** Start from another child session's pushed branch. */
+    baseSessionId?: string;
+  };
+  branch?: string;
+}
+
+export type WorkflowSessionState =
+  | "running"
+  | "waiting"
+  | "branch_pushed"
+  | "pr_opened"
+  | "done"
+  | "error"
+  | "cancelled";
+
+export interface WorkflowSpawnedSession {
+  id: string;
+  url: string;
+  repo: string;
+  branch: string;
+  parentSessionId: string;
+}
+
+/** sessionStatus()/waitSession() result and the row persisted for the Agents
+ * panel. Worktree paths are already visible on ordinary session detail views;
+ * carrying one here makes isolated siblings inspectable at a glance. */
+export interface WorkflowSessionSnapshot extends WorkflowSpawnedSession {
+  seq: number;
+  label: string;
+  status: WorkflowSessionState;
+  worktreeDir?: string;
+  prUrl?: string;
+  error?: string;
+  startedAt: string;
+  endedAt?: string;
+  branchPushed?: boolean;
+  tokens?: number;
+  costUsd?: number;
+}
+
+export interface WorkflowSessionStatus extends WorkflowSpawnedSession {
+  status: WorkflowSessionState;
+  worktreeDir?: string;
+  prUrl?: string;
+  error?: string;
+  branchPushed: boolean;
+  tokens?: number;
+  costUsd?: number;
+}
+
+export type WorkflowSessionOperation =
+  | "spawn"
+  | "status"
+  | "wait"
+  | "send"
+  | "cancel";
+
+export interface WorkflowSessionController {
+  /** Re-adopt a spawn result replayed from a prior journal. */
+  adopt(session: WorkflowSpawnedSession): void;
+  spawn(
+    opts: WorkflowSpawnSessionOpts,
+    requestId: string,
+  ): Promise<WorkflowSpawnedSession>;
+  status(id: string): Promise<WorkflowSessionStatus>;
+  wait(
+    id: string,
+    opts: { until: WorkflowSessionState; timeout?: number },
+    signal: AbortSignal,
+  ): Promise<WorkflowSessionStatus>;
+  send(id: string, message: string, requestId: string): Promise<unknown>;
+  cancel(id: string, requestId: string): Promise<WorkflowSessionStatus>;
+  /** Explicit workflow cancellation may propagate to active children. A
+   * process crash never calls this, so durable children outlive the worker. */
+  cancelActive?(requestIdPrefix: string): Promise<void>;
 }
 
 // ── Parent ⇄ executor contract ───────────────────────────────────────────────
@@ -163,8 +269,12 @@ export interface WorkflowAgentOutcome {
   /** Parsed schema-validated value when the call carried a schema. */
   structured?: unknown;
   error?: string;
+  /** Resolved model selected before runtime fallback. */
+  requestedModel?: string;
+  /** Effective terminal model after any fallback. */
   model?: string;
   tokens?: { input: number; output: number };
+  toolCalls?: number;
   /** The pi session this agent ran in — the transcript drill-in pointer. */
   engineSessionId?: string;
   /** Where it ran (the session's worktree, or a write agent's own one). */
@@ -264,7 +374,12 @@ export interface WorkflowAgentSnapshot {
   seq: number;
   label: string;
   phase?: string;
+  /** Resolved model selected before runtime fallback. */
+  requestedModel?: string;
+  /** Effective model, updated when the run reports a fallback. */
   model?: string;
+  /** Set only when the effective model differs from the resolved request. */
+  modelSubstitutedFrom?: string;
   status: WorkflowAgentStatus;
   /** Truncated to previewChars for snapshot payloads. */
   promptPreview: string;
@@ -273,6 +388,9 @@ export interface WorkflowAgentSnapshot {
   startedAt?: string;
   endedAt?: string;
   tokens?: { input: number; output: number };
+  toolCalls?: number;
+  /** Number of times this live call was restarted from the UI. */
+  retries?: number;
   /** True when the result came from the journal (resume replay). */
   cached?: boolean;
   /** True when the call carried a schema. */
@@ -293,22 +411,85 @@ export interface WorkflowAgentSnapshot {
 
 export type WorkflowRunStatus =
   | "running"
+  | "paused"
   | "done"
   | "error"
   | "cancelled"
   /** Marked on boot for runs that were live when the process died. */
   | "interrupted";
 
+export interface WorkflowRecoverySnapshot {
+  /** Only active runs carrying this descriptor are replayed after restart. */
+  autoResume: boolean;
+  args?: unknown;
+  defaultModel?: string;
+  budgetTotal?: number;
+  repo?: string;
+  baseBranch?: string;
+  mcpAllowlist?: string[];
+  deniedTools?: Record<string, string>;
+  sessionLimits?: {
+    maxDepth?: number;
+    maxConcurrent?: number;
+    maxSessions?: number;
+    maxTokens?: number;
+    maxCostUsd?: number;
+  };
+  cancelChildSessions?: boolean;
+}
+
+export interface WorkflowPhaseSnapshot {
+  title: string;
+  agents: number;
+  pending: number;
+  running: number;
+  done: number;
+  error: number;
+  cancelled: number;
+  tokensIn: number;
+  tokensOut: number;
+  toolCalls: number;
+  durationMs: number;
+}
+
+export interface WorkflowWarning {
+  kind: "large_workflow";
+  message: string;
+}
+
+export interface WorkflowPhaseToolTotal {
+  calls: number;
+  errors: number;
+  durationMs: number;
+}
+
 export interface WorkflowRunSnapshot {
   runId: string;
+  /** First run in a resume chain; stable namespace for idempotent side effects. */
+  replayRootRunId?: string;
   sessionId: string;
   name: string;
   description?: string;
   status: WorkflowRunStatus;
+  /** Serializable launch policy used for restart recovery. */
+  recovery?: WorkflowRecoverySnapshot;
+  /** New run that replayed this interrupted run after a process restart. */
+  recoveredAsRunId?: string;
+  recoveryError?: string;
+  pausedAt?: string;
+  pauseReason?: string;
+  totalPausedMs?: number;
   /** Phase titles in first-seen order (meta.phases pre-seed it). */
   phases: string[];
   currentPhase?: string;
   agents: WorkflowAgentSnapshot[];
+  /** Recomputed from agent and direct-tool snapshots on every update. */
+  phaseStats?: WorkflowPhaseSnapshot[];
+  /** Cumulative direct mcp.* totals by phase; unlike mcpCalls, never tail-capped. */
+  phaseToolTotals?: Record<string, WorkflowPhaseToolTotal>;
+  warnings?: WorkflowWarning[];
+  /** Real durable child sessions spawned by this workflow. */
+  sessions?: WorkflowSessionSnapshot[];
   logs: Array<{ ts: string; message: string }>;
   /** Script return value (JSON-serializable, capped). Set when done. */
   result?: unknown;
@@ -319,6 +500,8 @@ export interface WorkflowRunSnapshot {
     agents: number;
     tokensIn: number;
     tokensOut: number;
+    /** Tool calls made inside workflow agents. */
+    agentToolCalls?: number;
     /** mcp.* calls made by the script (absent on pre-mcp runs). */
     mcpCalls?: number;
     mcpErrors?: number;
@@ -355,6 +538,7 @@ export interface WorkflowMcpJournalEntry {
   server: string;
   tool: string;
   args: unknown;
+  phase?: string;
   ok: boolean;
   /** The normalized value the script received (capped). */
   value?: unknown;
@@ -363,14 +547,35 @@ export interface WorkflowMcpJournalEntry {
   endedAt: string;
 }
 
+export interface WorkflowSessionJournalEntry {
+  kind: "session";
+  seq: number;
+  /** Hash of operation + normalized arguments. */
+  hash: string;
+  operation: WorkflowSessionOperation;
+  args: unknown;
+  ok: boolean;
+  value?: unknown;
+  error?: string;
+  startedAt: string;
+  endedAt: string;
+}
+
 export type WorkflowJournalRecord =
   | WorkflowJournalEntry
-  | WorkflowMcpJournalEntry;
+  | WorkflowMcpJournalEntry
+  | WorkflowSessionJournalEntry;
 
 export function isMcpJournalEntry(
   entry: WorkflowJournalRecord,
 ): entry is WorkflowMcpJournalEntry {
   return entry.kind === "mcp";
+}
+
+export function isSessionJournalEntry(
+  entry: WorkflowJournalRecord,
+): entry is WorkflowSessionJournalEntry {
+  return entry.kind === "session";
 }
 
 /** A recent mcp.* call, surfaced on the snapshot (capped at
@@ -379,6 +584,7 @@ export function isMcpJournalEntry(
 export interface WorkflowMcpCallSnapshot {
   seq: number;
   server: string;
+  phase?: string;
   tool: string;
   ok: boolean;
   /** Wall-clock duration in ms. */
@@ -410,6 +616,14 @@ export type WorkerToParent =
       server: string;
       tool: string;
       args: unknown;
+      phase?: string;
+    }
+  | {
+      type: "session_call";
+      callId: number;
+      seq: number;
+      operation: WorkflowSessionOperation;
+      args: unknown;
     }
   /** mcp.servers() / mcp.tools(server) — discovery, never journaled. */
   | { type: "mcp_meta"; callId: number; server?: string }
@@ -437,6 +651,13 @@ export type ParentToWorker =
    *  outcome) — parallel() still degrades a throw to null. */
   | {
       type: "mcp_result";
+      callId: number;
+      ok: boolean;
+      value: unknown;
+      error?: string;
+    }
+  | {
+      type: "session_result";
       callId: number;
       ok: boolean;
       value: unknown;

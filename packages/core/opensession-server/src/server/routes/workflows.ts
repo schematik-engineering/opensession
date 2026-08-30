@@ -8,40 +8,33 @@
 import type { RouteContext } from "./context";
 import {
   isMcpJournalEntry,
+  isSessionJournalEntry,
   type WorkflowJournalEntry,
 } from "../workflow-types";
 import {
   getWorkflowRun,
   listWorkflowRunsForSession,
-  markInterruptedWorkflows,
   readWorkflowJournal,
 } from "../workflow-store";
-import { cancelWorkflow } from "../workflow-runner";
+import {
+  cancelWorkflow,
+  controlWorkflowAgent,
+  pauseWorkflow,
+  recoverWorkflow,
+  resumeWorkflow,
+} from "../workflow-runner";
 import {
   findPiNativeTranscript,
   readPiNativeTranscript,
 } from "../pi-native-transcript";
-
-// Boot pass: flip any run.json still "running" with no live worker to
-// "interrupted" (the orchestration state died with the previous process).
-// routes/index.ts is imported once at boot, which gives us this hook without
-// touching opensession.ts; the globalThis flag keeps hot reloads (which
-// re-import this module) from re-running it while workflows are live.
-if (!(globalThis as any).__opensessionWorkflowsBootMarked) {
-  (globalThis as any).__opensessionWorkflowsBootMarked = true;
-  try {
-    markInterruptedWorkflows();
-  } catch (e) {
-    console.warn("[workflow] boot interrupted-run pass failed:", e);
-  }
-}
 
 /** The journal's agent() records only. mcp.* records live in the same file
  *  under their own seq space, so every seq-keyed agent lookup goes through
  *  here — a raw find() can otherwise match an unrelated tool call. */
 function agentJournalEntries(runId: string): WorkflowJournalEntry[] {
   return readWorkflowJournal(runId).filter(
-    (e): e is WorkflowJournalEntry => !isMcpJournalEntry(e),
+    (e): e is WorkflowJournalEntry =>
+      !isMcpJournalEntry(e) && !isSessionJournalEntry(e),
   );
 }
 
@@ -117,9 +110,34 @@ export async function handleWorkflowsRoutes(
   }
 
   {
-    const m = path.match(/^\/api\/workflows\/([^/]+)\/cancel$/);
+    const m = path.match(
+      /^\/api\/workflows\/([^/]+)\/agents\/(\d+)\/(skip|retry)$/,
+    );
     if (m && req.method === "POST") {
-      return Response.json({ ok: cancelWorkflow(decodeURIComponent(m[1])) });
+      return Response.json({
+        ok: controlWorkflowAgent(
+          decodeURIComponent(m[1]),
+          Number.parseInt(m[2], 10),
+          m[3] as "skip" | "retry",
+        ),
+      });
+    }
+  }
+
+  {
+    const m = path.match(/^\/api\/workflows\/([^/]+)\/(cancel|pause|resume)$/);
+    if (m && req.method === "POST") {
+      const runId = decodeURIComponent(m[1]);
+      if (m[2] === "cancel")
+        return Response.json({ ok: cancelWorkflow(runId) });
+      if (m[2] === "pause")
+        return Response.json({ ok: pauseWorkflow(runId, "paused from UI") });
+      if (resumeWorkflow(runId)) return Response.json({ ok: true, runId });
+      const recoveredRunId = await recoverWorkflow(runId);
+      return Response.json({
+        ok: Boolean(recoveredRunId),
+        ...(recoveredRunId ? { runId: recoveredRunId } : {}),
+      });
     }
   }
 

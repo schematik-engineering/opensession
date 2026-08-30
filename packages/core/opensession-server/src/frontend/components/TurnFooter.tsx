@@ -100,9 +100,11 @@ export const TurnFooter = function TurnFooter({
       )}
     >
       {duration && (
-        <span className="mr-1.5 pl-1 text-meta font-medium leading-4 text-faint">
-          {duration}
-        </span>
+        <Tooltip label={fullTime(entry.timestamp)}>
+          <span className="mr-1.5 pl-1 text-meta font-medium leading-4 text-faint">
+            {duration}
+          </span>
+        </Tooltip>
       )}
       {assets.map((path) => (
         <AssetChip key={path} path={path} />

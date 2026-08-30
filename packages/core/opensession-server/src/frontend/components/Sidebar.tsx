@@ -632,7 +632,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
     // it pins at. A scroll frame cannot change either, and reading them is a
     // style recalc per header, so they are cached here and re-read only when
     // the list, the rail or the density actually changes. `stuck` is the
-    // class as last applied, so an unchanged header costs no write.
+    // attribute as last applied, so an unchanged header costs no write.
     type StickyHead = {
       el: HTMLElement;
       parent: HTMLElement;
@@ -654,7 +654,10 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
           parent: parent ?? el,
           sticky: style.position === "sticky" && !!parent,
           top: Number.parseFloat(style.top) || 0,
-          stuck: applied.get(el) ?? el.classList.contains("is-stuck"),
+          // React owns className and rewrites it on rerender. The dedicated
+          // data attribute is not part of that managed value, so it preserves
+          // the backing while the scroll position remains unchanged.
+          stuck: applied.get(el) ?? el.hasAttribute("data-stuck"),
         });
       }
     };
@@ -692,7 +695,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
         const stuck = next[i]!;
         if (head.stuck === stuck) continue;
         head.stuck = stuck;
-        head.el.classList.toggle("is-stuck", stuck);
+        head.el.toggleAttribute("data-stuck", stuck);
       }
     };
     const schedule = () => {
@@ -3104,7 +3107,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
   // The Snoozed group — the quiet zone, shared by the status lanes (slotted
   // just above Backlog) and the inbox bands (appended last, after Earlier).
   // `ns` keeps each repo's copy collapsible on its own.
-  function renderSnoozedGroup(rows: WsRow[], ns = "") {
+  function renderSnoozedGroup(rows: WsRow[], ns = "", nested = false) {
     const gkey = `${ns}status:snoozed`;
     const open = isOpen(gkey);
     return (
@@ -3116,7 +3119,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
             SIDEBAR_LANE_HEADER,
             "transition-colors",
             SIDEBAR_STICKY_LANE,
-            ns && SIDEBAR_STICKY_LANE_NESTED,
+            nested && SIDEBAR_STICKY_LANE_NESTED,
             SIDEBAR_STUCK_BACKING,
           )}
           data-sticky-head
@@ -3261,7 +3264,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
               SIDEBAR_LANE_HEADER,
               "transition-colors",
               SIDEBAR_STICKY_LANE,
-              ns && SIDEBAR_STICKY_LANE_NESTED,
+              !!laneRepo && SIDEBAR_STICKY_LANE_NESTED,
               SIDEBAR_STUCK_BACKING,
             )}
             data-sticky-head
@@ -3295,7 +3298,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
       lanes.splice(
         MINE_STATUS_META.findIndex((m) => m.key === "pending") + 1,
         0,
-        renderSnoozedGroup(snoozedRows, ns),
+        renderSnoozedGroup(snoozedRows, ns, !!laneRepo),
       );
     }
     return lanes;
@@ -3308,6 +3311,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
     ns = "",
     snoozedRows: WsRow[] = [],
     prItems: ReviewQueueItem[] = [],
+    nested = false,
   ) {
     const sorted = [...rows].sort((a, b) =>
       (b.lastActivity || "").localeCompare(a.lastActivity || ""),
@@ -3357,7 +3361,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
                 SIDEBAR_LANE_HEADER,
                 "transition-colors",
                 SIDEBAR_STICKY_LANE,
-                ns && SIDEBAR_STICKY_LANE_NESTED,
+                nested && SIDEBAR_STICKY_LANE_NESTED,
                 SIDEBAR_STUCK_BACKING,
               )}
               data-sticky-head
@@ -3387,14 +3391,15 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
           </div>
         );
       });
-    if (snoozedRows.length > 0) nodes.push(renderSnoozedGroup(snoozedRows, ns));
+    if (snoozedRows.length > 0)
+      nodes.push(renderSnoozedGroup(snoozedRows, ns, nested));
     return nodes;
   }
 
   // ── Inbox Active section ───────────────────────────────────────────────
   // Snoozed uses the shared section below; Active keeps its stable creation
   // order and the same compact row density.
-  function renderActiveSection(rows: WsRow[], ns = "") {
+  function renderActiveSection(rows: WsRow[], ns = "", nested = false) {
     const label = "Active";
     if (rows.length === 0) return null;
     const gkey = `${ns}inbox:${label.toLowerCase()}`;
@@ -3408,7 +3413,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
             SIDEBAR_LANE_HEADER,
             "transition-colors",
             SIDEBAR_STICKY_LANE,
-            ns && SIDEBAR_STICKY_LANE_NESTED,
+            nested && SIDEBAR_STICKY_LANE_NESTED,
             SIDEBAR_STUCK_BACKING,
           )}
           data-sticky-head
@@ -3441,15 +3446,18 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
     laneRepo?: string,
     prItems: ReviewQueueItem[] = [],
   ) {
+    const nested = !!laneRepo;
     if (filter.groupBy === "activity")
-      return renderInboxBands(rows, ns, snoozedRows, prItems);
+      return renderInboxBands(rows, ns, snoozedRows, prItems, nested);
     if (filter.groupBy === "status")
       return renderStatusLanes(rows, ns, snoozedRows, laneRepo, prItems);
     const active = sortInboxByCreation(rows);
     return [
-      renderActiveSection(active, ns),
+      renderActiveSection(active, ns, nested),
       ...prItems.map(renderPrRow),
-      ...(snoozedRows.length > 0 ? [renderSnoozedGroup(snoozedRows, ns)] : []),
+      ...(snoozedRows.length > 0
+        ? [renderSnoozedGroup(snoozedRows, ns, nested)]
+        : []),
     ];
   }
 
@@ -4610,6 +4618,11 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
                 "flex w-full min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
                 SIDEBAR_DENSITY_VARS,
                 SIDEBAR_NAV_X,
+                // Keyboard navigation calls scrollIntoView on the next row. Teach
+                // that native scroll where the pinned lane caption ends, otherwise
+                // it aligns the row with the scrollport and parks it underneath
+                // Active, making a two-row lane look as though it contains one.
+                "desktop:scroll-pt-[var(--sidebar-cap-h)]",
                 // The whole sidebar scrolls as one on phones, so the tools (and the
                 // Workspaces header) scroll away with the list instead of staying
                 // pinned above a separately-scrolling list. The top bar floats over

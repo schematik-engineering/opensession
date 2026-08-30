@@ -286,8 +286,11 @@ export const MCP_SERVER_CATALOG: McpServerCatalogEntry[] = [
     name: "opensession-web",
     summary: INTERNAL_MCP_CAPABILITIES["opensession-web"].summary,
     source: "packages/core/opensession-server/src/server/web-mcp.ts",
-    wiring: ["packages/core/opensession-server/src/server/interactive-mcp.ts"],
-    runClasses: ["interactive"],
+    wiring: [
+      "packages/core/opensession-server/src/server/interactive-mcp.ts",
+      "packages/core/opensession-server/src/server/goal-runner.ts",
+    ],
+    runClasses: ["interactive", "goal"],
     condition: "Needs a session id.",
     build: () => createWebMcpServer({ sessionId: SESSION_ID }),
   },

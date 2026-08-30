@@ -355,6 +355,8 @@ export interface ResolvedCreate {
   gitPrincipal?: string;
   /** Ephemeral capability. Durable create snapshots always strip this field. */
   gitEnv?: Record<string, string>;
+  /** Exact ref used to materialize a new branch, retained for crash recovery. */
+  worktreeBaseRef?: string;
   stackedOn?: { repo: string; branch: string };
   /** Workspace recorded on the session file. */
   workspaceId?: string;
@@ -365,6 +367,8 @@ export interface ResolvedCreate {
   /** Workspace to rename once the generated title lands (minted by THIS create). */
   autoNameWorkspace?: Workspace | null;
   parentSessionId?: string;
+  /** Number of supervised session-spawn hops from a human-created root. */
+  spawnDepth?: number;
   /** Started by a server-side agent action rather than a person's composer. */
   agentStarted?: boolean;
   /** Agent that created this session (SessionData.spawnedBy). */
@@ -783,7 +787,7 @@ async function restorePlannedOpening(sessionId: string): Promise<{
           project: restored.repoId!,
           branch: restored.branch,
           worktreePath: restored.wtPath,
-          baseBranch: restored.stackedOn?.branch,
+          baseBranch: restored.worktreeBaseRef || restored.stackedOn?.branch,
           isolated: restored.worktreeIsolated === true,
           existingBranch: restored.worktreeKind === "existing",
           credentialPrincipal: restored.gitPrincipal,
@@ -1164,6 +1168,9 @@ export async function openCreatedSession(
         ...(spec.workspaceId ? { workspaceId: spec.workspaceId } : {}),
         ...(spec.parentSessionId
           ? { parentSessionId: spec.parentSessionId }
+          : {}),
+        ...(spec.spawnDepth !== undefined
+          ? { spawnDepth: spec.spawnDepth }
           : {}),
         ...(spec.agentStarted ? { agentStarted: true } : {}),
         ...(spec.spawnedBy ? { spawnedBy: spec.spawnedBy } : {}),

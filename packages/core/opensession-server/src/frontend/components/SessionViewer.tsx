@@ -1605,6 +1605,8 @@ export function SessionViewer({
   const {
     open: panelOpen,
     setOpen: setPanelOpen,
+    page: desktopPanelPage,
+    setPage: setDesktopPanelPage,
     style: panelStyle,
     resizeHandle: panelResizeHandle,
   } = useSidePanel();
@@ -1614,24 +1616,17 @@ export function SessionViewer({
   const [reviewPanelOpen, setReviewPanelOpen] = useState(false);
   const activePanelOpen = showReview ? reviewPanelOpen : panelOpen;
   const setActivePanelOpen = showReview ? setReviewPanelOpen : setPanelOpen;
-  // The desktop panel starts on Changes, then keeps the selected tool when it
-  // closes so reopening returns to the person's last place. Phones still use
-  // null for their Workspace details overview and push Changes from that page.
+  // Phones use null for their Workspace details overview and push tools from
+  // that page. The desktop selection comes from useSidePanel so the open panel
+  // stays on the same tool while its session changes.
   const [panelPage, setPanelPage] = useState<
     null | "changes" | "portals" | "agents" | "terminal"
   >(null);
   // Start a panel terminal only after its tab is opened. Keep it mounted while
   // switching tabs, then drop it when the panel closes.
-  const [panelTerminalMounted, setPanelTerminalMounted] = useState(false);
-  useEffect(() => {
-    if (!activePanelOpen) setPanelTerminalMounted(false);
-  }, [activePanelOpen]);
-  // Closing the host that shows pages returns to the overview; that effect
-  // needs `isPhone` to know which host to watch, so it lives beside the
-  // viewport state further down.
-  useEffect(() => {
-    setPanelPage(null);
-  }, [session.id]);
+  const [panelTerminalMounted, setPanelTerminalMounted] = useState(
+    () => activePanelOpen && desktopPanelPage === "terminal",
+  );
   // Session scratch assets (Assets tab): fetched once per session + on
   // assets_changed broadcasts; the tab only appears once files exist.
   const { files: assetFiles, refresh: refreshAssets } = useSessionAssets(
@@ -1673,7 +1668,7 @@ export function SessionViewer({
   const sessionReports = useSessionReports(session.id, addHandler);
   // Team notes — human-to-human messages on this session, interleaved into
   // the transcript as NoteBubbles. The agent never sees them; they're posted
-  // from the composer's note mode (⌘N).
+  // from the composer's note mode.
   const [notes, setNotes] = useState<SessionNote[]>([]);
   const [noteMode, setNoteMode] = useState(false);
   async function addSessionAttachments(picked: FileList | File[]) {
@@ -2416,9 +2411,19 @@ export function SessionViewer({
       stale = true;
     };
   }, [session.id]);
-  function cancelWorkflowRun(runId: string) {
-    // Fire-and-forget: the workflow_update echo flips the card to cancelled.
-    fetch(`${BASE_PATH}/api/workflows/${encodeURIComponent(runId)}/cancel`, {
+  function workflowAction(
+    runId: string,
+    action: "cancel" | "pause" | "resume" | "skip" | "retry",
+    seq?: number,
+  ) {
+    // Fire-and-forget: workflow_update echoes every state transition. Resume
+    // after a process restart may create a new run, which arrives as another
+    // workflow_update on the same session.
+    const suffix =
+      action === "skip" || action === "retry"
+        ? `/agents/${seq}/${action}`
+        : `/${action}`;
+    fetch(`${BASE_PATH}/api/workflows/${encodeURIComponent(runId)}${suffix}`, {
       method: "POST",
     }).catch(() => {});
   }
@@ -2662,8 +2667,7 @@ export function SessionViewer({
     });
   }, [isBusy, loading, entries, session.runStartedAt]);
 
-  // Session-wide composer shortcuts. ⌘/Ctrl+N toggles team-note mode even when
-  // the composer is not focused; Ctrl+R focuses it directly.
+  // Ctrl+R focuses the session composer directly.
   const archiveShortcutLabel = useShortcutLabel("session-archive");
   const copyTranscriptLabel = useShortcutLabel("session-copy-transcript");
   const nextChatKeys = useShortcutKeys("workspace-next-unread");
@@ -2673,17 +2677,6 @@ export function SessionViewer({
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (!focused) return;
-      if (
-        !e.defaultPrevented &&
-        !e.repeat &&
-        matchesShortcut(e, "composer-note") &&
-        !blockingOverlayOpen()
-      ) {
-        e.preventDefault();
-        setNoteMode((on) => !on);
-        queueMicrotask(() => composerRef.current?.focus());
-        return;
-      }
       if (matchesShortcut(e, "composer-focus")) {
         e.preventDefault();
         composerRef.current?.focus();
@@ -4840,6 +4833,15 @@ export function SessionViewer({
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
+  useEffect(() => {
+    if (!activePanelOpen) {
+      setPanelTerminalMounted(false);
+    } else if (!isPhone && desktopPanelPage === "terminal") {
+      // A newly mounted session inherits the selected tab and starts its own
+      // terminal, just as selecting Terminal in-place would.
+      setPanelTerminalMounted(true);
+    }
+  }, [activePanelOpen, desktopPanelPage, isPhone]);
   // Whether the pane can hold the card beside the reading column instead of
   // over it. Unmeasured counts as room: the width lands in a layout effect
   // before the first paint, and assuming the common case keeps a pinned card
@@ -4879,7 +4881,7 @@ export function SessionViewer({
   // dot) is always visible; on a phone the right panel overlays the session and
   // is closed by default, so a running workflow fan-out has no glance.
   const runningWorkflowRuns = workflowRuns.filter(
-    (r) => r.status === "running",
+    (r) => r.status === "running" || r.status === "paused",
   );
   // Sub-agents ride along only while one is live, so a finished batch doesn't
   // pad a later workflow's tallies (their statuses clamp to done once the
@@ -5689,11 +5691,12 @@ export function SessionViewer({
             <Menu.Item
               onClick={() => {
                 setOverflowOpen(false);
-                setPanelPage("portals");
                 if (isPhone) {
+                  setPanelPage("portals");
                   setInfoPageScrolled(false);
                   setInfoPageOpen(true);
                 } else {
+                  setDesktopPanelPage("portals");
                   setActivePanelOpen(true);
                 }
               }}
@@ -6430,7 +6433,7 @@ export function SessionViewer({
                     // canvas now that the side panel contains tools only.
                     onOpenPanelTab={(tab) => {
                       if (tab === "changes") {
-                        setPanelPage("changes");
+                        setDesktopPanelPage("changes");
                         setActivePanelOpen(true);
                       } else {
                         openReview?.();
@@ -6721,7 +6724,7 @@ export function SessionViewer({
                               <WorkflowPanel
                                 sessionId={session.id}
                                 runs={workflowRuns}
-                                onCancel={cancelWorkflowRun}
+                                onAction={workflowAction}
                                 subagents={subagents}
                                 onOpenSubagent={(agentId, label) => {
                                   setInfoPageOpen(false);
@@ -7731,7 +7734,7 @@ export function SessionViewer({
                       }
                       askExitPending={promoting}
                       // Team notes: the send posts to the transcript for the
-                      // humans reading it, never to the agent (⌘N, or the "+").
+                      // humans reading it, never to the agent.
                       noteMode={noteMode}
                       onNoteModeChange={setNoteMode}
                       busy={isBusy && !forkFrom}
@@ -7862,7 +7865,6 @@ export function SessionViewer({
             it opens as a full-height column beside the left sidebar (not just
             below the session header). */}
         {(() => {
-          const desktopPanelPage = panelPage ?? "changes";
           const rightRegion = (
             <>
               {!isPhone && panelAvailable && activePanelOpen && (
@@ -7883,7 +7885,7 @@ export function SessionViewer({
                           PANEL_TAB,
                           desktopPanelPage === "changes" && "bg-hover text-fg",
                         )}
-                        onClick={() => setPanelPage("changes")}
+                        onClick={() => setDesktopPanelPage("changes")}
                       >
                         <IconFile size={15} className="shrink-0" />
                         <span className="@max-[380px]:hidden">Changes</span>
@@ -7895,7 +7897,7 @@ export function SessionViewer({
                           PANEL_TAB,
                           desktopPanelPage === "portals" && "bg-hover text-fg",
                         )}
-                        onClick={() => setPanelPage("portals")}
+                        onClick={() => setDesktopPanelPage("portals")}
                       >
                         <IconGlobe size={15} className="shrink-0" />
                         <span className="@max-[380px]:hidden">Portals</span>
@@ -7912,7 +7914,7 @@ export function SessionViewer({
                           PANEL_TAB,
                           desktopPanelPage === "agents" && "bg-hover text-fg",
                         )}
-                        onClick={() => setPanelPage("agents")}
+                        onClick={() => setDesktopPanelPage("agents")}
                       >
                         <IconStack size={15} className="shrink-0" />
                         <span className="@max-[380px]:hidden">Agents</span>
@@ -7931,7 +7933,7 @@ export function SessionViewer({
                         )}
                         onClick={() => {
                           setPanelTerminalMounted(true);
-                          setPanelPage("terminal");
+                          setDesktopPanelPage("terminal");
                         }}
                       >
                         <IconTerminal size={15} className="shrink-0" />
@@ -7974,7 +7976,7 @@ export function SessionViewer({
                       <WorkflowPanel
                         sessionId={session.id}
                         runs={workflowRuns}
-                        onCancel={cancelWorkflowRun}
+                        onAction={workflowAction}
                         subagents={subagents}
                         onOpenSubagent={openSubagent}
                         onBack={() => setActivePanelOpen(false)}
