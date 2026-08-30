@@ -4,17 +4,18 @@
  * The parent (workflow-runner.ts) spawns this as a Bun Worker and posts
  * {type:"start", body, args}. The script body executes here as an
  * AsyncFunction whose named parameters ARE the script API (agent/parallel/
- * pipeline/merge/mcp/phase/log/args/budget) — top-level `return` works. The
+ * pipeline/merge/spawnSession/sessionStatus/waitSession/sendToSession/
+ * cancelSession/mcp/phase/log/args/budget) — top-level `return` works. The
  * `mcp` global is the tool half of code mode: mcp.<server>.<tool>(args) is a
  * round trip through the parent's MCP host, not a model turn. The worker is
  * containment, not a hard sandbox (see scrubDangerousGlobals): env and the
  * exfil/spawn globals are stripped before the body runs, and the real trust
  * boundary is exposure — only interactive sessions can start workflows.
- * Every agent() and mcp.* call bridges over postMessage to the parent, which
- * runs it and posts the matching agent_result / mcp_result back.
+ * Every agent(), session API and mcp.* call bridges over postMessage to the
+ * parent, which runs it and posts the matching result back.
  *
- * Determinism: resume replay re-runs the script and answers repeated agent()
- * and mcp.* calls from the journal, so the script must be a pure function of
+ * Determinism: resume replay re-runs the script and answers repeated agent(),
+ * session API and mcp.* calls from the journal, so the script must be a pure function of
  * args + call results. Date.now(), argless `new Date()` and Math.random() are
  * poisoned (throw) to keep it that way; `new Date(ms)` still works.
  *
@@ -26,6 +27,9 @@ import type {
   ParentToWorker,
   WorkerToParent,
   WorkflowAgentOpts,
+  WorkflowSessionOperation,
+  WorkflowSessionState,
+  WorkflowSpawnSessionOpts,
 } from "./workflow-types";
 
 const workerGlobal = globalThis as unknown as {
@@ -49,8 +53,13 @@ const pendingMcp = new Map<
   number,
   { resolve: (value: unknown) => void; reject: (error: unknown) => void }
 >();
+const pendingSessions = new Map<
+  number,
+  { resolve: (value: unknown) => void; reject: (error: unknown) => void }
+>();
 let callCounter = 0;
 let mcpSeq = 0;
+let sessionSeq = 0;
 let currentPhase: string | undefined;
 let budgetTotal: number | null = null;
 let budgetSpent = 0;
@@ -144,6 +153,41 @@ function pipeline(
 /** Bridge one MCP tool call. REJECTS on failure (unlike agent(), which
  *  resolves null): a tool call failing is an exception the script can try/catch,
  *  and parallel() already degrades a throw to null. */
+function sessionCall(
+  operation: WorkflowSessionOperation,
+  args: unknown,
+): Promise<unknown> {
+  const callId = callCounter++;
+  const seq = sessionSeq++;
+  return new Promise((resolve, reject) => {
+    pendingSessions.set(callId, { resolve, reject });
+    post({ type: "session_call", callId, seq, operation, args });
+  });
+}
+
+function spawnSession(opts: WorkflowSpawnSessionOpts): Promise<unknown> {
+  return sessionCall("spawn", opts);
+}
+
+function sessionStatus(id: unknown): Promise<unknown> {
+  return sessionCall("status", { id: String(id) });
+}
+
+function waitSession(
+  id: unknown,
+  opts: { until?: WorkflowSessionState; timeout?: number },
+): Promise<unknown> {
+  return sessionCall("wait", { id: String(id), ...(opts || {}) });
+}
+
+function sendToSession(id: unknown, message: unknown): Promise<unknown> {
+  return sessionCall("send", { id: String(id), message: String(message) });
+}
+
+function cancelSession(id: unknown): Promise<unknown> {
+  return sessionCall("cancel", { id: String(id) });
+}
+
 function mcpCall(
   server: unknown,
   tool: unknown,
@@ -160,6 +204,7 @@ function mcpCall(
       server: String(server),
       tool: String(tool),
       args: callArgs ?? {},
+      ...(currentPhase ? { phase: currentPhase } : {}),
     });
   });
 }
@@ -339,6 +384,11 @@ async function runBody(
       "parallel",
       "pipeline",
       "merge",
+      "spawnSession",
+      "sessionStatus",
+      "waitSession",
+      "sendToSession",
+      "cancelSession",
       "mcp",
       "phase",
       "log",
@@ -350,6 +400,11 @@ async function runBody(
       parallel,
       pipeline,
       merge,
+      spawnSession,
+      sessionStatus,
+      waitSession,
+      sendToSession,
+      cancelSession,
       mcp,
       phase,
       log,
@@ -406,5 +461,13 @@ workerGlobal.onmessage = (event: MessageEvent<unknown>) => {
     // an uncaught one fails the run with the tool's own message.
     if (msg.ok) handlers.resolve(msg.value);
     else handlers.reject(new Error(msg.error || "MCP call failed"));
+    return;
+  }
+  if (msg.type === "session_result") {
+    const handlers = pendingSessions.get(msg.callId);
+    if (!handlers) return;
+    pendingSessions.delete(msg.callId);
+    if (msg.ok) handlers.resolve(msg.value);
+    else handlers.reject(new Error(msg.error || "Session operation failed"));
   }
 };

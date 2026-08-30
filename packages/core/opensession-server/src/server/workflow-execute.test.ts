@@ -267,6 +267,7 @@ describe("runAgentCollect", () => {
       [
         { type: "init", sessionId: "oc-abc", model: "pi/openai/gpt-5.5" },
         { type: "text_chunk", text: "hello " },
+        { type: "tool_use", toolName: "Read" },
         { type: "text_chunk", text: "world" },
         {
           type: "done",
@@ -290,6 +291,7 @@ describe("runAgentCollect", () => {
     expect(res.engineSessionId).toBe("oc-abc");
     expect(res.model).toBe("pi/openai/gpt-5.5");
     expect(res.tokens).toEqual({ input: 100, output: 20 });
+    expect(res.toolCalls).toBe(1);
     expect(res.error).toBeUndefined();
   });
 

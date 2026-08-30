@@ -15,6 +15,7 @@
 import { describe, expect, test } from "bun:test";
 import { platform } from "os";
 import {
+  bootstrapLaunchAgent,
   LAUNCHD_LABEL,
   LAUNCHD_LAUNCHER,
   metadataInstallBlockGuidance,
@@ -32,6 +33,64 @@ import { ENV_PATH, HOME } from "./paths";
 // manager exists there, so skip rather than loosen assertions that catch a
 // real regression on the platforms that install them.
 const onServiceHost = platform() !== "win32";
+
+describe("launchd bootstrap", () => {
+  test("retries transient EIO after bootout", async () => {
+    const commands: string[][] = [];
+    const results = [
+      {
+        code: 5,
+        stdout: "",
+        stderr: "Bootstrap failed: 5: Input/output error",
+      },
+      { code: 113, stdout: "", stderr: "Could not find service" },
+      { code: 0, stdout: "", stderr: "" },
+    ];
+
+    const result = await bootstrapLaunchAgent(
+      "dev.opensession.test",
+      "/tmp/test.plist",
+      {
+        domain: "gui/501",
+        runCommand: async (command) => {
+          commands.push(command);
+          return results.shift()!;
+        },
+        pause: async () => {},
+      },
+    );
+
+    expect(result.code).toBe(0);
+    expect(commands).toEqual([
+      ["launchctl", "bootstrap", "gui/501", "/tmp/test.plist"],
+      ["launchctl", "print", "gui/501/dev.opensession.test"],
+      ["launchctl", "bootstrap", "gui/501", "/tmp/test.plist"],
+    ]);
+  });
+
+  test("accepts a job registered despite transient EIO", async () => {
+    const results = [
+      {
+        code: 5,
+        stdout: "",
+        stderr: "Bootstrap failed: 5: Input/output error",
+      },
+      { code: 0, stdout: "registered", stderr: "" },
+    ];
+
+    const result = await bootstrapLaunchAgent(
+      "dev.opensession.test",
+      "/tmp/test.plist",
+      {
+        domain: "gui/501",
+        runCommand: async () => results.shift()!,
+        pause: async () => {},
+      },
+    );
+
+    expect(result).toEqual({ code: 0, stdout: "registered", stderr: "" });
+  });
+});
 
 describe("cloud metadata install refusal", () => {
   test("explains the EC2 risk, safe block, explicit bypass, and rerun", () => {

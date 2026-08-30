@@ -81,9 +81,10 @@ host is tried over HTTPS first, except localhost and loopback addresses use
 HTTP. If HTTPS does not answer, the shell retries a bare host over HTTP. Both
 setup flows probe `/api/health` by default but allow the normalized address to
 be saved with **Use anyway** or **Add anyway**. The organization row above Feed
-and **OS → Organizations** both switch accounts; ⌘⇧1…9 remains available from
-the keyboard. Inactive organizations stay loaded in hidden sandboxed windows
-so WebSockets and notifications remain live.
+and **OS → Organizations** both switch the focused window; ⌘⇧1…9 remains
+available from the keyboard. Other visible windows keep their own organizations
+and routes. Organizations without a visible window stay loaded in hidden
+sandboxed windows so WebSockets and notifications remain live.
 
 `OS1_URL` overrides the stored answer for one run. Distributions set the address
 the first-run screen offers with `opensession.defaultServer` in `package.json`
@@ -92,10 +93,12 @@ asked.
 
 ## Architecture
 
-- `src/main.js` — sandboxed `BrowserWindow`s for the active server plus hidden
-  sandboxed windows for inactive organizations (`contextIsolation`, no Node in
-  the renderer). Use **File → New Window** or ⌘N to keep different workspaces
-  open side by side. In-window navigation is limited to the active app origin;
+- `src/main.js` — sandboxed `BrowserWindow`s that each own an organization and
+  route, plus hidden sandboxed windows for organizations not already visible
+  (`contextIsolation`, no Node in the renderer). Use **File → New Window** or
+  ⌘N to keep different organizations or workspaces open side by side. Switching
+  organizations changes only the focused window. In-window navigation is
+  limited to that window's app origin;
   everything else opens in the default browser. Additional windows close
   normally; closing the last one hides it to the Dock so its route and drafts
   stay intact. Window state persists across launches.
@@ -142,7 +145,7 @@ persists in Electron's default session.
 
 ## Deep links
 
-- `os1://…` opens the app and maps to the active server
+- `os1://…` opens the app and maps to the focused window's server
   (e.g. `os1://session/abc` → `/session/abc`). Shared session, workspace and
   PR pages show a dismissible **View in the app** card with an **Open** button
   at the bottom of the sidebar in an eligible Mac browser. The click opens this

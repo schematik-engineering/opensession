@@ -167,8 +167,8 @@ function Content({
             : "z-[10000] bg-black/25 backdrop-blur-[1px] duration-[var(--dur)]",
           // `palette-backdrop` rides along purely as a runtime marker, and
           // nothing styles it any more: the window-level chords (archive,
-          // pin, team note, tab switching, open pull request) decline a
-          // keystroke while one is open, via `blockingOverlayOpen()` in
+          // pin, tab switching, open pull request) decline a keystroke while
+          // one is open, via `blockingOverlayOpen()` in
           // lib/blocking-overlay, and a palette must keep matching it.
           // That helper qualifies every marker with `:not([hidden])`, which
           // is load-bearing rather than tidy: a `keepMounted` palette (the

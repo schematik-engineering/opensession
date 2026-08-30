@@ -17,6 +17,7 @@ import {
   type ManagedGateway,
   promoteGatewayCurrent,
   readGatewayHandoffTransaction,
+  resolveInitialPeerGenerations,
   spawnGateway,
   writeGatewayHandoffTransaction,
   validateGatewayRelease,
@@ -77,6 +78,34 @@ describe("gateway supervisor", () => {
       attempts: 1,
     });
     expect(peers).toEqual({ kernel: "a".repeat(40), executor: "b".repeat(40) });
+  });
+
+  test("starts source installs without a separate executor generation", async () => {
+    const sourceRoot = mkdtempSync(join(tmpdir(), "opensession-source-"));
+    let discoveries = 0;
+    const peers = await resolveInitialPeerGenerations(sourceRoot, async () => {
+      discoveries++;
+      return { kernel: "a".repeat(40), executor: "b".repeat(40) };
+    });
+
+    expect(peers).toEqual({
+      kernel: "development",
+      executor: "development",
+    });
+    expect(discoveries).toBe(0);
+  });
+
+  test("discovers selected generations for immutable releases", async () => {
+    const releaseRoot = mkdtempSync(join(tmpdir(), "opensession-release-"));
+    writeFileSync(join(releaseRoot, ".opensession-release"), "c".repeat(40));
+    let discoveries = 0;
+    const peers = await resolveInitialPeerGenerations(releaseRoot, async () => {
+      discoveries++;
+      return { kernel: "a".repeat(40), executor: "b".repeat(40) };
+    });
+
+    expect(peers).toEqual({ kernel: "a".repeat(40), executor: "b".repeat(40) });
+    expect(discoveries).toBe(1);
   });
 
   test("fast-drains the child before a supervisor service restart", async () => {

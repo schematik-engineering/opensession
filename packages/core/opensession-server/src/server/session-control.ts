@@ -82,6 +82,12 @@ export interface CreateSessionOpts {
   requestScope?: string;
   /** Branch for a code-mode worktree session. Ignored for ask mode. */
   branch?: string;
+  /** Committed ref the new isolated branch starts from. Internal callers must
+   * validate access and existence before passing it. */
+  baseRef?: string;
+  /** Expected PR base when baseRef came from another session. Persisted as the
+   * existing stackedOn relationship so Review/stack support remains unchanged. */
+  stackedOnBranch?: string;
   /** Registered repo id to run in. Defaults to the instance default repo. */
   repo?: string;
   /** Explicitly run an Ask session without a repository checkout. */
@@ -121,6 +127,8 @@ export interface CreateSessionOpts {
   isolatedWorktree?: boolean;
   /** Parent/orchestrator session id when this is a worker sub-session. */
   parentSessionId?: string;
+  /** Persisted nesting depth for server-supervised child sessions. */
+  spawnDepth?: number;
   /** Started by a server-side agent action rather than a person typing in a composer. */
   agentStarted?: boolean;
   /**

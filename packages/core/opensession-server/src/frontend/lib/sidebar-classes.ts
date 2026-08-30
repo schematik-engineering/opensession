@@ -501,8 +501,11 @@ export const SIDEBAR_AUTOMATION_RUNS = "[--sidebar-icon-left:28px]";
  * it: a band heading (Tools / Workspaces / Automations / People) holds the top
  * slot, and the lane, repo and status headers under it pin one row lower.
  * Every pinning element also carries `data-sticky-head`, which is what
- * Sidebar's scroll listener queries — CSS has no interoperable `:stuck`, so
- * `is-stuck` is toggled from JS and only then does a header paint its backing.
+ * Sidebar's scroll listener queries. CSS has no interoperable `:stuck`, so JS
+ * toggles `data-stuck` and only then does a header paint its backing. This must
+ * be a dedicated attribute rather than an imperative class: React owns
+ * `className` and rewrites it on a sidebar rerender, even while the scroll
+ * position stays put.
  *
  * Everything here is gated on `min-[721px]`: on phones the whole sidebar is a
  * page that scrolls as one, and nothing pins.
@@ -542,7 +545,7 @@ export const SIDEBAR_STICKY_BAND_ROW =
  */
 export const SIDEBAR_STICKY_LANE =
   "desktop:sticky desktop:top-[var(--sidebar-band-slot)] desktop:z-[15] " +
-  "desktop:[&.is-stuck::after]:pointer-events-none desktop:[&.is-stuck::after]:absolute desktop:[&.is-stuck::after]:top-[calc(100%-8px)] desktop:[&.is-stuck::after]:left-[-400px] desktop:[&.is-stuck::after]:right-[-400px] desktop:[&.is-stuck::after]:z-[-1] desktop:[&.is-stuck::after]:h-5 desktop:[&.is-stuck::after]:content-[''] desktop:[&.is-stuck::after]:[background:linear-gradient(to_bottom,var(--sidebar-material),transparent),linear-gradient(to_bottom,var(--sidebar-bg),transparent)]";
+  "desktop:data-[stuck]:after:pointer-events-none desktop:data-[stuck]:after:absolute desktop:data-[stuck]:after:top-[calc(100%-8px)] desktop:data-[stuck]:after:left-[-400px] desktop:data-[stuck]:after:right-[-400px] desktop:data-[stuck]:after:z-[-1] desktop:data-[stuck]:after:h-5 desktop:data-[stuck]:after:content-[''] desktop:data-[stuck]:after:[background:linear-gradient(to_bottom,var(--sidebar-material),transparent),linear-gradient(to_bottom,var(--sidebar-bg),transparent)]";
 
 /**
  * A status lane nested inside a repo band sits one row lower again — its repo
@@ -626,7 +629,7 @@ export const SIDEBAR_BAND_CHEVRON_COLLAPSED = "visible";
  * listener re-rasterized the whole sidebar mid-scroll on loaded machines.
  */
 export const SIDEBAR_STUCK_BACKING =
-  "desktop:[&.is-stuck::before]:absolute desktop:[&.is-stuck::before]:top-0 desktop:[&.is-stuck::before]:bottom-[-1px] desktop:[&.is-stuck::before]:left-[-400px] desktop:[&.is-stuck::before]:right-[-400px] desktop:[&.is-stuck::before]:z-[-1] desktop:[&.is-stuck::before]:content-[''] desktop:[&.is-stuck::before]:[background:linear-gradient(var(--sidebar-material),var(--sidebar-material)),var(--sidebar-bg)]";
+  "desktop:data-[stuck]:before:absolute desktop:data-[stuck]:before:top-0 desktop:data-[stuck]:before:bottom-[-1px] desktop:data-[stuck]:before:left-[-400px] desktop:data-[stuck]:before:right-[-400px] desktop:data-[stuck]:before:z-[-1] desktop:data-[stuck]:before:content-[''] desktop:data-[stuck]:before:[background:linear-gradient(var(--sidebar-material),var(--sidebar-material)),var(--sidebar-bg)]";
 
 /**
  * The live-state dot a row, group header or hover card carries, minus the

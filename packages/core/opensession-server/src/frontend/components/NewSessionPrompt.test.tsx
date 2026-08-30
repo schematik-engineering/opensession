@@ -72,6 +72,16 @@ test("attachments share the prompt's scroller", () => {
   );
 });
 
+test("image annotation references use the same highlighted token as the composer", () => {
+  const { html } = field({
+    initialText: "[Image 1 · 12–48% × 20–60%] Increase the contrast",
+    images: ["data:image/png;base64,iVBORw0KGgo="],
+  });
+
+  expect(html).toContain("cmp-image-attachment");
+  expect(html).toContain("[Image 1 · 12–48% × 20–60%]");
+});
+
 // A pasted screenshot is uploaded before it is attached, and during a slow
 // load that takes seconds. Without something standing in for it the card
 // looks like it ignored the paste, and the second paste leaves you with two

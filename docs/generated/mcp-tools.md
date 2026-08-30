@@ -51,12 +51,12 @@ touches an in-process tool:
 | [`opensession-publish`](#opensession-publish) | 4 | interactive | Needs a session id. |
 | [`opensession-repos`](#opensession-repos) | 4 | interactive | Needs a session id. |
 | [`opensession-memory`](#opensession-memory) | 9 | interactive | Needs a session id. |
-| [`opensession-web`](#opensession-web) | 3 | interactive | Needs a session id. |
+| [`opensession-web`](#opensession-web) | 3 | interactive, goal wake | Needs a session id. |
 | [`opensession-portals`](#opensession-portals) | 6 | interactive | Needs a session id. |
 | [`opensession-walkthrough`](#opensession-walkthrough) | 2 | interactive | Needs a session id. |
 | [`opensession-slack`](#opensession-slack) | 1 | interactive | Needs a session id. |
 | [`opensession-ask`](#opensession-ask) | 1 | interactive, Slack loop | Needs a session id. |
-| [`opensession-workflows`](#opensession-workflows) | 5 | interactive, automation | Automation runs get it ONLY with the human-set `workflows` flag. |
+| [`opensession-workflows`](#opensession-workflows) | 8 | interactive, automation | Automation runs get it ONLY with the human-set `workflows` flag. |
 | [`opensession-assets`](#opensession-assets) | 4 | interactive | Needs a session id. Works in read-only Ask mode — assets land outside the checkout. |
 | [`opensession-todos`](#opensession-todos) | 5 | interactive | Needs a session id. |
 | [`opensession-papercuts`](#opensession-papercuts) | 2 | interactive, automation | Dropped when the session's repo opted out (Settings → Papercuts). |
@@ -68,7 +68,7 @@ touches an in-process tool:
 | [`opensession-github`](#opensession-github) | 4 | Slack loop | – |
 | [`opensession-goal-self`](#opensession-goal-self) | 6 | goal wake | Only on a session that carries a goalId. |
 
-27 servers, 113 tools.
+27 servers, 116 tools.
 
 ## opensession-sessions
 
@@ -580,8 +580,8 @@ Permanently delete one memory. Prefer archive_memory because deletion cannot be 
 Read a URL as text, search what was fetched, clone a GitHub repo. No web search.
 
 - **Source** `packages/core/opensession-server/src/server/web-mcp.ts`
-- **Wired in** `packages/core/opensession-server/src/server/interactive-mcp.ts`
-- **Runs** interactive
+- **Wired in** `packages/core/opensession-server/src/server/interactive-mcp.ts`, `packages/core/opensession-server/src/server/goal-runner.ts`
+- **Runs** interactive, goal wake
 - **Condition** Needs a session id.
 
 ### `fetch_url`
@@ -708,11 +708,17 @@ Deterministic agent fan-out from a model-authored script.
 - **Condition** Automation runs get it ONLY with the human-set `workflows` flag.
 - **Note** An automation's build passes its own mcpAllowlist + AUTOMATION_DENIED_TOOLS, so a script's mcp.* calls cannot widen the run's least-privilege surface. Same tools either way.
 
+### `workflow_capabilities`
+
+`mcp__opensession-workflows__workflow_capabilities` · input: none
+
+List the current workflow agent models, defaults, and runtime limits. Call this only when choosing models or sizing a workflow; load the workflow-authoring skill for the full API and examples.
+
 ### `run_workflow`
 
 `mcp__opensession-workflows__run_workflow` · input: `script` (string, required), `args_json` (string), `budget_tokens` (number), `repo` (string)
 
-Run a dynamic workflow: a JS script YOU author that fans out many lightweight read/analyze agents deterministically and combines their results — map-reduce over a codebase, N-way file audits, comparative research. Progress streams live to this session's Agents panel; poll workflow_status for the outcome. Script shape — plain JavaScript (NOT TypeScript), no imports; the API below is injected as globals. A meta export is required, then the async body follows (top-level await AND top-level return are allowed): export const meta = { name: "route-audit", // required, short slug description: "Audit every route for auth checks", // optional phases: [{ title: "List" }, { title: "Audit" }], // optional, pre-seeds the progress UI }; Injected globals: - agent(prompt, opts?) → Promise — run one focused agent (ask mode: reads files / runs read-only commands in this session's worktree; its final message is the return value). Resolves to the final text; with opts.schema (a JSON Schema) resolves to the parsed, validated object instead; resolves to null when the agent errored — filter with .filter(Boolean). opts: { label, phase, schema, model, effort, write }. - parallel([...thunks]) → Promise — run zero-arg thunks concurrently and wait for all; a thrown thunk becomes null, never rejects the batch. E.g. await parallel(files.map(f => () => agent("Audit " + f))) - pipeline(items, ...stages) → Promise — per-item stage chain with NO barrier between stages (item B can run stage 1 while item A is in stage 2). Each stage gets (prevResult, originalItem, index); a throwing stage drops that item to null and skips its remaining stages. - mcp.<server>.<tool>(args) → Promise — call an MCP tool DIRECTLY from the script (no model turn: one round trip). Resolves to the tool's structured result, or its text auto-parsed as JSON when it parses. REJECTS on failure (unlike agent(), which resolves null) — try/catch it, or let parallel() degrade the throw to null. Also: mcp.call(server, tool, args) (same thing, dynamic names), mcp.servers() → string[], mcp.tools(server) → [{name, description, inputSchema}]. - phase(title) — set the current progress group for subsequent agent calls. - log(message) — narrator line in the progress feed. - args — your args_json, parsed, verbatim. - budget — { total, spent(), remaining() } in output tokens. AGENT OR TOOL? An agent() is a model turn — use it when the work needs judgement (reading code, summarizing, ranking, deciding). An mcp.* call is a function call — use it whenever you just need DATA from a connected server. Don't spend an agent on "query Prometheus for X" or "fetch that Linear issue": call the tool, filter the rows in the script, and spend agents only on the parts that need thinking. Tool names and argument shapes are the same ones in your own tool list; mcp.servers() / mcp.tools(server) enumerate them at runtime. The surface is exactly what YOUR runs may use (per-user restrictions apply, confirm-gated servers like stripe are never reachable from a script). MODEL: pick whichever model fits each agent — pass opts.model with any of the currently available ids: grok/grok-4.6 (Grok 4.6 · SuperGrok), grok/grok-4.5 (Grok 4.5 · SuperGrok), cursor/auto (Auto · Cursor), cursor/grok-4.6 (Grok 4.6 · Cursor), cursor/composer-2.5 (Composer 2.5 · Cursor), cursor/claude-opus-5 (Opus 5 · Cursor), cursor/gpt-5.6-sol (GPT-5.6-sol · Cursor), cursor/claude-sonnet-5 (Sonnet 5 · Cursor), cursor/gemini-3.7-flash (Gemini 3.7-flash · Cursor). Agents default to pi/anthropic/claude-opus-5 when you don't set one. Choose per task — intelligence and taste first. EFFORT: pass opts.effort to set one agent's reasoning level. The values are low, medium, high, xhigh and max; each model offers its own ladder, and unset means that model's default. Spend it where judgement lives (a verifier, a ranker, a synthesis step); mechanical extraction and classification do not need it. A level the chosen model does not offer is ignored rather than an error. Rules: - Date.now(), argless new Date(), and Math.random() THROW inside scripts (they break resume replay determinism) — pass timestamps/seeds via args. - Agents start fresh with ZERO context from this session — make every prompt self-contained (paths, constraints, what to return). - Agents are read-only by default (ask mode). Pass opts.write to let one edit code (see below). - Limits: 8 agents run concurrently (extras queue), 200 agent() calls per run lifetime, 15min per agent, 60min per workflow. mcp.* is cheaper and its own lane: 16 concurrent, 2000 per run, 60s per call. - Both agent() and mcp.* calls are journaled, so resume_workflow REPLAYS them instead of re-firing — a resumed script won't create the same Linear issue twice. Example (no opts.model set → agents run on the default): export const meta = { name: "route-audit", phases: [{ title: "List" }, { title: "Audit" }, { title: "Rank" }] }; phase("List"); const files = await agent( "List every .ts file in packages/core/opensession-server/src/server/routes of this repo. Reply with ONLY the basenames.", { schema: { type: "array", items: { type: "string" } } }, ); if (!files) return "listing failed"; phase("Audit"); const findings = await pipeline( files, (f) => agent("Read packages/core/opensession-server/src/server/routes/" + f + " and report missing auth/validation checks. Reply 'none' if clean.", { label: f }), (prev, f) => (prev && prev !== "none" ? f + ": " + prev : null), ); log(findings.filter(Boolean).length + " files with findings"); phase("Rank"); const real = findings.filter(Boolean); if (!real.length) return "all clean"; return await agent( "Rank these route-audit findings by real-world severity and drop the false positives:\n" + real.join("\n"), { label: "rank findings" }, ); Example of mixing tools and agents (data by tool, judgement by agent): export const meta = { name: "alert-triage" }; const alerts = await mcp.grafana.list_alert_groups({ state: "new" }); const issues = await mcp.linear.list_issues({ team: "ENG", state: "started" }); // Reduce HERE — every row dropped in the script is a model turn not spent. const unclaimed = alerts.filter((a) => !issues.some((i) => i.title.includes(a.title))); log(unclaimed.length + " unclaimed of " + alerts.length); return await parallel( unclaimed.map((a) => () => agent("Assess this alert and say who should own it: " + JSON.stringify(a), { label: a.id })), );
+Run a model-authored plain-JavaScript workflow for deterministic agent fan-out, direct MCP calls, and durable child sessions. Use it for broad, repetitive work that benefits from parallelism. Progress streams to the Agents panel and workflow_status. The script must export meta with a short name, then may use top-level await and return. Minimal shape: export const meta = { name: "audit", phases: [{ title: "Inspect" }] }; phase("Inspect"); return await parallel([() => agent("Inspect path A", { label: "A" })]); Before authoring or revising a non-trivial workflow, load the workflow-authoring skill (or invoke /workflow-authoring) for the complete API, determinism rules, durable-session patterns, and examples. Call workflow_capabilities for the current model ids, defaults, and runtime limits. Agents start with no conversation context and are read-only unless explicitly given write access. Completed agent, MCP, and session calls are journaled for resume/recovery.
 
 ### `workflow_status`
 
@@ -730,13 +736,25 @@ List this session's workflow runs, newest first — one line each with run id, n
 
 `mcp__opensession-workflows__cancel_workflow` · input: `run_id` (string, required)
 
-Cancel a running workflow: aborts in-flight agents, terminates the script, marks the run cancelled.
+Cancel a running workflow: aborts in-flight agents, terminates the script, marks the run cancelled, and applies its configured active-child cancellation policy.
+
+### `pause_workflow`
+
+`mcp__opensession-workflows__pause_workflow` · input: `run_id` (string, required)
+
+Pause a running workflow. Active agents stop cleanly and restart in place when the workflow resumes; completed journal entries are preserved.
+
+### `control_workflow_agent`
+
+`mcp__opensession-workflows__control_workflow_agent` · input: `run_id` (string, required), `seq` (integer, required), `action` ("skip" | "retry", required)
+
+Skip or retry one pending/running workflow agent without cancelling its siblings. Retry is available only while the agent is running.
 
 ### `resume_workflow`
 
 `mcp__opensession-workflows__resume_workflow` · input: `run_id` (string, required), `script` (string), `args_json` (string), `repo` (string)
 
-Re-launch a done/error/interrupted/cancelled workflow run as a NEW run that replays completed agent() calls from the old run's journal (identical prompt+opts resolve instantly as cached) and only re-executes what changed or never finished. Optionally pass a fixed script — unchanged calls still replay from the journal.
+Resume a paused workflow in place, or re-launch a done/error/interrupted/cancelled workflow as a NEW run that replays completed agent(), mcp.* and session API calls from the old run's journal. Existing child sessions are re-adopted, never duplicated. Optionally pass a fixed script.
 
 ## opensession-assets
 

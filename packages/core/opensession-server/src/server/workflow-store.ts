@@ -3,9 +3,9 @@
  *
  * Disk layout: ~/.opensession-workflows/<runId>/ with
  *   run.json      — WorkflowRunSnapshot (the UI payload)
- *   journal.jsonl — one record per completed agent() call (WorkflowJournalEntry)
- *                   or mcp.* call (WorkflowMcpJournalEntry, kind:"mcp") — the
- *                   resume-replay unit and the UI drill-in detail
+ *   journal.jsonl — one record per completed agent(), mcp.* or durable-session
+ *                   API call. This is the resume-replay unit and the UI's
+ *                   agent drill-in detail.
  *   script.mjs    — the workflow script source, verbatim
  * Tests point OPENSESSION_WORKFLOWS_DIR at a tmp dir.
  *
@@ -33,12 +33,36 @@ import {
 import {
   WORKFLOW_LIMITS,
   type WorkflowJournalRecord,
+  type WorkflowRecoverySnapshot,
   type WorkflowRunSnapshot,
 } from "./workflow-types";
+import {
+  workflowPhaseStats,
+  workflowWarnings,
+} from "../shared/workflow-observability";
 
 const g = globalThis as any;
 
-type LiveWorkflow = { snapshot: WorkflowRunSnapshot; cancel: () => void };
+export type WorkflowAgentControlAction = "skip" | "retry";
+
+export interface WorkflowLiveControls {
+  cancel: () => void;
+  pause: (reason?: string) => boolean;
+  resume: () => boolean;
+  controlAgent: (seq: number, action: WorkflowAgentControlAction) => boolean;
+}
+
+type LiveWorkflow = {
+  snapshot: WorkflowRunSnapshot;
+  controls: WorkflowLiveControls;
+};
+
+const NOOP_CONTROLS: WorkflowLiveControls = {
+  cancel: () => {},
+  pause: () => false,
+  resume: () => false,
+  controlAgent: () => false,
+};
 
 function workflowRunningKey(runId: string): string {
   return `workflow:${runId}`;
@@ -114,7 +138,22 @@ function truncate(text: string, max: number): string {
  *  snapshot is persisted AND re-broadcast to every session watcher on each
  *  mutation, so every string a script can influence (labels, log lines,
  *  errors, phase titles) gets capped here, not just the previews. */
+function refreshDerivedProgress(snapshot: WorkflowRunSnapshot): void {
+  snapshot.phaseStats = workflowPhaseStats(snapshot);
+  snapshot.warnings = workflowWarnings(snapshot);
+}
+
 function enforceSnapshotLimits(snapshot: WorkflowRunSnapshot): void {
+  for (const session of snapshot.sessions || []) {
+    session.label = truncate(session.label || "", 200);
+    session.repo = truncate(session.repo || "", 200);
+    session.branch = truncate(session.branch || "", 500);
+    session.worktreeDir = session.worktreeDir
+      ? truncate(session.worktreeDir, 1_000)
+      : undefined;
+    session.prUrl = session.prUrl ? truncate(session.prUrl, 1_000) : undefined;
+    session.error = session.error ? truncate(session.error, 1_000) : undefined;
+  }
   for (const agent of snapshot.agents) {
     agent.label = truncate(agent.label || "", 200);
     agent.promptPreview = truncate(
@@ -141,6 +180,7 @@ function enforceSnapshotLimits(snapshot: WorkflowRunSnapshot): void {
 
 export function createWorkflowRun(init: {
   runId: string;
+  replayRootRunId?: string;
   sessionId: string;
   name: string;
   description?: string;
@@ -148,23 +188,28 @@ export function createWorkflowRun(init: {
   user?: string;
   cwd: string;
   script: string;
+  recovery?: WorkflowRecoverySnapshot;
 }): WorkflowRunSnapshot {
   const snapshot: WorkflowRunSnapshot = {
     runId: init.runId,
+    ...(init.replayRootRunId ? { replayRootRunId: init.replayRootRunId } : {}),
     sessionId: init.sessionId,
     name: init.name,
     ...(init.description !== undefined
       ? { description: init.description }
       : {}),
     status: "running",
+    ...(init.recovery ? { recovery: init.recovery } : {}),
     phases: [...init.phases],
     agents: [],
+    sessions: [],
     logs: [],
     startedAt: new Date().toISOString(),
     totals: { agents: 0, tokensIn: 0, tokensOut: 0 },
     ...(init.user !== undefined ? { user: init.user } : {}),
     cwd: init.cwd,
   };
+  refreshDerivedProgress(snapshot);
   persistSnapshot(snapshot);
   writeFileAtomic(`${runDir(init.runId)}/script.mjs`, init.script);
   direntCache = null;
@@ -173,7 +218,7 @@ export function createWorkflowRun(init: {
   const existing = liveWorkflows.get(init.runId);
   liveWorkflows.set(init.runId, {
     snapshot,
-    cancel: existing?.cancel ?? (() => {}),
+    controls: existing?.controls ?? NOOP_CONTROLS,
   });
   holdSessionRunning(init.sessionId, workflowRunningKey(init.runId));
   broadcastSnapshot(snapshot);
@@ -190,6 +235,7 @@ export function updateWorkflowRun(
   const snapshot = liveWorkflows.get(runId)?.snapshot ?? readRunJson(runId);
   if (!snapshot) return undefined;
   mutate(snapshot);
+  refreshDerivedProgress(snapshot);
   enforceSnapshotLimits(snapshot);
   persistSnapshot(snapshot);
   broadcastSnapshot(snapshot);
@@ -248,14 +294,21 @@ export function readWorkflowJournal(runId: string): WorkflowJournalRecord[] {
   return entries;
 }
 
-export function registerLiveWorkflow(runId: string, cancel: () => void): void {
+export function registerLiveWorkflow(
+  runId: string,
+  controls: WorkflowLiveControls | (() => void),
+): void {
+  const resolved =
+    typeof controls === "function"
+      ? { ...NOOP_CONTROLS, cancel: controls }
+      : controls;
   const existing = liveWorkflows.get(runId);
   if (existing) {
-    existing.cancel = cancel;
+    existing.controls = resolved;
     return;
   }
   const snapshot = readRunJson(runId);
-  if (snapshot) liveWorkflows.set(runId, { snapshot, cancel });
+  if (snapshot) liveWorkflows.set(runId, { snapshot, controls: resolved });
 }
 
 export function unregisterLiveWorkflow(runId: string): void {
@@ -272,11 +325,49 @@ export function cancelLiveWorkflow(runId: string): boolean {
   const live = liveWorkflows.get(runId);
   if (!live) return false;
   try {
-    live.cancel();
+    live.controls.cancel();
   } catch (e) {
     console.warn(`[workflow] cancel hook for ${runId} threw:`, e);
   }
   return true;
+}
+
+export function pauseLiveWorkflow(runId: string, reason?: string): boolean {
+  return liveWorkflows.get(runId)?.controls.pause(reason) ?? false;
+}
+
+export function resumeLiveWorkflow(runId: string): boolean {
+  return liveWorkflows.get(runId)?.controls.resume() ?? false;
+}
+
+export function controlLiveWorkflowAgent(
+  runId: string,
+  seq: number,
+  action: WorkflowAgentControlAction,
+): boolean {
+  return liveWorkflows.get(runId)?.controls.controlAgent(seq, action) ?? false;
+}
+
+/** Pause every coordinator before a graceful process restart. Active detached
+ * agents receive their normal cancellation signal, and the next process
+ * replays completed journal entries while restarting unfinished calls. */
+export function pauseWorkflowsForShutdown(): number {
+  let paused = 0;
+  for (const live of liveWorkflows.values()) {
+    if (live.controls.pause("server restart")) paused++;
+  }
+  return paused;
+}
+
+export function recoverableWorkflowRunIds(): string[] {
+  return runIdsOnDisk().filter((runId) => {
+    const snapshot = readRunJson(runId);
+    return (
+      snapshot?.status === "interrupted" &&
+      snapshot.recovery?.autoResume === true &&
+      !snapshot.recoveredAsRunId
+    );
+  });
 }
 
 /** Boot pass: a run.json still "running" with no live entry died with the
@@ -288,7 +379,11 @@ export function markInterruptedWorkflows(): void {
   for (const runId of runIdsOnDisk()) {
     if (liveWorkflows.has(runId)) continue;
     const snapshot = readRunJson(runId);
-    if (!snapshot || snapshot.status !== "running") continue;
+    if (
+      !snapshot ||
+      (snapshot.status !== "running" && snapshot.status !== "paused")
+    )
+      continue;
     snapshot.status = "interrupted";
     snapshot.endedAt = new Date().toISOString();
     for (const agent of snapshot.agents) {

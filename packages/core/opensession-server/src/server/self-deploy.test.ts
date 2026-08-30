@@ -15,12 +15,16 @@ import {
   deployStateDir,
   formatDeployStatus,
   isFrontendOnlyRelease,
+  macDeployLaunchArgs,
   markerAgeMs,
   requiresRootDeploy,
   parseDeployResult,
   readDeployState,
+  selfDeployHealthUrl,
   WATCHDOG_WINDOW_MS,
 } from "./self-deploy";
+import { parseMacSelfDeployArgs } from "../../../../../scripts/self-deploy-macos";
+import { acquireMacDeployLock } from "./macos-deploy-lock";
 
 const savedState = process.env.OPENSESSION_DEPLOY_STATE;
 const savedCheckout = process.env.OPENSESSION_DEPLOY_CHECKOUT;
@@ -201,7 +205,7 @@ describe("requiresRootDeploy", () => {
       "packages/core/opensession-server/src/server/gateway-tcp-proxy.ts",
       "packages/core/opensession-server/src/server/stable-frontend.ts",
     ]) {
-      expect(requiresRootDeploy([path])).toBe(true);
+      expect(requiresRootDeploy([path], "linux")).toBe(true);
     }
   });
 
@@ -212,6 +216,19 @@ describe("requiresRootDeploy", () => {
         "packages/core/opensession-server/src/frontend/App.tsx",
         "docs/self-development.md",
       ]),
+    ).toBe(false);
+  });
+
+  test("does not require Linux root artifacts on macOS", () => {
+    expect(
+      requiresRootDeploy(
+        [
+          "opensession.service",
+          "deploy/systemd/opensession-watchdog.service",
+          "packages/core/opensession-server/src/server/gateway-tcp-proxy.ts",
+        ],
+        "darwin",
+      ),
     ).toBe(false);
   });
 });
@@ -247,6 +264,99 @@ describe("isFrontendOnlyRelease", () => {
         ]),
       ).toBe(false);
     }
+  });
+});
+
+describe("macOS self-deploy launcher", () => {
+  test("targets the configured server address for health checks", () => {
+    expect(selfDeployHealthUrl({ HOST: "100.81.254.102", PORT: "4850" })).toBe(
+      "http://100.81.254.102:4850/ready",
+    );
+    expect(selfDeployHealthUrl({ HOST: "::1" })).toBe(
+      "http://[::1]:3850/ready",
+    );
+    expect(
+      selfDeployHealthUrl({
+        OPENSESSION_HEALTH_URL: "http://localhost:9999/health",
+      }),
+    ).toBe("http://localhost:9999/health");
+  });
+
+  test("serializes launchd deploys and frontend promotions without flock", async () => {
+    const release = await acquireMacDeployLock(dir, 20, 1);
+    await expect(acquireMacDeployLock(dir, 5, 1)).rejects.toThrow(
+      "timed out waiting for the active macOS deploy",
+    );
+    release();
+    const nextRelease = await acquireMacDeployLock(dir, 20, 1);
+    nextRelease();
+  });
+
+  test("submits a detached launchd job without sudo or shell interpolation", () => {
+    const args = macDeployLaunchArgs({
+      unit: "opensession-self-deploy-1700000000000",
+      targetSha: "a".repeat(40),
+      checkout: "/Users/test/Open Session",
+      stateDir: "/Users/test/.opensession/deploy",
+      bun: "/Users/test/.bun/bin/bun",
+      home: "/Users/test",
+      healthUrl: "http://127.0.0.1:3850/ready",
+      controller: "/Users/test/Open Session/scripts/self-deploy-macos.ts",
+    });
+    expect(args.slice(0, 4)).toEqual([
+      "launchctl",
+      "submit",
+      "-l",
+      "opensession-self-deploy-1700000000000",
+    ]);
+    expect(args).toContain("/Users/test/Open Session");
+    expect(
+      args.slice(args.indexOf("--unit"), args.indexOf("--unit") + 2),
+    ).toEqual(["--unit", "opensession-self-deploy-1700000000000"]);
+    expect(args).not.toContain("sudo");
+    expect(args).not.toContain("/bin/sh");
+    expect(args.at(-1)).toBe("http://127.0.0.1:3850/ready");
+  });
+
+  test("requires an exact SHA and absolute trusted paths", () => {
+    const valid = [
+      "--unit",
+      "opensession-self-deploy-1700000000000",
+      "--sha",
+      "b".repeat(40),
+      "--checkout",
+      "/repo",
+      "--state",
+      "/state",
+      "--bun",
+      "/bin/bun",
+      "--home",
+      "/Users/test",
+      "--health-url",
+      "http://127.0.0.1:3850/ready",
+    ];
+    expect(parseMacSelfDeployArgs(valid).target).toBe("b".repeat(40));
+    expect(() =>
+      parseMacSelfDeployArgs(
+        valid.map((value) => (value === "/repo" ? "relative/repo" : value)),
+      ),
+    ).toThrow("--checkout must be absolute");
+    expect(() =>
+      parseMacSelfDeployArgs(
+        valid.map((value) =>
+          value === "b".repeat(40) ? "origin/main" : value,
+        ),
+      ),
+    ).toThrow("--sha must be an exact commit");
+    expect(() =>
+      parseMacSelfDeployArgs(
+        valid.map((value) =>
+          value === "opensession-self-deploy-1700000000000"
+            ? "other-job"
+            : value,
+        ),
+      ),
+    ).toThrow("--unit is not a self-deploy launchd label");
   });
 });
 
@@ -320,6 +430,8 @@ describe("deploy/self-deploy.sh", () => {
     expect(source).toContain("No separate human approval is required");
     expect(source).toContain("nextDeployUnitName()");
     expect(source).toContain("Migration path for instances upgrading");
+    expect(source).toContain('platform() === "darwin"');
+    expect(source).toContain("macDeployLaunchArgs");
     expect(source).toContain(
       "Environment=OPENSESSION_BUN_BIN=${process.execPath}",
     );

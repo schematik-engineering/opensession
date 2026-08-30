@@ -30,6 +30,7 @@ import type { NativeSessionFile } from "./types";
 import { shouldPersistModelSwitch } from "./run-events";
 import { shellQuoteWord } from "./sandbox/adapters/bootstrap";
 import { newSessionId } from "./paths";
+import { createWebMcpServer } from "./web-mcp";
 
 const g = globalThis as any;
 
@@ -59,6 +60,10 @@ function goalMcpServers(
       isAdmin: true,
     }),
     "opensession-goal-self": createGoalSelfMcpServer(goalId),
+    // Goals often measure public URLs over time. Give them the same bounded,
+    // SSRF-safe reader as interactive sessions instead of opening curl in the
+    // ask-mode shell allowlist.
+    "opensession-web": createWebMcpServer({ sessionId: osSessionId }),
   };
 }
 

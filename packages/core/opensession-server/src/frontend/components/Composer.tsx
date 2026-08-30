@@ -314,8 +314,7 @@ interface Props {
   /**
    * Note mode (Plain-style internal notes): the send posts a team note the
    * agent never sees. When `onNoteModeChange` is wired, a Note row appears in
-   * the "+" menu and ⌘/Ctrl+N toggles it while the field is focused; the
-   * composer tints yellow so the mode is unmistakable.
+   * the "+" menu; the composer tints yellow so the mode is unmistakable.
    */
   noteMode?: boolean;
   onNoteModeChange?: (on: boolean) => void;
@@ -557,7 +556,6 @@ export function Composer({
   const localUploads = useAttachmentUploads();
   const activeStaging = staging ?? localUploads.staging;
   const isPhone = useIsPhone();
-  const noteChord = useShortcutLabel("composer-note");
   const attachChord = useShortcutLabel("composer-attach");
   const stopKeys = useShortcutKeys("run-stop");
   const effortUpLabel = useShortcutLabel("effort-up");
@@ -1681,7 +1679,7 @@ export function Composer({
                 key="note-mode"
                 icon={<IconNote size={15} />}
                 label="Team note"
-                title="The agent won't read this. ⌘N to go back."
+                title="The agent won't read this."
                 tone="note"
                 onRemove={() => onNoteModeChange?.(false)}
                 removeLabel="Leave note mode"
@@ -2043,8 +2041,8 @@ export function Composer({
                       }}
                       title={
                         noteMode
-                          ? "Prompt the agent again (⌘N)"
-                          : "Only your team sees it (⌘N)"
+                          ? "Prompt the agent again"
+                          : "Only your team sees it"
                       }
                     >
                       <span className={composerMenuIcon}>
@@ -2053,9 +2051,6 @@ export function Composer({
                       <span className="grow whitespace-nowrap">
                         {noteMode ? "Back to prompting" : "Write a team note"}
                       </span>
-                      {!isPhone && (
-                        <MenuShortcut>{isApple ? "⌘N" : "Ctrl N"}</MenuShortcut>
-                      )}
                     </ComposerPressButton>
                   )}
                   {menuExtra?.({ close: () => setMenu(null) })}

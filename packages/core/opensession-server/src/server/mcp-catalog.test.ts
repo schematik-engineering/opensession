@@ -62,6 +62,19 @@ function wiredAutomation(): string[] {
   );
 }
 
+function wiredGoal(): string[] {
+  const source = readFileSync(
+    resolve(import.meta.dir, "goal-runner.ts"),
+    "utf-8",
+  );
+  const start = source.indexOf("function goalMcpServers(");
+  const end = source.indexOf("\n}\n\nfunction buildGoalWakePrompt", start);
+  if (start < 0 || end < 0) throw new Error("goal wiring markers missing");
+  return [
+    ...source.slice(start, end).matchAll(/"(opensession-[a-z-]+)"\s*:/g),
+  ].map((match) => match[1]!);
+}
+
 describe("MCP server catalog", () => {
   test("server names are unique", () => {
     const names = MCP_SERVER_CATALOG.map((e) => e.name);
@@ -93,6 +106,14 @@ describe("MCP server catalog", () => {
     const wired = wiredAutomation();
     expect([...new Set(wired)].sort()).toEqual(
       catalogFor("automation")
+        .map((entry) => entry.name)
+        .sort(),
+    );
+  });
+
+  test("complete goal wiring matches the catalog", () => {
+    expect(wiredGoal().sort()).toEqual(
+      catalogFor("goal")
         .map((entry) => entry.name)
         .sort(),
     );

@@ -18,13 +18,14 @@
  */
 
 import { existsSync, mkdirSync, readFileSync } from "fs";
-import { userInfo } from "os";
+import { platform, userInfo } from "os";
 import { resolve as resolvePath } from "path";
 import { z } from "zod";
 import { createSdkMcpServer, tool } from "./inprocess-mcp";
 import { RUN_HOST_HELPER } from "../executor/host-unit";
 import { homeDir, stateDir } from "./paths";
 import { isDevInstance } from "./dev-mode";
+import { acquireMacDeployLock } from "./macos-deploy-lock";
 import {
   activateFrontendRelease,
   type FrontendReleasePointer,
@@ -252,7 +253,11 @@ const ROOT_DEPLOY_PATHS = new Set([
 /** Files the unprivileged self-deploy path cannot install. Letting one of these
  * fall through to an ordinary source restart reports a healthy deployment while
  * the root-owned live artifact remains on the previous release. */
-export function requiresRootDeploy(paths: string[]): boolean {
+export function requiresRootDeploy(
+  paths: string[],
+  hostPlatform: NodeJS.Platform = process.platform,
+): boolean {
+  if (hostPlatform === "darwin") return false;
   return paths.some(
     (path) => ROOT_DEPLOY_PATHS.has(path) || path.startsWith("deploy/systemd/"),
   );
@@ -298,6 +303,10 @@ async function run(
 
 async function acquireDeployLock(state: string): Promise<() => Promise<void>> {
   mkdirSync(state, { recursive: true });
+  if (platform() === "darwin") {
+    const release = await acquireMacDeployLock(state);
+    return async () => release();
+  }
   const proc = Bun.spawn(
     [
       "flock",
@@ -406,77 +415,149 @@ async function promoteFrontendRelease(
   }
 }
 
-/**
- * Launch deploy/self-deploy.sh as a transient SYSTEM unit via the root-owned
- * fixed helper. A system unit (not
- * a --user scope) because the sequence must outlive opensession.service's
- * restart AND not depend on the user manager surviving it.
- */
+export function selfDeployHealthUrl(
+  env: Record<string, string | undefined> = process.env,
+): string {
+  if (env.OPENSESSION_HEALTH_URL) return env.OPENSESSION_HEALTH_URL;
+  let host = env.HOST || "127.0.0.1";
+  if (host === "0.0.0.0" || host === "::") host = "127.0.0.1";
+  if (host.includes(":")) host = `[${host}]`;
+  return `http://${host}:${env.PORT || "3850"}/ready`;
+}
+
+export interface MacDeployLaunchOptions {
+  unit: string;
+  targetSha: string;
+  checkout: string;
+  stateDir: string;
+  bun: string;
+  home: string;
+  healthUrl: string;
+  controller?: string;
+}
+
+/** A transient launchd job survives replacement of the two Open Session
+ * LaunchAgents while remaining entirely inside the logged-in user's domain. */
+export function macDeployLaunchArgs(options: MacDeployLaunchOptions): string[] {
+  const controller =
+    options.controller || `${REPO_ROOT}/scripts/self-deploy-macos.ts`;
+  const log = `${options.stateDir}/self-deploy.log`;
+  return [
+    "launchctl",
+    "submit",
+    "-l",
+    options.unit,
+    "-o",
+    log,
+    "-e",
+    log,
+    "--",
+    options.bun,
+    controller,
+    "--unit",
+    options.unit,
+    "--sha",
+    options.targetSha,
+    "--checkout",
+    options.checkout,
+    "--state",
+    options.stateDir,
+    "--bun",
+    options.bun,
+    "--home",
+    options.home,
+    "--health-url",
+    options.healthUrl,
+  ];
+}
+
+/** Launch the platform controller outside the gateway service so it survives
+ * the restart it triggers. Linux uses a system unit; macOS uses a transient
+ * user launchd job and never asks for sudo. */
 async function launchDeployUnit(
   unit: string,
   targetSha: string,
 ): Promise<void> {
   const checkout = deployCheckout();
   const stateDir = deployStateDir();
-  const controller = `${REPO_ROOT}/deploy/self-deploy.sh`;
   mkdirSync(stateDir, { recursive: true });
-  if (!existsSync(RUN_HOST_HELPER) && userInfo().uid === 0) {
-    throw new Error("legacy self-deploy refuses to launch from a root service");
+  let args: string[];
+  if (platform() === "darwin") {
+    const controller = `${REPO_ROOT}/scripts/self-deploy-macos.ts`;
+    if (!existsSync(controller))
+      throw new Error(`macOS deploy controller not found at ${controller}`);
+    args = macDeployLaunchArgs({
+      unit,
+      targetSha,
+      checkout,
+      stateDir,
+      bun: process.execPath,
+      home: homeDir(),
+      healthUrl: selfDeployHealthUrl(),
+      controller,
+    });
+  } else {
+    const controller = `${REPO_ROOT}/deploy/self-deploy.sh`;
+    if (!existsSync(RUN_HOST_HELPER) && userInfo().uid === 0) {
+      throw new Error(
+        "legacy self-deploy refuses to launch from a root service",
+      );
+    }
+    args = existsSync(RUN_HOST_HELPER)
+      ? ["sudo", "-n", RUN_HOST_HELPER, "self-deploy", unit, targetSha]
+      : [
+          // Migration path for instances upgrading through the old in-product
+          // deploy flow. Those boxes already grant this exact capability; a
+          // subsequent `opensession service install` replaces it with the helper.
+          "sudo",
+          "-n",
+          "systemd-run",
+          "--collect",
+          "--quiet",
+          `--unit=${unit}`,
+          `--description=Open Session self-deploy to ${targetSha.slice(0, 10)}`,
+          `--uid=${userInfo().username}`,
+          `--gid=${userInfo().username}`,
+          "-p",
+          `WorkingDirectory=${checkout}`,
+          "-p",
+          `Environment=HOME=${homeDir()}`,
+          "-p",
+          `Environment=PATH=${process.env.PATH || "/usr/local/bin:/usr/bin:/bin"}`,
+          "-p",
+          `Environment=OPENSESSION_BUN_BIN=${process.execPath}`,
+          "-p",
+          `Environment=OPENSESSION_DEPLOY_CHECKOUT=${checkout}`,
+          "-p",
+          `Environment=OPENSESSION_DEPLOY_STATE=${stateDir}`,
+          ...(process.env.OPENSESSION_STATE_DIR
+            ? [
+                "-p",
+                `Environment=OPENSESSION_STATE_DIR=${process.env.OPENSESSION_STATE_DIR}`,
+              ]
+            : []),
+          ...(process.env.OPENSESSION_SESSIONS_DIR
+            ? [
+                "-p",
+                `Environment=OPENSESSION_SESSIONS_DIR=${process.env.OPENSESSION_SESSIONS_DIR}`,
+              ]
+            : []),
+          ...(process.env.OPENSESSION_HEALTH_URL
+            ? [
+                "-p",
+                `Environment=OPENSESSION_HEALTH_URL=${process.env.OPENSESSION_HEALTH_URL}`,
+              ]
+            : []),
+          "-p",
+          "StandardOutput=journal",
+          "-p",
+          "StandardError=journal",
+          "/bin/bash",
+          controller,
+          "--sha",
+          targetSha,
+        ];
   }
-  const args = existsSync(RUN_HOST_HELPER)
-    ? ["sudo", "-n", RUN_HOST_HELPER, "self-deploy", unit, targetSha]
-    : [
-        // Migration path for instances upgrading through the old in-product
-        // deploy flow. Those boxes already grant this exact capability; a
-        // subsequent `opensession service install` replaces it with the helper.
-        "sudo",
-        "-n",
-        "systemd-run",
-        "--collect",
-        "--quiet",
-        `--unit=${unit}`,
-        `--description=Open Session self-deploy to ${targetSha.slice(0, 10)}`,
-        `--uid=${userInfo().username}`,
-        `--gid=${userInfo().username}`,
-        "-p",
-        `WorkingDirectory=${checkout}`,
-        "-p",
-        `Environment=HOME=${homeDir()}`,
-        "-p",
-        `Environment=PATH=${process.env.PATH || "/usr/local/bin:/usr/bin:/bin"}`,
-        "-p",
-        `Environment=OPENSESSION_BUN_BIN=${process.execPath}`,
-        "-p",
-        `Environment=OPENSESSION_DEPLOY_CHECKOUT=${checkout}`,
-        "-p",
-        `Environment=OPENSESSION_DEPLOY_STATE=${stateDir}`,
-        ...(process.env.OPENSESSION_STATE_DIR
-          ? [
-              "-p",
-              `Environment=OPENSESSION_STATE_DIR=${process.env.OPENSESSION_STATE_DIR}`,
-            ]
-          : []),
-        ...(process.env.OPENSESSION_SESSIONS_DIR
-          ? [
-              "-p",
-              `Environment=OPENSESSION_SESSIONS_DIR=${process.env.OPENSESSION_SESSIONS_DIR}`,
-            ]
-          : []),
-        ...(process.env.OPENSESSION_HEALTH_URL
-          ? [
-              "-p",
-              `Environment=OPENSESSION_HEALTH_URL=${process.env.OPENSESSION_HEALTH_URL}`,
-            ]
-          : []),
-        "-p",
-        "StandardOutput=journal",
-        "-p",
-        "StandardError=journal",
-        "/bin/bash",
-        controller,
-        "--sha",
-        targetSha,
-      ];
   const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
   const [err, code] = await Promise.all([
     new Response(proc.stderr).text(),
@@ -629,10 +710,14 @@ export function createSelfDeployMcpServer(ctx: SelfDeployToolContext) {
           }
           const unit = nextDeployUnitName();
           await launchDeployUnit(unit, targetSha);
+          const lifecycle =
+            platform() === "darwin"
+              ? "The detached launchd job will reload the macOS LaunchAgents, health-gate the release, and switch back automatically if the prior release remains schema-compatible."
+              : "This instance will promote through either the single-active gateway handoff or the coordinated restart selected by the release classifier. An unhealthy release switches back automatically, and the watchdog covers wedges for 15 min.";
           return text(
             `Deploy launched${ctx.user ? ` by ${ctx.user}` : ""}: unit ${unit} → immutable release ${targetSha.slice(0, 10)}.\n` +
               `Result will land in ${stateDir}/last-result.json (log: ${stateDir}/self-deploy.log).\n` +
-              `This instance will promote through either the single-active gateway handoff or the coordinated restart selected by the release classifier. Your session survives via the detached engine + reattach. Check deploy_status shortly; an unhealthy release switches back automatically, and the watchdog covers wedges for 15 min.`,
+              `${lifecycle} Your session survives via the detached engine + reattach. Check deploy_status shortly.`,
           );
         } catch (e: any) {
           return text(

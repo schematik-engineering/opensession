@@ -207,6 +207,13 @@ service user account and allow its sudo prompts. The default command without
 `--system` installs a rootless user service and does not install the fixed
 run-host helper or self-deploy grants.
 
+On macOS, run `opensession service install` without `sudo` or `--system`.
+Standard self-deploys run as transient jobs in the current user's launchd
+domain, prepare immutable releases, reload the gateway and SessionKernel
+LaunchAgents, health-gate the result, and restore the prior compatible release
+on failure. The first standard deploy bootstraps the immutable release pin; it
+cannot roll back automatically until that first release is healthy.
+
 Staying current is one command: **`opensession update`**. It refuses a dirty
 checkout, detects fork topology (origin = your fork + an upstream remote),
 fetches upstream, and either fast-forwards or creates an honest merge commit.
