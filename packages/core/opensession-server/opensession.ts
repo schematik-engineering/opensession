@@ -49,6 +49,8 @@ import {
   spaEntry,
 } from "./src/server/frontend-build";
 import { configuredIntegration } from "./src/server/config";
+import { readMcpConfig } from "./src/server/connections";
+import { warmAwsMcpIamAuth } from "./src/server/aws-mcp-auth";
 import { initHumanAsks } from "./src/server/human-asks";
 import { interactiveMcpServers } from "./src/server/interactive-mcp";
 import {
@@ -667,6 +669,11 @@ async function loadAgents(): Promise<AgentModule[]> {
 // any of it — the already-running agents/timers keep going untouched (only a
 // real restart reloads their code, and that restart is now graceful, below).
 if (!g.__opensessionBooted) {
+  // AWS's hosted MCP uses an IAM client-credentials exchange instead of a
+  // browser approval. Warm its one-hour bearer before runs can need it; the
+  // exchange fails soft so a missing role never takes down unrelated tools.
+  await warmAwsMcpIamAuth(readMcpConfig().mcpServers);
+
   // Pi runs Claude Max through the installed `claude` CLI (the Anthropic
   // bridge hands the Agent SDK pathToClaudeCodeExecutable); nothing bundled
   // stands in for it. Warn at boot, loudly, if it is not a usable executable,

@@ -454,6 +454,7 @@ async function main(): Promise<void> {
     "deploy/install-session-kernel-credential.sh",
     "deploy/install-run-host-helper.sh",
     "deploy/opensession-run-host",
+    "deploy/opensession-aws-mcp-token",
     "deploy/systemd/opensession-control.slice",
     "deploy/systemd/opensession-workloads.slice",
   ]) {

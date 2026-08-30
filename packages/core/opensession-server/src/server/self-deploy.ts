@@ -239,6 +239,7 @@ const ROOT_DEPLOY_PATHS = new Set([
   "deploy/install-run-host-helper.sh",
   "deploy/install-resource-control.sh",
   "deploy/opensession-run-host",
+  "deploy/opensession-aws-mcp-token",
   "opensession.service",
   "opensession.socket",
   "opensession-ingress.service",

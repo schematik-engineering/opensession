@@ -27,6 +27,7 @@ runner_mode="${12}"
 runner_bin="${13}"
 script_dir="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 helper="/usr/local/libexec/opensession-run-host"
+aws_mcp_helper="/usr/local/libexec/opensession-aws-mcp-token"
 config="/etc/opensession/run-host.conf"
 sudoers="/etc/sudoers.d/opensession-run-host"
 
@@ -71,6 +72,11 @@ install -d -o root -g root -m 0755 "$(dirname "$helper")"
 [ ! -L "$helper" ] || { echo "helper path cannot be a symlink" >&2; exit 2; }
 safe_regular_destination "$helper" || { echo "unsafe helper destination" >&2; exit 2; }
 install -o root -g root -m 0755 "$script_dir/opensession-run-host" "$helper"
+if [ -x /usr/local/bin/aws ]; then
+  [ ! -L "$aws_mcp_helper" ] || { echo "AWS MCP helper path cannot be a symlink" >&2; exit 2; }
+  safe_regular_destination "$aws_mcp_helper" || { echo "unsafe AWS MCP helper destination" >&2; exit 2; }
+  install -o root -g root -m 0755 "$script_dir/opensession-aws-mcp-token" "$aws_mcp_helper"
+fi
 [ ! -L "$(dirname "$config")" ] || { echo "config directory cannot be a symlink" >&2; exit 2; }
 install -d -o root -g root -m 0700 "$(dirname "$config")"
 [ ! -L "$config" ] || { echo "config path cannot be a symlink" >&2; exit 2; }
@@ -90,6 +96,9 @@ printf '%s\n' \
 install -o root -g root -m 0600 "$tmp_config" "$config"
 
 printf '%s ALL=(root) NOPASSWD: %s\n' "$service_user" "$helper" > "$tmp_sudoers"
+if [ -x /usr/local/bin/aws ]; then
+  printf '%s ALL=(root) NOPASSWD: %s\n' "$service_user" "$aws_mcp_helper" >> "$tmp_sudoers"
+fi
 printf '%s ALL=(root) NOPASSWD: %s restart opensession.service\n' \
   "$service_user" "$systemctl_bin" >> "$tmp_sudoers"
 printf '%s ALL=(root) NOPASSWD: %s restart opensession-executor.service\n' \
