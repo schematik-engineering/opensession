@@ -75,11 +75,11 @@ specs, transcripts, logs, or command arguments.
 - The primary interaction is conversational: mention the bot in a guild text
   channel to create a fresh linked public thread and Docker-backed OpenSession.
   A prior `/os ask` link on the parent channel is never reused by a new mention.
-- New Discord sessions default to OpenSession **Code** mode. Ordinary ACP tool
-  calls are therefore approved by the existing Code-mode permission engine
-  instead of pausing the thread. Explicitly select **Ask** on `/os ask` for a
-  read-only, confirmation-gated session; global denied/confirm-gated tool
-  policy still applies in every mode.
+- Discord sessions always use OpenSession **Code** mode. Ordinary tool calls
+  are approved by the existing Code-mode permission engine instead of pausing
+  the thread. Legacy Ask-mode links are retired on restart and the next prompt
+  creates a Code-mode session. Global denied and confirmation-gated tool policy
+  still applies.
 - Anyone permitted by the guild/channel/role/user boundaries can reply in that
   thread to continue the same transcript. Each turn is attributed to that
   Discord user's display name. If the model asks a question, the reply answers

@@ -13,7 +13,7 @@ import type { SessionControl } from "../../server/session-control";
 import { DiscordRest, splitDiscordMessage } from "./api";
 import { loadDiscordConfig, type DiscordConfig } from "./config";
 import { DiscordGateway } from "./gateway";
-import { DiscordAgent } from "./index";
+import { DISCORD_COMMANDS, DiscordAgent } from "./index";
 import { DiscordStateStore } from "./state";
 
 const tempDirs: string[] = [];
@@ -84,7 +84,7 @@ describe("Discord config and state", () => {
     });
     store.setConversation("guild:g:channel:c", {
       sessionId: "os-session",
-      mode: "ask",
+      mode: "code",
       model: "cursor/auto",
       userId: "1542925450790305905",
       updatedAt: new Date().toISOString(),
@@ -104,9 +104,45 @@ describe("Discord config and state", () => {
     expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(readFileSync(path, "utf8")).not.toContain("secret-value");
   });
+
+  test("drops legacy Ask-mode links instead of resuming permission prompts", () => {
+    const path = join(tempDir(), "state.json");
+    writeFileSync(
+      path,
+      JSON.stringify({
+        version: 1,
+        gateway: {},
+        conversations: {
+          "guild:g:channel:c": {
+            sessionId: "legacy-ask-session",
+            mode: "ask",
+            userId: "1542925450790305905",
+            updatedAt: new Date().toISOString(),
+          },
+        },
+        processed: {},
+      }),
+      { mode: 0o600 },
+    );
+
+    expect(
+      new DiscordStateStore(path).conversation("guild:g:channel:c"),
+    ).toBeUndefined();
+  });
 });
 
 describe("Discord REST presentation", () => {
+  test("offers no permission-mode override on Discord prompts", () => {
+    const command = DISCORD_COMMANDS[0] as {
+      options?: Array<{
+        name?: string;
+        options?: Array<{ name?: string }>;
+      }>;
+    };
+    const ask = command.options?.find((option) => option.name === "ask");
+    expect(ask?.options?.map((option) => option.name)).toEqual(["prompt"]);
+  });
+
   test("splits long replies without losing content", () => {
     const input = `${"a".repeat(1_500)}\n${"b".repeat(1_500)}`;
     const chunks = splitDiscordMessage(input);
@@ -301,7 +337,7 @@ describe("Discord agent", () => {
     const threadChannel = "1542925450790305906";
     state.setConversation(`guild:${cfg.guildIds[0]}:channel:${parentChannel}`, {
       sessionId: "old-slash-session",
-      mode: "ask",
+      mode: "code",
       model: "cursor/auto",
       userId: cfg.userIds[0],
       updatedAt: new Date().toISOString(),
@@ -444,6 +480,116 @@ describe("Discord agent", () => {
     dispatch("MESSAGE_CREATE", event);
     await Bun.sleep(20);
     expect(creates).toHaveLength(1);
+    await agent.shutdown();
+  });
+
+  test("replaces a linked Ask session with an auto-permission Code session", async () => {
+    const state = new DiscordStateStore(join(tempDir(), "state.json"));
+    const cfg = config();
+    const channelId = "1542925450790305930";
+    const key = `guild:${cfg.guildIds[0]}:channel:${channelId}`;
+    state.setConversation(key, {
+      sessionId: "legacy-ask-session",
+      mode: "code",
+      userId: cfg.userIds[0],
+      updatedAt: new Date().toISOString(),
+    });
+    const creates: any[] = [];
+    const deliveries: string[] = [];
+    let dispatch: (name: string, data: any) => void = () => {};
+    const control: SessionControl = {
+      listSessions: () => [],
+      getSession: (id) =>
+        ({
+          id,
+          state: "idle",
+          title: "Discord request",
+          mode: id === "legacy-ask-session" ? "ask" : "code",
+        }) as any,
+      transcriptTail: async (id) =>
+        id === "replacement-code-session"
+          ? [
+              {
+                id: "replacement-answer",
+                type: "assistant",
+                content: "AUTO_PERMISSION_OK",
+                timestamp: new Date().toISOString(),
+              },
+            ]
+          : [],
+      answerQuestion: () => false,
+      deliverToSession: async (_id, prompt) => {
+        deliveries.push(prompt);
+        return { status: "started", message: "started" };
+      },
+      cancelSession: () => false,
+      createSession: async (input) => {
+        creates.push(input);
+        return {
+          id: "replacement-code-session",
+          createdBy: String(input.user),
+          createdAt: new Date().toISOString(),
+        };
+      },
+    };
+    const edits: string[] = [];
+    const rest = {
+      currentBot: async () => ({
+        id: cfg.applicationId,
+        username: "OpenSession",
+      }),
+      currentGuilds: async () => [{ id: cfg.guildIds[0], name: "Schematik" }],
+      syncGuildCommand: async () => ({}),
+      gatewayBot: async () => ({ url: "wss://gateway.discord.gg", shards: 1 }),
+      sendMessage: async () => ({
+        id: "status",
+        channel_id: channelId,
+        content: "OpenSession is starting…",
+      }),
+      editMessage: async (
+        _channelId: string,
+        _messageId: string,
+        content: string,
+      ) => {
+        edits.push(content);
+        return { id: "status", channel_id: channelId, content };
+      },
+    };
+    const agent = new DiscordAgent({
+      loadConfig: () => cfg,
+      state,
+      control: () => control,
+      rest: () => rest as unknown as DiscordRest,
+      gateway: (options) => {
+        dispatch = (name, data) => void options.onDispatch(name, data);
+        return {
+          start() {},
+          stop() {},
+          health: () => ({ status: "ready", ready: true }),
+        } as unknown as DiscordGateway;
+      },
+    });
+    await agent.startup();
+
+    const event = {
+      id: "1542925450790305931",
+      channel_id: channelId,
+      guild_id: cfg.guildIds[0],
+      content: "continue without permission prompts",
+      author: { id: cfg.userIds[0], username: "jack" },
+      mentions: [],
+      attachments: [],
+    };
+    dispatch("MESSAGE_CREATE", event);
+    for (let i = 0; i < 100 && !state.wasProcessed(event.id); i++)
+      await Bun.sleep(5);
+
+    expect(state.wasProcessed(event.id)).toBe(true);
+    expect(deliveries).toEqual([]);
+    expect(creates).toHaveLength(1);
+    expect(creates[0]).toMatchObject({ mode: "code", sandbox: "docker" });
+    expect(state.conversation(key)?.sessionId).toBe("replacement-code-session");
+    expect(edits.at(-1)).toContain("AUTO_PERMISSION_OK");
     await agent.shutdown();
   });
 
@@ -647,7 +793,7 @@ describe("Discord agent", () => {
     const key = `guild:${cfg.guildIds[0]}:channel:${channelId}`;
     state.setConversation(key, {
       sessionId: "os-discord-command",
-      mode: "ask",
+      mode: "code",
       model: "grok/grok-4.6",
       userId: cfg.userIds[0],
       updatedAt: new Date().toISOString(),
