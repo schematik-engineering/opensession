@@ -5,7 +5,7 @@ import { writeJsonAtomic } from "../../server/shared/atomic-write";
 export interface DiscordConversation {
   sessionId: string;
   model?: string;
-  mode: "ask" | "code";
+  mode: "code";
   userId: string;
   updatedAt: string;
 }
@@ -38,7 +38,7 @@ function validConversation(value: unknown): value is DiscordConversation {
   const v = value as Record<string, unknown>;
   return (
     typeof v.sessionId === "string" &&
-    (v.mode === "ask" || v.mode === "code") &&
+    v.mode === "code" &&
     typeof v.userId === "string" &&
     typeof v.updatedAt === "string" &&
     (v.model === undefined || typeof v.model === "string")

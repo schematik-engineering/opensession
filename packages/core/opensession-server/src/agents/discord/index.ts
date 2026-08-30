@@ -21,7 +21,7 @@ import {
   type DiscordConfig,
 } from "./config";
 import { DiscordGateway } from "./gateway";
-import { DiscordStateStore, type DiscordConversation } from "./state";
+import { DiscordStateStore } from "./state";
 
 // GUILDS | GUILD_MESSAGES | DIRECT_MESSAGES | MESSAGE_CONTENT.
 // MESSAGE_CONTENT must also be enabled in Discord's Developer Portal.
@@ -103,15 +103,6 @@ export const DISCORD_COMMANDS: DiscordApplicationCommand[] = [
             description: "What OpenSession should do",
             required: true,
             max_length: 4_000,
-          },
-          {
-            type: 3,
-            name: "mode",
-            description: "Code is default; Ask is explicitly read-only",
-            choices: [
-              { name: "Ask", value: "ask" },
-              { name: "Code", value: "code" },
-            ],
           },
         ],
       },
@@ -552,14 +543,6 @@ export class DiscordAgent implements AgentModule {
     try {
       await this.enqueueConversation(key, async () => {
         try {
-          if (values.mode && !this.state.conversation(key)) {
-            this.state.setConversation(key, {
-              sessionId: "",
-              mode: values.mode === "code" ? "code" : "ask",
-              userId: user.id,
-              updatedAt: new Date().toISOString(),
-            });
-          }
           const result = await this.runPrompt({
             key,
             eventId: interaction.id,
@@ -638,7 +621,7 @@ export class DiscordAgent implements AgentModule {
       }
       this.state.setConversation(key, {
         sessionId: conversation?.sessionId || "",
-        mode: conversation?.mode || "ask",
+        mode: "code",
         model,
         userId: user.id,
         updatedAt: new Date().toISOString(),
@@ -659,12 +642,19 @@ export class DiscordAgent implements AgentModule {
   }): Promise<string> {
     const control = this.requireControl();
     let conversation = this.state.conversation(input.key);
-    const existing = conversation?.sessionId
+    let existing = conversation?.sessionId
       ? control.getSession(conversation.sessionId)
       : undefined;
     if (conversation?.sessionId && !existing) {
       this.state.deleteConversation(input.key);
       conversation = undefined;
+    } else if (existing?.mode === "ask") {
+      // Discord is always an auto-permission surface. A link created before
+      // that invariant cannot be upgraded in place because Ask sessions own a
+      // read-only checkout, so retire the link and start a Code session below.
+      this.state.deleteConversation(input.key);
+      conversation = undefined;
+      existing = undefined;
     }
 
     const baselineEntries = existing
@@ -708,19 +698,15 @@ export class DiscordAgent implements AgentModule {
       if (delivered.status === "error") throw new Error(delivered.message);
       sessionId = existing.id;
     } else {
-      // Discord is an internal, team-role-gated surface. Start its sessions in
-      // OpenSession's native Code mode so ordinary ACP tools are approved by
-      // the existing permission engine instead of pausing the thread for each
-      // call. An explicit `/os ask ... mode:Ask` still opts into read-only,
-      // confirmation-gated behavior; hard-denied and confirm-gated tools keep
-      // their global policy.
-      const mode = conversation?.mode || "code";
+      // Discord is an internal, team-role-gated surface. Its sessions always
+      // use Code mode so ordinary tool calls are approved without pausing a
+      // thread. Hard-denied and confirm-gated tools keep their global policy.
       const model = conversation?.model || this.requireConfig().defaultModel;
       const created = await control.createSession({
         prompt: input.prompt,
         requestId: `discord:${input.eventId}:create`,
         requestScope: `discord:${input.user.id}:${input.key}`,
-        mode,
+        mode: "code",
         ...(model ? { model } : {}),
         images: input.images,
         sandbox: "docker",
@@ -730,7 +716,7 @@ export class DiscordAgent implements AgentModule {
       this.state.setConversation(input.key, {
         sessionId,
         model,
-        mode,
+        mode: "code",
         userId: input.user.id,
         updatedAt: new Date().toISOString(),
       });
