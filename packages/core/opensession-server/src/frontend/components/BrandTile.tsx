@@ -1,5 +1,11 @@
 import React from "react";
-import { BRANDS, brandKey, brandLogo } from "../brand-logos";
+import {
+  BRANDS,
+  brandKey,
+  brandLogo,
+  brandLogoDataUri,
+  isSvgBrandLogo,
+} from "../brand-logos";
 import { markTileClass, markTileShadow } from "../lib/mark-tile";
 
 /** Rounded brand square with the service's real logo (falls back to the first
@@ -14,7 +20,12 @@ export function IconTile({ name, size = 34 }: { name: string; size?: number }) {
   const canonicalKey = brandKey(key);
   const brand = BRANDS[canonicalKey];
   const logo = brandLogo(key);
-  const logoSize = canonicalKey === "tella" ? size : size * 0.56;
+  const logoSize =
+    canonicalKey === "tella" || canonicalKey === "aws"
+      ? size
+      : canonicalKey === "executor"
+        ? size * 0.78
+        : size * 0.56;
   const bg = brand?.bg;
   return (
     <span
@@ -36,7 +47,15 @@ export function IconTile({ name, size = 34 }: { name: string; size?: number }) {
         boxShadow: bg ? markTileShadow(bg) : undefined,
       }}
     >
-      {logo ? (
+      {logo && isSvgBrandLogo(logo) ? (
+        <img
+          src={brandLogoDataUri(logo)}
+          width={logoSize}
+          height={logoSize}
+          alt=""
+          aria-hidden="true"
+        />
+      ) : logo ? (
         <svg
           viewBox={logo.viewBox}
           width={logoSize}
@@ -62,7 +81,8 @@ export function IconTile({ name, size = 34 }: { name: string; size?: number }) {
 }
 
 /**
- * The bare brand mark, monochrome at the current text color.
+ * The bare brand mark, monochrome at the current text color unless the
+ * official mark is intrinsically multicolor.
  *
  * A menu or a select row draws a brand this way rather than as a tile: a
  * column of colored squares down a settings page reads as decoration, while a
@@ -83,6 +103,17 @@ export function BrandMark({
 }) {
   const logo = brandLogo(name);
   if (!logo) return null;
+  if (isSvgBrandLogo(logo))
+    return (
+      <img
+        src={brandLogoDataUri(logo)}
+        width={size}
+        height={size}
+        alt=""
+        aria-hidden="true"
+        className={className}
+      />
+    );
   return (
     <svg
       viewBox={logo.viewBox}
