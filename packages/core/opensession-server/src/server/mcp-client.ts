@@ -16,6 +16,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { readMcpConfig } from "./connections";
 import { mcpAuthHeader } from "./mcp-oauth";
 import { ensureAwsMcpIamAuth, isAwsMcpIamServer } from "./aws-mcp-auth";
+import { githubMcpAuthHeader } from "./github-mcp-auth";
 
 export class McpToolError extends Error {}
 
@@ -33,7 +34,11 @@ export async function listMcpTools(
     ? await ensureAwsMcpIamAuth(cfg.url)
     : undefined;
   const oauth = managed ? undefined : mcpAuthHeader(serverName, user);
-  const auth = managed || oauth || cfg.headers?.Authorization;
+  const auth =
+    managed ||
+    oauth ||
+    githubMcpAuthHeader(cfg.url, user) ||
+    cfg.headers?.Authorization;
   const transport = new StreamableHTTPClientTransport(new URL(cfg.url), {
     requestInit: {
       headers: {
@@ -74,7 +79,11 @@ export async function callMcpTool<T = unknown>(
     ? await ensureAwsMcpIamAuth(cfg.url)
     : undefined;
   const oauth = managed ? undefined : mcpAuthHeader(serverName, user);
-  const auth = managed || oauth || cfg.headers?.Authorization;
+  const auth =
+    managed ||
+    oauth ||
+    githubMcpAuthHeader(cfg.url, user) ||
+    cfg.headers?.Authorization;
   const transport = new StreamableHTTPClientTransport(new URL(cfg.url), {
     requestInit: {
       headers: {

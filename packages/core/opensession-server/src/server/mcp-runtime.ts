@@ -22,6 +22,7 @@ import {
 } from "./mcp-tools-cache";
 import { mcpSharedGrantHeader, mcpUserGrantHeader } from "./mcp-oauth";
 import { mcpRelayUrl, mintMcpRelayToken } from "./mcp-relay";
+import { githubMcpAuthHeader } from "./github-mcp-auth";
 import { isAwsMcpIamServer } from "./aws-mcp-auth";
 import type { InProcessMcpServer } from "./inprocess-mcp";
 
@@ -327,6 +328,7 @@ export async function createMcpRuntime(opts: {
       const hasGrant =
         isAwsMcpIamServer(String(cfg.url)) ||
         candidates.some((user) => mcpUserGrantHeader(name, user)) ||
+        candidates.some((user) => githubMcpAuthHeader(String(cfg.url), user)) ||
         !!mcpSharedGrantHeader(name);
       let url = String(cfg.url);
       let headers = { ...((cfg.headers as Record<string, string>) || {}) };

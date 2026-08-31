@@ -53,7 +53,7 @@ export function filterMcpServers(
         );
       continue;
     }
-    const { allowedUsers, oauthUrl, ...entry } = cfg;
+    const { allowedUsers, oauthUrl, oauth, ...entry } = cfg;
     if (Array.isArray(allowedUsers) && allowedUsers.length) {
       // Cleared when the prompter OR the session creator (grantUsers[0]) is
       // on the list — anyone with access to a cleared person's session can
