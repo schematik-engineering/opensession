@@ -14,6 +14,7 @@ import {
   supportsManualToken,
   validateManualMcpToken,
 } from "./mcp-oauth";
+import { __setIdentitiesForTest } from "./shared/user-mappings";
 
 describe("MCP OAuth client registration", () => {
   const realFetch = globalThis.fetch;
@@ -147,6 +148,43 @@ describe("MCP OAuth client registration", () => {
         "https://drivemcp.googleapis.com/mcp/v1",
       );
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("personal OAuth accepts an authenticated GitHub login without Slack metadata", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "os-mcp-oauth-user-test-"));
+    __setMcpOauthStorePathForTest(join(dir, "oauth.json"));
+    const restore = __setIdentitiesForTest([
+      { name: "Jack", github: "jackdnl" },
+    ]);
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/.well-known/oauth-protected-resource/mcp"))
+        return Response.json({
+          authorization_servers: ["https://auth.example.com"],
+        });
+      if (
+        url ===
+        "https://auth.example.com/.well-known/oauth-authorization-server"
+      )
+        return Response.json({
+          authorization_endpoint: "https://auth.example.com/authorize",
+          token_endpoint: "https://auth.example.com/token",
+        });
+      return new Response("not found", { status: 404 });
+    }) as unknown as typeof fetch;
+
+    try {
+      const result = await startMcpOauthFlow(
+        "Example",
+        "https://mcp.example.com/mcp",
+        "jackdnl",
+        { clientId: "client" },
+      );
+      expect(new URL(result.url).searchParams.get("client_id")).toBe("client");
+    } finally {
+      restore();
       rmSync(dir, { recursive: true, force: true });
     }
   });

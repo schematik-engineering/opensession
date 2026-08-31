@@ -10,6 +10,7 @@ import {
   isTrustedGithubLogin,
   isTrustedUser,
   personKeyToDisplayName,
+  resolveTeamMemberName,
 } from "./user-mappings";
 
 const TEAM: TeamMember[] = [
@@ -86,6 +87,14 @@ describe("identity table derivation", () => {
     expect(githubLoginToPersonKeyFromTeam("unknown", TEAM)).toBeNull();
     expect(personKeyToDisplayName("ali", TEAM)).toBe("Alice");
     expect(personKeyToDisplayName("unknown", TEAM)).toBeNull();
+  });
+
+  test("canonical roster names do not require Slack or git-email metadata", () => {
+    const team: TeamMember[] = [{ name: "Jack", github: "jackdnl" }];
+    expect(resolveTeamMemberName("jackdnl", team)).toBe("Jack");
+    expect(resolveTeamMemberName("@JACKDNL", team)).toBe("Jack");
+    expect(resolveTeamMemberName("Jack", team)).toBe("Jack");
+    expect(resolveTeamMemberName("unknown", team)).toBeNull();
   });
 });
 

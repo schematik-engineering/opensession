@@ -26,7 +26,7 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import { randomBytes, createHash } from "crypto";
 import { configuredServer, productName } from "./config";
 import { statePath } from "./paths";
-import { resolveTeammate } from "./shared/user-mappings";
+import { resolveTeamMemberName } from "./shared/user-mappings";
 
 let storePath = statePath(".opensession-mcp-oauth.json");
 
@@ -479,9 +479,13 @@ export async function startMcpOauthFlow(
   forUser?: string,
   oauthClientConfig?: McpOauthClientConfig,
 ): Promise<{ url: string }> {
-  const teamName = forUser ? resolveTeammate(forUser)?.name : undefined;
+  const teamName = forUser
+    ? (resolveTeamMemberName(forUser) ?? undefined)
+    : undefined;
   if (forUser && !teamName)
-    throw new Error(`"${forUser}" doesn't resolve to a configured teammate`);
+    throw new McpOauthConfigurationError(
+      `"${forUser}" doesn't resolve to a configured teammate`,
+    );
   const preset = oauthPresetFor(name);
   if (preset) {
     const state = b64url(randomBytes(24));
@@ -737,7 +741,7 @@ export function mcpUserGrantHeader(
   user?: string,
 ): string | undefined {
   if (!user) return undefined;
-  const teamName = resolveTeammate(user)?.name;
+  const teamName = resolveTeamMemberName(user);
   if (!teamName) return undefined;
   return grantHeader(name, { kind: "user", teamName });
 }
@@ -913,7 +917,7 @@ export function removeMcpOauthGrant(name: string, forUser?: string): boolean {
   const auth = store[name];
   if (!auth) return false;
   if (forUser) {
-    const teamName = resolveTeammate(forUser)?.name;
+    const teamName = resolveTeamMemberName(forUser);
     if (!teamName || !auth.users?.[teamName]) return false;
     delete auth.users[teamName];
   } else {
@@ -1054,10 +1058,10 @@ export async function saveManualMcpGrant(
 ): Promise<void> {
   await validateManualMcpToken(name, token, serverUrl);
   const teamName = opts.forUser
-    ? resolveTeammate(opts.forUser)?.name
+    ? (resolveTeamMemberName(opts.forUser) ?? undefined)
     : undefined;
   if (opts.forUser && !teamName)
-    throw new Error(
+    throw new McpOauthConfigurationError(
       `"${opts.forUser}" doesn't resolve to a configured teammate`,
     );
   const store = readStore();
