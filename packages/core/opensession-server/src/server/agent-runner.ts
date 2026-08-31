@@ -57,7 +57,7 @@ import {
   routeModel,
   BEST_AVAILABLE_CODEX_MODEL,
   getDefaultModel,
-  resolveConcreteModel,
+  resolveExecutionModel,
   resolveModel,
   toPiModel,
 } from "./models";
@@ -556,8 +556,7 @@ async function* runAgentInner(opts: RunAgentOpts): AsyncGenerator<StreamEvent> {
     workspacePreset?.model || opts.model || getDefaultModel(),
   );
   const wantsBestCodex = requestedModel?.id === BEST_AVAILABLE_CODEX_MODEL;
-  const primaryModel =
-    workspacePreset?.model || resolveConcreteModel(opts.model);
+  const primaryModel = resolveExecutionModel(opts.model);
   const preferredFallback = /^(?:claude|codex)\//.test(primaryModel)
     ? "none"
     : wantsBestCodex

@@ -1010,6 +1010,13 @@ export function resolveConcreteModel(
   return DEFAULT_CODEX_MODEL;
 }
 
+/** Resolve the model that the runner will actually dispatch. */
+export function resolveExecutionModel(model?: string | null): string {
+  return (
+    resolveWorkspaceModelPreset(model)?.model || resolveConcreteModel(model)
+  );
+}
+
 /** Fallback model for an interactive session. Haiku crosses to its explicit
  * OpenAI peer; other models retain the configured global preference. */
 export function interactiveFallbackModel(
