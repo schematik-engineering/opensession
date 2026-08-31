@@ -4,6 +4,14 @@ async function source(relativePath: string) {
   return Bun.file(new URL(relativePath, import.meta.url)).text();
 }
 
+function interfaceBody(sourceText: string, name: string) {
+  const start = sourceText.indexOf(`export interface ${name} {`);
+  const end = sourceText.indexOf("\n}", start);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  return sourceText.slice(start, end);
+}
+
 test("SessionViewer receives app-owned composer wiring through one binding", async () => {
   const [viewer, app, binding] = await Promise.all([
     source("../SessionViewer.tsx"),
@@ -11,11 +19,10 @@ test("SessionViewer receives app-owned composer wiring through one binding", asy
     source("../../lib/session-viewer-bindings.ts"),
   ]);
 
-  const propsStart = viewer.indexOf("interface Props {");
-  const propsEnd = viewer.indexOf("\n}\n\n// Stable identity", propsStart);
-  const props = viewer.slice(propsStart, propsEnd);
-  expect(propsStart).toBeGreaterThanOrEqual(0);
-  expect(propsEnd).toBeGreaterThan(propsStart);
+  const props = interfaceBody(binding, "SessionViewerProps");
+  expect(viewer).toContain(
+    'import type { SessionViewerProps } from "../lib/session-viewer-bindings";',
+  );
   expect(props).toContain("composer: ComposerBinding;");
   for (const oldProp of [
     "setTyping:",

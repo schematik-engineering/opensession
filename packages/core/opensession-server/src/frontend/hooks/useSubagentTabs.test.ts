@@ -11,7 +11,7 @@ describe("sub-agent tab ownership", () => {
     expect(appSource).toContain(
       "const subagentStack = stackFor(currentSession?.id)",
     );
-    expect(appSource).toContain("subagentStack={stackFor(viewerSession.id)}");
+    expect(appSource).toContain("subagentStack: stackFor(viewerSession.id)");
     expect(appSource).not.toContain("setSubagentTabs");
     expect(appSource).not.toContain("SUBAGENT_LINK_LABEL");
   });

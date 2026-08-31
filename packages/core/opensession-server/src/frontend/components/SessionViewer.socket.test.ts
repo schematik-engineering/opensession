@@ -4,12 +4,12 @@ async function source(relativePath: string) {
   return Bun.file(new URL(relativePath, import.meta.url)).text();
 }
 
-function componentProps(viewer: string) {
-  const start = viewer.indexOf("interface Props {");
-  const end = viewer.indexOf("\n}\n\n// Stable identity", start);
+function interfaceBody(sourceText: string, name: string) {
+  const start = sourceText.indexOf(`export interface ${name} {`);
+  const end = sourceText.indexOf("\n}", start);
   expect(start).toBeGreaterThanOrEqual(0);
   expect(end).toBeGreaterThan(start);
-  return viewer.slice(start, end);
+  return sourceText.slice(start, end);
 }
 
 function invocation(sourceText: string, component: string, from = 0) {
@@ -26,7 +26,8 @@ test("SessionViewer receives its socket capabilities from context", async () => 
     source("../App.tsx"),
     source("../lib/session-viewer-bindings.ts"),
   ]);
-  const props = componentProps(viewer);
+  const props = interfaceBody(bindings, "SessionViewerProps");
+  const lifecycle = interfaceBody(bindings, "SessionViewerLifecycleBinding");
   expect(props).not.toContain("send:");
   expect(props).not.toContain("addHandler:");
   expect(props).not.toContain("setTyping:");
@@ -34,7 +35,8 @@ test("SessionViewer receives its socket capabilities from context", async () => 
   expect(bindings).toContain(
     "setTyping: (sessionId: string, active: boolean) => void;",
   );
-  expect(props).toContain("connected:");
+  expect(props).toContain("lifecycle: SessionViewerLifecycleBinding;");
+  expect(lifecycle).toContain("connected: boolean;");
   expect(viewer).toContain(
     'import { useSessionSocket } from "../hooks/useSessionSocket";',
   );
@@ -46,8 +48,9 @@ test("SessionViewer receives its socket capabilities from context", async () => 
   expect(viewerInvocation).not.toContain("setTyping=");
   expect(viewerInvocation).toContain("composer={{");
   expect(viewerInvocation).toContain("setTyping: socket.setTyping,");
+  expect(viewerInvocation).toContain("lifecycle={{");
   expect(viewerInvocation).toContain(
-    "connected={socket.connected && !pendingSocket}",
+    "connected: socket.connected && !pendingSocket,",
   );
   expect(app).toContain(
     "const pendingSocket = surfaceId === pendingSessionId;",

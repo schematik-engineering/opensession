@@ -47,7 +47,7 @@ describe("on-demand view tab ownership", () => {
   test("keeps existing tab-strip, viewer, and navigation consumers", () => {
     expect(appSource).toContain("previewOpen: previewTabOpen");
     expect(appSource).toContain(
-      "terminalTabOpen={!!wsKey && terminalOpen.has(wsKey)}",
+      "terminalTabOpen: !!wsKey && terminalOpen.has(wsKey)",
     );
     expect(appSource).toContain("openPreview: openPreviewTab");
   });
