@@ -54,6 +54,7 @@ import {
 import { providerFor } from "./models";
 import { AcpTerminalManager } from "./acp-terminal";
 import { askBashDenyReason, filterMcpServers } from "./runner-shared";
+import { baseJournalKind, isUnattendedKind } from "./run-policy";
 import {
   acpProviderStateDir,
   readAcpAccountBinding,
@@ -393,6 +394,9 @@ async function permissionResponse(
   retryWithoutTool?: boolean;
 }> {
   const tool = request.toolCall.name || request.toolCall.title || "tool";
+  const askUser = isUnattendedKind(baseJournalKind(opts.journal?.kind))
+    ? undefined
+    : opts.onAskUser;
   if (opts.deniedTools?.[tool]) {
     return {
       response: selectedPermission(request, false),
@@ -408,7 +412,7 @@ async function permissionResponse(
     const command = typeof input?.command === "string" ? input.command : "";
     const denial = command ? askBashDenyReason(command) : "Missing command";
     if (!denial) return { response: selectedPermission(request, true) };
-    if (!opts.onAskUser) {
+    if (!askUser) {
       return {
         response: selectedPermission(request, false),
         denial,
@@ -419,14 +423,14 @@ async function permissionResponse(
   const needsConfirmation = opts.mode === "ask" || !!opts.confirmTools?.[tool];
   if (!needsConfirmation && (opts.mode === "code" || opts.mode === "scratch"))
     return { response: selectedPermission(request, true) };
-  if (!opts.onAskUser) {
+  if (!askUser) {
     return {
       response: selectedPermission(request, false),
       denial: `${tool} requires approval, but this run has no interactive approver`,
       retryWithoutTool: true,
     };
   }
-  const result = await opts.onAskUser({
+  const result = await askUser({
     questions: [
       {
         header: "ACP tool",
