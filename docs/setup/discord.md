@@ -75,6 +75,12 @@ specs, transcripts, logs, or command arguments.
 - The primary interaction is conversational: mention the bot in a guild text
   channel to create a fresh linked public thread and Docker-backed OpenSession.
   A prior `/os ask` link on the parent channel is never reused by a new mention.
+  Thread creation is required; a failed thread create reports the error instead
+  of silently reusing a parent-channel session.
+- When the mention replies to another Discord message, the first OpenSession
+  turn includes that exact message's author, text, attachments, message link,
+  and bounded recent channel context. Reply and channel context are labelled as
+  untrusted data before reaching the session.
 - Discord sessions always use OpenSession **Code** mode. Ordinary tool calls
   are approved by the existing Code-mode permission engine instead of pausing
   the thread. Legacy Ask-mode links are retired on restart and the next prompt
@@ -82,8 +88,10 @@ specs, transcripts, logs, or command arguments.
   still applies.
 - Anyone permitted by the guild/channel/role/user boundaries can reply in that
   thread to continue the same transcript. Each turn is attributed to that
-  Discord user's display name. If the model asks a question, the reply answers
-  the pending OpenSession question.
+  Discord user's display name, and no bot mention is required. OpenSession-owned
+  threads are recognized after a restart even while their session link is being
+  created. If the model asks a question, the reply answers the pending
+  OpenSession question.
 - `/os ask` starts or continues the channel's session.
 - `/os model` switches between the configured Grok and Cursor subscription
   models.
@@ -92,10 +100,13 @@ specs, transcripts, logs, or command arguments.
 - Direct messages are supported only for explicitly allowlisted user IDs.
 
 All outbound messages suppress parsed mentions and are split below Discord's
-2,000-character limit. Inbound event IDs, Gateway resume state, and channel →
-session links are persisted atomically in
+2,000-character limit. Accepted message payloads are persisted before the
+Gateway sequence advances. Inbound event IDs, pending intake, Gateway resume
+state, and channel → session links are persisted atomically in
 `~/.opensession/discord/state.json` (mode 0600), so reconnects and restarts do
-not duplicate a prompt.
+not lose or duplicate a prompt. Outbound status and answer messages use
+deterministic Discord nonces so replaying accepted intake does not duplicate
+delivered chunks either.
 
 ## Verification
 
