@@ -523,7 +523,10 @@ async function* runAcpAttempt(
   if (account) await refreshAcpAuthSource(provider, account.authPath);
   const auth = prepareAuth(provider, unifiedSessionId, account);
   const selectedAccountId =
-    account?.id || process.env.OPENSESSION_ACP_ACCOUNT_ID || "projected";
+    account?.id ||
+    projected?.accountId ||
+    process.env.OPENSESSION_ACP_ACCOUNT_ID ||
+    "projected";
   // Provider-native session ids are account-owned. When a spent/removed pin
   // rotates to another subscription, begin a fresh ACP session and let the
   // OpenSession transcript handoff preserve the visible conversation.
@@ -900,9 +903,9 @@ async function* runAcpAttempt(
 
 /**
  * Rotate through subscription accounts when a provider refuses a turn for a
- * usage limit before producing any model-visible work. A Docker run receives
+ * usage limit before producing any model-visible work. A detached run receives
  * one credential-minimal projection, so it records the exhausted account and
- * rotates on the next run; host runs can retry immediately from the pool.
+ * rotates on the next run; in-process runs can retry immediately from the pool.
  */
 export async function* runAcp(
   opts: RunAgentOpts,

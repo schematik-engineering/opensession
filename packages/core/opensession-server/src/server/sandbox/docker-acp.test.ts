@@ -2,20 +2,17 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 
 describe("Docker ACP credential projection", () => {
-  test("selects and refreshes one account before copying the private run projection", () => {
+  test("projects one private account before dispatching the detached host", () => {
     const source = readFileSync(
       new URL("./docker.ts", import.meta.url),
       "utf8",
     );
-    const selection = source.indexOf("pickAcpAccount(acpProvider");
-    const refresh = source.indexOf("await refreshAcpAuthSource(");
     const projection = source.indexOf(
-      "copyFileSync(authSource, authDestination)",
+      "await projectAcpRunCredentials(spec, dir)",
     );
-    expect(selection).toBeGreaterThan(0);
-    expect(refresh).toBeGreaterThan(selection);
-    expect(projection).toBeGreaterThan(refresh);
-    expect(source).toContain("acpSessionExhaustedAccounts(");
+    const dispatch = source.indexOf("const r = await docker(args)");
+    expect(projection).toBeGreaterThan(0);
+    expect(dispatch).toBeGreaterThan(projection);
     expect(source).toContain("OPENSESSION_ACP_ACCOUNT_ID=");
     expect(source).not.toContain("refresh_token=");
   });
