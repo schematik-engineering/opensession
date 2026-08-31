@@ -321,10 +321,24 @@ describe("ACP runner", () => {
 
   test("continues a headless ask turn after denying an unsafe terminal command", async () => {
     stageAuth();
-    const runOpts = { ...opts("unsafe then safe"), mode: "ask" as const };
+    let askCalls = 0;
+    const baseOpts = opts("unsafe then safe");
+    const runOpts = {
+      ...baseOpts,
+      mode: "ask" as const,
+      journal: { ...baseOpts.journal, kind: "automation" },
+      onAskUser: async () => {
+        askCalls++;
+        return {
+          behavior: "deny" as const,
+          message: "This detached run has no interactive approver",
+        };
+      },
+    };
 
     const events = await collect(runAcp(runOpts, "grok/grok-4.6"));
 
+    expect(askCalls).toBe(0);
     expect(events.filter((event) => event.type === "tool_use")).toHaveLength(2);
     expect(
       events
