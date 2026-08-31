@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { errorMessage } from "../../lib/error-message";
 import {
   ensureNotificationPermission,
   getNotifSettings,
@@ -46,8 +47,8 @@ function PushRow() {
       if (v) await enablePush(getCurrentUser());
       else await disablePush();
       setState(await getPushState());
-    })().catch(async (e: any) => {
-      setError(e.message);
+    })().catch(async (error) => {
+      setError(errorMessage(error, "Failed to update push notifications"));
       setState(await getPushState());
     });
     setBusy(false);

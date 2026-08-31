@@ -90,7 +90,7 @@ describe("single session ownership", () => {
     const host = read("session-kernel/store-host.ts");
     expect(service).toContain('request.t === "runtime_work"');
     expect(service).toContain("runtimeWorkRequest(request");
-    expect(service).toMatch(/enqueueSession\(\s*sessionId/);
+    expect(service).toMatch(/enqueueSession\(\s*sessionId,/);
     expect(worker).toContain('request.t === "runtime_session_work"');
     expect(host).toContain("runtimeCatalogWork(");
     expect(host).toContain("runtimeSessionWork(");
@@ -237,7 +237,7 @@ describe("single session ownership", () => {
     const run = read("run-session.ts");
     const queue = read("queue-state.ts");
     const actor = read("session-kernel/actor-worker.ts");
-    expect(run).toContain("beginNextPromptDispatch(sessionId");
+    expect(run).toMatch(/beginNextPromptDispatch\(\s*sessionId/);
     expect(run).not.toContain("selectQueueBatch(queue");
     expect(run).not.toContain("interruptMarks");
     expect(actor).toContain('delivery.op === "prepare_interrupt"');
@@ -245,8 +245,8 @@ describe("single session ownership", () => {
     expect(actor).toContain('delivery.op === "settle_interrupt"');
     expect(actor).toContain('delivery.op === "claim_next_dispatch"');
     expect(actor).toContain("store.claimNextDeliveryDispatch(delivery)");
-    expect(queue).toContain(
-      "failPromptDispatch(sessionId, dispatch.promptEntryId, false)",
+    expect(queue).toMatch(
+      /failPromptDispatch\(\s*sessionId,\s*dispatch\.promptEntryId,\s*false\s*\)/,
     );
     expect(run).toContain(
       'registerSessionEffectExecutor("delivery_interrupt_cancel"',
@@ -254,7 +254,7 @@ describe("single session ownership", () => {
     const beginEffect = run.indexOf("beginPromptInterruptEffect(");
     const cancel = run.indexOf("cancelAgentRunToken(dispatchId)", beginEffect);
     const settle = run.indexOf("settlePromptInterrupt(", cancel);
-    expect(run).toMatch(/preparePromptInterrupt\(\s*sessionId/);
+    expect(run).toMatch(/preparePromptInterrupt\(\s*sessionId,/);
     expect(beginEffect).toBeGreaterThan(-1);
     expect(beginEffect).toBeLessThan(cancel);
     expect(cancel).toBeLessThan(settle);
@@ -450,9 +450,7 @@ describe("single session ownership", () => {
     expect(wiring.indexOf("completedCreate?.piSessionId")).toBeLessThan(
       wiring.indexOf("actorCreationSetupPlan(bksId, createIdentity)"),
     );
-    expect(create).toContain("terminal replay (${durableCreation.state})");
-    expect(create).toContain("failCreate(message)");
-    expect(create).not.toContain("failCreate(message);\n      throw error");
+    expect(create).toContain("failCreate(error instanceof Error");
     expect(create).toContain("if (projected) return projected");
     expect(create.indexOf("if (projected) return projected")).toBeLessThan(
       create.indexOf('if (state.state === "failed")'),
@@ -523,7 +521,7 @@ describe("single session ownership", () => {
     const tools = read("../agents/slack/sessions-tools.ts");
     expect(tools).toContain("durableToolRequestId");
     expect(tools).toMatch(
-      /durableToolRequestId\(\s*ctx,\s*"create_session",\s*extra/,
+      /durableToolRequestId\(\s*ctx,\s*"create_session",\s*extra,/,
     );
     const native = readFileSync(
       resolve(
@@ -691,8 +689,8 @@ describe("single session ownership", () => {
     expect(cache).toContain('op: "prepare_outcome_projection"');
     expect(cache).toContain("projectionId: opts.projectionId");
     expect(runSession).toContain("creationOwnsPrompt(record.osSessionId");
-    expect(boot).toContain(
-      "creationOwnsPrompt(run.osSessionId, run.promptEntryId)",
+    expect(boot).toMatch(
+      /creationOwnsPrompt\(\s*run\.osSessionId,\s*run\.promptEntryId\s*\)/,
     );
     expect(boot).toContain("!!(run.runnerId || run.sandboxId)");
     expect(boot).toContain("settleRecoveredCreationOpening(");

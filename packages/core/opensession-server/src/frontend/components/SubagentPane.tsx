@@ -5,6 +5,7 @@ import { TranscriptBlocks } from "./TranscriptBlocks";
 import { EmptyState, InlineAlert, LoadingState } from "../ui/state";
 import { PANEL_BODY } from "../lib/session-panel-classes";
 import { Badge } from "../ui/badge";
+import { errorMessage } from "../lib/error-message";
 
 export interface SubagentRef {
   agentId: string;
@@ -77,9 +78,9 @@ export function SubagentPane({
         // Keep polling only while the parent session is live (the sub-agent may
         // still be streaming); once idle the transcript is final.
         if (next.sessionRunning) timer = setTimeout(() => load(false), 1500);
-      })().catch(async (e: any) => {
+      })().catch(async (error) => {
         if (cancelled) return;
-        setError(e?.message || "Failed to load sub-agent");
+        setError(errorMessage(error, "Failed to load sub-agent"));
         setLoading(false);
       });
     }

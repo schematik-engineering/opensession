@@ -1,5 +1,5 @@
 import { ApiError, BASE, request } from "./request";
-import type { SessionNote, UnifiedSession } from "../types";
+import type { SessionNote, TranscriptEntry, UnifiedSession } from "../types";
 import { resolveAnonymousUserPath } from "../auth-ready";
 import { preparePromptImages } from "../images";
 
@@ -180,8 +180,11 @@ export async function searchTranscripts(
   return data?.matches ?? [];
 }
 
-export async function fetchTranscript(sessionId: string, tail?: number) {
-  return request<any>(
+export async function fetchTranscript(
+  sessionId: string,
+  tail?: number,
+): Promise<TranscriptEntry[]> {
+  return request<TranscriptEntry[]>(
     `/sessions/${encodeURIComponent(sessionId)}/transcript${
       tail ? `?tail=${tail}` : ""
     }`,

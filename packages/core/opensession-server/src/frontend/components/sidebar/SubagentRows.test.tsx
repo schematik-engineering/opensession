@@ -36,7 +36,7 @@ Object.assign(
   },
 );
 
-const { ActiveSubagentRows } = await import("./ActiveSubagentRows");
+const { SubagentRows } = await import("./SubagentRows");
 
 function session(
   id: string,
@@ -59,48 +59,88 @@ function session(
   };
 }
 
-describe("ActiveSubagentRows", () => {
+function rowButtons(tree: ReactElement<{ children: React.ReactNode }>) {
+  const row = React.Children.toArray(tree.props.children)[0] as ReactElement<{
+    children: React.ReactNode;
+  }>;
+  const children = React.Children.toArray(row.props.children);
+  const open = children[0] as ReactElement<{ onClick: () => void }>;
+  const tooltip = children[1] as ReactElement<{ children: React.ReactNode }>;
+  const archive = tooltip.props.children as ReactElement<{
+    onClick: () => void;
+  }>;
+  return { open, archive };
+}
+
+describe("SubagentRows", () => {
   test("renders semantic indented child rows and selected state", () => {
     const direct = session("direct");
     const nested = session("nested", { parentSessionId: "direct" });
     const html = renderToStaticMarkup(
-      <ActiveSubagentRows
+      <SubagentRows
         items={[
           { session: direct, depth: 1 },
           { session: nested, depth: 2 },
         ]}
         selectedId="nested"
         onSelect={() => {}}
+        onArchive={() => {}}
       />,
     );
 
-    expect(html.match(/data-active-subagent-row/g)).toHaveLength(2);
+    expect(html.match(/data-subagent-row/g)).toHaveLength(2);
     expect(html).toContain('data-parent-session-id="parent"');
     expect(html).toContain('data-parent-session-id="direct"');
     expect(html).toContain('aria-current="page"');
-    // 41 is the workspace row's repo-tile column, so the arrow centres under
-    // the tile rather than in the gap before it.
-    expect(html).toContain("--sidebar-icon-left:41px");
-    expect(html).toContain("--sidebar-icon-left:53px");
+    // Direct workers indent one compact step; deeper workers take another.
+    expect(html).toContain("--sidebar-icon-left:29px");
+    expect(html).toContain("--sidebar-icon-left:39px");
+    expect(html).toContain(
+      'd="M6.75 5.75V9.25C6.75 13.116 9.884 16.25 13.75 16.25H18.25"',
+    );
     expect(html).toContain("Worker nested, subagent, Running");
+    expect(html).toContain('aria-label="Archive Worker nested"');
   });
 
-  test("opens the exact child session", () => {
+  test("shows PR status after an idle worker merges", () => {
+    const worker = session("pr", {
+      isRunning: false,
+      prUrl: "https://github.com/tellahq/example/pull/1",
+      prState: "MERGED",
+    });
+    const html = renderToStaticMarkup(
+      <SubagentRows
+        items={[{ session: worker, depth: 1 }]}
+        selectedId={null}
+        onSelect={() => {}}
+        onArchive={() => {}}
+      />,
+    );
+
+    expect(html).toContain("Worker pr, subagent, Merged");
+    expect(html).toContain('title="PR merged"');
+    expect(html).toContain("text-purple");
+  });
+
+  test("opens and archives the exact child session", () => {
     const child = session("child");
     let opened: UnifiedSession | null = null;
-    const tree = ActiveSubagentRows({
+    let archived: UnifiedSession | null = null;
+    const tree = SubagentRows({
       items: [{ session: child, depth: 1 }],
       selectedId: null,
       onSelect: (session) => {
         opened = session;
       },
+      onArchive: (session) => {
+        archived = session;
+      },
     }) as ReactElement<{ children: React.ReactNode }>;
-    const button = React.Children.toArray(
-      tree.props.children,
-    )[0] as ReactElement<{
-      onClick: () => void;
-    }>;
-    button.props.onClick();
+    const buttons = rowButtons(tree);
+
+    buttons.open.props.onClick();
+    buttons.archive.props.onClick();
     expect((opened as UnifiedSession | null)?.id).toBe("child");
+    expect((archived as UnifiedSession | null)?.id).toBe("child");
   });
 });

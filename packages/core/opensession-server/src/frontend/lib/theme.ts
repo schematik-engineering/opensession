@@ -1,3 +1,5 @@
+import { repairDesktopPalettePaint } from "./palette-repaint";
+
 // Appearance theme: follow the OS ("system", the default) or force light/dark.
 // Stored per-browser in localStorage — it's an appearance/device preference, not
 // per-user cloud state like pins — and applied to <html data-theme>, which drives
@@ -44,6 +46,7 @@ export function applyTheme(pref: ThemePref = getThemePref()) {
   // different colour from our own titlebar. Keep in sync with index.html.
   if (meta)
     meta.setAttribute("content", eff === "light" ? "#f6f6f6" : "#222222");
+  repairDesktopPalettePaint();
 }
 
 export function setThemePref(pref: ThemePref) {

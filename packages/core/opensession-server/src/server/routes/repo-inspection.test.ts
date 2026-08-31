@@ -49,6 +49,24 @@ describe("normalizeRepoOrigin", () => {
 });
 
 describe("inspectRepo", () => {
+  test("accepts an empty repository using its unborn local branch", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "opensession-empty-repo-"));
+    try {
+      const remote = join(dir, "remote.git");
+      const checkout = join(dir, "checkout");
+      git("init", "-q", "--bare", "-b", "main", remote);
+      git("init", "-q", "-b", "main", checkout);
+      git("-C", checkout, "remote", "add", "origin", remote);
+
+      expect(await inspectRepo(checkout)).toMatchObject({
+        path: checkout,
+        defaultBranch: "main",
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("uses the remote HEAD when the local origin/HEAD is stale", async () => {
     const dir = mkdtempSync(join(tmpdir(), "opensession-repo-inspection-"));
     try {

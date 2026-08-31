@@ -1,6 +1,6 @@
 import { repoLabel } from "../lib/repo-label";
 import React, { useCallback, useEffect, useState } from "react";
-import type { PrDetails } from "../lib/types";
+import type { PrDetails, WSClientMessage } from "../lib/types";
 import {
   deriveHeadline,
   summarizeChecks,
@@ -31,6 +31,7 @@ import { getCurrentUser } from "./UserPicker";
 import { providerFromUrl } from "../lib/provider";
 import { isApple } from "../lib/platform";
 import { sessionPrPresentation } from "../lib/session-prs";
+import { errorMessage } from "../lib/error-message";
 import {
   prChipClass,
   prChipExternalClass,
@@ -122,7 +123,7 @@ interface Props {
    */
   prs?: SessionPrRef[];
   /** Prompt the session (Create PR / Resolve conflicts) — WS `prompt` message. */
-  send?: (msg: any) => void;
+  send?: (msg: WSClientMessage) => void;
   /** Clicking the headline jumps to the PR tab; a chip jumps to that PR. */
   onOpenPrTab?: (ref?: { repo: string; branch: string }) => void;
   /** Open a GitHub stack layer that is not one of this session's PR targets. */
@@ -644,8 +645,8 @@ export function PrStatusBar({
       await fn();
       await load();
     })()
-      .catch(async (e: any) => {
-        setError(e.message || `${name} failed`);
+      .catch(async (error: unknown) => {
+        setError(errorMessage(error, `${name} failed`));
       })
       .finally(async () => {
         setBusy(null);

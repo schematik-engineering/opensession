@@ -1968,6 +1968,37 @@ describe("TranscriptBlocks indexed ranges", () => {
     expect(hydrated).toContain("PR #42");
   });
 
+  test("does not let a model switch materialize an unloaded review loop", () => {
+    const html = renderToStaticMarkup(
+      <TranscriptBlocks
+        transcriptIndex={[
+          indexRow(1, "review_handoff", { reviewPrNumber: 42 }),
+          indexRow(2, "assistant"),
+          indexRow(3, "user"),
+        ]}
+        entries={[
+          {
+            id: "model-switch",
+            type: "system",
+            content: "Switched model inside old review work",
+            timestamp: "2026-08-12T12:00:02.500Z",
+          },
+          {
+            id: "indexed-3",
+            seq: 3,
+            changeSeq: 3,
+            type: "user",
+            content: "Loaded tail",
+            timestamp: "2026-08-12T12:00:03Z",
+          },
+        ]}
+      />,
+    );
+    expect(html).toContain("Loaded tail");
+    expect(html).not.toContain("PR #42");
+    expect(html).not.toContain("Switched model inside old review work");
+  });
+
   test("grows around unloaded middle history while loaded neighbors keep order", () => {
     const html = renderToStaticMarkup(
       <TranscriptBlocks

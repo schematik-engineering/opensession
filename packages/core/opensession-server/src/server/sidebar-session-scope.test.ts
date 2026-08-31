@@ -215,6 +215,77 @@ describe("scopeSessionsForSidebar", () => {
     ).toEqual(["selected", "sibling"]);
   });
 
+  test("keeps a selected worker nested under its ancestor workspace", () => {
+    const rows = [
+      session("parent", {
+        workspaceId: "ws-parent",
+        startedBy: "Grace",
+      }),
+      session("parent-sibling", {
+        workspaceId: "ws-parent",
+        startedBy: "Grace",
+      }),
+      session("worker", {
+        workspaceId: "ws-worker",
+        parentSessionId: "parent",
+        startedBy: "Grace",
+        prUrl: "https://github.com/tellahq/example/pull/99",
+        prState: "OPEN",
+      }),
+      session("worker-sibling", {
+        workspaceId: "ws-worker",
+        startedBy: "Grace",
+      }),
+      session("nested-worker", {
+        workspaceId: "ws-nested",
+        parentSessionId: "worker",
+        startedBy: "Grace",
+        prUrl: "https://github.com/tellahq/example/pull/1",
+        prState: "OPEN",
+      }),
+      session("inline-review", {
+        workspaceId: "ws-inline-review",
+        parentSessionId: "worker",
+        startedBy: "Grace",
+        prs: [
+          {
+            repo: "example",
+            branch: "parent-branch",
+            source: "discovered",
+            state: "OPEN",
+            url: "https://github.com/tellahq/example/pull/99",
+            number: 99,
+          },
+        ],
+      }),
+      session("merged-worker", {
+        workspaceId: "ws-merged",
+        parentSessionId: "worker",
+        startedBy: "Grace",
+        prUrl: "https://github.com/tellahq/example/pull/2",
+        prState: "MERGED",
+      }),
+      session("unrelated", {
+        workspaceId: "ws-unrelated",
+        startedBy: "Grace",
+      }),
+    ];
+
+    expect(
+      scopeSessionsForSidebar(
+        rows,
+        scope({ selectedSessionId: "worker" }),
+        context(),
+      ).map((row) => row.id),
+    ).toEqual([
+      "parent",
+      "parent-sibling",
+      "worker",
+      "worker-sibling",
+      "nested-worker",
+    ]);
+  });
+
   test("filters automation runs by owner", () => {
     const rows = [
       session("mine", { automation: "nightly", startedBy: undefined }),

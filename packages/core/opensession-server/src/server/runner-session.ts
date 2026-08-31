@@ -38,6 +38,7 @@ import { makeAskHandler } from "./asks";
 import type { McpScope } from "./runner-shared";
 import type { StreamEvent } from "./agent-runner";
 import type { ImageInput } from "./run-events";
+import { resolveSessionRunInputs } from "./session-run-inputs";
 import {
   activeRunRecords,
   journalClear,
@@ -89,15 +90,33 @@ export async function maybeLaunchRunnerRun(
   const registeredRunner = getRunner(target.id);
   if (!registeredRunner)
     throw new Error("This Runner is no longer available for this session");
+  if (
+    session.automationDescendantPolicy &&
+    !registeredRunner.permissions.automationDescendants
+  )
+    throw new Error(
+      "This Runner is not configured with automation descendant OS isolation",
+    );
   const runner = claimRunnerWorkload(registeredRunner.id, {
     user: opts.user,
     repo: session.repo,
     sessionId: session.id,
     operation: "full session",
+    automationDescendant: !!session.automationDescendantPolicy,
   });
   if (!runner)
     throw new Error("This Runner is no longer available for this session");
 
+  const runInputs = await resolveSessionRunInputs(session, { user: opts.user });
+  const automationPolicy = session.automationDescendantPolicy;
+  const runUser = runInputs.isAutomationSession ? undefined : opts.user;
+  const publicationPolicy = automationPolicy
+    ? {
+        repo: automationPolicy.publicationRepo,
+        branch: automationPolicy.baseBranch,
+        headBranch: session.branch || "",
+      }
+    : undefined;
   const hostId = opts.hostId || `rh-${Bun.randomUUIDv7()}`;
   const hostDir = `${runHostsDir(OPENSESSION_SESSIONS_DIR)}/${hostId}`;
   const specPath = `${hostDir}/${HOST_SPEC_NAME}`;
@@ -148,17 +167,27 @@ export async function maybeLaunchRunnerRun(
     fastMode: session.fastMode,
     accountId: session.accountId,
     images: opts.images,
-    mcpServers: opts.mcpServers ?? "all",
-    proxyMcpServers: Object.keys(interactiveMcpServers(opts.user, session.id)),
+    mcpServers: runInputs.isAutomationSession
+      ? (runInputs.mcpServers ?? [])
+      : (opts.mcpServers ?? "all"),
+    proxyMcpServers: runInputs.isAutomationSession
+      ? []
+      : Object.keys(interactiveMcpServers(opts.user, session.id)),
     rpcToken: crypto.randomUUID(),
     wsToken: crypto.randomUUID(),
-    reposNote: opts.reposNote,
+    reposNote: runInputs.isAutomationSession ? undefined : opts.reposNote,
+    deniedTools: runInputs.deniedTools,
+    publicationPolicy,
     confirmTools: STRIPE_CONFIRM_TOOLS,
+    aws: !runInputs.isAutomationSession,
     author: commitAuthorFor(opts.user, session.startedBy),
-    user: opts.user,
-    mcpGrantUser: session.startedBy || undefined,
+    user: runUser,
+    mcpGrantUser: runInputs.isAutomationSession
+      ? undefined
+      : session.startedBy || undefined,
     fallbackModel: interactiveFallbackModel(session.model),
-    journalKind: "prompt",
+    journalKind: runInputs.isAutomationSession ? "automation" : "prompt",
+    trustProfile: runInputs.isAutomationSession ? "automation" : "interactive",
   };
   if (!spec.rpcToken || !spec.wsToken)
     throw new Error(
@@ -187,14 +216,18 @@ export async function maybeLaunchRunnerRun(
     prompt: spec.prompt,
     cwd: session.worktreeDir,
     mode: session.mode,
-    mcpServers: opts.mcpServers ?? "all",
-    user: opts.user,
+    mcpServers: spec.mcpServers,
+    user: runUser,
     model: session.model,
     effort: session.effort,
     fastMode: session.fastMode,
     accountId: session.accountId,
     fallbackModel: interactiveFallbackModel(session.model),
-    kind: "prompt",
+    deniedTools: runInputs.deniedTools,
+    publicationPolicy,
+    aws: !runInputs.isAutomationSession,
+    trustProfile: runInputs.isAutomationSession ? "automation" : "interactive",
+    kind: runInputs.isAutomationSession ? "automation" : "prompt",
     runnerId: runner.id,
     hostId,
     promptEntryId: opts.promptEntryId,
@@ -203,7 +236,7 @@ export async function maybeLaunchRunnerRun(
     startedAt: priorRun?.startedAt ?? new Date().toISOString(),
   };
   await journalSet(run);
-  registerRunToken(rpcToken, { sessionId: session.id, user: opts.user });
+  registerRunToken(rpcToken, { sessionId: session.id, user: runUser });
   registerRunWsHost(hostId, wsToken);
   const hostSpecs = new Map<string, RunHostSpec>([[hostId, spec]]);
 

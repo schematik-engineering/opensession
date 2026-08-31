@@ -4,6 +4,12 @@ const appSource = await Bun.file(new URL("../App.tsx", import.meta.url)).text();
 const hookSource = await Bun.file(
   new URL("useRunningCloseConfirmation.ts", import.meta.url),
 ).text();
+const lifecycleSource = await Bun.file(
+  new URL("useSessionLifecycle.ts", import.meta.url),
+).text();
+const workspaceMutationsSource = await Bun.file(
+  new URL("useWorkspaceMutations.ts", import.meta.url),
+).text();
 const dialogSource = await Bun.file(
   new URL("../components/RunningCloseDialog.tsx", import.meta.url),
 ).text();
@@ -19,11 +25,20 @@ describe("running close confirmation ownership", () => {
     expect(appSource).not.toContain("Close running session");
   });
 
-  test("keeps the existing running-session gates at their call sites", () => {
-    expect(appSource).toContain(
+  test("keeps the existing running-session gates at their owners", () => {
+    expect(lifecycleSource).toContain(
       "confirmRunningClose(s, () => void closeSessionNow(s))",
     );
-    expect(appSource).toContain(
+    expect(lifecycleSource).toContain(
+      "confirmRunningClose(s, () => void archive())",
+    );
+    expect(lifecycleSource).toContain(
+      "confirmRunningCloses(sessions, () => void archive())",
+    );
+    expect(workspaceMutationsSource).toContain(
+      "confirmRunningCloses(members, () => {",
+    );
+    expect(workspaceMutationsSource).toContain(
       "confirmRunningCloses(sessions, () => void archive())",
     );
   });

@@ -12,7 +12,7 @@ const apiSource = await Bun.file(
 
 test("workspace surfaces keep committed and uncommitted work separate", () => {
   expect(apiSource).toContain("commits?: WorkspaceCommit[]");
-  expect(summarySource).toContain("(diffIsCommitted || commits.length > 0)");
+  expect(summarySource).toContain("(diffIsCommitted || hasCommitDetails)");
   expect(summarySource).toContain(">Committed</div>");
   expect(summarySource).toContain(">Uncommitted</div>");
   expect(summarySource).toContain("commits.map(committedRow)");
@@ -22,11 +22,17 @@ test("workspace surfaces keep committed and uncommitted work separate", () => {
   );
 });
 
-test("folded commits open in a nested overlay", () => {
-  expect(summarySource).toContain("<Popover.Root exclusive={false}>");
-  expect(summarySource).toContain('side={embedded ? "bottom" : "left"}');
+test("the Committed section folds open to every PR or workspace commit", () => {
+  expect(summarySource).toContain("const prCommits = pr?.commits ?? []");
+  expect(summarySource).toContain(
+    "const [commitsOpen, setCommitsOpen] = useState(false)",
+  );
+  expect(summarySource).toContain("aria-expanded={commitsOpen}");
+  expect(summarySource).toContain(
+    'title={commitsOpen ? "Hide commits" : "Show all commits"}',
+  );
+  expect(summarySource).toContain("prCommits.map(prCommittedRow)");
   expect(summarySource).toContain("commits.map(committedRow)");
-  expect(summarySource).not.toContain("setCommitsOpen");
 });
 
 test("uncommitted work opens Changes without using the separate commit action", () => {
@@ -35,6 +41,14 @@ test("uncommitted work opens Changes without using the separate commit action", 
   expect(summarySource).toContain("onClick={openUncommittedChanges}");
   expect(summarySource).toContain("onClick={askCommit}");
   expect(summarySource).toContain('title="View uncommitted changes"');
+});
+
+test("reviewers stay hidden until a pull request is connected", () => {
+  expect(summarySource).toContain("if (!pr) return []");
+  expect(summarySource).toContain(
+    "const hasConnectedPr = sessionHasConnectedPr(session)",
+  );
+  expect(summarySource).toContain('!hasConnectedPr && "hidden!"');
 });
 
 test("an assigned reviewer can be changed or cleared from the summary", () => {
@@ -62,4 +76,8 @@ test("popup review heading keeps a small gap after a lone PR band", () => {
   expect(summarySource).toContain(
     '"[.ws-summary-pr-group:has(>.ws-summary-band:last-child)+.ws-summary-review-group_&]:mt-1"',
   );
+});
+
+test("popup review tabs keep a small gap after the PR band", () => {
+  expect(summarySource).toContain('className={embedded ? undefined : "mt-1"}');
 });

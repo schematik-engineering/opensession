@@ -29,6 +29,7 @@ import {
   startBrowserDictation,
   type BrowserDictation,
 } from "../lib/browser-dictation";
+import { errorMessage } from "../lib/error-message";
 
 type Phase =
   | "idle"
@@ -291,9 +292,9 @@ export function VoiceInput({
         restoreFocus = true;
       }
     })()
-      .catch((error: any) => {
+      .catch((error) => {
         if (request !== requestRef.current) return;
-        setError(error?.message || "Transcription failed");
+        setError(errorMessage(error, "Transcription failed"));
         restoreFocus = true;
       })
       .finally(() => {
@@ -382,7 +383,7 @@ export function VoiceInput({
     // Live level meter for the waveform is progressive enhancement. Recording
     // works fine without it.
     await (async () => {
-      const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+      const Ctx = window.AudioContext || window.webkitAudioContext;
       const ctx: AudioContext = new Ctx();
       audioCtxRef.current = ctx;
       const analyser = ctx.createAnalyser();

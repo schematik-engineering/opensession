@@ -139,11 +139,19 @@ export async function setupRequest<T = unknown>(
         }
       : {}),
   });
-  let body: any = null;
+  let body: unknown = null;
   await (async () => {
     body = await res.json();
   })().catch(async () => {});
-  if (!res.ok) throw new Error(body?.error || `Request failed (${res.status})`);
+  const responseError =
+    typeof body === "object" &&
+    body !== null &&
+    "error" in body &&
+    typeof body.error === "string"
+      ? body.error
+      : null;
+  if (!res.ok)
+    throw new Error(responseError || `Request failed (${res.status})`);
   return body as T;
 }
 

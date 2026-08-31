@@ -2,13 +2,14 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentUser } from "./UserPicker";
 import { Button } from "../ui/button";
 import { noAutofill } from "../lib/composer-autofill";
+import type { WSClientMessage } from "../lib/types";
 
 interface Props {
   sessionId: string;
   /** Human label for the source, e.g. `PR #1234` — used in the delivered message. */
   label: string;
   /** WS sender; when absent the selection popover is disabled (read-only view). */
-  send?: (msg: any) => void;
+  send?: (msg: WSClientMessage) => void;
   children: React.ReactNode;
 }
 

@@ -21,14 +21,19 @@ function invocation(sourceText: string, component: string, from = 0) {
 }
 
 test("SessionViewer receives its socket capabilities from context", async () => {
-  const [viewer, app] = await Promise.all([
+  const [viewer, app, bindings] = await Promise.all([
     source("./SessionViewer.tsx"),
     source("../App.tsx"),
+    source("../lib/session-viewer-bindings.ts"),
   ]);
   const props = componentProps(viewer);
   expect(props).not.toContain("send:");
   expect(props).not.toContain("addHandler:");
-  expect(props).toContain("setTyping:");
+  expect(props).not.toContain("setTyping:");
+  expect(props).toContain("composer: ComposerBinding;");
+  expect(bindings).toContain(
+    "setTyping: (sessionId: string, active: boolean) => void;",
+  );
   expect(props).toContain("connected:");
   expect(viewer).toContain(
     'import { useSessionSocket } from "../hooks/useSessionSocket";',
@@ -38,7 +43,9 @@ test("SessionViewer receives its socket capabilities from context", async () => 
   const viewerInvocation = invocation(app, "SessionViewer");
   expect(viewerInvocation).not.toContain("send=");
   expect(viewerInvocation).not.toContain("addHandler=");
-  expect(viewerInvocation).toContain("setTyping={socket.setTyping}");
+  expect(viewerInvocation).not.toContain("setTyping=");
+  expect(viewerInvocation).toContain("composer={{");
+  expect(viewerInvocation).toContain("setTyping: socket.setTyping,");
   expect(viewerInvocation).toContain(
     "connected={socket.connected && !pendingSocket}",
   );
@@ -50,25 +57,24 @@ test("SessionViewer receives its socket capabilities from context", async () => 
   expect(app).toContain(
     "const sessionSocket = pendingSocket\n      ? socket.sessionSocketIgnoringMessages\n      : socket.sessionSocket;",
   );
-  expect(app).toMatch(/renderSessionPane\(\s+session,\s+socket,/);
-  expect(app).toMatch(/renderSessionPane\(\s+currentSession,\s+mainSocket,/);
+  expect(app).toMatch(/renderSessionPane\(\s*session,\s*socket,/);
+  expect(app).toMatch(/renderSessionPane\(\s*currentSession,\s*mainSocket,/);
 });
 
 test("SessionViewer descendants no longer receive socket props", async () => {
-  const [viewer, terminal] = await Promise.all([
+  const [viewer, sidePanelHost, terminal] = await Promise.all([
     source("./SessionViewer.tsx"),
+    source("./session/SidePanelHost.tsx"),
     source("./TerminalPanel.tsx"),
   ]);
   const prPanel = invocation(viewer, "PrPanel");
   expect(prPanel).not.toContain("send=");
   expect(prPanel).not.toContain("addHandler=");
 
-  let shellStart = 0;
-  for (let count = 0; count < 2; count += 1) {
-    const shellPanel = invocation(viewer, "ShellPanel", shellStart);
+  for (const host of [viewer, sidePanelHost]) {
+    const shellPanel = invocation(host, "ShellPanel");
     expect(shellPanel).not.toContain("send=");
     expect(shellPanel).not.toContain("addHandler=");
-    shellStart = viewer.indexOf("<ShellPanel", shellStart) + shellPanel.length;
   }
 
   expect(terminal).toContain(
@@ -80,6 +86,16 @@ test("SessionViewer descendants no longer receive socket props", async () => {
   );
   expect(shellProps).not.toContain("send:");
   expect(shellProps).not.toContain("addHandler:");
+});
+
+test("the side panel shell stays mounted while another panel tab is active", async () => {
+  const sidePanelHost = await source("./session/SidePanelHost.tsx");
+
+  expect(sidePanelHost).toContain("hasWorkspace && terminalMounted");
+  expect(sidePanelHost).toMatch(
+    /page === "terminal"\s*\? "flex h-full min-h-0 flex-col"\s*: "hidden"/,
+  );
+  expect(sidePanelHost).toContain('visible={page === "terminal"}');
 });
 
 test("PrPanel keeps explicit socket injection for other hosts", async () => {

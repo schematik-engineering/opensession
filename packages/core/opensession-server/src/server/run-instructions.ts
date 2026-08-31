@@ -167,6 +167,17 @@ export function buildRunInstructions(input: {
         "in-process worker.",
     );
   }
+  if (!input.isAsk && inproc["opensession-portals"]) {
+    parts.push(
+      "## Preview links\nBefore finishing a user-facing web change, set its exact " +
+        "root-relative route, query included. For editors, call `opensession-portals` " +
+        "`set_editor_preview_path` with a dedicated or fresh staging record: at least 60 " +
+        "seconds, 2+ clips, and a ready non-empty transcript. Pass a stable `exclusiveKey` " +
+        "such as `video:<id>` to prevent reuse by another active session. Never use a local " +
+        "fixture. For other web changes, call `set_portal_path` without a name. Open the " +
+        "resulting staging URL and verify it shows the changed feature.",
+    );
+  }
 
   parts.push(
     "## Media\nShow selected results with `OPENSESSION_IMAGE: /abs/path.png` or " +

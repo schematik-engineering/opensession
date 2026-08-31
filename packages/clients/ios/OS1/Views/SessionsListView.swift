@@ -2147,6 +2147,7 @@ struct SessionsListView: View {
                     in: viewModel.sessions,
                     containing: session
                 ),
+                relatedSessions: viewModel.sessions,
                 workspaceNames: viewModel.workspaceNames,
                 viewModelForSession: {
                     sessionPageCache.viewModel(

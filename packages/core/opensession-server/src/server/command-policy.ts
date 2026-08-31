@@ -176,6 +176,113 @@ function unquoteBareWord(inner: string): string | undefined {
   return /^[\w@%+=:,./-]*$/.test(inner) ? inner : undefined;
 }
 
+export interface PublicationPolicy {
+  repo: string;
+  branch: string;
+  headBranch: string;
+}
+
+/** Server-side floor for automation descendants. It permits publishing the
+ * owned feature branch and updating its PR, but never merging, pushing the
+ * protected base, or selecting another repository for a write. */
+export function publicationPolicyDenyReason(
+  command: string,
+  policy: PublicationPolicy,
+): string | undefined {
+  const scan = scannableCommand(command);
+  const shellCommands = scanShell(scan).commands;
+  for (const words of shellCommands) {
+    const gitIndex = words.indexOf("git");
+    if (gitIndex >= 0) {
+      let index = gitIndex + 1;
+      while (index < words.length && words[index].startsWith("-")) {
+        const option = words[index++];
+        if (
+          ["-C", "-c", "--git-dir", "--work-tree", "--namespace"].includes(
+            option,
+          )
+        )
+          index++;
+      }
+      const subcommand = words[index];
+      if (subcommand === "send-pack")
+        return "automation descendants cannot use git send-pack";
+      if (subcommand === "push") {
+        const pushArgs = words.slice(index + 1);
+        if (pushArgs.some((arg) => /^(?:https?:\/\/|git@|ssh:\/\/)/i.test(arg)))
+          return "automation descendants cannot push to an external repository URL";
+        const destinations = pushArgs.filter(
+          (arg) => !arg.startsWith("-") && arg !== "origin",
+        );
+        const normalizedDestinations = destinations.map((arg) =>
+          (arg.includes(":") ? arg.split(":").at(-1)! : arg).replace(
+            /^refs\/heads\//,
+            "",
+          ),
+        );
+        if (normalizedDestinations.includes(policy.branch))
+          return `automation descendants cannot push the protected base branch ${policy.branch}`;
+        if (
+          normalizedDestinations.length === 0 ||
+          normalizedDestinations.some(
+            (destination) => destination !== policy.headBranch,
+          )
+        )
+          return `automation descendants may only push their owned branch ${policy.headBranch}`;
+      }
+    }
+    const ghIndex = words.indexOf("gh");
+    if (ghIndex >= 0) {
+      for (let index = ghIndex + 1; index < words.length; index++) {
+        const word = words[index];
+        const inlineRepo = word.match(/^(?:--repo|-R)=(.+)$/)?.[1];
+        const repo =
+          inlineRepo ||
+          (word === "--repo" || word === "-R" ? words[index + 1] : undefined);
+        if (repo && repo !== policy.repo)
+          return `automation descendants cannot write to repository ${repo}`;
+      }
+      if (words.includes("api"))
+        return "automation descendants cannot use the general GitHub API";
+      if (words.includes("pr") && words.includes("merge"))
+        return "automation descendants cannot merge pull requests";
+    }
+  }
+  const escapedBranch = policy.branch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (
+    new RegExp(
+      `\\bgit\\s+push\\b[^\\n]*(?:HEAD:|refs/heads/)?${escapedBranch}(?:\\s|$)`,
+    ).test(scan)
+  )
+    return `automation descendants cannot push the protected base branch ${policy.branch}`;
+  if (/\bgit\s+push\s+(?:https?:\/\/|git@|ssh:\/\/)/i.test(scan))
+    return "automation descendants cannot push to an external repository URL";
+  if (/\bgit\s+push\b/i.test(scan)) {
+    const escapedHead = policy.headBranch.replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&",
+    );
+    const ownsDestination = new RegExp(
+      `(?:HEAD:)?(?:refs/heads/)?${escapedHead}(?:\\s|$)`,
+    ).test(scan);
+    if (!ownsDestination)
+      return `automation descendants may only push their owned branch ${policy.headBranch}`;
+  }
+  for (const match of scan.matchAll(
+    /\bgh\b[^\n]*\s(?:--repo|-R)\s+([^\s]+)/g,
+  )) {
+    if (match[1] !== policy.repo)
+      return `automation descendants cannot write to repository ${match[1]}`;
+  }
+  for (const match of scan.matchAll(
+    /\bgh\s+api\s+[^\n]*\/repos\/([^/\s]+\/[^/\s]+)/g,
+  )) {
+    if (match[1] !== policy.repo)
+      return `automation descendants cannot write to repository ${match[1]}`;
+  }
+  return undefined;
+}
+
 export interface CommandEvaluation {
   decision: CommandDecision;
   reason?: string;

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { linkPrStackApi } from "../../lib/api";
+import { errorMessage } from "../../lib/error-message";
 import type { PrDetails } from "../../lib/types";
 import { Badge } from "../../ui/badge";
 import { Button } from "../../ui/button";
@@ -33,8 +34,8 @@ export function StackLinkSection({
       toast("Linked into a stack");
       onLinked();
     })()
-      .catch(async (e: any) => {
-        setError(e?.message || "Couldn't link the stack");
+      .catch(async (error) => {
+        setError(errorMessage(error, "Couldn't link the stack"));
       })
       .finally(async () => {
         setLinking(false);

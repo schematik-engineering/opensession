@@ -74,6 +74,7 @@ import {
 } from "./icons";
 import { FileChips } from "./FileChips";
 import { UserAvatar } from "./UserAvatar";
+import { errorMessage } from "../lib/error-message";
 
 interface Props {
   sessionId: string;
@@ -329,8 +330,8 @@ export function PlainThreadActions({
       await fn();
       onChanged();
     })()
-      .catch(async (e: any) => {
-        setError(e?.message || "Plain update failed");
+      .catch(async (error) => {
+        setError(errorMessage(error, "Plain update failed"));
       })
       .finally(async () => {
         setBusy(false);
@@ -775,8 +776,8 @@ export function PlainReplyBox({
       sentTimer.current = setTimeout(() => setSent(false), 3000);
       onSent?.();
     })()
-      .catch(async (e: any) => {
-        setError(e?.message || "Failed to send");
+      .catch(async (error) => {
+        setError(errorMessage(error, "Failed to send"));
       })
       .finally(async () => {
         setSending(false);

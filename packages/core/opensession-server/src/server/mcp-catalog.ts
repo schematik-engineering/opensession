@@ -305,7 +305,7 @@ export const MCP_SERVER_CATALOG: McpServerCatalogEntry[] = [
       createPortalsMcpServer({
         sessionId: SESSION_ID,
         worktreeDir: () => undefined,
-        setDefaultPath: () => undefined,
+        setDefaultPath: async () => ({}),
         sandbox: async () => null,
         hasSandbox: () => false,
         runner: () => undefined,

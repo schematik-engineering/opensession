@@ -222,7 +222,7 @@ export function personLensName(
 
 interface BuildAutomationGroupsInput {
   sessions: UnifiedSession[];
-  activeSubagentIds: ReadonlySet<string>;
+  nestedSubagentIds: ReadonlySet<string>;
   automationOverview: AutomationOverviewByName;
   filter: FilterState;
   currentUser: string;
@@ -231,7 +231,7 @@ interface BuildAutomationGroupsInput {
 
 export function buildAutomationGroups({
   sessions,
-  activeSubagentIds,
+  nestedSubagentIds,
   automationOverview,
   filter,
   currentUser,
@@ -241,7 +241,7 @@ export function buildAutomationGroups({
   for (const session of sessions) {
     const name =
       typeof session.automation === "string" ? session.automation.trim() : "";
-    if (!name || activeSubagentIds.has(session.id) || isClaimed(session)) {
+    if (!name || nestedSubagentIds.has(session.id) || isClaimed(session)) {
       continue;
     }
     const items = sessionsByAutomation.get(name) ?? [];

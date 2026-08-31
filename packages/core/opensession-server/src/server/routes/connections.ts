@@ -13,9 +13,20 @@ import {
   getConnections,
   readMcpConfig,
   removeMcpServer,
+  requiresAllowedUsers,
   setMcpAllowedUsers,
 } from "../connections";
 import { refreshPickerModels } from "../models";
+import {
+  appleMobileSetupStatus,
+  appleReleaseApprover,
+  configureAppleMobileConnections,
+} from "../apple-mobile-connections";
+import {
+  approveReleasePlan,
+  listReleaseApprovalRequests,
+} from "../../../../../integrations/apple-mobile/src/plans";
+import { stateDir } from "../paths";
 import {
   BRIDGE_PROVIDER_IDS,
   PROVIDER_ID_RE,
@@ -41,6 +52,7 @@ import {
   isAwsMcpIamServer,
 } from "../aws-mcp-auth";
 import { githubMcpManagedAuth } from "../github-mcp-auth";
+import { requireWorkspaceAdmin } from "../workspace-auth";
 
 /** Navigate `integrations.github` in a raw parsed config object so the App
  *  routes can set or drop its keys without disturbing anything else the file
@@ -207,9 +219,96 @@ export async function handleConnectionsRoutes(
     });
   }
 
+  if (path === "/api/connections/apple-mobile" && req.method === "GET") {
+    return Response.json(appleMobileSetupStatus());
+  }
+
+  if (path === "/api/connections/apple-mobile" && req.method === "PUT") {
+    const forbidden = requireWorkspaceAdmin(ctx);
+    if (forbidden) return forbidden;
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== "object") {
+      return Response.json({ error: "Invalid JSON" }, { status: 400 });
+    }
+    try {
+      return Response.json(configureAppleMobileConnections(body));
+    } catch (error) {
+      return Response.json(
+        { error: error instanceof Error ? error.message : String(error) },
+        { status: 400 },
+      );
+    }
+  }
+
+  if (
+    path === "/api/connections/apple-mobile/approvals" &&
+    req.method === "GET"
+  ) {
+    const release = readMcpConfig().mcpServers["apple-release"];
+    const allowedUsers = Array.isArray(release?.allowedUsers)
+      ? release.allowedUsers
+      : [];
+    const approver = appleReleaseApprover(ctx.authUser, allowedUsers);
+    if (!ctx.authUser) {
+      return Response.json({
+        authenticated: false,
+        allowed: false,
+        requests: [],
+      });
+    }
+    const allowed = Boolean(approver);
+    return Response.json({
+      authenticated: true,
+      allowed,
+      requests: allowed
+        ? listReleaseApprovalRequests(stateDir("apple-mobile"))
+        : [],
+    });
+  }
+
+  const appleApprovalMatch = path.match(
+    /^\/api\/connections\/apple-mobile\/approvals\/([^/]+)$/,
+  );
+  if (appleApprovalMatch && req.method === "POST") {
+    if (!ctx.authUser) {
+      return Response.json(
+        { error: "Sign in to approve an Apple release" },
+        { status: 401 },
+      );
+    }
+    const release = readMcpConfig().mcpServers["apple-release"];
+    const allowedUsers = Array.isArray(release?.allowedUsers)
+      ? release.allowedUsers
+      : [];
+    const approver = appleReleaseApprover(ctx.authUser, allowedUsers);
+    if (!approver) {
+      return Response.json(
+        { error: "You are not allowed to approve Apple releases" },
+        { status: 403 },
+      );
+    }
+    try {
+      const request = approveReleasePlan(
+        decodeURIComponent(appleApprovalMatch[1]),
+        approver,
+        stateDir("apple-mobile"),
+      );
+      return Response.json({ ok: true, request });
+    } catch (error) {
+      return Response.json(
+        { error: error instanceof Error ? error.message : String(error) },
+        { status: 400 },
+      );
+    }
+  }
+
   if (path === "/api/connections/mcp" && req.method === "POST") {
     const body = await req.json().catch(() => null);
     if (!body) return Response.json({ error: "Invalid JSON" }, { status: 400 });
+    if (typeof body.name === "string" && requiresAllowedUsers(body.name)) {
+      const forbidden = requireWorkspaceAdmin(ctx);
+      if (forbidden) return forbidden;
+    }
     const result = addMcpServer(body);
     if ("error" in result) return Response.json(result, { status: 400 });
     return Response.json(result);
@@ -522,23 +621,26 @@ export async function handleConnectionsRoutes(
   }
 
   const mcpDelMatch = path.match(/^\/api\/connections\/mcp\/([^/]+)$/);
-  if (mcpDelMatch && req.method === "DELETE") {
-    const result = removeMcpServer(decodeURIComponent(mcpDelMatch[1]));
-    if ("error" in result) return Response.json(result, { status: 404 });
-    return Response.json(result);
-  }
+  if (mcpDelMatch && (req.method === "DELETE" || req.method === "PUT")) {
+    const name = decodeURIComponent(mcpDelMatch[1]);
+    if (requiresAllowedUsers(name)) {
+      const forbidden = requireWorkspaceAdmin(ctx);
+      if (forbidden) return forbidden;
+    }
 
-  // Restrict an existing MCP server to specific users (or clear the
-  // restriction with an empty/absent list).
-  if (mcpDelMatch && req.method === "PUT") {
+    if (req.method === "DELETE") {
+      const result = removeMcpServer(name);
+      if ("error" in result) return Response.json(result, { status: 404 });
+      return Response.json(result);
+    }
+
+    // Restrict an existing MCP server to specific users (or clear the
+    // restriction with an empty/absent list).
     const body = await req.json().catch(() => null);
     const allowedUsers = Array.isArray(body?.allowedUsers)
       ? body.allowedUsers
       : undefined;
-    const result = setMcpAllowedUsers(
-      decodeURIComponent(mcpDelMatch[1]),
-      allowedUsers,
-    );
+    const result = setMcpAllowedUsers(name, allowedUsers);
     if ("error" in result) return Response.json(result, { status: 404 });
     return Response.json(result);
   }

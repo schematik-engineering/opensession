@@ -46,7 +46,15 @@ import {
   automationRunMcpForSession,
   selfImproveMcpForSession,
 } from "./automations";
-import { findSession, touchNativeSession } from "./session-cache";
+import {
+  findSession,
+  touchNativeSession,
+  touchNativeSessionStrict,
+} from "./session-cache";
+import {
+  claimPreviewPathLease,
+  releasePreviewPathLease,
+} from "./preview-path-leases";
 import {
   attachRepo,
   linkPr,
@@ -279,10 +287,45 @@ export function interactiveMcpServers(
             hasSandbox: () =>
               Boolean(findSession(sessionId)?.sandbox?.sandboxId),
             runner: () => findSession(sessionId),
-            setDefaultPath: (path) =>
-              touchNativeSession(sessionId, {
-                previewPath: path || undefined,
-              }),
+            setDefaultPath: async (path, options) => {
+              const session = findSession(sessionId);
+              if (!session) throw new Error("Session not found.");
+              if (!options?.exclusiveKey) {
+                await touchNativeSessionStrict(sessionId, {
+                  previewPath: path || undefined,
+                });
+                try {
+                  releasePreviewPathLease(sessionId);
+                } catch (error) {
+                  console.error(
+                    `Failed to release preview reservation for ${sessionId}:`,
+                    error,
+                  );
+                }
+                return {};
+              }
+              const claim = claimPreviewPathLease({
+                key: options.exclusiveKey,
+                sessionId,
+                path: path || "/",
+                ttlMinutes: options.leaseMinutes,
+              });
+              if (!claim.ok)
+                throw new Error(
+                  "That staging record is already reserved by another active session. Choose or create another record.",
+                );
+              try {
+                await touchNativeSessionStrict(sessionId, {
+                  previewPath: path || undefined,
+                });
+                return { leaseId: claim.lease.id };
+              } catch (error) {
+                releasePreviewPathLease(sessionId, {
+                  leaseId: claim.lease.id,
+                });
+                throw error;
+              }
+            },
           }),
           // Publish a demo walkthrough (video + before/after + writeup) onto
           // the session's Review tab and the PR description.

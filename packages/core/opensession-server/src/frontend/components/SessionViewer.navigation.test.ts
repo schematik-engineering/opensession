@@ -33,8 +33,6 @@ const availabilityProps = [
 const retainedCallbackProps = [
   "onArchive",
   "onArchived",
-  "setTyping",
-  "onComposerPrefillConsumed",
   "onRename",
   "onRenameWorkspace",
   "onArchiveWorkspace",
@@ -106,6 +104,16 @@ test("SessionViewer navigation comes from NavigationContext", async () => {
   expect(viewer).toContain("onOpenSession={openCurrentWorkspace}");
 });
 
+test("fork session stays available at the current tip inside a workspace", async () => {
+  const { viewer } = await sources();
+  expect(viewer).toContain("                  {forkAction}");
+  expect(viewer).not.toContain("{!workspaceScopedMenu && forkAction}");
+  expect(viewer).toContain("                handleFork();");
+  expect(viewer).not.toContain("const lastAssistantId = entries.findLast(");
+  expect(viewer).toContain('{ kind: "tip" }');
+  expect(viewer).toContain("? { messageId: forkFrom.messageId }");
+});
+
 test("App passes only SessionViewer navigation availability", async () => {
   const { app } = await sources();
   const viewerStart = app.indexOf("<SessionViewer\n");
@@ -126,5 +134,13 @@ test("App passes only SessionViewer navigation availability", async () => {
   );
   expect(viewerInvocation).toContain(
     "canStartNewSession={!viewerSession.desk && !emptyWorkspaceSession}",
+  );
+
+  const openSessionStart = app.indexOf("const openSession =");
+  const openSessionEnd = app.indexOf("\n  };", openSessionStart);
+  expect(openSessionStart).toBeGreaterThanOrEqual(0);
+  expect(openSessionEnd).toBeGreaterThan(openSessionStart);
+  expect(app.slice(openSessionStart, openSessionEnd)).toContain(
+    "setActiveViewTab(null);",
   );
 });

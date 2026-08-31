@@ -2,7 +2,11 @@ import { repoLabel } from "../lib/repo-label";
 import { cleanSessionTitle } from "../lib/session-title";
 import { AGENT_NAME } from "../lib/brand";
 import React, { useEffect, useState } from "react";
-import type { UnifiedSession, WSServerMessage } from "../lib/types";
+import type {
+  UnifiedSession,
+  WSClientMessage,
+  WSServerMessage,
+} from "../lib/types";
 import { relativeTime } from "../lib/api";
 import { PrPanel } from "./PrPanel";
 import { providerFromUrl, avatarUrl } from "../lib/provider";
@@ -17,7 +21,7 @@ interface Props {
   /** Open another PR in the review panel (stack map layer links). */
   onOpenPr?: (repo: string, branch: string) => void;
   onAddToInput: (id: string, text: string) => void;
-  send?: (msg: any) => void;
+  send?: (msg: WSClientMessage) => void;
   addHandler?: (handler: (msg: WSServerMessage) => void) => () => void;
 }
 

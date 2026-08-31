@@ -13,6 +13,7 @@ import {
   listSandboxPortalServices,
   restartPortalService,
   restartSandboxPortalService,
+  normalizePortalPath,
   setPortalPath,
   setSandboxPortalPath,
   startPortalService,
@@ -36,7 +37,10 @@ import { getRepo } from "./worktree";
 export interface PortalsMcpContext {
   sessionId: string;
   worktreeDir: () => string | undefined;
-  setDefaultPath: (path: string | null) => void;
+  setDefaultPath: (
+    path: string | null,
+    options?: { exclusiveKey?: string; leaseMinutes?: number },
+  ) => Promise<{ leaseId?: string }>;
   /** An explicit computation action may wake the Sandbox. Passive listing may not. */
   sandbox: (options?: { wake?: boolean }) => Promise<Sandbox | null>;
   hasSandbox: () => boolean;
@@ -378,6 +382,66 @@ export function createPortalsMcpServer(ctx: PortalsMcpContext) {
         },
       ),
       tool(
+        "set_editor_preview_path",
+        "Set and exclusively reserve the staging route for an editor feature. Call this only after verifying the staging record is at least 60 seconds long, has multiple clips, and has a ready non-empty transcript.",
+        {
+          path: z.string(),
+          exclusiveKey: z.string().regex(/^video:[A-Za-z0-9_-]+$/),
+          durationSeconds: z.number().min(60),
+          clipCount: z.number().int().min(2),
+          transcriptWordCount: z.number().int().min(1),
+          leaseMinutes: z
+            .number()
+            .int()
+            .min(10)
+            .max(30 * 24 * 60)
+            .optional(),
+        },
+        async ({
+          path,
+          exclusiveKey,
+          durationSeconds,
+          clipCount,
+          transcriptWordCount,
+          leaseMinutes,
+        }: {
+          path: string;
+          exclusiveKey: string;
+          durationSeconds: number;
+          clipCount: number;
+          transcriptWordCount: number;
+          leaseMinutes?: number;
+        }) => {
+          const dir = workspace(ctx);
+          if (dir instanceof Error) return result(dir.message);
+          try {
+            const normalized = normalizePortalPath(path);
+            if (!normalized)
+              throw new Error("An editor staging route cannot be empty.");
+            const videoId = exclusiveKey.slice("video:".length);
+            const pathname = new URL(normalized, "https://preview.invalid")
+              .pathname;
+            if (!pathname.split("/").includes(videoId))
+              throw new Error(
+                "The exclusive video key must match the video ID in the route.",
+              );
+            const reservation = await ctx.setDefaultPath(normalized, {
+              exclusiveKey,
+              leaseMinutes,
+            });
+            if (!reservation.leaseId)
+              throw new Error("The staging record could not be reserved.");
+            return result(
+              `Reserved ${normalized} for this session (${Math.round(durationSeconds)}s, ${clipCount} clips, ${transcriptWordCount} transcript words).`,
+            );
+          } catch (error) {
+            return result(
+              `Could not set editor preview path: ${(error as Error).message}`,
+            );
+          }
+        },
+      ),
+      tool(
         "set_portal_path",
         "Set the root-relative route a Portal should open by default. Omit name to set the session's default testing route.",
         { name: z.string().optional(), path: z.string() },
@@ -398,12 +462,14 @@ export function createPortalsMcpServer(ctx: PortalsMcpContext) {
                 );
               if (sandbox) await setSandboxPortalPath(sandbox, path, name);
               else setPortalPath(dir, path, name);
-            } else ctx.setDefaultPath(path.trim() === "" ? null : path);
-            return result(
-              name
-                ? `Set ${name}'s default route to ${path || "/"}.`
-                : `Set this session's default route to ${path || "/"}.`,
-            );
+            } else {
+              const normalized = normalizePortalPath(path) ?? null;
+              await ctx.setDefaultPath(normalized);
+              return result(
+                `Set this session's default route to ${normalized || "/"}.`,
+              );
+            }
+            return result(`Set ${name}'s default route to ${path || "/"}.`);
           } catch (error) {
             return result(
               `Could not set Portal path: ${(error as Error).message}`,

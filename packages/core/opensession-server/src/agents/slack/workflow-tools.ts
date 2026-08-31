@@ -40,6 +40,7 @@ import { selectableModels } from "../../server/models";
 import { workflowPhaseStats } from "../../shared/workflow-observability";
 import type {
   WorkflowAgentSnapshot,
+  WorkflowAutomationSessionPolicy,
   WorkflowRunSnapshot,
 } from "../../server/workflow-types";
 
@@ -71,6 +72,8 @@ export interface WorkflowsToolContext {
   /** Per-call tool denials for mcp.* (automation runs: Plain customer-facing
    *  writes, WorkOS identity mutation). */
   deniedTools?: Record<string, string>;
+  /** Human-owned automation policy for durable code child sessions. */
+  automationSessionPolicy?: WorkflowAutomationSessionPolicy;
   /** The in-process opensession-* servers this run carries, built FRESH per
    *  call (an McpServer holds one transport — see workflow-mcp.ts). Supplied
    *  by interactive sessions only; an automation's script stays external-only.
@@ -223,6 +226,7 @@ export function createWorkflowsMcpServer(ctx: WorkflowsToolContext) {
             budgetTotal: args.budget_tokens,
             mcpAllowlist: ctx.mcpAllowlist,
             deniedTools: ctx.deniedTools,
+            automationSessionPolicy: ctx.automationSessionPolicy,
             inProcessMcp: ctx.inProcessMcp,
           });
           return text(
@@ -487,6 +491,7 @@ export function createWorkflowsMcpServer(ctx: WorkflowsToolContext) {
             resumeFromRunId: args.run_id,
             mcpAllowlist: ctx.mcpAllowlist,
             deniedTools: ctx.deniedTools,
+            automationSessionPolicy: ctx.automationSessionPolicy,
             inProcessMcp: ctx.inProcessMcp,
           });
           return text(

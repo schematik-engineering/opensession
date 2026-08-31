@@ -23,6 +23,9 @@ export type RunnerExecutionPermissions = {
   fullSessions: boolean;
   terminals: boolean;
   portals: boolean;
+  /** Explicit operator assertion that descendant runs use a separate OS
+   * identity/filesystem and cannot read host credentials. */
+  automationDescendants: boolean;
 };
 
 export type RunnerResources = {
@@ -164,6 +167,7 @@ function defaultPermissions(): RunnerExecutionPermissions {
     fullSessions: false,
     terminals: false,
     portals: false,
+    automationDescendants: false,
   };
 }
 
@@ -309,11 +313,13 @@ function normalizeRunner(value: Runner): Runner {
       : {}),
     permissions: {
       commands: permissions.commands !== false,
-      // Runner full sessions are not shipped. Keep legacy fields false so
-      // an old record or client cannot reactivate the removed path.
+      // Runner full sessions remain disabled until the isolated execution
+      // implementation ships. The automation flag records operator policy but
+      // cannot reactivate this separate execution gate.
       fullSessions: false,
       terminals: false,
       portals: false,
+      automationDescendants: permissions.automationDescendants === true,
     },
     allowedUsers: cleanStrings(raw.allowedUsers),
     allowedRepos: cleanStrings(raw.allowedRepos),
@@ -573,7 +579,13 @@ export function setRunnerWorkload(
  * interleave with another turn between eligibility and reservation. */
 export function claimRunnerWorkload(
   id: string,
-  input: { user?: string; repo?: string; sessionId: string; operation: string },
+  input: {
+    user?: string;
+    repo?: string;
+    sessionId: string;
+    operation: string;
+    automationDescendant?: boolean;
+  },
 ): Runner | undefined {
   const store = load();
   const runner = store.runners.find((candidate) => candidate.id === id);
@@ -718,10 +730,17 @@ export function runnerOwnsWorkspace(
  * until multi-host capacity accounting is available on the Runner channel. */
 export function runnerAvailableForSession(
   runner: Runner,
-  input: { user?: string; repo?: string; sessionId: string },
+  input: {
+    user?: string;
+    repo?: string;
+    sessionId: string;
+    automationDescendant?: boolean;
+  },
 ): boolean {
-  if (!runnerAllowed(runner, { ...input, permission: "fullSessions" }))
-    return false;
+  const permission = input.automationDescendant
+    ? "automationDescendants"
+    : "fullSessions";
+  if (!runnerAllowed(runner, { ...input, permission })) return false;
   const reservation = runner.reservation;
   if (
     reservation &&

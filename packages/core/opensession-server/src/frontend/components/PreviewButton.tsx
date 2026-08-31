@@ -9,6 +9,7 @@ import {
 import type { UnifiedSession } from "../lib/types";
 import { BASE_PATH } from "../lib/base";
 import { withPreviewPath } from "../lib/preview-url";
+import { errorMessage } from "../lib/error-message";
 import { Tooltip } from "../ui/tooltip";
 import { Button } from "../ui/button";
 import { cn } from "../ui/cn";
@@ -245,8 +246,8 @@ export function PreviewButton({
     setShotError(null);
     await (async () => {
       setShot(await capturePreviewShot(session.id));
-    })().catch(async (e: any) => {
-      setShotError(e.message);
+    })().catch(async (error) => {
+      setShotError(errorMessage(error, "Failed to capture preview"));
       setShot(null);
     });
     setSnapping(false);

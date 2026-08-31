@@ -1,12 +1,14 @@
-# Investigation
+### Investigation
 
-Own the answer. Do not modify source unless the user also asked for a fix.
+**You own the answer. Plan, route, write.**
 
-1. Restate the exact question and what evidence would settle it.
-2. Read the narrow owning code path, its callers, types, tests, and relevant history. Search by concrete symbols and error text instead of scanning the repository.
-3. When independent evidence streams exist, delegate bounded slices such as source, history, and runtime behavior. Keep the final judgment in this session.
-4. Trace one representative input through the real data flow. Distinguish observed facts from inference.
-5. Try to falsify the leading explanation with a focused test, query, or runtime observation.
-6. Return the answer with source locations and the smallest useful next action. If evidence is incomplete, name what is missing.
+Read-only requests: "how does X work?", "why was Y built this way?", "are we sure about Z?", "should we do X or Y?". They produce a cited explanation or a recommendation, not a code change.
 
-Do not build speculative scaffolding for a read-only answer.
+1. Route through the **how** skill (Explain mode for narrow questions, Critique mode for "are we sure?"). For motivation questions, also route through the **why** skill.
+2. Throughput checkpoint stays one line: `throughput checkpoint: n/a, read-only investigation`. The four-item version is for code-shaped work.
+3. Produce the `how`-shaped output (Overview / Key Concepts / How It Works / Where Things Live / Gotchas), or a recommendation with a tradeoffs table if the request is a decision between alternatives.
+4. Apply the **unslop** skill to the reply.
+
+No PR, no babysit, no `architect` unless the investigation precedes a code change. If it does, hand back to the user and re-route to Bug fix or Feature.
+
+**Reply:** the investigation output. For "are we sure?" answers, include your real judgment with reasons. Push back if the premise is wrong (see Autonomy).

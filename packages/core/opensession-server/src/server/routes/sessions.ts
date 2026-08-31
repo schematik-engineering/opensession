@@ -49,7 +49,12 @@ import {
 } from "../queue-state";
 
 import { markPrReviewNotified } from "../pr-review-notifications";
-import { getPrsByRepo } from "../pr-cache";
+import {
+  footerPrsFor,
+  getPrsByRepo,
+  prsBySessionRef,
+  type PrInfo,
+} from "../pr-cache";
 import {
   getReviewRequest,
   setReviewAccepted,
@@ -141,7 +146,7 @@ import {
   githubMutationCredential,
 } from "./github-credential";
 import { defaultRepo } from "../config";
-import type { UnifiedSession } from "../types";
+import type { SessionPrRef, UnifiedSession } from "../types";
 import { shareWorkspacePrRefs } from "../session-pr-target";
 import {
   indexedSessions,
@@ -442,13 +447,58 @@ async function sessionListRuntimeSignals(): Promise<SessionListRuntimeSignals> {
 type SessionEnrichmentContext = {
   defaultRepoId: string;
   prsByRepo: ReturnType<typeof getPrsByRepo>;
+  prsBySession: ReturnType<typeof prsBySessionRef>;
   workspaceNames: ReadonlyMap<string, string>;
 };
 
+type FooterPrMatch = { repo: string; branch: string; pr: PrInfo };
+
+/**
+ * Restore PRs discovered from attribution footers on materialized list rows.
+ *
+ * Native session writes update one SQLite row from the durable session file,
+ * which deliberately contains no derived PR fields. The list route therefore
+ * has to reapply footer discovery just like the full session assembly does.
+ */
+export function mergeFooterPrRefs(
+  session: UnifiedSession,
+  matches: readonly FooterPrMatch[],
+): SessionPrRef[] {
+  const refs = [...(session.prs || [])];
+  for (const { repo, branch, pr } of matches) {
+    const current = refs.findIndex(
+      (ref) => ref.repo === repo && ref.branch === branch,
+    );
+    const discovered: SessionPrRef = {
+      repo,
+      branch,
+      source: "discovered",
+      url: pr.url,
+      state: pr.state,
+      number: pr.number,
+      title: pr.title,
+      isDraft: pr.isDraft,
+      reviewDecision: pr.reviewDecision,
+      mergeable: pr.mergeable,
+      additions: pr.additions,
+      deletions: pr.deletions,
+      checks: pr.checks,
+    };
+    if (current < 0) refs.push(discovered);
+    else {
+      const existing = refs[current]!;
+      refs[current] = { ...discovered, source: existing.source };
+    }
+  }
+  return refs;
+}
+
 function sessionEnrichmentContext(): SessionEnrichmentContext {
+  const prsByRepo = getPrsByRepo();
   return {
     defaultRepoId: defaultRepo().id,
-    prsByRepo: getPrsByRepo(),
+    prsByRepo,
+    prsBySession: prsBySessionRef(prsByRepo),
     workspaceNames: workspaceNameSnapshot(),
   };
 }
@@ -476,6 +526,7 @@ function enrichSession(
   const currentPr = s.branch
     ? context.prsByRepo.get(s.repo || context.defaultRepoId)?.get(s.branch)
     : undefined;
+  const prs = mergeFooterPrRefs(s, footerPrsFor(context.prsBySession, s));
   const quarantine = signals?.quarantines.get(s.id);
   const safety = quarantine
     ? publicSessionSafety(quarantine, signals?.runtime.claimedJournalSessions)
@@ -513,6 +564,7 @@ function enrichSession(
           prChecks: currentPr.checks,
         }
       : {}),
+    ...(prs.length ? { prs } : {}),
     repo: s.repo || context.defaultRepoId,
     // The name of the workspace this session is filed under. A sidebar row
     // names a workspace, never one of its tabs, and the workspace list is

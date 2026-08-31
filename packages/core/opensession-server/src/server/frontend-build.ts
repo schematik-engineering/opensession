@@ -530,16 +530,22 @@ export function renderIndexHtml(
 
 /** Point the served bundle at `meta`: render index.html and swap the store
  *  contents in place (never reassigned; routes hold the one reference). */
-function publishStableShell(): void {
-  if (process.env.OPENSESSION_GATEWAY_ROLE === "standby") return;
+function publishStableShell(activated = false): void {
+  if (process.env.OPENSESSION_GATEWAY_ROLE === "standby" && !activated) return;
   const store = frontendStore();
   if (!store.indexHtml || !store.version) return;
   try {
-    publishStableFrontendSnapshot(frontendDeployStateDir(), {
+    const published = publishStableFrontendSnapshot(frontendDeployStateDir(), {
       releaseRoot: activeFrontendReleaseRoot(),
+      fallbackRoots:
+        (g.__opensessionFrontendFallbackRoots as string[] | undefined) ?? [],
       version: store.version,
       indexHtml: store.indexHtml,
     });
+    // Full backend deploys start a fresh process, so their in-memory fallback
+    // list is empty. The stable snapshot carries the preceding release chain
+    // across that restart and keeps old content-hashed chunks lazy-loadable.
+    g.__opensessionFrontendFallbackRoots = published.fallbackRoots;
   } catch (error) {
     console.error("[frontend] could not publish stable ingress shell", error);
   }
@@ -902,7 +908,15 @@ export function preloadPreparedFrontend(): void {
 }
 
 export function ensureFrontendBuilt(): Promise<void> {
-  if (!frontend || frontend.version) return Promise.resolve();
+  if (!frontend) return Promise.resolve();
+  // A coordinated gateway handoff keeps this process and its built frontend
+  // store alive while loading the next release. Republish the stable ingress
+  // snapshot for that release even though there is nothing left to build.
+  if (frontend.version) {
+    // Standby gateways reach this point only after their activation fence.
+    publishStableShell(true);
+    return Promise.resolve();
+  }
   if (!g.__opensessionFrontendBuild) {
     g.__opensessionFrontendBuild = (async () => {
       // Compiled binary: the bundle is baked in, no source tree or Tailwind

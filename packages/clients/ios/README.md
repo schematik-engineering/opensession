@@ -207,6 +207,8 @@ Pure SwiftUI with SwiftStreamingMarkdown for CommonMark/GFM rendering. See
   The floating glass composer uses a
   progressive material fade so transcript content recedes cleanly beneath it;
   its full surface focuses the field and keeps a comfortable keyboard gap.
+  Typing `@` in either this input or the new-session prompt opens the same
+  inline people, tools, workspaces, sessions, and files palette as the web UI.
 - **Dictation** — the composer's mic (first of the trailing controls, ahead of
   stop, every session) is speech to text, not a call: `Dictation.swift` runs
   `SFSpeechRecognizer` over an `AVAudioEngine` tap and streams the utterance
@@ -218,9 +220,9 @@ Pure SwiftUI with SwiftStreamingMarkdown for CommonMark/GFM rendering. See
   the button renders in and would otherwise destroy its state mid-sentence.
 - **Session creation** — a full-height prompt editor with attachments and a
   compact single-row iOS toolbar for repository, mode, and model settings. The
-  same controls move into the keyboard accessory while the prompt is focused,
-  with an 8pt gap above the keys so attachments, options, model, and dictation
-  remain reachable and visually separate while typing.
+  same controls move into a keyboard-aware safe-area row while the prompt is
+  focused, with an 8pt gap above the keys and a trailing keyboard-dismiss button.
+  Dragging the editor down dismisses the keyboard before the sheet can move.
   Opening a file with OS from Files or another app starts a fresh composer with
   that file attached. Images use the vision channel; other files upload to the
   session's staged file channel before Start becomes available.

@@ -61,6 +61,9 @@ test("workspace Review keeps the implementation summary beside the PR canvas", (
   expect(source).toContain("session={presentationSession}");
   expect(source).toContain("onOpenChange={setReviewSummaryOpen}");
   expect(source).toContain("compactToolbar={reviewSummaryVisible}");
+  expect(source).toMatch(
+    /const reviewSummaryVisible =\s*tab === "review" &&\s*!!presentationSession &&/,
+  );
   expect(viewerSource).toContain("compactToolbar={summaryVisible}");
   expect(viewerSource).not.toContain("WS_SUMMARY_REVIEW_CLEARANCE");
   expect(source).toContain("walkthrough={presentationSession?.walkthrough}");
@@ -204,8 +207,10 @@ test("wide Review keeps its controls stable while page navigation moves", () => 
     "desktop:[--review-file-tree-gap:0px] desktop:[--review-file-tree-top:60px]",
   );
   expect(prPanelSource).toContain(
-    'compactToolbar ? "overflow-y-visible desktop:[--review-file-header-top:61px]" : "overflow-y-auto"',
+    'compactToolbar ? "overflow-y-visible" : "overflow-y-auto"',
   );
+  expect(prPanelSource).toContain("stickyFileHeaders: false");
+  expect(prPanelSource).not.toContain("--review-file-header-top");
   expect(prPanelSource).toContain('${compactToolbar ? "pt-0" : "pt-2"}');
 });
 

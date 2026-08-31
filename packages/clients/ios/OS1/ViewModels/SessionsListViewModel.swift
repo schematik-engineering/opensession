@@ -290,6 +290,9 @@ final class SessionsListViewModel {
     /// Live sibling sessions shown in the conversation tab strip. This mirrors
     /// the web client: workspace membership wins, with isolated worktrees as
     /// the fallback for legacy rows, and the natural order is oldest first.
+    /// Worker sessions are drill-ins reached from their parent's More menu,
+    /// never tabs of their own. Opening one directly therefore produces a
+    /// one-session view with no strip.
     nonisolated static func tabSessions(
         in sessions: [Session], containing current: Session
     ) -> [Session] {
@@ -297,11 +300,13 @@ final class SessionsListViewModel {
         // Prefer the latest polled copy so a newly filed optimistic session
         // joins its workspace without requiring the conversation to reopen.
         let current = sessions.first { $0.id == current.id } ?? current
+        if current.parentSessionId?.isEmpty == false { return [current] }
         guard hasWorkspaceGroup(current) else {
             return [current]
         }
         var tabs = sessions.filter {
             inWorkspaceGroup($0, containing: current)
+                && $0.parentSessionId?.isEmpty != false
                 && ($0.archived != true || $0.id == current.id)
         }
         if !tabs.contains(where: { $0.id == current.id }) {
@@ -315,6 +320,22 @@ final class SessionsListViewModel {
         let main = mainSession(in: tabs)
         guard let main else { return [] }
         return [main] + tabs.filter { $0.id != main.id }
+    }
+
+    /// Direct, live workers delegated by one session, in the order they were
+    /// created. The web header derives its worker menu from this same parent
+    /// relationship rather than workspace membership because a worker may use
+    /// a temporary workspace of its own.
+    nonisolated static func workerSessions(
+        in sessions: [Session], parentId: String
+    ) -> [Session] {
+        sessions
+            .filter { $0.parentSessionId == parentId && $0.archived != true }
+            .sorted {
+                let left = $0.createdAt ?? ""
+                let right = $1.createdAt ?? ""
+                return left == right ? $0.id < $1.id : left < right
+            }
     }
 
     /// Closed siblings shown by a workspace's history menu.

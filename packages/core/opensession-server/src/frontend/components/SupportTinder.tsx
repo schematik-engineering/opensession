@@ -21,6 +21,7 @@ import { cn } from "../ui/cn";
 import { DeckDone, SwipeCard } from "../ui/swipe-deck";
 import { dismissToast, toast } from "../ui/toast";
 import { UNDO_MS, ageLabel, ageTone, shuffle } from "../lib/swipe-deck";
+import { errorMessage } from "../lib/error-message";
 
 /**
  * Support Tinder — the swipe deck for the Plain Todo queue, one ticket at
@@ -252,9 +253,9 @@ export function SupportTinder({ onExit, onOpenSession }: Props) {
       setIndex(entry.at);
       showToast(msg);
     };
-    const fail = (e: any) => {
+    const fail = (error: unknown) => {
       setBusy(false);
-      showToast(`Undo failed: ${e.message || e}`);
+      showToast(`Undo failed: ${errorMessage(error, "unknown error")}`);
     };
     setBusy(true);
     if (entry.kind === "spam") {

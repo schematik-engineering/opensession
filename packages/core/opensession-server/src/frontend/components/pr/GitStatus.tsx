@@ -15,7 +15,11 @@ import {
   GIT_NOTE,
   GIT_ROW,
 } from "../../lib/pr-tone-classes";
-import type { GitStatusInfo, PrDetails } from "../../lib/types";
+import type {
+  GitStatusInfo,
+  PrDetails,
+  WSClientMessage,
+} from "../../lib/types";
 import { Button } from "../../ui/button";
 import { MergeUndoControl } from "./MergeUndoControl";
 
@@ -40,7 +44,7 @@ export function GitStatusRows({
   pr: PrDetails | null;
   sessionId: string;
   repo?: string;
-  send?: (msg: any) => void;
+  send?: (msg: WSClientMessage) => void;
   onRefresh: () => Promise<void> | void;
   onMerge?: () => void;
   merging?: boolean;

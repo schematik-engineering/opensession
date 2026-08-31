@@ -12,6 +12,7 @@ import { DeviceCode } from "../ui/device-code";
 import { InlineAlert } from "../ui/state";
 import { PulseDot } from "../ui/status";
 import { AUTH_STATUS_EVENT, authGatesOut } from "../lib/auth-ready";
+import { errorMessage } from "../lib/error-message";
 
 /**
  * Mutable compatibility view for older consumers. `usePeople()` owns the
@@ -460,8 +461,8 @@ function GithubSignIn({
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
       setFlow(body);
-    })().catch(async (e: any) => {
-      setError(e.message);
+    })().catch(async (error) => {
+      setError(errorMessage(error, "Failed to start sign-in"));
     });
     setStarting(false);
   }

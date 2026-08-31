@@ -6,6 +6,7 @@ import {
   type AssetStorageSettingsDto,
   type AssetStorageSettingsInput,
 } from "../../lib/api";
+import { errorMessage } from "../../lib/error-message";
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
 import { OptionSelect } from "../../ui/select";
@@ -72,9 +73,9 @@ export function StoragePanel() {
       if (cancelled?.()) return;
       setSaved(next);
       setDraft(draftFrom(next));
-    })().catch(async (cause: any) => {
+    })().catch(async (cause) => {
       if (!cancelled?.())
-        setError(cause?.message || "Couldn’t load asset storage");
+        setError(errorMessage(cause, "Couldn’t load asset storage"));
     });
   }
 
@@ -100,9 +101,9 @@ export function StoragePanel() {
       setTested(true);
       toast("Storage connection works.", { variant: "success" });
     })()
-      .catch(async (cause: any) => {
+      .catch(async (cause) => {
         setTested(false);
-        setError(cause?.message || "Couldn’t connect to storage");
+        setError(errorMessage(cause, "Couldn’t connect to storage"));
       })
       .finally(async () => {
         setBusy(null);
@@ -125,8 +126,8 @@ export function StoragePanel() {
         { variant: "success" },
       );
     })()
-      .catch(async (cause: any) => {
-        setError(cause?.message || "Couldn’t save asset storage");
+      .catch(async (cause) => {
+        setError(errorMessage(cause, "Couldn’t save asset storage"));
       })
       .finally(async () => {
         setBusy(null);

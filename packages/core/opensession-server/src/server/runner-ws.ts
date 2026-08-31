@@ -239,6 +239,8 @@ export type RunnerWorkspaceRequest = {
   /** Short-lived, repository-scoped clone credential. Never persisted. */
   cloneToken?: string;
   user?: string;
+  /** Server-authenticated create provenance, never accepted from agent text. */
+  automationDescendant?: boolean;
 };
 
 export type RunnerWorkspaceResult = { cwd: string };
@@ -740,6 +742,21 @@ export function runnerWsMessage(ws: any, raw: string | Buffer): boolean {
       });
       return true;
     }
+    case "branch_bundle_result": {
+      const id = String(message.id);
+      const pending = connection.pending.get(id);
+      if (!pending || message.operationToken !== pending.operationToken)
+        return true;
+      clearTimeout(pending.timer);
+      connection.pending.delete(id);
+      pending.resolve({
+        code: message.ok === true ? 0 : -1,
+        stdout: "",
+        stderr: String(message.error || ""),
+        data: message.bundle,
+      });
+      return true;
+    }
     case "workspace_ready": {
       const id = String(message.id);
       const pending = connection.pending.get(id);
@@ -887,6 +904,70 @@ export function runnerWsMessage(ws: any, raw: string | Buffer): boolean {
   return true;
 }
 
+/** Export one credential-free owned branch from a Runner workspace. */
+export async function requestRunnerBranchBundle(
+  runnerId: string,
+  request: {
+    sessionId: string;
+    repo: string;
+    workspacePath: string;
+    branch: string;
+  },
+): Promise<Buffer> {
+  const connection = connections.get(runnerId);
+  if (!connection || connection.protocolVersion !== PROTOCOL_VERSION)
+    throw new Error(`Runner ${runnerId} is not connected`);
+  const runner = getRunner(runnerId);
+  if (
+    !runner ||
+    !runnerAllowed(runner, {
+      repo: request.repo,
+      permission: "automationDescendants",
+    }) ||
+    !runnerOwnsWorkspace(runner, request.workspacePath, request.sessionId)
+  )
+    throw new Error("Runner cannot export this automation workspace");
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(request.branch))
+    throw new Error("Invalid branch for Runner bundle export");
+  const id = `rb${++executionCounter}-${Date.now().toString(36)}`;
+  const operationToken = randomBytes(18).toString("base64url");
+  const result = await new Promise<RunnerExecResult>((resolve) => {
+    const timer = setTimeout(() => {
+      connection.pending.delete(id);
+      resolve({
+        code: -1,
+        stdout: "",
+        stderr: "Runner bundle export timed out",
+      });
+    }, 60_000);
+    connection.pending.set(id, {
+      stdout: [],
+      stderr: [],
+      resolve,
+      timer,
+      operationToken,
+    });
+    connection.ws.send(
+      JSON.stringify({
+        t: "branch_bundle_export",
+        version: PROTOCOL_VERSION,
+        id,
+        operationToken,
+        sessionId: request.sessionId,
+        repo: request.repo,
+        workspacePath: request.workspacePath,
+        branch: request.branch,
+      }),
+    );
+  });
+  if (result.code !== 0 || typeof result.data !== "string")
+    throw new Error(result.stderr || "Runner branch bundle export failed");
+  const bundle = Buffer.from(result.data, "base64");
+  if (!bundle.length || bundle.length > 25 * 1024 * 1024)
+    throw new Error("Runner branch bundle is empty or too large");
+  return bundle;
+}
+
 /** Materialize only a session-owned workspace under an admin-approved root. */
 export async function prepareRunnerWorkspace(
   runnerId: string,
@@ -896,16 +977,19 @@ export async function prepareRunnerWorkspace(
   if (!connection || connection.protocolVersion !== PROTOCOL_VERSION)
     throw new Error(`Runner ${runnerId} is not connected`);
   const runner = getRunner(runnerId);
+  const permission = request.automationDescendant
+    ? "automationDescendants"
+    : "fullSessions";
   if (
     !runner ||
     !runnerAllowed(runner, {
       user: request.user,
       repo: request.repo,
-      permission: "fullSessions",
+      permission,
     })
   )
     throw new Error(
-      `Runner ${runner?.name ?? runnerId} is not permitted for full sessions`,
+      `Runner ${runner?.name ?? runnerId} is not permitted for ${permission}`,
     );
   if (!runner.workspaceRoots.length)
     throw new Error(`Runner ${runner.name} has no managed workspace root`);
@@ -954,6 +1038,7 @@ export async function prepareRunnerWorkspace(
           branch: request.branch,
           workspacePath: request.workspacePath,
           repositoryUrl: request.repositoryUrl,
+          automationDescendant: request.automationDescendant === true,
           ...(request.cloneToken ? { cloneToken: request.cloneToken } : {}),
         }),
       );
@@ -1004,16 +1089,20 @@ export async function launchRunnerHost(
       `Runner ${runnerId} is not connected`,
     );
   const runner = getRunner(runnerId);
+  const permission =
+    request.spec.trustProfile === "automation"
+      ? "automationDescendants"
+      : "fullSessions";
   if (
     !runner ||
     !runnerAllowed(runner, {
       user: request.user,
       repo: request.repo,
-      permission: "fullSessions",
+      permission,
     })
   )
     throw new RunnerHostLaunchRejectedError(
-      `Runner ${runner?.name ?? runnerId} is not permitted for full sessions`,
+      `Runner ${runner?.name ?? runnerId} is not permitted for ${permission}`,
     );
   if (!runnerOwnsWorkspace(runner, request.spec.cwd, request.sessionId))
     throw new RunnerHostLaunchRejectedError(
@@ -1062,6 +1151,7 @@ export async function launchRunnerHost(
           sessionId: request.sessionId,
           repo: request.repo,
           server: request.server,
+          automationDescendant: request.spec.trustProfile === "automation",
           spec: request.spec,
         }),
       );

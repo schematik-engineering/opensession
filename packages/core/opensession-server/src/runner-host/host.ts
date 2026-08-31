@@ -603,6 +603,7 @@ try {
     inProcessMcp: proxyMcpConfigs(),
     reposNote: spec.reposNote,
     deniedTools: spec.deniedTools,
+    publicationPolicy: spec.publicationPolicy,
     confirmTools: spec.confirmTools,
     aws: spec.aws,
     claudeCliEnv: spec.claudeCliEnv,

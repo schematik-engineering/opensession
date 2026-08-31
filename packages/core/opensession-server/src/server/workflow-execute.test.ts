@@ -295,6 +295,28 @@ describe("runAgentCollect", () => {
     expect(res.error).toBeUndefined();
   });
 
+  test("captures an engine id reported before live event attachment", async () => {
+    const reported: string[] = [];
+    const runner = async function* (
+      _opts: RunAgentOpts,
+      onEngineSession?: (engineSessionId: string) => void,
+    ): AsyncGenerator<StreamEvent> {
+      onEngineSession?.("pi-early");
+      yield { type: "text_chunk", text: "finished" };
+      yield { type: "done" };
+    };
+
+    const res = await runAgentCollect(
+      { prompt: "p", cwd: "/tmp", mcpServers: [] },
+      undefined,
+      (id) => reported.push(id),
+      runner,
+    );
+
+    expect(res.engineSessionId).toBe("pi-early");
+    expect(reported).toEqual(["pi-early"]);
+  });
+
   test("error event surfaces as error", async () => {
     mockRunAgent([
       [

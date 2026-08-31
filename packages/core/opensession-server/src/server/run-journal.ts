@@ -76,6 +76,7 @@ export interface ActiveRunRecord {
   mcpServers?: McpScope;
   user?: string; // per-run user, preserved across resume (gates per-user MCP servers)
   deniedTools?: Record<string, string>; // per-run tool denials, preserved across resume
+  publicationPolicy?: { repo: string; branch: string; headBranch: string };
   confirmTools?: Record<string, string>; // per-run human-confirmed tools, preserved across resume
   aws?: boolean; // whether to inject AWS creds, preserved across resume
   claudeCliEnv?: boolean; // pool Claude-CLI credential in the run env (deepsec scans), preserved across resume
@@ -168,6 +169,7 @@ function writeRunJournal(journal: Record<string, ActiveRunRecord>): void {
 export function buildRunJournalRecord(
   opts: {
     deniedTools?: Record<string, string>;
+    publicationPolicy?: { repo: string; branch: string; headBranch: string };
     aws?: boolean;
     claudeCliEnv?: boolean;
     codexCliEnv?: boolean;
@@ -192,6 +194,7 @@ export function buildRunJournalRecord(
     | "resumeAttempts"
     | "lastResumeAt"
     | "deniedTools"
+    | "publicationPolicy"
     | "aws"
     | "claudeCliEnv"
     | "codexCliEnv"
@@ -208,6 +211,7 @@ export function buildRunJournalRecord(
     usageCredits: site.usageCredits ?? opts.usageCredits,
     prReviewer: site.prReviewer ?? opts.prReviewer,
     deniedTools: opts.deniedTools,
+    publicationPolicy: opts.publicationPolicy,
     aws: !!opts.aws,
     claudeCliEnv: opts.claudeCliEnv || undefined,
     codexCliEnv: opts.codexCliEnv || undefined,

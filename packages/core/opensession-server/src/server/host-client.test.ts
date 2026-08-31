@@ -264,6 +264,20 @@ describe("local run-host capability", () => {
     expect(localRunHostsSupported("linux", true, () => null)).toBe(false);
   });
 
+  test("keeps hermetic fixtures off the live run-host installation", () => {
+    const previous = process.env.OPENSESSION_TEST_IN_PROCESS_RUNS;
+    process.env.OPENSESSION_TEST_IN_PROCESS_RUNS = "1";
+    try {
+      expect(localRunHostsSupported("linux", true, () => "/usr/bin/tool")).toBe(
+        false,
+      );
+    } finally {
+      if (previous === undefined)
+        delete process.env.OPENSESSION_TEST_IN_PROCESS_RUNS;
+      else process.env.OPENSESSION_TEST_IN_PROCESS_RUNS = previous;
+    }
+  });
+
   test("keeps a fresh host out of the boot recovery claim", async () => {
     const hostId = `rh-${crypto.randomUUID()}`;
     const osSessionId = `os-${crypto.randomUUID()}`;
@@ -359,6 +373,34 @@ function hello(spec: RunHostSpec, selectedModel: string) {
 }
 
 describe("HostHandle model recovery", () => {
+  test("reports an engine id recovered from the initial host snapshot", () => {
+    const spec: RunHostSpec = {
+      hostId: "rh-workflow-early-init",
+      osSessionId: "os-parent",
+      lifecycle: "auxiliary",
+      transcriptTarget: "none",
+      prompt: "review",
+      cwd: "/tmp",
+    };
+    const reported: string[] = [];
+    const handle = new HostHandle("/tmp/rh-workflow-early-init", spec, {
+      onEngineSession: (id) => reported.push(id),
+    });
+
+    (handle as any).handleMsg({
+      ...hello(spec, "pi/openai/gpt-5.6-sol"),
+      engineSessionId: "pi-before-attach",
+    });
+    (handle as any).handleMsg({
+      ...hello(spec, "pi/openai/gpt-5.6-sol"),
+      engineSessionId: "pi-before-attach",
+    });
+
+    expect(reported).toEqual(["pi-before-attach"]);
+    expect((handle as any).engineSessionId).toBe("pi-before-attach");
+    (handle as any).finish();
+  });
+
   test("reuses a steer id for transcript rows forwarded by an older host", () => {
     const root = mkdtempSync(join(tmpdir(), "host-client-steer-id-test-"));
     roots.push(root);

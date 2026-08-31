@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { IconLink } from "../icons";
 import { linkPrApi } from "../../lib/api";
+import { errorMessage } from "../../lib/error-message";
 import { Button } from "../../ui/button";
 import { Field, Input } from "../../ui/input";
 import { Popover } from "../../ui/popover";
@@ -37,8 +38,8 @@ export function LinkPrControl({
       setVal("");
       setOpen(false);
     })()
-      .catch(async (e: any) => {
-        toast(e.message || "Couldn't link that PR");
+      .catch(async (error) => {
+        toast(errorMessage(error, "Couldn't link that PR"));
       })
       .finally(async () => {
         setBusy(false);

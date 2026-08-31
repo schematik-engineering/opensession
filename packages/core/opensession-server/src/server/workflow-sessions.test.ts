@@ -64,6 +64,9 @@ function harness(options?: {
         });
       return true;
     },
+    async reparentSession() {
+      return { ok: false, error: "not used" };
+    },
     async createSession(input) {
       creates.push(input);
       const id = `child-${++next}`;
@@ -100,6 +103,8 @@ function harness(options?: {
       requireCommittedRef: async (_repo, ref) => {
         if (ref === "missing") throw new Error("not a usable committed branch");
       },
+      defaultBranch: () => "main",
+      publicationRepo: () => "tellahq/renderer",
       resolveRepo: (session, repo) =>
         !repo || repo === session.repo || repo === "other"
           ? {
@@ -111,7 +116,7 @@ function harness(options?: {
           : null,
     },
   });
-  return { controller, creates, sends, cancels, sessions };
+  return { controller, control, creates, sends, cancels, sessions };
 }
 
 const foundationOpts = {
@@ -274,7 +279,87 @@ describe("workflow durable sessions", () => {
     ).rejects.toThrow(/not registered on the workflow parent/);
   });
 
-  test("automation policy fails closed instead of widening tools", async () => {
+  test("routes an admitted code child to an explicit Runner", async () => {
+    const h = harness();
+    await h.controller.spawn(
+      {
+        ...foundationOpts,
+        runner: "mac-studio",
+        admission: { tokens: 50_000, costUsd: 4 },
+      },
+      "request-runner",
+    );
+    expect(h.creates[0]).toMatchObject({ runner: "mac-studio" });
+    await expect(
+      h.controller.spawn(
+        {
+          ...foundationOpts,
+          runner: "mac-studio",
+          workspace: {
+            type: "isolated-worktree",
+            baseRef: "release",
+          },
+        },
+        "request-runner-base",
+      ),
+    ).rejects.toThrow(/require the repository default branch/);
+    await expect(
+      h.controller.spawn(
+        { ...foundationOpts, runner: "" },
+        "request-bad-runner",
+      ),
+    ).rejects.toThrow(/runner must be a non-empty id/);
+  });
+
+  test("treats a Runner PR projection as monotonic proof of branch push", async () => {
+    const h = harness({ pushed: () => false });
+    const child = await h.controller.spawn(foundationOpts, "request-a");
+    h.sessions.set(child.id, {
+      ...h.sessions.get(child.id)!,
+      runner: {
+        id: "mac-studio",
+        name: "Mac Studio",
+        workspacePath: "/runner/child",
+        lifecycle: "awake",
+      },
+      prUrl: "https://github.com/tellahq/renderer/pull/2",
+    });
+    const pushed = await h.controller.wait(
+      child.id,
+      { until: "branch_pushed" },
+      new AbortController().signal,
+    );
+    expect(pushed.branchPushed).toBe(false);
+    expect(pushed.prUrl).toContain("/pull/2");
+  });
+
+  test("projects PR gates and queues a scoped autofix handoff", async () => {
+    const h = harness();
+    const child = await h.controller.spawn(foundationOpts, "request-a");
+    await expect(
+      h.controller.autofix!(child.id, undefined, "fix-early"),
+    ).rejects.toThrow(/has no pull request/);
+    h.sessions.set(child.id, {
+      ...h.sessions.get(child.id)!,
+      prUrl: "https://github.com/tellahq/renderer/pull/1",
+      prState: "OPEN",
+      prReviewDecision: "CHANGES_REQUESTED",
+      prChecks: { total: 3, passed: 2, failed: 1, pending: 0 },
+    });
+    expect(
+      (
+        await h.controller.wait(
+          child.id,
+          { until: "pr_checks_failed" },
+          new AbortController().signal,
+        )
+      ).prChecks?.failed,
+    ).toBe(1);
+    await h.controller.autofix!(child.id, "Fix the snapshot", "fix-a");
+    expect(h.sends.at(-1)?.message).toContain("do not merge");
+  });
+
+  test("automation policy fails closed and explicit opt-in keeps MCP empty", async () => {
     const h = harness();
     const blocked = createWorkflowSessionController({
       parentSessionId: "parent",
@@ -291,5 +376,60 @@ describe("workflow durable sessions", () => {
     await expect(blocked.spawn(foundationOpts, "request-a")).rejects.toThrow(
       /unavailable in automation workflows/,
     );
+
+    h.sessions.set("parent", {
+      ...h.sessions.get("parent")!,
+      automation: "Renderer swarm",
+      automationId: "auto-1",
+    });
+    const optedIn = createWorkflowSessionController({
+      parentSessionId: "parent",
+      user: "Automation",
+      allowSpawning: true,
+      automationSessionPolicy: {
+        automationId: "auto-1",
+        automationName: "Renderer swarm",
+        allowedRepos: ["renderer"],
+        allowedRunners: [],
+      },
+      mcpAllowlist: [],
+      maxDepth: 2,
+      deps: {
+        control: h.control,
+        baseUrl: "https://os.example.test",
+        branchPushed: async () => true,
+        hasUncommittedChanges: async () => false,
+        requireCommittedRef: async () => {},
+        defaultBranch: () => "main",
+        publicationRepo: () => "tellahq/renderer",
+        resolveRepo: (_session, repo) => ({
+          repo: repo || "renderer",
+          dir: "/repo/main",
+          branch: "main",
+          primary: true,
+        }),
+      },
+    });
+    await optedIn.spawn(foundationOpts, "request-opted-in");
+    expect(h.creates.at(-1)).toMatchObject({
+      mcpServers: [],
+      automationDescendantPolicy: {
+        automationId: "auto-1",
+        mcpServers: [],
+        repo: "renderer",
+        publicationRepo: "tellahq/renderer",
+        baseBranch: "main",
+        publication: "branch-pr-only",
+      },
+    });
+    await expect(
+      optedIn.spawn({ ...foundationOpts, repo: "other" }, "repo-denied"),
+    ).rejects.toThrow(/not allowed to spawn sessions in repo/);
+    await expect(
+      optedIn.spawn(
+        { ...foundationOpts, runner: "mac-studio" },
+        "runner-denied",
+      ),
+    ).rejects.toThrow(/not allowed to use Runner/);
   });
 });

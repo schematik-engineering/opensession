@@ -99,6 +99,7 @@ export interface RunHostSpec {
   wsToken?: string;
   reposNote?: string;
   deniedTools?: Record<string, string>;
+  publicationPolicy?: { repo: string; branch: string; headBranch: string };
   confirmTools?: Record<string, string>;
   aws?: boolean;
   /** Provision pool credentials for run-spawned Claude/Codex CLI tools. */

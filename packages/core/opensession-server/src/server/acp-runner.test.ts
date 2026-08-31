@@ -350,6 +350,11 @@ describe("ACP runner", () => {
 
   test("rotates a host run to the next Grok subscription before model fallback", async () => {
     delete process.env.OPENSESSION_RUN_JOURNAL;
+    writeFileSync(
+      join(scratch, "acp-accounts.json"),
+      JSON.stringify({ hostOwners: { grok: "other-user" } }),
+      { mode: 0o600 },
+    );
     const add = (name: string) => {
       const home = join(scratch, name);
       const auth = join(home, ".grok/auth.json");

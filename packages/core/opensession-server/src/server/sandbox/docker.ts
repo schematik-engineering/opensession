@@ -1366,6 +1366,7 @@ function recordForSpec(spec: RunHostSpec, sandboxId: string): ActiveRunRecord {
     mcpServers: spec.mcpServers,
     user: spec.user,
     deniedTools: spec.deniedTools,
+    publicationPolicy: spec.publicationPolicy,
     confirmTools: spec.confirmTools,
     aws: spec.aws,
     model: spec.model,

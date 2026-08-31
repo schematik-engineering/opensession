@@ -1,6 +1,6 @@
 import type { WorkspaceOverview } from "../../lib/api";
 import { providerFromUrl } from "../../lib/provider";
-import { sessionPrMerged } from "../../lib/session-prs";
+import { sessionPrMerged, sessionPrRefs } from "../../lib/session-prs";
 import {
   MAX_HOVERCARD_MEDIA,
   TONE_TEXT,
@@ -288,8 +288,11 @@ export function WsPrStatusMark({
       </span>
     );
   }
-  const session = frontingPrSession(sessions);
-  if (!session) {
+  const pr = [...sessions]
+    .sort((a, b) => (b.lastActivity || "").localeCompare(a.lastActivity || ""))
+    .flatMap(sessionPrRefs)
+    .find((candidate) => candidate.url || candidate.number !== undefined);
+  if (!pr) {
     // Rows that can never have a PR — feed/scratch workspaces (repo-less
     // sessions, no workspace branch/PR) — get an empty alignment slot, not a
     // misleading git glyph. A draft workspace (no session at all yet) gets
@@ -332,19 +335,19 @@ export function WsPrStatusMark({
       </span>
     );
   }
-  const failed = (session.prChecks?.failed || 0) > 0;
-  const pending = (session.prChecks?.pending || 0) > 0;
-  const changesRequested = session.prReviewDecision === "CHANGES_REQUESTED";
+  const failed = (pr.checks?.failed || 0) > 0;
+  const pending = (pr.checks?.pending || 0) > 0;
+  const changesRequested = pr.reviewDecision === "CHANGES_REQUESTED";
   const className =
-    session.prState === "CLOSED" || failed || changesRequested
+    pr.state === "CLOSED" || failed || changesRequested
       ? "text-red"
       : pending
         ? "text-yellow"
-        : session.prIsDraft
+        : pr.isDraft
           ? "text-faint"
           : "text-green";
   const label =
-    session.prState === "CLOSED"
+    pr.state === "CLOSED"
       ? "PR closed"
       : changesRequested
         ? "PR changes requested"
@@ -352,9 +355,9 @@ export function WsPrStatusMark({
           ? "PR checks failing"
           : pending
             ? "PR checks running"
-            : session.prIsDraft
+            : pr.isDraft
               ? "Draft PR"
-              : session.prReviewDecision === "APPROVED"
+              : pr.reviewDecision === "APPROVED"
                 ? "PR approved"
                 : "PR open";
   return (

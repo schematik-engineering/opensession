@@ -9,6 +9,7 @@ import { writeJsonAtomic } from "./shared/atomic-write";
 import { plainApiUrl } from "./config";
 import { homeDir, OPENSESSION_SESSIONS_DIR } from "./paths";
 import { invalidateSessionsCache } from "./session-cache";
+import { releasePreviewPathLease } from "./preview-path-leases";
 import type { NativeSessionFile } from "./types";
 
 const HOME = homeDir();
@@ -79,6 +80,7 @@ export async function archivePlainSessionCandidates(
       `[plain-archive] Could not archive session ${sessionId}:`,
       error,
     ),
+  releaseLease: (sessionId: string) => void = releasePreviewPathLease,
 ): Promise<number> {
   let archived = 0;
   for (const { path, data } of sessions) {
@@ -92,6 +94,11 @@ export async function archivePlainSessionCandidates(
           archivedReason: "plain",
         }),
       );
+      try {
+        releaseLease(data.id);
+      } catch (error) {
+        reportFailure(data.id, error);
+      }
       archived++;
     } catch (error) {
       reportFailure(data.id, error);

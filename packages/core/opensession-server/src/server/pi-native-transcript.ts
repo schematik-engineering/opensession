@@ -15,8 +15,16 @@
  * model text are both transcript output and remain visible in provider order.
  */
 
-import { existsSync, readFileSync, readdirSync } from "fs";
-import { join } from "path";
+import {
+  closeSync,
+  existsSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+  statSync,
+} from "fs";
+import { basename, join } from "path";
 import type { TranscriptEntry } from "@tellahq/opensession-protocol/session";
 import { stateDir } from "./paths";
 import { toolResultMedia } from "./transcript-media";
@@ -48,14 +56,21 @@ interface PiNativeMessage {
  * into an O(1) hit for each drill-in poll, instead of a scan per request —
  * the UI polls every 2s while an agent runs.
  */
-let indexCache: { map: Map<string, string>; ts: number } | null = null;
+let indexCache: {
+  root: string;
+  map: Map<string, string>;
+  ts: number;
+} | null = null;
 const INDEX_TTL = 2000;
 
-function transcriptIndex(): Map<string, string> {
-  if (indexCache && Date.now() - indexCache.ts < INDEX_TTL)
+function transcriptIndex(root = piSessionsRoot()): Map<string, string> {
+  if (
+    indexCache &&
+    indexCache.root === root &&
+    Date.now() - indexCache.ts < INDEX_TTL
+  )
     return indexCache.map;
   const map = new Map<string, string>();
-  const root = piSessionsRoot();
   let dirs: string[];
   try {
     dirs = readdirSync(root);
@@ -80,7 +95,7 @@ function transcriptIndex(): Map<string, string> {
       if (!prev || name > prev.split("/").pop()!) map.set(id, path);
     }
   }
-  indexCache = { map, ts: Date.now() };
+  indexCache = { root, map, ts: Date.now() };
   return map;
 }
 
@@ -88,6 +103,71 @@ function transcriptIndex(): Map<string, string> {
 export function findPiNativeTranscript(engineSessionId: string): string | null {
   const hit = transcriptIndex().get(engineSessionId);
   return hit && existsSync(hit) ? hit : null;
+}
+
+const NATIVE_FILE_TIME = /^(\d{4}-\d{2}-\d{2}T\d{2})-(\d{2})-(\d{2})-(\d{3})Z_/;
+const PROMPT_PROBE_BYTES = 512 * 1024;
+
+function nativeFileStartedAt(path: string): number | null {
+  const match = basename(path).match(NATIVE_FILE_TIME);
+  if (!match) return null;
+  const value = Date.parse(`${match[1]}:${match[2]}:${match[3]}.${match[4]}Z`);
+  return Number.isFinite(value) ? value : null;
+}
+
+function filePrefixContains(path: string, needle: string): boolean {
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, "r");
+    const buffer = Buffer.allocUnsafe(PROMPT_PROBE_BYTES);
+    const bytes = readSync(fd, buffer, 0, buffer.length, 0);
+    return buffer.toString("utf8", 0, bytes).includes(needle);
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+/**
+ * Recover the native transcript for an agent whose init frame raced ahead of
+ * the detached host connection. The journal still has the exact prompt and
+ * original timing, so only files created during that call are probed. The
+ * largest exact-prompt match wins because a provider fallback can leave an
+ * earlier, nearly empty Pi session beside the conversation that did the work.
+ */
+export function findPiNativeTranscriptByPrompt(
+  input: { prompt: string; startedAt: string; endedAt: string },
+  sessionsRoot = piSessionsRoot(),
+): string | null {
+  const startedAt = Date.parse(input.startedAt);
+  const endedAt = Date.parse(input.endedAt);
+  const prompt = input.prompt.trim();
+  if (!prompt || !Number.isFinite(startedAt) || !Number.isFinite(endedAt))
+    return null;
+
+  const escapedPrompt = JSON.stringify(prompt.slice(0, 8_192)).slice(1, -1);
+  const earliest = startedAt - 30_000;
+  const latest = Math.max(startedAt, endedAt) + 30_000;
+  let best: { path: string; size: number } | null = null;
+  for (const path of transcriptIndex(sessionsRoot).values()) {
+    const fileStartedAt = nativeFileStartedAt(path);
+    if (
+      fileStartedAt === null ||
+      fileStartedAt < earliest ||
+      fileStartedAt > latest ||
+      !filePrefixContains(path, escapedPrompt)
+    )
+      continue;
+    let size: number;
+    try {
+      size = statSync(path).size;
+    } catch {
+      continue;
+    }
+    if (!best || size > best.size) best = { path, size };
+  }
+  return best?.path ?? null;
 }
 
 function blocks(message: PiNativeMessage): PiNativeBlock[] {

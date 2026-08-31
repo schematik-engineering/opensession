@@ -92,6 +92,7 @@ describe("deriveSessionQueue", () => {
     expect(result.optimisticTranscriptEntries.map((item) => item.id)).toEqual([
       "steer",
     ]);
+    expect(result.optimisticTranscriptEntries[0]?.sender).toBe("Jaap");
     expect(result.pendingTranscriptDeliveryIds).toEqual(["existing", "steer"]);
   });
 

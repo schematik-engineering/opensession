@@ -56,6 +56,8 @@ interface Props {
   subagents?: SessionSubagentSnapshot[];
   /** Opens a sub-agent's conversation in its own view tab. */
   onOpenSubagent?: (agentId: string, label: string) => void;
+  /** Opens a nested workflow session through the app router. */
+  onOpenSession?: (sessionId: string) => void;
   /** Set when this renders as a page pushed on top of the workspace panel
    *  (the Agents item in its tab strip). Page mode shows the empty state and
    *  can carry a back header; without it this is a section of the phone info
@@ -248,7 +250,13 @@ function AgentRail({
   );
 }
 
-function NestedSessionRow({ session }: { session: WorkflowSessionSnapshot }) {
+function NestedSessionRow({
+  session,
+  onOpen,
+}: {
+  session: WorkflowSessionSnapshot;
+  onOpen?: (sessionId: string) => void;
+}) {
   const markStatus =
     session.status === "error"
       ? "error"
@@ -264,9 +272,22 @@ function NestedSessionRow({ session }: { session: WorkflowSessionSnapshot }) {
   return (
     <a
       href={session.url}
+      onClick={(event) => {
+        if (
+          !onOpen ||
+          event.button !== 0 ||
+          event.metaKey ||
+          event.ctrlKey ||
+          event.shiftKey ||
+          event.altKey
+        )
+          return;
+        event.preventDefault();
+        onOpen(session.id);
+      }}
       className={cn(
         ROW_CLASS,
-        "min-h-11 flex-col items-stretch gap-0.5 hover:bg-hover desktop:min-h-0",
+        "min-h-11 flex-col items-stretch gap-0.5 no-underline hover:bg-hover desktop:min-h-0",
       )}
       title={`Open ${session.id}`}
     >
@@ -307,6 +328,7 @@ export function WorkflowPanel({
   onAction,
   subagents,
   onOpenSubagent,
+  onOpenSession,
   onBack,
   hideHeader = false,
 }: Props) {
@@ -365,6 +387,7 @@ export function WorkflowPanel({
           now={now}
           onAction={onAction}
           onOpenAgent={onOpenAgent}
+          onOpenSession={onOpenSession}
         />
       ))}
     </>
@@ -562,11 +585,13 @@ function RunCard({
   now,
   onAction,
   onOpenAgent,
+  onOpenSession,
 }: {
   run: WorkflowRunSnapshot;
   now: number;
   onAction: Props["onAction"];
   onOpenAgent: (runId: string, seq: number) => void;
+  onOpenSession?: (sessionId: string) => void;
 }) {
   // Expanded agent rows (by seq) + their lazily-fetched journal entries.
   const [openAgents, setOpenAgents] = useState<ReadonlySet<number>>(
@@ -783,7 +808,11 @@ function RunCard({
             </span>
           </div>
           {run.sessions.map((session) => (
-            <NestedSessionRow key={session.id} session={session} />
+            <NestedSessionRow
+              key={session.id}
+              session={session}
+              onOpen={onOpenSession}
+            />
           ))}
         </div>
       )}

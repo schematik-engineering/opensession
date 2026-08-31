@@ -8,6 +8,7 @@ import {
   SettingRowTitle,
 } from "../ui/settings";
 import { toast } from "../ui/toast";
+import { errorMessage } from "../lib/error-message";
 import {
   StateChip,
   integrationState,
@@ -69,8 +70,8 @@ export function EngineRow({
       await onChanged();
       toast("Engine enabled");
     })()
-      .catch(async (e: any) => {
-        toast(e?.message || "Couldn't enable the engine");
+      .catch(async (error) => {
+        toast(errorMessage(error, "Couldn't enable the engine"));
       })
       .finally(async () => {
         setEnabling(false);

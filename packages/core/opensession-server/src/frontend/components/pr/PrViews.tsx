@@ -1,13 +1,41 @@
+import { useState } from "react";
 import { renderPrCommentMarkdown } from "../../lib/markdown";
 import { formatPrCommentPrompt, stripHtmlComments } from "../../lib/pr-prompts";
+import { avatarUrl, type Provider } from "../../lib/provider";
 import type { PrComment, PrDetails } from "../../lib/types";
+
+function PrAvatar({ login, provider }: { login: string; provider: Provider }) {
+  const src = avatarUrl(login, provider, 56);
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+
+  return (
+    <span
+      className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-active text-meta font-semibold text-fg"
+      aria-hidden
+    >
+      {src && failedSrc !== src ? (
+        <img
+          className="size-full rounded-full object-cover outline outline-1 -outline-offset-1 outline-divider"
+          src={src}
+          alt=""
+          loading="lazy"
+          onError={() => setFailedSrc(src)}
+        />
+      ) : (
+        login.slice(0, 1).toUpperCase()
+      )}
+    </span>
+  );
+}
 
 function PrDescriptionCard({
   author,
   descriptionHtml,
+  provider,
 }: {
   author: string;
   descriptionHtml: string;
+  provider: Provider;
 }) {
   if (!descriptionHtml)
     return (
@@ -18,9 +46,7 @@ function PrDescriptionCard({
   return (
     <article className="min-w-0 rounded-xl border border-line/60 bg-surface smooth-shadow-sm">
       <div className="flex items-center gap-2 border-b border-divider px-4 py-3">
-        <span className="flex size-7 items-center justify-center rounded-full bg-active text-meta font-semibold text-fg">
-          {author.slice(0, 1).toUpperCase()}
-        </span>
+        <PrAvatar login={author} provider={provider} />
         <div>
           <div className="text-xs font-semibold text-fg">{author}</div>
           <div className="text-meta text-faint">Opened this pull request</div>
@@ -44,6 +70,7 @@ export function ConversationView({
   author,
   descriptionHtml,
   comments,
+  provider,
   repo,
   pr,
   onAddToInput,
@@ -51,6 +78,7 @@ export function ConversationView({
   author: string;
   descriptionHtml: string;
   comments: PrComment[];
+  provider: Provider;
   /** The repo a bare `#5528` in a comment refers to (see markdown.ts). */
   repo?: string;
   pr?: PrDetails;
@@ -63,7 +91,11 @@ export function ConversationView({
        without it the box sizes to its content and `max-w` becomes a fixed 760px
        that a phone can't fit. */
     <div className="mx-auto flex w-full min-w-0 max-w-[760px] flex-col gap-4">
-      <PrDescriptionCard author={author} descriptionHtml={descriptionHtml} />
+      <PrDescriptionCard
+        author={author}
+        descriptionHtml={descriptionHtml}
+        provider={provider}
+      />
 
       {comments.length === 0 ? (
         <div className="rounded-xl border border-dashed border-line px-4 py-10 text-center text-xs text-faint">
@@ -84,9 +116,10 @@ export function ConversationView({
               key={`${comment.url || comment.createdAt || index}`}
             >
               <div className="flex items-center gap-2 border-b border-divider px-4 py-3">
-                <span className="flex size-7 items-center justify-center rounded-full bg-active text-meta font-semibold text-fg">
-                  {(comment.author || "?").slice(0, 1).toUpperCase()}
-                </span>
+                <PrAvatar
+                  login={comment.author || "Unknown"}
+                  provider={provider}
+                />
                 <div className="min-w-0 flex-1">
                   <div className="text-xs font-semibold text-fg">
                     {comment.author || "Unknown"}

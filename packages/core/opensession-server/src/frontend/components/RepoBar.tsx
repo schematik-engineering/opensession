@@ -14,6 +14,7 @@ import { Button } from "../ui/button";
 import { Modal } from "../ui/modal";
 import { IconCheck, IconPlus, IconX, IconChevronRight } from "./icons";
 import { RepoTile, repoLabel } from "./RepoTile";
+import { errorMessage } from "../lib/error-message";
 
 interface Props {
   sessionId: string;
@@ -107,8 +108,8 @@ export function RepoBar({
     await (async () => {
       setAttached(await attachRepoApi(sessionId, repo, branch || undefined));
     })()
-      .catch(async (e: any) => {
-        setError(e.message || String(e));
+      .catch(async (error) => {
+        setError(errorMessage(error, "Failed to attach repository"));
       })
       .finally(async () => {
         setBusy(null);
@@ -121,8 +122,8 @@ export function RepoBar({
     await (async () => {
       setAttached(await detachRepoApi(sessionId, repo));
     })()
-      .catch(async (e: any) => {
-        setError(e.message || String(e));
+      .catch(async (error) => {
+        setError(errorMessage(error, "Failed to detach repository"));
       })
       .finally(async () => {
         setBusy(null);
@@ -153,8 +154,8 @@ export function RepoBar({
       setHasWork(false); // the new worktree starts fresh
       setAttached((prev) => prev.filter((r) => r.repo !== res.repo));
     })()
-      .catch(async (e: any) => {
-        setError(e.message || String(e));
+      .catch(async (error) => {
+        setError(errorMessage(error, "Failed to switch repository"));
         // Resync in case a concurrent turn changed the session's state.
         fetchRepoSwitchable(sessionId)
           .then(({ switchable, hasWork }) => {

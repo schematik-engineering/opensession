@@ -7,7 +7,12 @@ import React, {
   useRef,
 } from "react";
 import { createPortal } from "react-dom";
-import type { CodeFlowResult, DiffFileGroup, RepoDiff } from "../lib/types";
+import type {
+  CodeFlowResult,
+  DiffFileGroup,
+  RepoDiff,
+  WSClientMessage,
+} from "../lib/types";
 import { useSessionDiffResource } from "../hooks/useApiResources";
 import {
   API_BASE,
@@ -40,6 +45,7 @@ import {
   useCodeOrganizationSettings,
 } from "../hooks/useCodeDisplaySettings";
 import { PrFileTree } from "./pr/PrFileTree";
+import { errorMessage } from "../lib/error-message";
 
 /* The +/− counts. Kept as constants because CommentableDiff carries the same
    pair on its file rows and group headers, and the two must read alike. */
@@ -50,7 +56,7 @@ interface Props {
   sessionId: string;
   isRunning: boolean;
   canSend: boolean;
-  send: (msg: any) => void;
+  send: (msg: WSClientMessage) => void;
   /** Shared diff state (lifted so the Changes tab badge and this panel poll
    *  once, not twice). When omitted, the panel fetches on its own. */
   diff?: SessionDiffState;
@@ -223,9 +229,9 @@ export function DiffPanel({
       if (generation === flowGeneration.current)
         setFlow({ key: flowKey, data });
     })()
-      .catch(async (error: any) => {
+      .catch(async (error: unknown) => {
         if (generation === flowGeneration.current)
-          setFlowError(error?.message || "Couldn't load code flow.");
+          setFlowError(errorMessage(error, "Couldn't load code flow."));
       })
       .finally(async () => {
         if (generation === flowGeneration.current) setFlowLoading(false);

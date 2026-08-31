@@ -40,7 +40,7 @@ touches an in-process tool:
 
 | Server | Tools | Runs | Condition |
 | --- | --- | --- | --- |
-| [`opensession-sessions`](#opensession-sessions) | 14 | interactive, Slack loop, automation | Automation runs get it ONLY with the human-set `selfImprove` flag, and then in the `automationSelf` build below. |
+| [`opensession-sessions`](#opensession-sessions) | 15 | interactive, Slack loop, automation | Automation runs get it ONLY with the human-set `selfImprove` flag, and then in the `automationSelf` build below. |
 | [`opensession-admin`](#opensession-admin) | 13 | interactive, Slack loop | – |
 | [`opensession-runners`](#opensession-runners) | 5 | interactive | – |
 | [`opensession-goals`](#opensession-goals) | 8 | interactive | – |
@@ -52,7 +52,7 @@ touches an in-process tool:
 | [`opensession-repos`](#opensession-repos) | 4 | interactive | Needs a session id. |
 | [`opensession-memory`](#opensession-memory) | 9 | interactive | Needs a session id. |
 | [`opensession-web`](#opensession-web) | 3 | interactive, goal wake | Needs a session id. |
-| [`opensession-portals`](#opensession-portals) | 6 | interactive | Needs a session id. |
+| [`opensession-portals`](#opensession-portals) | 7 | interactive | Needs a session id. |
 | [`opensession-walkthrough`](#opensession-walkthrough) | 2 | interactive | Needs a session id. |
 | [`opensession-slack`](#opensession-slack) | 1 | interactive | Needs a session id. |
 | [`opensession-ask`](#opensession-ask) | 1 | interactive, Slack loop | Needs a session id. |
@@ -68,7 +68,7 @@ touches an in-process tool:
 | [`opensession-github`](#opensession-github) | 4 | Slack loop | – |
 | [`opensession-goal-self`](#opensession-goal-self) | 6 | goal wake | Only on a session that carries a goalId. |
 
-27 servers, 116 tools.
+27 servers, 118 tools.
 
 ## opensession-sessions
 
@@ -134,11 +134,17 @@ Copy one file from this session to another session and notify that agent. The so
 
 Cancel a session's in-flight run and drop any queued messages. Only works for runs this server owns (web UI / Slack / automation sessions) — external CLI/tmux sessions are observe-only.
 
+### `reparent_session`
+
+`mcp__opensession-sessions__reparent_session` · input: `id` (string, required), `parentSessionId` (string | null, required)
+
+Change a native Open Session session's parent/orchestrator link, or detach it by passing null. This changes child/report routing only: it does not move the session to another workspace or worktree, and it does not rewrite prompts already in the transcript. Cycles and unknown session ids are rejected. If the child needs new instructions, send them separately with send_to_session.
+
 ### `create_session`
 
-`mcp__opensession-sessions__create_session` · input: `prompt` (string, required), `repo` (string), `mode` ("ask" | "code"), `branch` (string), `model` (string), `mcpServers` (string[]), `parentSessionId` (string), `reportBack` (boolean), `standalone` (boolean), `sandbox` (boolean | "docker" | "daytona" | "e2b" | "box" | "modal" | "microvm" | "lambda-microvm"), `accountId` (string), `forkFrom` (object)
+`mcp__opensession-sessions__create_session` · input: `prompt` (string, required), `repo` (string), `mode` ("ask" | "code"), `branch` (string), `model` (string), `mcpServers` (string[]), `parentSessionId` (string), `reportBack` (boolean), `standalone` (boolean), `isolatedWorktree` (boolean), `sandbox` (boolean | "docker" | "daytona" | "e2b" | "box" | "modal" | "microvm" | "lambda-microvm"), `accountId` (string), `forkFrom` (object)
 
-Spin up a visible Open Session session and start it on a prompt. Use this as the sub-session primitive: workers can delegate focused tasks and report back to this parent session. mode 'ask' (default) runs read-only on the selected repo checkout; mode 'code' can edit files / open PRs (never merges). A worker targeting one of the parent's repos shares that exact primary or attached worktree, so reviewers see current/uncommitted work; pass repo explicitly for attached-repo tasks. `branch` is only used when there is nothing to share — a standalone worker, or a worker targeting a repo the parent does not carry — and is generated from the prompt when omitted. Repo defaults to the parent session's repo (example when standalone); pass another registered repo id to override. For workers that only need filesystem/code access, pass mcpServers: [] to avoid unrelated MCP startup cost/failures. When called from a session, the worker defaults to the same workspace and is instructed to report back here; set standalone true or reportBack false to opt out. When a HUMAN asks for "a new session" ("create a new session for X", "spin one up on Y"), this tool is what they mean — a detached session that appears in their sidebar and outlives the current run — never an in-process subagent or task agent; reply with the new session's URL.
+Spin up a visible Open Session session and start it on a prompt. Use this as the sub-session primitive: workers can delegate focused tasks and report back to this parent session. mode 'ask' (default) runs read-only on the selected repo checkout; mode 'code' can edit files / open PRs (never merges). A worker targeting one of the parent's repos shares that exact primary or attached worktree, so reviewers see current/uncommitted work; pass repo explicitly for attached-repo tasks. Pass isolatedWorktree true to instead give the worker its own worktree and branch (child/report-back linkage is kept) — use it when fanning work out across separate workspaces. `branch` is only used when there is nothing to share — a standalone worker, or a worker targeting a repo the parent does not carry — and is generated from the prompt when omitted. Repo defaults to the parent session's repo (example when standalone); pass another registered repo id to override. For workers that only need filesystem/code access, pass mcpServers: [] to avoid unrelated MCP startup cost/failures. When called from a session, the worker defaults to the same workspace and is instructed to report back here; set standalone true or reportBack false to opt out. When a HUMAN asks for "a new session" ("create a new session for X", "spin one up on Y"), this tool is what they mean — a detached session that appears in their sidebar and outlives the current run — never an in-process subagent or task agent; reply with the new session's URL.
 
 ### `migrate_session_engine`
 
@@ -148,9 +154,9 @@ Migrate an existing session onto the Pi engine by flipping its model to a pi/* i
 
 ### `spawn_task`
 
-`mcp__opensession-sessions__spawn_task` · input: `prompt` (string, required), `repo` (string), `branch` (string), `model` (string), `mode` ("ask" | "code" | "scratch"), `sandbox` (boolean | "docker" | "daytona" | "e2b" | "box" | "modal" | "microvm" | "lambda-microvm")
+`mcp__opensession-sessions__spawn_task` · input: `prompt` (string, required), `repo` (string), `branch` (string), `isolatedWorktree` (boolean), `model` (string), `mode` ("ask" | "code" | "scratch"), `sandbox` (boolean | "docker" | "daytona" | "e2b" | "box" | "modal" | "microvm" | "lambda-microvm")
 
-Delegate a self-contained task to a child session and return IMMEDIATELY with {taskId, url} — the lightweight alternative to create_session + send_to_session choreography when you just want work done and a handle to poll. The child is created through the same code path as create_session (it shares this session's worktree in code mode when repos match, inherits your user, is linked as a child, and is told to report back here); poll it with task_status and stop it with cancel_task. Mode defaults to 'code' (pass a branch unless the child can share this session's code worktree); use 'ask' for read-only investigation. Loop guard: spawned children may delegate one further level, then spawn_task refuses (depth ≥ 2). Not available from automation sessions.
+Delegate a self-contained task to a child session and return IMMEDIATELY with {taskId, url} — the lightweight alternative to create_session + send_to_session choreography when you just want work done and a handle to poll. The child is created through the same code path as create_session (it shares this session's worktree in code mode when repos match, inherits your user, is linked as a child, and is told to report back here); poll it with task_status and stop it with cancel_task. Mode defaults to 'code' (pass a branch, or isolatedWorktree true for a generated one, unless the child can share this session's code worktree); use 'ask' for read-only investigation. Loop guard: spawned children may delegate one further level, then spawn_task refuses (depth ≥ 2). Not available from automation sessions.
 
 ### `task_status`
 
@@ -166,7 +172,7 @@ Cancel a spawned task's in-flight run (drops queued messages too). Only runs thi
 
 ### Variant · selfImprove automation (isAdmin: false, automationSelf: true)
 
-Built for: automation. 5 tools, without `wait_for`, `wait_status`, `cancel_wait`, `answer_session_question`, `send_to_session`, `send_file_to_session`, `cancel_session`, `create_session`, `migrate_session_engine`.
+Built for: automation. 5 tools, without `wait_for`, `wait_status`, `cancel_wait`, `answer_session_question`, `send_to_session`, `send_file_to_session`, `cancel_session`, `reparent_session`, `create_session`, `migrate_session_engine`.
 
 ## opensession-admin
 
@@ -640,6 +646,12 @@ Stop one supervised Portal in this session. It never affects services in another
 `mcp__opensession-portals__restart_portal` · input: `name` (string, required)
 
 Restart one supervised Portal using its registered command and port. Repository-declared Portals are refreshed from their trusted recipe before restart.
+
+### `set_editor_preview_path`
+
+`mcp__opensession-portals__set_editor_preview_path` · input: `path` (string, required), `exclusiveKey` (string, required), `durationSeconds` (number, required), `clipCount` (integer, required), `transcriptWordCount` (integer, required), `leaseMinutes` (integer)
+
+Set and exclusively reserve the staging route for an editor feature. Call this only after verifying the staging record is at least 60 seconds long, has multiple clips, and has a ready non-empty transcript.
 
 ### `set_portal_path`
 

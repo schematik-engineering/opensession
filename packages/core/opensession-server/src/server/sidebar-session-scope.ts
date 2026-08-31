@@ -6,7 +6,7 @@ import { listMentions } from "./mentions";
 import { getPins } from "./pins";
 import { getSnoozes } from "./snoozes";
 import { userMatchesAny } from "./shared/user-mappings";
-import type { UnifiedSession } from "./types";
+import type { SessionPrRef, UnifiedSession } from "./types";
 import { getWorkspace, type Workspace } from "./workspaces";
 
 export interface SidebarSessionScope {
@@ -260,6 +260,60 @@ function groupNeedsAttention(
   );
 }
 
+type PrIdentity = Pick<SessionPrRef, "repo" | "branch" | "url" | "number">;
+
+function openPrIdentities(session: SidebarScopeSession): PrIdentity[] {
+  const refs = (session.prs || []).filter(
+    (pr) => (pr.state ?? "OPEN") === "OPEN",
+  );
+  if (
+    (session.prNumber === undefined && !session.prUrl) ||
+    (session.prState ?? "OPEN") !== "OPEN"
+  )
+    return refs;
+  return [
+    ...refs,
+    {
+      repo: session.repo || "repository",
+      branch: session.branch || "",
+      url: session.prUrl,
+      number: session.prNumber,
+    },
+  ];
+}
+
+function prIdentitiesMatch(a: PrIdentity, b: PrIdentity): boolean {
+  if (a.url && b.url && a.url === b.url) return true;
+  if (a.repo.toLowerCase() !== b.repo.toLowerCase()) return false;
+  if (a.number !== undefined && b.number !== undefined)
+    return a.number === b.number;
+  return !!a.branch && !!b.branch && a.branch === b.branch;
+}
+
+/** Keep an idle child only when it owns PR work absent from its ancestors. */
+function sessionHasOwnOpenPr(
+  session: SidebarScopeSession,
+  byId: ReadonlyMap<string, SidebarScopeSession>,
+): boolean {
+  const childPrs = openPrIdentities(session);
+  if (childPrs.length === 0) return false;
+
+  const ancestorPrs: PrIdentity[] = [];
+  const seen = new Set([session.id]);
+  let parentId = session.parentSessionId;
+  while (parentId && !seen.has(parentId)) {
+    seen.add(parentId);
+    const parent = byId.get(parentId);
+    if (!parent) break;
+    ancestorPrs.push(...openPrIdentities(parent));
+    parentId = parent.parentSessionId;
+  }
+  return childPrs.some(
+    (childPr) =>
+      !ancestorPrs.some((ancestorPr) => prIdentitiesMatch(childPr, ancestorPr)),
+  );
+}
+
 /** The global team-activity window appended to every scoped sidebar response. */
 export function sessionIsRecentTeamActivity(
   session: UnifiedSession,
@@ -293,21 +347,31 @@ export function scopeSessionsForSidebar<T extends SidebarScopeSession>(
 ): T[] {
   const selectedIds = new Set<string>();
   const selectedGroupKeys = new Set<string>();
+  const byId = new Map<string, T>();
+  for (const session of sessions) {
+    byId.set(session.id, session);
+    for (const alias of session.aliasIds || []) byId.set(alias, session);
+  }
   if (scope.selectedWorkspaceId)
     selectedGroupKeys.add(`workspace:${scope.selectedWorkspaceId}`);
   if (scope.selectedSessionId) {
-    const selected = sessions.find(
-      (session) =>
-        session.id === scope.selectedSessionId ||
-        session.aliasIds?.includes(scope.selectedSessionId!),
-    );
-    if (selected) selectedGroupKeys.add(sessionGroupKey(selected));
+    let selected = byId.get(scope.selectedSessionId);
+    const seen = new Set<string>();
+    while (selected && !seen.has(selected.id)) {
+      seen.add(selected.id);
+      selectedGroupKeys.add(sessionGroupKey(selected));
+      selected = selected.parentSessionId
+        ? byId.get(selected.parentSessionId)
+        : undefined;
+    }
   }
   for (const session of sessions)
     if (selectedGroupKeys.has(sessionGroupKey(session)))
       selectedIds.add(session.id);
   // Active workers can live in temporary child workspaces. Keep their chain
-  // when the selected workspace or parent session is open.
+  // when the selected workspace or parent session is open. A selected worker's
+  // ancestor groups above stay whole too, so a person or repo lens cannot turn
+  // the worker's temporary workspace into a top-level row on navigation.
   let expanded = true;
   while (expanded) {
     expanded = false;
@@ -317,7 +381,8 @@ export function scopeSessionsForSidebar<T extends SidebarScopeSession>(
         selectedIds.has(session.parentSessionId) &&
         (session.isRunning ||
           session.waitingForInput ||
-          (session.queuedCount || 0) > 0) &&
+          (session.queuedCount || 0) > 0 ||
+          sessionHasOwnOpenPr(session, byId)) &&
         !selectedIds.has(session.id)
       ) {
         selectedIds.add(session.id);

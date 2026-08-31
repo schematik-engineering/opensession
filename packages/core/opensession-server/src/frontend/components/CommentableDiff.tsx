@@ -45,6 +45,7 @@ import { Spinner } from "../ui/spinner";
 import { EmptyState } from "../ui/state";
 import { Menu, MENU_ICON } from "../ui/menu";
 import { toast } from "../ui/toast";
+import { errorMessage } from "../lib/error-message";
 import { useStickyEdges } from "../hooks/useStickyEdges";
 import { UserAvatar } from "./UserAvatar";
 import { ExtBadge, fileExt } from "./lang-marks";
@@ -492,8 +493,8 @@ export function CommentableDiff({
       if (contents == null)
         throw new Error("File is not available at this revision");
       copyMenuValue(contents, "File contents copied");
-    })().catch(async (error: any) => {
-      toast(error?.message || "Couldn’t copy file contents");
+    })().catch(async (error) => {
+      toast(errorMessage(error, "Couldn’t copy file contents"));
     });
   };
 
@@ -583,8 +584,8 @@ export function CommentableDiff({
       editorRef.current = null;
       setEditingPath(null);
     })()
-      .catch(async (e: any) => {
-        setEditError(e?.message || "Failed to save");
+      .catch(async (error) => {
+        setEditError(errorMessage(error, "Failed to save"));
       })
       .finally(async () => {
         setSavingEdit(false);
@@ -1392,8 +1393,8 @@ const CommentForm = function CommentForm({
     if (!body || sending) return;
     setSending(true);
     setError(null);
-    await onSubmit(body).catch((error: any) => {
-      setError(error.message || "Failed to submit");
+    await onSubmit(body).catch((error) => {
+      setError(errorMessage(error, "Failed to submit"));
       setSending(false);
     });
     // Success unmounts this form (parent clears the draft), so do not touch state.

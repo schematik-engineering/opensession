@@ -103,6 +103,7 @@ struct NewSessionView: View {
     /// keeps it alive across the layout changes a long dictation causes.
     @State private var dictation = Dictation()
     @State private var sessionProjection = ComposerSessionProjectionState()
+    @State private var promptSelection: TextSelection?
     @FocusState private var promptFocused: Bool
 
     /// Remembered only for restoring Code after switching this composer to
@@ -174,45 +175,30 @@ struct NewSessionView: View {
                         usesSystemButtonStyle: true
                     )
                 }
-
-                // iOS hides the bottom bar while the software keyboard is up.
-                // Repeat the same controls in its accessory so composing never
-                // makes attachments, run options, model, or dictation vanish.
-                // The accessory otherwise seats its glass directly on the
-                // keyboard edge, so each control leaves the same 8pt breathing
-                // room the session composer keeps there.
-                ToolbarItemGroup(placement: .keyboard) {
-                    AttachImagesButton(images: $images, usesSystemButtonStyle: true)
-                        .padding(.bottom, 8)
-                    moreOptionsMenu
-                        .padding(.bottom, 8)
-                    Spacer()
-                    modelChip
-                        .padding(.bottom, 8)
-                    ComposerDictationButton(
-                        dictation: dictation,
-                        draft: $prompt,
-                        usesSystemButtonStyle: true
-                    )
-                    .padding(.bottom, 8)
-                }
                 #else
                 ToolbarItem(placement: .confirmationAction) { startButton }
                 ToolbarItem(placement: .cancellationAction) { cancelButton }
                 #endif
             }
             #if os(iOS)
-            // Keep staged files above both forms of the composer toolbar: the
-            // bottom bar at rest and its keyboard accessory while editing.
-            // As a sibling of the editor, this shelf ended at the sheet edge
-            // and the bottom toolbar floated over it.
+            // Keep staged files above both forms of the composer toolbar. The
+            // keyboard tools live here too: unlike a keyboard toolbar, this
+            // inset can reserve real space below its glass instead of extending
+            // the material until it touches the keys.
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if !images.isEmpty || !files.isEmpty {
-                    VStack(spacing: 0) {
-                        Divider()
-                        attachments
+                VStack(spacing: 0) {
+                    if !images.isEmpty || !files.isEmpty {
+                        VStack(spacing: 0) {
+                            Divider()
+                            attachments
+                        }
+                        .background(OS1VisualStyle.background)
                     }
-                    .background(OS1VisualStyle.background)
+                    if promptFocused {
+                        keyboardTools
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 8)
+                    }
                 }
             }
             #endif
@@ -259,6 +245,12 @@ struct NewSessionView: View {
         // This belongs to the outer stack. The editor itself disappears when
         // the recipe library is pushed, which is not an exit from the sheet.
         .onDisappear { parkDraftAfterDismiss() }
+        #if os(iOS)
+        // While the prompt owns the keyboard, a downward drag belongs to the
+        // editor and dismisses the keyboard. Once focus leaves, the sheet's
+        // normal swipe-to-dismiss gesture becomes available again.
+        .interactiveDismissDisabled(promptFocused)
+        #endif
         // The floor belongs to the stack, not to its first screen. A macOS
         // sheet sizes to its content, so applied inside, a push replaced it
         // with a view that asks for nothing and the sheet collapsed to its
@@ -369,13 +361,10 @@ struct NewSessionView: View {
 
     private var editor: some View {
         ZStack(alignment: .topLeading) {
-            TextEditor(text: sessionProjection.binding(
-                $prompt,
-                titleGeneration: TranscriptLinks.shared.generation,
-                refreshTitles: !promptFocused
-            ))
+            TextEditor(text: projectedPrompt, selection: $promptSelection)
                 .font(.body)
                 .scrollContentBackground(.hidden)
+                .scrollDismissesKeyboardImmediatelyCompat()
                 .padding(.horizontal, 11)
                 .padding(.top, 8)
                 .focused($promptFocused)
@@ -395,12 +384,34 @@ struct NewSessionView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, placeholderTopPadding)
             }
+            VStack {
+                Spacer(minLength: 0)
+                ComposerMentionPalette(
+                    text: projectedPrompt.wrappedValue,
+                    selection: promptSelection,
+                    scope: ComposerMentionScope(repo: repo)
+                ) { edit in
+                    projectedPrompt.wrappedValue = edit.text
+                    promptSelection = edit.selection
+                    promptFocused = true
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 64)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         #if os(iOS)
         .contentShape(Rectangle())
         .onTapGesture { promptFocused = true }
         #endif
+    }
+
+    private var projectedPrompt: Binding<String> {
+        sessionProjection.binding(
+            $prompt,
+            titleGeneration: TranscriptLinks.shared.generation,
+            refreshTitles: !promptFocused
+        )
     }
 
     /// Offered only while the prompt is empty, under the placeholder it
@@ -626,6 +637,40 @@ struct NewSessionView: View {
         #endif
         return catalog?.label(for: id) ?? "Model"
     }
+
+    #if os(iOS)
+    private var keyboardTools: some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 2) {
+                AttachImagesButton(images: $images)
+                moreOptionsMenu
+            }
+            .padding(.horizontal, 2)
+            .background { Color.clear.glassSurface(in: Capsule()) }
+
+            Spacer(minLength: 8)
+
+            HStack(spacing: 2) {
+                modelChip
+                ComposerDictationButton(dictation: dictation, draft: $prompt)
+                Button(
+                    "Dismiss keyboard",
+                    systemImage: "keyboard.chevron.compact.down"
+                ) {
+                    promptFocused = false
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(OS1VisualStyle.textDim)
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
+            }
+            .padding(.horizontal, 2)
+            .background { Color.clear.glassSurface(in: Capsule()) }
+        }
+    }
+    #endif
 
     /// Attach stays at the leading edge. iOS keeps mode and execution choices
     /// behind one overflow button, with model and dictation on the right. The

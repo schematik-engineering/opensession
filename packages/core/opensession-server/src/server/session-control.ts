@@ -15,7 +15,11 @@
  * getSessionControl() surface directly, no MCP involved.
  */
 import type { ImageInput } from "./run-events";
-import type { UnifiedSession, TranscriptEntry } from "./types";
+import type {
+  AutomationDescendantPolicy,
+  UnifiedSession,
+  TranscriptEntry,
+} from "./types";
 
 /**
  * Derived, at-a-glance status for a session. `waiting_question` is the one the
@@ -53,6 +57,15 @@ export interface DeliverResult {
   /** True when this request id was already committed by the session owner. */
   duplicate?: boolean;
 }
+
+export type ReparentSessionResult =
+  | {
+      ok: true;
+      previousParentSessionId?: string;
+      parentSessionId?: string;
+      changed: boolean;
+    }
+  | { ok: false; error: string };
 
 /**
  * Where a new session runs, as a caller may ask for it. `true` takes the
@@ -106,6 +119,10 @@ export interface CreateSessionOpts {
   files?: unknown;
   /** Optional MCP allowlist for the opening run. Empty array means no MCP servers. */
   mcpServers?: string[];
+  /** Authorized persistent Runner id for a new code workspace. */
+  runner?: string;
+  /** Server-authored immutable policy for an automation workflow descendant. */
+  automationDescendantPolicy?: AutomationDescendantPolicy;
   /**
    * Join an existing workspace as a sibling session — a new tab, the create path's
    * equivalent of the web tab strip's "+". The session takes the workspace's
@@ -241,6 +258,11 @@ export interface SessionControl {
     id: string,
     opts?: { requestId?: string },
   ): boolean | Promise<boolean>;
+  /** Change a native session's parent link, or remove it when omitted. */
+  reparentSession(
+    id: string,
+    parentSessionId?: string,
+  ): Promise<ReparentSessionResult>;
   /** Create a new session and start its first turn in the background. */
   createSession(opts: CreateSessionOpts): Promise<{
     id: string;

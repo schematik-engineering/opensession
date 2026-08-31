@@ -9,7 +9,12 @@ import React, {
 } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
-import type { Workspace, UnifiedSession, WSServerMessage } from "../lib/types";
+import type {
+  UnifiedSession,
+  Workspace,
+  WSClientMessage,
+  WSServerMessage,
+} from "../lib/types";
 import {
   fetchModels,
   fetchSession,
@@ -106,7 +111,7 @@ interface Props {
   /** Foregrounded view tab; null = the workspace home (first-session composer). */
   tab: "review" | "conversation" | "video" | null;
   connected: boolean;
-  send: (msg: any) => void;
+  send: (msg: WSClientMessage) => void;
   addHandler: (handler: (msg: WSServerMessage) => void) => () => void;
   /** `created` is the server's copy of a session the info panel just made
 	    (Auto-fix), so the app can open it without a loading placeholder. */
@@ -614,6 +619,7 @@ export function WorkspacePane({
   const reviewSummaryHasRoom = headerW === 0 || headerW >= WS_SUMMARY_ROOM_W;
   const reviewSummaryVisible =
     tab === "review" &&
+    !!presentationSession &&
     reviewSummaryOpen &&
     reviewSummaryHasRoom &&
     !panelOpen &&

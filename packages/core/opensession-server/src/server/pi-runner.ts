@@ -83,7 +83,11 @@ import {
 } from "./context-log";
 import { wrapContext } from "./prompt-context";
 import { EMPTY_REPLY_RETRY_PROMPT } from "./auto-continue";
-import { bashAskPolicyReply } from "./command-policy";
+import {
+  bashAskPolicyReply,
+  publicationPolicyDenyReason,
+  type PublicationPolicy,
+} from "./command-policy";
 import {
   appendTranscriptEntries,
   recordEngineSessionOwner,
@@ -1298,6 +1302,23 @@ function summarizeBashAuditCommand(
   };
 }
 
+export function piBashHomeEnv(input: {
+  runKey: string;
+  scratchDir?: string;
+  isolated: boolean;
+  hostHome?: string;
+}): Record<string, string> {
+  if (!input.isolated) return input.hostHome ? { HOME: input.hostHome } : {};
+  const home = `${input.scratchDir || "/tmp"}/automation-home-${input.runKey.replace(/[^A-Za-z0-9_-]/g, "_")}`;
+  return {
+    HOME: home,
+    XDG_CONFIG_HOME: `${home}/.config`,
+    AWS_CONFIG_FILE: `${home}/.aws/config`,
+    AWS_SHARED_CREDENTIALS_FILE: `${home}/.aws/credentials`,
+    GH_CONFIG_DIR: `${home}/.config/gh`,
+  };
+}
+
 /** The custom `bash` tool: same name/schema surface as pi's built-in (so the
  *  model needs no new habits) but execution is ours — Bun.spawn with the
  *  MINIMAL env only, never the server process env. `gated` additionally
@@ -1319,6 +1340,7 @@ export function makePiBashTool(input: {
   unattended: boolean;
   sessionId?: string;
   runKind?: string;
+  publicationPolicy?: PublicationPolicy;
   /** Immutable Open Session run cancellation. Kept separate from Pi's tool
    * signal because AgentSession.abort() can leave an active tool signal live. */
   runSignal?: AbortSignal;
@@ -1348,6 +1370,10 @@ export function makePiBashTool(input: {
         const reason = askBashDenyReason(command);
         if (reason) throw new Error(reason);
       }
+      const publicationDenial = input.publicationPolicy
+        ? publicationPolicyDenyReason(command, input.publicationPolicy)
+        : undefined;
+      if (publicationDenial) throw new Error(publicationDenial);
       if (input.gated) {
         const reply = bashAskPolicyReply(
           { permission: "bash", metadata: { command } },
@@ -2000,9 +2026,17 @@ async function* runPiAttempt(
     // Minimal bash env, the security invariant this engine hangs on. The
     // server env is NEVER inherited; every entry is explicit.
     const awsEnv = opts.aws ? await ensureAgentAwsCredsFile() : {};
+    const homeEnv = piBashHomeEnv({
+      runKey,
+      scratchDir: opts.scratchDir,
+      isolated: Boolean(opts.publicationPolicy),
+      hostHome: process.env.HOME,
+    });
+    if (opts.publicationPolicy && homeEnv.HOME)
+      mkdirSync(homeEnv.HOME, { recursive: true, mode: 0o700 });
     const bashEnv: Record<string, string> = {
       ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
-      ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
+      ...homeEnv,
       ...(process.env.LANG ? { LANG: process.env.LANG } : {}),
       // Session-scoped scratch (session-scratch.ts): temp files follow the
       // session's lifecycle instead of accumulating in shared /tmp.
@@ -2116,6 +2150,7 @@ async function* runPiAttempt(
               unattended: policy.unattended,
               sessionId: journal?.osSessionId,
               runKind: journal?.kind,
+              publicationPolicy: opts.publicationPolicy,
               runSignal: abort.signal,
               onAudit: (event) =>
                 audit({

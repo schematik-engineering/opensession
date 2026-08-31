@@ -143,6 +143,7 @@ import {
   SESSIONS_DIR,
 } from "./session-cache";
 import { markRecapPendingIfUnwatched } from "./recap";
+import { scheduleSessionHistoryIndex } from "./session-index";
 import { broadcastToSession, sessionWatchers } from "./ws-hub";
 import { getWorkspace } from "./workspaces";
 import {
@@ -220,7 +221,16 @@ if (
       projectionId: projection.projectionId,
       runGeneration: projection.runGeneration,
     });
-    if (decision === "missing" || decision === "completed") return;
+    if (decision === "missing") return;
+    if (decision === "completed") {
+      // A crash can settle the outcome before it durably schedules history
+      // indexing. Replaying the completed effect repairs that narrow gap.
+      await scheduleSessionHistoryIndex(
+        item.sessionId,
+        projection.projectionId,
+      );
+      return;
+    }
     if (decision === "wait")
       throw new SessionEffectDeferredError(
         "Earlier turn outcome is still pending",
@@ -241,6 +251,9 @@ if (
       throw new Error(
         "Turn outcome projection ownership changed before settlement",
       );
+    // The timer is the durable push into history. Its handler reads only this
+    // session after the outcome mailbox has been released.
+    await scheduleSessionHistoryIndex(item.sessionId, projection.projectionId);
   });
   interruptExecutorGlobal.__opensessionTurnOutcomeProjectionExecutorRegistered = true;
 }
@@ -1713,7 +1726,9 @@ export async function autoPushSessionBranches(
   session: UnifiedSession,
 ): Promise<void> {
   const githubGitEnv =
-    session.automation || session.automationId
+    session.automation ||
+    session.automationId ||
+    session.automationDescendantPolicy
       ? undefined
       : session.createdByLogin
         ? githubCredentialForLogin(session.createdByLogin)?.env
@@ -1785,6 +1800,55 @@ export async function autoPushSessionBranches(
  * interactive-parity credentials (~/.ssh, gh, account pool / scoped OAuth
  * upload) that untrusted prompt text must not reach.
  */
+export function sandboxRunSecuritySpec(
+  session: UnifiedSession,
+  opts: {
+    isAutomationSession: boolean;
+    user?: string;
+    mcpServers?: McpScope;
+    deniedTools?: Record<string, string>;
+  },
+): Pick<
+  RunHostSpec,
+  | "mcpServers"
+  | "proxyMcpServers"
+  | "reposNote"
+  | "deniedTools"
+  | "publicationPolicy"
+  | "aws"
+  | "user"
+  | "mcpGrantUser"
+  | "journalKind"
+  | "trustProfile"
+> {
+  const descendant = session.automationDescendantPolicy;
+  return {
+    mcpServers: opts.isAutomationSession ? (opts.mcpServers ?? []) : [],
+    proxyMcpServers: opts.isAutomationSession
+      ? []
+      : [
+          ...Object.keys(interactiveMcpServers(opts.user, session.id)),
+          ...(session.goalId ? ["opensession-goal-self"] : []),
+        ],
+    reposNote: undefined,
+    deniedTools: opts.deniedTools,
+    publicationPolicy: descendant
+      ? {
+          repo: descendant.publicationRepo,
+          branch: descendant.baseBranch,
+          headBranch: session.branch || "",
+        }
+      : undefined,
+    aws: !opts.isAutomationSession,
+    user: opts.isAutomationSession ? undefined : opts.user,
+    mcpGrantUser: opts.isAutomationSession
+      ? undefined
+      : session.startedBy || undefined,
+    journalKind: opts.isAutomationSession ? "automation" : "prompt",
+    trustProfile: opts.isAutomationSession ? "automation" : "interactive",
+  };
+}
+
 export async function maybeLaunchSandboxedRun(
   session: UnifiedSession,
   opts: {
@@ -1798,6 +1862,7 @@ export async function maybeLaunchSandboxedRun(
     user?: string;
     images?: ImageInput[];
     mcpServers?: McpScope;
+    deniedTools?: Record<string, string>;
     isAutomationSession: boolean;
     startToken?: string;
   },
@@ -1828,7 +1893,7 @@ export async function maybeLaunchSandboxedRun(
       `Sandbox provider "${sbProvider}" is not configured and Ready`,
     );
   }
-  if (opts.isAutomationSession) {
+  if (opts.isAutomationSession && !session.automationDescendantPolicy) {
     throw new Error(
       "Interactive sandbox connections are unavailable to automation sessions",
     );
@@ -1941,12 +2006,11 @@ export async function maybeLaunchSandboxedRun(
     // what the registered InteractiveMcpBuilder can build for this session —
     // including opensession-goal-self for goal-driven sessions (the builder adds
     // it from the session's goalId, mirroring the in-process path below).
-    const proxyMcpServers = [
-      ...Object.keys(interactiveMcpServers(opts.user, session.id)),
-      ...(session.goalId ? ["opensession-goal-self"] : []),
-    ];
     rpcToken = crypto.randomUUID();
-    registerRunToken(rpcToken, { sessionId: session.id, user: opts.user });
+    registerRunToken(rpcToken, {
+      sessionId: session.id,
+      user: opts.isAutomationSession ? undefined : opts.user,
+    });
     // Detached sandbox hosts cannot read the server's workspace store. Resolve
     // the picker-only workspace preset before crossing that boundary. A preset
     // matching built-in Dial/Orchestrator wiring keeps that portable id, while
@@ -1978,20 +2042,20 @@ export async function maybeLaunchSandboxedRun(
       // turn wait on a ladder of ENOENT, 401 and 60s timeout failures before
       // the model could answer. Automation keeps its explicit fail-closed
       // allowlist because those remote connectors are part of its contract.
-      mcpServers: opts.isAutomationSession ? (opts.mcpServers ?? []) : [],
-      proxyMcpServers,
+      ...sandboxRunSecuritySpec(session, opts),
       rpcToken,
-      reposNote: await buildSessionNote(session, opts.user),
+      reposNote: opts.isAutomationSession
+        ? undefined
+        : await buildSessionNote(session, opts.user),
       confirmTools: STRIPE_CONFIRM_TOOLS,
-      aws: true,
-      author: commitAuthorFor(opts.user, session.startedBy),
-      user: opts.user,
-      mcpGrantUser: session.startedBy || undefined,
+      author: commitAuthorFor(
+        opts.isAutomationSession ? undefined : opts.user,
+        opts.isAutomationSession ? undefined : session.startedBy,
+      ),
       fallbackModel: interactiveFallbackModel(session.model),
       effort: portablePreset?.effort ?? session.effort,
       fastMode: session.fastMode,
       accountId: session.accountId,
-      journalKind: "prompt",
     };
     if (isAgentSessionCancelled(session.id, opts.startToken)) {
       unregisterRunToken(rpcToken);
@@ -2775,6 +2839,14 @@ async function runSessionPromptInner(
         )
       : undefined;
   if (isAgentSessionCancelled(session.id, startToken)) return;
+  if (
+    session.automationDescendantPolicy &&
+    !session.runner?.id &&
+    !isRunnableSandboxProvider(session.sandbox?.provider)
+  )
+    throw new Error(
+      "Automation descendants require a sandbox or an explicitly isolated Runner",
+    );
   const runnerRun = await maybeLaunchRunnerRun(session, {
     prompt,
     hostId: startToken,
@@ -2798,6 +2870,7 @@ async function runSessionPromptInner(
         user,
         images,
         mcpServers: mcpServers ?? "all",
+        deniedTools,
         isAutomationSession,
         startToken,
       });
@@ -2868,18 +2941,27 @@ async function runSessionPromptInner(
           model: session.model,
           images,
           mcpServers: mcpServers ?? "all",
-          proxyMcpServers: isAutomationSession
-            ? Object.keys(automationSessionMcp(session, sessionId))
-            : [
-                ...Object.keys(interactiveMcpServers(user, sessionId)),
-                ...(session.goalId ? ["opensession-goal-self"] : []),
-              ],
+          proxyMcpServers: session.automationDescendantPolicy
+            ? []
+            : isAutomationSession
+              ? Object.keys(automationSessionMcp(session, sessionId))
+              : [
+                  ...Object.keys(interactiveMcpServers(user, sessionId)),
+                  ...(session.goalId ? ["opensession-goal-self"] : []),
+                ],
           reposNote: isAutomationSession
             ? undefined
             : await buildSessionNote(session, user),
           deniedTools,
+          publicationPolicy: session.automationDescendantPolicy
+            ? {
+                repo: session.automationDescendantPolicy.publicationRepo,
+                branch: session.automationDescendantPolicy.baseBranch,
+                headBranch: session.branch || "",
+              }
+            : undefined,
           confirmTools: STRIPE_CONFIRM_TOOLS,
-          aws: true,
+          aws: !isAutomationSession,
           author: commitAuthorFor(user, session.startedBy),
           user: runInputs.user,
           fallbackModel: interactiveFallbackModel(session.model),
@@ -2973,14 +3055,18 @@ async function runSessionPromptInner(
       // A goal-driven session also gets its own opensession-goal-self controls, so an
       // interactive turn (a human steering it in the UI) can set the next wake,
       // append to the ledger, or pause/finish — the same tools the headless wake has.
-      inProcessMcp: isAutomationSession
-        ? automationSessionMcp(session, sessionId)
-        : session.goalId
-          ? {
-              ...interactiveMcpServers(user, sessionId),
-              "opensession-goal-self": createGoalSelfMcpServer(session.goalId),
-            }
-          : interactiveMcpServers(user, sessionId),
+      inProcessMcp: session.automationDescendantPolicy
+        ? {}
+        : isAutomationSession
+          ? automationSessionMcp(session, sessionId)
+          : session.goalId
+            ? {
+                ...interactiveMcpServers(user, sessionId),
+                "opensession-goal-self": createGoalSelfMcpServer(
+                  session.goalId,
+                ),
+              }
+            : interactiveMcpServers(user, sessionId),
       reposNote: isAutomationSession
         ? undefined
         : await buildSessionNote(session, user),
@@ -2992,8 +3078,15 @@ async function runSessionPromptInner(
           ? getAutomation(session.automationId)?.prReviewer
           : undefined,
       deniedTools,
+      publicationPolicy: session.automationDescendantPolicy
+        ? {
+            repo: session.automationDescendantPolicy.publicationRepo,
+            branch: session.automationDescendantPolicy.baseBranch,
+            headBranch: session.branch || "",
+          }
+        : undefined,
       confirmTools: STRIPE_CONFIRM_TOOLS,
-      aws: true, // sessions keep AWS read access (via injected creds)
+      aws: !isAutomationSession, // automation descendants never receive AWS credentials
       // Attribute any commits this turn makes to whoever sent the prompt, or
       // to whoever the session belongs to when nobody did (an auto-continue,
       // a restart resume, a queue drain).

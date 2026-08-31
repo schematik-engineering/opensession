@@ -1243,6 +1243,11 @@ describe("run journal", () => {
       cwd: "/tmp",
       mcpServers: [],
       deniedTools: { mcp__danger__delete: "No deletes" },
+      publicationPolicy: {
+        repo: "tellahq/renderer",
+        branch: "main",
+        headBranch: "compat/layout",
+      },
       confirmTools: { mcp__stripe__create_refund: "Create a refund" },
       model: "pi/openai/gpt-5.6-terra",
       selectedModel: "dial/medium",
@@ -1256,6 +1261,11 @@ describe("run journal", () => {
       mcp__stripe__create_refund: "Create a refund",
     });
     expect(run.deniedTools).toEqual({ mcp__danger__delete: "No deletes" });
+    expect(run.publicationPolicy).toEqual({
+      repo: "tellahq/renderer",
+      branch: "main",
+      headBranch: "compat/layout",
+    });
     expect(run.fallbackModel).toBe("gpt-5.5");
     expect(run.selectedModel).toBe("dial/medium");
     expect(run.transientFallback).toBe(true);

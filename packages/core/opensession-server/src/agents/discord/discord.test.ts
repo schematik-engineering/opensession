@@ -486,6 +486,7 @@ describe("Discord agent", () => {
         completedTurns += 1;
         return { status: "started", message: "started" };
       },
+      reparentSession: async () => ({ ok: false, error: "not used" }),
       cancelSession: () => true,
       createSession: async (input) => {
         creates.push(input);
@@ -736,6 +737,7 @@ describe("Discord agent", () => {
         completedTurns += 1;
         return { status: "started", message: "started" };
       },
+      reparentSession: async () => ({ ok: false, error: "not used" }),
       cancelSession: () => false,
       createSession: async () => {
         createCount += 1;
@@ -947,6 +949,7 @@ describe("Discord agent", () => {
         deliveries += 1;
         return { status: "started", message: "started" };
       },
+      reparentSession: async () => ({ ok: false, error: "not used" }),
       cancelSession: () => false,
       createSession: async () => {
         creates += 1;
@@ -1070,6 +1073,7 @@ describe("Discord agent", () => {
         deliveries.push(prompt);
         return { status: "started", message: "started" };
       },
+      reparentSession: async () => ({ ok: false, error: "not used" }),
       cancelSession: () => false,
       createSession: async (input) => {
         creates.push(input);
@@ -1157,6 +1161,7 @@ describe("Discord agent", () => {
       transcriptTail: async () => [],
       answerQuestion: () => false,
       deliverToSession: async () => ({ status: "started", message: "started" }),
+      reparentSession: async () => ({ ok: false, error: "not used" }),
       cancelSession: () => false,
       createSession: async () => {
         creates += 1;
@@ -1278,6 +1283,7 @@ describe("Discord agent", () => {
       transcriptTail: async () => [],
       answerQuestion: () => false,
       deliverToSession: async () => ({ status: "started", message: "started" }),
+      reparentSession: async () => ({ ok: false, error: "not used" }),
       cancelSession: () => false,
       createSession: async () => ({
         id: "os-discord-failed",
@@ -1375,6 +1381,7 @@ describe("Discord agent", () => {
         deliveries.push(prompt);
         return { status: "started", message: "started" };
       },
+      reparentSession: async () => ({ ok: false, error: "not used" }),
       cancelSession: (id) => {
         cancellations.push(id);
         return true;

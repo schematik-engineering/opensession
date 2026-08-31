@@ -130,6 +130,33 @@ describe("resolveSessionRunInputs", () => {
     expect(inputs.inProcessMcpBranch).toBe("automation-self-improve");
   });
 
+  test("an automation descendant keeps immutable empty scope on resume", async () => {
+    const inputs = await resolveSessionRunInputs(
+      {
+        ...plain,
+        automation: undefined,
+        mcpServers: ["dangerous-later-config"],
+        automationDescendantPolicy: {
+          automationId: "auto-1",
+          automationName: "Renderer swarm",
+          mcpServers: [],
+          repo: "renderer",
+          publicationRepo: "tellahq/renderer",
+          baseBranch: "main",
+          allowedRunners: [],
+          publication: "branch-pr-only",
+        },
+      },
+      { user: "Kent" },
+    );
+    expect(inputs.isAutomationSession).toBe(true);
+    expect(inputs.mcpServers).toEqual([]);
+    expect(inputs.mcpServersSource).toBe("automation");
+    expect(inputs.deniedTools).toBeDefined();
+    expect(inputs.user).toBeUndefined();
+    expect(inputs.sessionNote).toBe(false);
+  });
+
   test("an allowlist that resolves to nothing reports itself as unscoped", async () => {
     // An automation record that is gone (or names no servers) leaves the run
     // unscoped — say so rather than claiming an allowlist that isn't there.

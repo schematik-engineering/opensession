@@ -759,6 +759,14 @@ export async function runnerRun(): Promise<number> {
           return;
         }
         if (
+          msg?.t === "branch_bundle_export" &&
+          msg.version === 1 &&
+          msg.operationToken
+        ) {
+          await exportBranchBundle(socket, msg);
+          return;
+        }
+        if (
           msg?.t === "workspace_cleanup" &&
           msg.version === 1 &&
           msg.operationToken
@@ -927,6 +935,95 @@ export async function runnerRun(): Promise<number> {
     await new Promise((r) => setTimeout(r, delay));
   }
   return 1;
+}
+
+async function exportBranchBundle(socket: WebSocket, msg: any): Promise<void> {
+  const id = String(msg.id);
+  const operationToken = String(msg.operationToken);
+  const workspacePath = String(msg.workspacePath || "");
+  const branch = String(msg.branch || "");
+  const scratch = mkdtempSync(join(tmpdir(), "opensession-runner-bundle-"));
+  const bundlePath = join(scratch, "branch.bundle");
+  try {
+    if (!workspacePath || !branch || !existsSync(workspacePath))
+      throw new Error("Runner bundle workspace is unavailable");
+    const gitEnv = {
+      ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+      HOME: scratch,
+      XDG_CONFIG_HOME: join(scratch, ".config"),
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_CONFIG_COUNT: "2",
+      GIT_CONFIG_KEY_0: "core.hooksPath",
+      GIT_CONFIG_VALUE_0: "/dev/null",
+      GIT_CONFIG_KEY_1: "credential.helper",
+      GIT_CONFIG_VALUE_1: "",
+    };
+    const inspect = async (args: string[]) => {
+      const proc = Bun.spawn(["git", ...args], {
+        cwd: workspacePath,
+        env: gitEnv,
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [code, stdout, stderr] = await Promise.all([
+        proc.exited,
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ]);
+      return { code, stdout, stderr };
+    };
+    const [head, status] = await Promise.all([
+      inspect(["branch", "--show-current"]),
+      inspect(["status", "--porcelain"]),
+    ]);
+    if (head.code !== 0 || head.stdout.trim() !== branch)
+      throw new Error(
+        "Runner publication workspace is not on its owned branch",
+      );
+    if (status.code !== 0 || status.stdout.trim())
+      throw new Error("Runner publication workspace has uncommitted changes");
+    const proc = Bun.spawn(
+      ["git", "bundle", "create", bundlePath, `refs/heads/${branch}`],
+      {
+        cwd: workspacePath,
+        env: gitEnv,
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "pipe",
+      },
+    );
+    const [code, stderr] = await Promise.all([
+      proc.exited,
+      new Response(proc.stderr).text(),
+    ]);
+    if (code !== 0) throw new Error(stderr || "git bundle failed");
+    const bundle = readFileSync(bundlePath);
+    if (!bundle.length || bundle.length > 25 * 1024 * 1024)
+      throw new Error("Runner branch bundle is empty or too large");
+    socket.send(
+      JSON.stringify({
+        t: "branch_bundle_result",
+        id,
+        operationToken,
+        ok: true,
+        bundle: bundle.toString("base64"),
+      }),
+    );
+  } catch (error) {
+    socket.send(
+      JSON.stringify({
+        t: "branch_bundle_result",
+        id,
+        operationToken,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 }
 
 async function prepareWorkspace(socket: WebSocket, msg: any): Promise<void> {

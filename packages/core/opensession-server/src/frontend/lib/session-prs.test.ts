@@ -4,6 +4,7 @@ import {
   collapsePrLinkSessions,
   prLinksMatch,
   sessionCarriesPr,
+  sessionHasConnectedPr,
   sessionHasPr,
   sessionPrApproved,
   sessionPrMerged,
@@ -230,6 +231,26 @@ describe("session PR projection", () => {
         deletions: 2,
       }),
     ]);
+  });
+});
+
+describe("sessionHasConnectedPr", () => {
+  test("requires an actual PR identity, not only branch status", () => {
+    expect(sessionHasConnectedPr(session({ prState: "OPEN" }))).toBe(false);
+    expect(sessionHasConnectedPr(session({ prNumber: 42 }))).toBe(true);
+    expect(
+      sessionHasConnectedPr(
+        session({
+          linkedPrs: [
+            {
+              repo: "shared-infra",
+              branch: "linked-pr",
+              url: "https://github.com/tellahq/shared-infra/pull/42",
+            },
+          ],
+        }),
+      ),
+    ).toBe(true);
   });
 });
 

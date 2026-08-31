@@ -246,6 +246,14 @@ export function sessionHasPr(session: UnifiedSession): boolean {
   return pullRequests(session).length > 0;
 }
 
+/** Whether session metadata identifies an actual PR, rather than only a branch
+ * state that can also be present for work shipping directly to main. */
+export function sessionHasConnectedPr(session: UnifiedSession): boolean {
+  return [...sessionPrRefs(session), ...(session.linkedPrs || [])].some(
+    (ref) => ref.number != null || Boolean(ref.url),
+  );
+}
+
 /** A multi-PR session has landed once every actual PR is terminal and one merged. */
 export function sessionPrMerged(session: UnifiedSession): boolean {
   const refs = pullRequests(session);

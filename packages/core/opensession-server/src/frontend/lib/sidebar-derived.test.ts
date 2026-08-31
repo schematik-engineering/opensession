@@ -192,7 +192,7 @@ describe("sidebar derived data", () => {
         session("daily", { automation: "daily check" }),
         session("claimed", { automation: "Claimed" }),
       ],
-      activeSubagentIds: new Set(),
+      nestedSubagentIds: new Set(),
       automationOverview: new Map(),
       filter: filter(),
       currentUser: "Jaap",

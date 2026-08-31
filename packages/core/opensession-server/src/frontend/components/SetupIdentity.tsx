@@ -5,6 +5,7 @@ import {
   type InstanceIdentityDto,
 } from "../lib/api";
 import { AGENT_NAME, PRODUCT_NAME } from "../lib/brand";
+import { errorMessage } from "../lib/error-message";
 import { cn } from "../ui/cn";
 import { Field } from "../ui/input";
 import {
@@ -108,9 +109,9 @@ export function IdentityRows({
       toast("Saved. Open tabs update after the next rebuild.", {
         variant: "success",
       });
-    })().catch(async (e: any) => {
-      toast(e?.message || "Failed to save", { variant: "error" });
-      throw e;
+    })().catch(async (error) => {
+      toast(errorMessage(error, "Failed to save"), { variant: "error" });
+      throw error;
     });
   };
 

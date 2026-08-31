@@ -30,6 +30,7 @@ import { useCurrentUser } from "./UserPicker";
 import { GithubAccounts } from "./Connections";
 import { KeychainSection } from "./settings/KeychainPanel";
 import { ProfileSection } from "./settings/ProfileSection";
+import { errorMessage } from "../lib/error-message";
 
 /**
  * Settings → Personal → Account: everything about you on this instance.
@@ -95,8 +96,8 @@ export function MyAccountsPanel() {
         if (polls > 24) return clearInterval(t);
         void load();
       }, 5000);
-    })().catch(async (e: any) => {
-      setError(e.message);
+    })().catch(async (error) => {
+      setError(errorMessage(error, `Could not connect ${name}`));
     });
   }
 
@@ -104,8 +105,8 @@ export function MyAccountsPanel() {
     await (async () => {
       await disconnectTool(name);
       void load();
-    })().catch(async (e: any) => {
-      setError(e.message);
+    })().catch(async (error) => {
+      setError(errorMessage(error, `Could not disconnect ${name}`));
     });
   }
 

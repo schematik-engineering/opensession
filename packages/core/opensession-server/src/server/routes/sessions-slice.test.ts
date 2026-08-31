@@ -16,11 +16,13 @@ import {
   registerSessionControl,
   tryGetSessionControl,
 } from "../session-control";
+import type { PrInfo } from "../pr-cache";
 import type { UnifiedSession } from "../types";
 import {
   archivedScope,
   archivedIndexRow,
   handleSessionsRoutes,
+  mergeFooterPrRefs,
   nativeCreateRepoOptions,
   sessionListRow,
   sessionRan,
@@ -329,6 +331,66 @@ describe("archivedIndexRow", () => {
       }),
     );
     expect(row.aliasIds).toEqual(["bks-019f0000-0000-7000-0000-000000000000"]);
+  });
+});
+
+describe("mergeFooterPrRefs", () => {
+  const pr = {
+    url: "https://github.com/tellahq/tella-fusion/pull/6072",
+    state: "OPEN",
+    number: 6072,
+    title: "Make crop controls truthful",
+    isDraft: false,
+    additions: 258,
+    deletions: 92,
+    changedFiles: 3,
+    reviewDecision: "",
+    author: "jfrolich",
+    createdAt: "2026-08-31T08:00:00.000Z",
+    updatedAt: "2026-08-31T09:00:00.000Z",
+    checks: { total: 1, passed: 1, failed: 0, pending: 0 },
+    mergeable: "MERGEABLE",
+    reviewRequested: [],
+    reviewedBy: [],
+    assignees: [],
+    sessionRef: "bks-crop",
+  } satisfies PrInfo;
+
+  test("restores a footer-discovered PR on a materialized session row", () => {
+    const refs = mergeFooterPrRefs(archivedSession({ id: "bks-crop" }), [
+      { repo: "tella-fusion", branch: "fix-crop", pr },
+    ]);
+
+    expect(refs).toEqual([
+      expect.objectContaining({
+        repo: "tella-fusion",
+        branch: "fix-crop",
+        source: "discovered",
+        number: 6072,
+        state: "OPEN",
+      }),
+    ]);
+  });
+
+  test("refreshes an existing ref without losing how it was attached", () => {
+    const refs = mergeFooterPrRefs(
+      archivedSession({
+        prs: [
+          {
+            repo: "tella-fusion",
+            branch: "fix-crop",
+            source: "primary",
+            number: 6072,
+            state: "CLOSED",
+          },
+        ],
+      }),
+      [{ repo: "tella-fusion", branch: "fix-crop", pr }],
+    );
+
+    expect(refs).toEqual([
+      expect.objectContaining({ source: "primary", state: "OPEN" }),
+    ]);
   });
 });
 

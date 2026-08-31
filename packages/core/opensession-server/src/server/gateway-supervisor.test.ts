@@ -18,6 +18,7 @@ import {
   promoteGatewayCurrent,
   readGatewayHandoffTransaction,
   resolveInitialPeerGenerations,
+  resolveInitialReleaseRoot,
   spawnGateway,
   writeGatewayHandoffTransaction,
   validateGatewayRelease,
@@ -78,6 +79,23 @@ describe("gateway supervisor", () => {
       attempts: 1,
     });
     expect(peers).toEqual({ kernel: "a".repeat(40), executor: "b".repeat(40) });
+  });
+
+  test("starts source installs without an immutable release pointer", () => {
+    const state = mkdtempSync(join(tmpdir(), "opensession-deploy-"));
+    const sourceRoot = mkdtempSync(join(tmpdir(), "opensession-source-"));
+    const sourceEntry = join(
+      sourceRoot,
+      "packages/core/opensession-server/opensession.ts",
+    );
+    mkdirSync(join(sourceRoot, "packages/core/opensession-server"), {
+      recursive: true,
+    });
+    writeFileSync(sourceEntry, "");
+
+    expect(resolveInitialReleaseRoot(state, sourceRoot)).toBe(
+      realpathSync(sourceRoot),
+    );
   });
 
   test("starts source installs without a separate executor generation", async () => {

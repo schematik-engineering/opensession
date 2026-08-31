@@ -93,6 +93,7 @@ function makeLocalSandbox(cwd: string): Sandbox {
         inProcessMcp: cb?.inProcessMcp?.(),
         reposNote: spec.reposNote,
         deniedTools: spec.deniedTools,
+        publicationPolicy: spec.publicationPolicy,
         confirmTools: spec.confirmTools,
         aws: spec.aws,
         author: spec.author,

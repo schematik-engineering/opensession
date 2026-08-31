@@ -1,5 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
-import type { UnifiedSession, WSServerMessage } from "../lib/types";
+import type {
+  UnifiedSession,
+  WSClientMessage,
+  WSServerMessage,
+} from "../lib/types";
 import { relativeTime } from "../lib/api";
 import { sessionPath } from "../lib/share-link";
 import { Button } from "../ui/button";
@@ -61,7 +65,7 @@ interface Props {
   currentSessionId?: string;
   onOpenSession?: (id: string) => void;
   /** WebSocket sender + handler hook — both required for the compose form. */
-  send?: (msg: any) => void;
+  send?: (msg: WSClientMessage) => void;
   addHandler?: (handler: (msg: WSServerMessage) => void) => () => void;
   /** Offer the inline "start a new session on this PR" form. */
   compose?: boolean;

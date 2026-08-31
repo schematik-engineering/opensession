@@ -1008,9 +1008,35 @@ async function defaultStartPoint(repo: Repo): Promise<string> {
   const remote = `origin/${repo.defaultBranch}`;
   const hasRemote =
     (
-      await $`git -C ${repo.repo} show-ref --verify --quiet refs/remotes/${remote}`.nothrow()
+      await $`git -C ${repo.repo} rev-parse --verify --quiet ${remote}^{commit}`.nothrow()
     ).exitCode === 0;
-  return hasRemote ? remote : repo.defaultBranch;
+  if (hasRemote) return remote;
+
+  const hasLocal =
+    (
+      await $`git -C ${repo.repo} rev-parse --verify --quiet ${repo.defaultBranch}^{commit}`.nothrow()
+    ).exitCode === 0;
+  if (hasLocal) return repo.defaultBranch;
+
+  // An empty remote has no commit from which Git can cut a worktree. Give its
+  // configured default branch a local root commit so the first session gets a
+  // normal linked worktree. This deliberately does not push: publishing the
+  // new repository remains an explicit action by the session.
+  const anyCommit = (
+    await $`git -C ${repo.repo} rev-list --all --max-count=1`.quiet().nothrow()
+  ).stdout
+    .toString()
+    .trim();
+  if (!anyCommit) {
+    const emptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+    const initialCommit = (
+      await $`git -C ${repo.repo} -c user.name=${"Open Session"} -c user.email=${"assistant@opensession.dev"} commit-tree ${emptyTree} -m ${"Initial commit"}`.quiet()
+    )
+      .text()
+      .trim();
+    await $`git -C ${repo.repo} update-ref refs/heads/${repo.defaultBranch} ${initialCommit}`.quiet();
+  }
+  return repo.defaultBranch;
 }
 
 /**
@@ -1118,7 +1144,9 @@ export async function createWorktree(
   const base = opts?.base;
 
   await withGitLock(async () => {
-    await shell`git -C ${repo.repo} fetch origin ${repo.defaultBranch} --quiet`.nothrow();
+    await shell`git -C ${repo.repo} fetch origin ${repo.defaultBranch} --quiet`
+      .quiet()
+      .nothrow();
     let startPoint = await defaultStartPoint(repo);
     if (base) {
       // Stacked worktree: fetch the base (it may be remote-only), then branch off it.

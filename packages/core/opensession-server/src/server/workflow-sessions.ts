@@ -9,7 +9,10 @@ import {
 import { resolveSessionRepoContext } from "./session-repos";
 import { buildChildSessionPrompt } from "../agents/slack/sessions-tools";
 import { getRepo } from "./worktree";
+import { onSessionStateChange } from "./session-state-events";
+import { publishSessionBranch } from "./session-publication";
 import type {
+  WorkflowAutomationSessionPolicy,
   WorkflowSessionController,
   WorkflowSessionState,
   WorkflowSessionStatus,
@@ -22,6 +25,9 @@ export interface WorkflowSessionControllerDeps {
   branchPushed: (session: SessionSummary) => Promise<boolean>;
   requireCommittedRef: (repoId: string, ref: string) => Promise<void>;
   hasUncommittedChanges: (session: SessionSummary) => Promise<boolean>;
+  defaultBranch: (repoId: string) => string;
+  publicationRepo: (repoId: string) => string;
+  publishSessionBranch: typeof publishSessionBranch;
   resolveRepo: typeof resolveSessionRepoContext;
   baseUrl: string;
 }
@@ -32,6 +38,7 @@ export interface WorkflowSessionControllerOpts {
   /** An automation workflow is deliberately read/fan-out only unless a future
    * narrowly scoped policy explicitly grants durable session creation. */
   allowSpawning: boolean;
+  automationSessionPolicy?: WorkflowAutomationSessionPolicy;
   mcpAllowlist?: string[];
   maxDepth: number;
   /** Test seam; production uses SessionControl + the registered Git repos. */
@@ -112,6 +119,31 @@ function stateOf(
   return "done";
 }
 
+function waitForSessionWake(
+  sessionId: string,
+  timeout: number,
+  signal: AbortSignal,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      off();
+      signal.removeEventListener("abort", onAbort);
+      error ? reject(error) : resolve();
+    };
+    const off = onSessionStateChange((event) => {
+      if (event.sessionId === sessionId) finish();
+    });
+    const timer = setTimeout(() => finish(), timeout);
+    const onAbort = () => finish(new Error("workflow cancelled"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
+}
+
 function reached(
   current: WorkflowSessionStatus,
   until: WorkflowSessionState,
@@ -119,8 +151,19 @@ function reached(
   if (current.status === until) return true;
   if (until === "running") return true;
   if (until === "branch_pushed")
-    return current.branchPushed || current.status === "pr_opened";
+    return current.branchPushed || Boolean(current.prUrl);
   if (until === "pr_opened") return Boolean(current.prUrl);
+  if (until === "pr_merged") return current.prState === "MERGED";
+  if (until === "pr_changes_requested")
+    return current.prReviewDecision === "CHANGES_REQUESTED";
+  if (until === "pr_approved") return current.prReviewDecision === "APPROVED";
+  if (until === "pr_checks_failed") return (current.prChecks?.failed || 0) > 0;
+  if (until === "pr_checks_passed")
+    return Boolean(
+      current.prChecks?.total &&
+      current.prChecks.failed === 0 &&
+      current.prChecks.pending === 0,
+    );
   return false;
 }
 
@@ -136,6 +179,12 @@ export function createWorkflowSessionController(
     requireCommittedRef: opts.deps?.requireCommittedRef ?? requireCommittedRef,
     hasUncommittedChanges:
       opts.deps?.hasUncommittedChanges ?? hasUncommittedChanges,
+    defaultBranch:
+      opts.deps?.defaultBranch ?? ((repoId) => getRepo(repoId).defaultBranch),
+    publicationRepo:
+      opts.deps?.publicationRepo ?? ((repoId) => getRepo(repoId).ghRepo),
+    publishSessionBranch:
+      opts.deps?.publishSessionBranch ?? publishSessionBranch,
     resolveRepo: opts.deps?.resolveRepo ?? resolveSessionRepoContext,
     baseUrl: opts.deps?.baseUrl ?? configuredServer().publicBaseUrl,
   };
@@ -163,6 +212,12 @@ export function createWorkflowSessionController(
       branchPushed: pushed,
       ...(session.worktreeDir ? { worktreeDir: session.worktreeDir } : {}),
       ...(session.prUrl ? { prUrl: session.prUrl } : {}),
+      ...(session.prState ? { prState: session.prState } : {}),
+      ...(session.prReviewDecision
+        ? { prReviewDecision: session.prReviewDecision }
+        : {}),
+      ...(session.prChecks ? { prChecks: session.prChecks } : {}),
+      ...(session.runner?.id ? { runner: session.runner.id } : {}),
       ...(session.lastRunError ? { error: session.lastRunError.message } : {}),
       ...(session.usage
         ? {
@@ -204,6 +259,25 @@ export function createWorkflowSessionController(
         );
       if (input.branch !== undefined && typeof input.branch !== "string")
         throw new Error("spawnSession() branch must be a string");
+      if (input.runner !== undefined && !input.runner.trim())
+        throw new Error("spawnSession() runner must be a non-empty id");
+      if (input.admission !== undefined) {
+        if (
+          !Number.isFinite(input.admission.tokens) ||
+          input.admission.tokens < 0
+        )
+          throw new Error(
+            "spawnSession() admission.tokens must be non-negative",
+          );
+        if (
+          input.admission.costUsd !== undefined &&
+          (!Number.isFinite(input.admission.costUsd) ||
+            input.admission.costUsd < 0)
+        )
+          throw new Error(
+            "spawnSession() admission.costUsd must be non-negative",
+          );
+      }
       if (
         input.workspace?.baseRef !== undefined &&
         (typeof input.workspace.baseRef !== "string" ||
@@ -228,6 +302,24 @@ export function createWorkflowSessionController(
         throw new Error(
           `Nested session depth ${depth} exceeds the configured maximum ${opts.maxDepth}`,
         );
+      const automationPolicy = opts.automationSessionPolicy;
+      if (automationPolicy) {
+        if (parent.automationId !== automationPolicy.automationId)
+          throw new Error(
+            "Automation durable-session policy does not belong to the workflow parent",
+          );
+        if (!automationPolicy.allowedRepos.includes(input.repo))
+          throw new Error(
+            `Automation is not allowed to spawn sessions in repo \`${input.repo}\``,
+          );
+        if (
+          input.runner &&
+          !automationPolicy.allowedRunners.includes(input.runner)
+        )
+          throw new Error(
+            `Automation is not allowed to use Runner \`${input.runner}\``,
+          );
+      }
       const parentRepo = deps.resolveRepo(parent, input.repo, input.prompt);
       if (!parentRepo)
         throw new Error(
@@ -268,6 +360,13 @@ export function createWorkflowSessionController(
         stackBase = base.branch;
       }
       if (baseRef) await deps.requireCommittedRef(input.repo, baseRef);
+      if (input.runner) {
+        const defaultBranch = deps.defaultBranch(input.repo);
+        if (stackBase || (baseRef && baseRef !== defaultBranch))
+          throw new Error(
+            `Runner sessions currently require the repository default branch \`${defaultBranch}\` as their base`,
+          );
+      }
 
       const prompt = [
         buildChildSessionPrompt({
@@ -298,6 +397,21 @@ export function createWorkflowSessionController(
         fastMode: parent.fastMode,
         accountId: parent.accountId,
         mcpServers: inheritedMcp,
+        runner: input.runner,
+        ...(automationPolicy
+          ? {
+              automationDescendantPolicy: {
+                automationId: automationPolicy.automationId,
+                automationName: automationPolicy.automationName,
+                mcpServers: [],
+                repo: input.repo,
+                publicationRepo: deps.publicationRepo(input.repo),
+                baseBranch: deps.defaultBranch(input.repo),
+                allowedRunners: [...automationPolicy.allowedRunners],
+                publication: "branch-pr-only" as const,
+              },
+            }
+          : {}),
         spawnDepth: depth,
       });
       const child = control.getSession(created.id);
@@ -326,15 +440,31 @@ export function createWorkflowSessionController(
         if (signal.aborted) throw new Error("workflow cancelled");
         const current = await status(id);
         if (reached(current, waitOpts.until)) return current;
-        if (["done", "error", "cancelled"].includes(current.status))
+        // An idle code turn is not terminal for Git/PR milestones: branch and
+        // GitHub projections commonly settle after the model turn ends.
+        if (
+          current.status === "error" ||
+          current.status === "cancelled" ||
+          (current.status === "done" &&
+            (waitOpts.until === "running" || waitOpts.until === "waiting"))
+        )
           throw new Error(
             `Session \`${id}\` reached ${current.status} before ${waitOpts.until}${current.error ? `: ${current.error}` : ""}`,
           );
         if (Date.now() >= deadline)
-          throw new Error(
-            `Timed out waiting for session \`${id}\` to reach ${waitOpts.until}`,
+          throw Object.assign(
+            new Error(
+              `Timed out waiting for session \`${id}\` to reach ${waitOpts.until}`,
+            ),
+            { retryable: true },
           );
-        await Bun.sleep(Math.min(250, Math.max(1, deadline - Date.now())));
+        // Primary turn boundaries wake immediately. PR projection changes do
+        // not yet have a dedicated event, so retain a low-frequency fallback.
+        await waitForSessionWake(
+          id,
+          Math.min(3_000, Math.max(1, deadline - Date.now())),
+          signal,
+        );
       }
     },
 
@@ -344,6 +474,35 @@ export function createWorkflowSessionController(
       return await control.deliverToSession(id, message, opts.user, {
         deliveryId: requestId,
       });
+    },
+
+    async autofix(id, reason, requestId) {
+      assertOwned(id);
+      const current = await status(id);
+      if (!current.prUrl)
+        throw new Error(`Session \`${id}\` has no pull request to autofix`);
+      if (current.prState && current.prState !== "OPEN")
+        throw new Error(
+          `Session \`${id}\` pull request is ${current.prState.toLowerCase()}, not open`,
+        );
+      const prompt = [
+        "Re-open the current pull request and address every open review comment and failing CI check. Push the fixes, reply honestly in each addressed thread, and do not merge.",
+        reason?.trim() ? `Coordinator context: ${reason.trim()}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+      return await control.deliverToSession(id, prompt, opts.user, {
+        deliveryId: requestId,
+        busy: "queue",
+        reviewHandoff: true,
+      });
+    },
+
+    async publish(id, requestId) {
+      assertOwned(id);
+      const result = await deps.publishSessionBranch(id, requestId);
+      const current = await status(id);
+      return { ...result, status: current };
     },
 
     async cancel(id, requestId) {

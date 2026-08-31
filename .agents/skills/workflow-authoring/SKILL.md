@@ -196,9 +196,14 @@ Session API:
 
 - `spawnSession({ prompt, repo, mode?, workspace?, branch? })` returns `{ id, url, repo, branch, parentSessionId }` once the visible session exists.
 - `sessionStatus(id)` returns current status, branch/worktree, and PR data.
-- `waitSession(id, { until, timeout? })` waits for `running`, `waiting`, `branch_pushed`, `pr_opened`, `done`, `error`, or `cancelled`.
+- `waitSession(id, { until, timeout? })` waits for lifecycle or PR milestones, including `pr_checks_passed`, `pr_checks_failed`, `pr_changes_requested`, `pr_approved`, and `pr_merged`.
 - `sendToSession(id, message)` steers a child spawned by this workflow.
+- `autofixSession(id, reason?)` queues the standard review and failing-CI fix handoff for a child with a PR.
 - `cancelSession(id)` cancels a child spawned by this workflow.
+- `reconcileSessions(desired, opts)` maintains a refillable child pool with bounded concurrency and optional durable retries.
+- `workflowState.get(key)` / `workflowState.compareAndSet(key, version, value)` provide replay-lineage-scoped CAS state.
+
+Use `spawnSession({ ..., runner, admission: { tokens, costUsd } })` when work needs a specific authorized Runner and up-front budget reservation.
 
 For dependent branches, wait for the base child to push, then create an isolated worktree with `baseSessionId` instead of `baseRef`.
 

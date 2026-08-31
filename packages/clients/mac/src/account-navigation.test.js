@@ -1,6 +1,7 @@
 const { describe, expect, test } = require("bun:test");
 const {
   accountForContext,
+  isOpenSessionAppUrl,
   resumableAccountUrl,
 } = require("./account-navigation");
 
@@ -37,6 +38,49 @@ describe("accountForContext", () => {
   });
 });
 
+describe("isOpenSessionAppUrl", () => {
+  const account = "https://one.example/";
+
+  test("accepts Open Session pages", () => {
+    expect(isOpenSessionAppUrl(account, "https://one.example/")).toBe(true);
+    expect(
+      isOpenSessionAppUrl(
+        account,
+        "https://one.example/workspace/ws-1/session/os-1?tab=changes#latest",
+      ),
+    ).toBe(true);
+    expect(
+      isOpenSessionAppUrl(account, "https://one.example/reports/daily/latest"),
+    ).toBe(true);
+  });
+
+  test("rejects same-origin documents that are not app pages", () => {
+    expect(
+      isOpenSessionAppUrl(
+        account,
+        "https://one.example/api/sessions/os-1/assets/raw/report.html",
+      ),
+    ).toBe(false);
+    expect(
+      isOpenSessionAppUrl(
+        account,
+        "https://one.example/api/reports/daily/latest/raw",
+      ),
+    ).toBe(false);
+    expect(isOpenSessionAppUrl(account, "https://one.example/docs/help")).toBe(
+      false,
+    );
+  });
+
+  test("rejects another origin and non-web URLs", () => {
+    expect(
+      isOpenSessionAppUrl(account, "https://two.example/session/os-2"),
+    ).toBe(false);
+    expect(isOpenSessionAppUrl(account, "file:///offline.html")).toBe(false);
+    expect(isOpenSessionAppUrl(account, "not a URL")).toBe(false);
+  });
+});
+
 describe("resumableAccountUrl", () => {
   test("retains an in-app route exactly", () => {
     expect(
@@ -49,7 +93,13 @@ describe("resumableAccountUrl", () => {
     );
   });
 
-  test("rejects another account and shell pages", () => {
+  test("rejects documents, another account and shell pages", () => {
+    expect(
+      resumableAccountUrl(
+        "https://one.example/",
+        "https://one.example/api/sessions/os-1/assets/raw/report.html",
+      ),
+    ).toBeNull();
     expect(
       resumableAccountUrl(
         "https://one.example/",

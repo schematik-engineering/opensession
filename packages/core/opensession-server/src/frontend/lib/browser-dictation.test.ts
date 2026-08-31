@@ -32,7 +32,19 @@ describe("Electron dictation", () => {
     const originalWindow = globalThis.window;
     const originalNavigator = globalThis.navigator;
     const originalCrypto = globalThis.crypto;
-    let processor: any;
+    let processor:
+      | {
+          onaudioprocess:
+            | ((event: {
+                inputBuffer: {
+                  getChannelData(channel: number): Float32Array;
+                };
+              }) => void)
+            | null;
+          connect(): void;
+          disconnect(): void;
+        }
+      | undefined;
     const pushed: Float32Array[] = [];
     let transcript = "";
     const api = {
@@ -89,7 +101,9 @@ describe("Electron dictation", () => {
         transcript = text;
       }, {} as MediaStream);
       expect(dictation).not.toBeNull();
-      processor.onaudioprocess({
+      const processAudio = processor?.onaudioprocess;
+      if (!processAudio) throw new Error("Audio processor was not connected");
+      processAudio({
         inputBuffer: { getChannelData: () => new Float32Array([0.25, -0.5]) },
       });
       await Promise.resolve();

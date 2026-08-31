@@ -350,6 +350,18 @@ export async function handleStaticAssetsRoutes(
       }
       return new Response(file, { headers });
     }
+    // An absent content-hashed asset belongs to a retired bundle, not to the
+    // client-side router. Returning the SPA document here turns the real 404
+    // into a misleading strict-MIME error for dynamic imports.
+    if (type)
+      return new Response("Not found", {
+        status: 404,
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
   }
   if (path === "/manifest.webmanifest") {
     return Response.json(pwaManifest(publicPrefix), {

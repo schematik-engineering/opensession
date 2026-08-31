@@ -858,10 +858,23 @@ export interface GitStatusInfo {
   uncommittedPaths?: string[];
 }
 
+type ProtocolCreateSessionMessage = Extract<
+  ProtocolClientMessage,
+  { type: "create_session" }
+>;
+
+type AppProtocolClientMessage =
+  | Exclude<ProtocolClientMessage, ProtocolCreateSessionMessage>
+  | (ProtocolCreateSessionMessage & {
+      /** Link a support-session create to its Plain thread. */
+      plainThreadId?: string;
+    });
+
 export type WSClientMessage =
   // The protocol core: liveness ping, watch/unwatch + history paging,
-  // prompt/interrupt + queue control, cancel, create_session.
-  | ProtocolClientMessage
+  // prompt/interrupt + queue control, cancel, create_session. The reference
+  // app extends create_session with its support-ticket linkage above.
+  | AppProtocolClientMessage
   // Presence only: this tab went hidden or idle (or came back). The watch is
   // untouched — the transcript keeps streaming — but an away socket stops
   // showing this person's face to teammates.

@@ -1409,7 +1409,9 @@ export function PrPanel({
     showFileStats,
     codeTheme,
     visibleFileOrder,
-    stickyFileHeaders: true,
+    // PR file cards scroll beneath the sticky toolbar as one surface. Sidebar
+    // Changes opts into pinned file headers separately.
+    stickyFileHeaders: false,
     defaultExpandedFiles: diffLoadPolicy.defaultExpandedFiles,
     allowExpandAll: diffLoadPolicy.allowExpandAll,
     viewedFiles: prViewed?.key === viewedKey ? prViewed.viewed : undefined,
@@ -2130,10 +2132,9 @@ export function PrPanel({
           )}
 
         <main
-          // Wide review scrolls the toolbar and canvas in one container. Once
-          // the toolbar sticks, file titles clear its 10px inset, 40px row,
-          // 2px border, 8px section gap, and the file card's own 1px border.
-          className={`min-w-0 flex-1 bg-surface [--review-file-header-top:0px] ${compactToolbar ? "overflow-y-visible desktop:[--review-file-header-top:61px]" : "overflow-y-auto"} ${reviewing ? "pb-24 phone:pb-36" : "pb-4"}`}
+          // Wide review scrolls the toolbar and canvas in one container. File
+          // cards stay in that flow and pass beneath the sticky toolbar.
+          className={`min-w-0 flex-1 bg-surface ${compactToolbar ? "overflow-y-visible" : "overflow-y-auto"} ${reviewing ? "pb-24 phone:pb-36" : "pb-4"}`}
         >
           {page === "overview" ? (
             <SelectionToSession
@@ -2151,6 +2152,7 @@ export function PrPanel({
                     author={pr.author}
                     descriptionHtml={bodyHtml}
                     comments={comments}
+                    provider={provider}
                     repo={markdownRepo}
                     onAddToInput={onAddToInput}
                     pr={pr}

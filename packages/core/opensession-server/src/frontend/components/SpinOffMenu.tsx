@@ -5,7 +5,11 @@ import { Button } from "../ui/button";
 import { Menu, MENU_ICON } from "../ui/menu";
 import { Modal } from "../ui/modal";
 import { IconChevronRight, IconSparkle } from "./icons";
-import type { UnifiedSession, TranscriptEntry } from "../lib/types";
+import type {
+  TranscriptEntry,
+  UnifiedSession,
+  WSClientMessage,
+} from "../lib/types";
 import { getCurrentUser } from "./UserPicker";
 import { Field, fieldClasses } from "../ui/input";
 import { noAutofill } from "../lib/composer-autofill";
@@ -17,7 +21,7 @@ type Flavor = "build" | "learnings" | "analyze";
 interface Props {
   session: UnifiedSession;
   entries: TranscriptEntry[];
-  send: (msg: any) => void;
+  send: (msg: WSClientMessage) => void;
   connected: boolean;
   /** Open the new-session composer prefilled — the one flavor that writes no
       prompt of its own. */

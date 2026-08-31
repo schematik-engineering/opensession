@@ -1465,7 +1465,7 @@ export function Composer({
     // other ⌘Z is left to the field's own history.
     if (sessionNames.handleUndoRedoKey(e)) return;
     if (handleMentionKeyDown(e)) return;
-    if ((e.nativeEvent as any).isComposing) return;
+    if (e.nativeEvent.isComposing) return;
     if (
       (e.key === "Backspace" || e.key === "Delete") &&
       !e.metaKey &&

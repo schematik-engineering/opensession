@@ -55,6 +55,15 @@ describe("pstack mode", () => {
       ]);
       expect(expanded).toContain(`<skill name="${name}"`);
       expect(expanded).toMatch(/# (Pstack|Poteto) mode/);
+      if (name === "pstack") {
+        expect(expanded).toContain("## Open Session delegation");
+        expect(expanded).toContain("playbooks/orchestrate.md");
+        expect(expanded).toContain("principle-model-the-domain");
+      } else {
+        expect(expanded).toContain(
+          "canonical Open Session pstack implementation",
+        );
+      }
       expect(expanded).toEndWith("fix it");
     }
   });

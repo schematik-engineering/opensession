@@ -144,6 +144,29 @@ export function openSlackComposer(
   });
 }
 
+export function updatePendingSlackComposer(
+  sessionId: string,
+  requestId: string,
+  draft: Omit<SlackComposeRequest, "id">,
+): SlackComposeRequest | null {
+  const pending = pendingSlackComposers.get(sessionId);
+  if (
+    !pending ||
+    pending.request.id !== requestId ||
+    pending.status !== "pending"
+  )
+    return null;
+  const channel = draft.channel || pending.request.channel;
+  pending.request = {
+    id: requestId,
+    message: draft.message,
+    ...(channel ? { channel } : {}),
+    images: [...draft.images],
+  };
+  broadcast(sessionId, pending.request);
+  return pending.request;
+}
+
 export function claimPendingSlackComposer(
   sessionId: string,
   requestId: string,

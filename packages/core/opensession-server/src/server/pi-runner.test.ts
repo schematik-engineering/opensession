@@ -30,6 +30,7 @@ import {
   makeGuardedToolOps,
   makePiBashTool,
   parsePiModel,
+  piBashHomeEnv,
   piAssistantTranscriptEntries,
   PI_STATE_DIR,
   PI_STEER_TOOL_SKIP,
@@ -1270,6 +1271,24 @@ describe("local-tool path containment", () => {
   );
 });
 
+test("automation descendants receive an isolated CLI home", () => {
+  expect(
+    piBashHomeEnv({
+      runKey: "run/unsafe",
+      scratchDir: "/scratch/session",
+      isolated: true,
+      hostHome: "/Users/operator",
+    }),
+  ).toEqual({
+    HOME: "/scratch/session/automation-home-run_unsafe",
+    XDG_CONFIG_HOME: "/scratch/session/automation-home-run_unsafe/.config",
+    AWS_CONFIG_FILE: "/scratch/session/automation-home-run_unsafe/.aws/config",
+    AWS_SHARED_CREDENTIALS_FILE:
+      "/scratch/session/automation-home-run_unsafe/.aws/credentials",
+    GH_CONFIG_DIR: "/scratch/session/automation-home-run_unsafe/.config/gh",
+  });
+});
+
 describe("makePiBashTool exit-gated completion", () => {
   const env = { PATH: process.env.PATH || "/usr/bin:/bin" };
   const tool = makePiBashTool({
@@ -1277,6 +1296,28 @@ describe("makePiBashTool exit-gated completion", () => {
     env,
     gated: false,
     unattended: false,
+  });
+
+  test("enforces automation descendant publication policy before execution", async () => {
+    const restricted = makePiBashTool({
+      cwd: tmpdir(),
+      env,
+      gated: true,
+      unattended: true,
+      publicationPolicy: {
+        repo: "tellahq/renderer",
+        branch: "main",
+        headBranch: "compat/layout",
+      },
+    });
+    await expect(
+      (restricted as any).execute(
+        "publication-denied",
+        { command: "gh pr merge 12 --squash" },
+        undefined,
+        undefined,
+      ),
+    ).rejects.toThrow(/cannot merge/);
   });
 
   test("a background child holding stdout does not wedge the tool", async () => {

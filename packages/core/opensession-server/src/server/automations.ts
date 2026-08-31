@@ -57,6 +57,7 @@ import { linkThreadInIndex, createSlackPostScanner } from "./slack-links";
 import { createPapercutsMcpServer } from "../agents/slack/papercuts-tools";
 import { createReportMcpServer } from "../agents/slack/report-tools";
 import { createWorkflowsMcpServer } from "../agents/slack/workflow-tools";
+import type { WorkflowAutomationSessionPolicy } from "../shared/workflow-types";
 import { createTurnMcpServer } from "../agents/slack/turn-tools";
 import { createAuditMcpServer } from "./audit-mcp";
 import { createHealthMcpServer } from "./health-mcp";
@@ -219,6 +220,12 @@ export interface Automation {
    * from a ticket. See workflow-tools.ts's module doc.
    */
   workflows?: boolean;
+  /** Human-set separately from workflows: permits durable code children. */
+  workflowSessions?: boolean;
+  /** Repositories durable workflow children may target. Required for opt-in. */
+  workflowSessionRepos?: string[];
+  /** Persistent Runners those children may target. Empty denies all Runners. */
+  workflowSessionRunners?: string[];
   /**
    * Provision the run's env with a Claude-CLI credential from the
    * claude-accounts pool (CLAUDE_CODE_OAUTH_TOKEN, via the pi runner —
@@ -592,6 +599,9 @@ const AUTOMATION_FIELDS: Record<string, AutomationFieldValidator> = {
   workspaceId: (v) => sanitizeAutomationWorkspace(v),
   selfImprove: (v) => v === true || undefined,
   workflows: (v) => v === true || undefined,
+  workflowSessions: (v) => v === true || undefined,
+  workflowSessionRepos: (v) => sanitizeMcpList(v),
+  workflowSessionRunners: (v) => sanitizeMcpList(v),
   claudeCliEnv: (v) => v === true || undefined,
   codexCliEnv: (v) => v === true || undefined,
   model: (v) => sanitizeModel(v),
@@ -672,6 +682,9 @@ export function createAutomation(input: {
   workspaceId?: string;
   selfImprove?: boolean;
   workflows?: boolean;
+  workflowSessions?: boolean;
+  workflowSessionRepos?: string[];
+  workflowSessionRunners?: string[];
   claudeCliEnv?: boolean;
   codexCliEnv?: boolean;
   model?: string;
@@ -901,6 +914,31 @@ export function automationBaselineMcpServers(
  *  stdio proxies — so rebuild the baseline set and opensession-workflows
  *  (human-set `workflows` flag only) from the automation record. Never the
  *  admin/sessions siblings. */
+export function automationWorkflowSessionPolicy(
+  automation: Pick<
+    Automation,
+    | "id"
+    | "name"
+    | "workflows"
+    | "workflowSessions"
+    | "workflowSessionRepos"
+    | "workflowSessionRunners"
+  >,
+): WorkflowAutomationSessionPolicy | undefined {
+  if (
+    !automation.workflows ||
+    !automation.workflowSessions ||
+    !automation.workflowSessionRepos?.length
+  )
+    return undefined;
+  return {
+    automationId: automation.id,
+    automationName: automation.name,
+    allowedRepos: [...new Set(automation.workflowSessionRepos)],
+    allowedRunners: [...new Set(automation.workflowSessionRunners || [])],
+  };
+}
+
 export function automationRunMcpForSession(
   session: { automation?: string; worktreeDir?: string | null },
   sessionId: string,
@@ -922,6 +960,7 @@ export function automationRunMcpForSession(
       // it must never be a way around the allowlist or the denied writes.
       mcpAllowlist: a.mcpServers,
       deniedTools: AUTOMATION_DENIED_TOOLS,
+      automationSessionPolicy: automationWorkflowSessionPolicy(a),
     });
   }
   return servers;
@@ -972,6 +1011,7 @@ function automationRunInProcessMcp(
             // one — never a way around the allowlist or the denied writes.
             mcpAllowlist: a.mcpServers,
             deniedTools: AUTOMATION_DENIED_TOOLS,
+            automationSessionPolicy: automationWorkflowSessionPolicy(a),
           }),
         }
       : {}),

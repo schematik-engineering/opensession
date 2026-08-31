@@ -184,6 +184,96 @@ function sendToSession(id: unknown, message: unknown): Promise<unknown> {
   return sessionCall("send", { id: String(id), message: String(message) });
 }
 
+function publishSessionBranch(id: unknown): Promise<unknown> {
+  return sessionCall("publish", { id: String(id) });
+}
+
+function autofixSession(id: unknown, reason?: unknown): Promise<unknown> {
+  return sessionCall("autofix", {
+    id: String(id),
+    ...(reason === undefined ? {} : { message: String(reason) }),
+  });
+}
+
+/** Refillable worker pool for durable sessions. Each item starts only when a
+ * prior child reaches the requested milestone, so large desired sets do not
+ * trip the active-session cap. Calls remain ordinary journaled spawn/waits. */
+async function reconcileSessions(
+  desired: WorkflowSpawnSessionOpts[],
+  opts: {
+    concurrency?: number;
+    until?: WorkflowSessionState;
+    timeout?: number;
+    retry?: { attempts: number; message: string };
+  } = {},
+): Promise<unknown[]> {
+  const items = Array.isArray(desired) ? desired : [];
+  if (
+    opts.retry &&
+    (!Number.isSafeInteger(opts.retry.attempts) ||
+      opts.retry.attempts < 0 ||
+      opts.retry.attempts > 3)
+  )
+    throw new Error(
+      "reconcileSessions retry.attempts must be an integer from 0 to 3",
+    );
+  const concurrency = Math.max(
+    1,
+    Math.min(items.length || 1, opts.concurrency || 1),
+  );
+  const results = new Array(items.length);
+  let next = 0;
+  const lanes = await Promise.allSettled(
+    Array.from({ length: concurrency }, async () => {
+      for (;;) {
+        const index = next++;
+        if (index >= items.length) return;
+        const child = (await spawnSession(items[index])) as { id: string };
+        let attempt = 0;
+        for (;;) {
+          try {
+            results[index] = await waitSession(child.id, {
+              until: opts.until || "done",
+              ...(opts.timeout === undefined ? {} : { timeout: opts.timeout }),
+            });
+            break;
+          } catch (error) {
+            if (
+              !opts.retry ||
+              (error as { retryable?: unknown })?.retryable !== true ||
+              attempt++ >= opts.retry.attempts
+            )
+              throw error;
+            await sendToSession(child.id, opts.retry.message);
+          }
+        }
+      }
+    }),
+  );
+  const failed = lanes.find(
+    (lane): lane is PromiseRejectedResult => lane.status === "rejected",
+  );
+  if (failed) throw failed.reason;
+  return results;
+}
+
+const workflowState = {
+  get(key: unknown): Promise<unknown> {
+    return sessionCall("state_get", { key: String(key) });
+  },
+  compareAndSet(
+    key: unknown,
+    expectedVersion: unknown,
+    value: unknown,
+  ): Promise<unknown> {
+    return sessionCall("state_cas", {
+      key: String(key),
+      expectedVersion: Number(expectedVersion),
+      value,
+    });
+  },
+};
+
 function cancelSession(id: unknown): Promise<unknown> {
   return sessionCall("cancel", { id: String(id) });
 }
@@ -388,6 +478,10 @@ async function runBody(
       "sessionStatus",
       "waitSession",
       "sendToSession",
+      "publishSessionBranch",
+      "autofixSession",
+      "reconcileSessions",
+      "workflowState",
       "cancelSession",
       "mcp",
       "phase",
@@ -404,6 +498,10 @@ async function runBody(
       sessionStatus,
       waitSession,
       sendToSession,
+      publishSessionBranch,
+      autofixSession,
+      reconcileSessions,
+      workflowState,
       cancelSession,
       mcp,
       phase,
@@ -468,6 +566,14 @@ workerGlobal.onmessage = (event: MessageEvent<unknown>) => {
     if (!handlers) return;
     pendingSessions.delete(msg.callId);
     if (msg.ok) handlers.resolve(msg.value);
-    else handlers.reject(new Error(msg.error || "Session operation failed"));
+    else {
+      const error = new Error(
+        msg.error || "Session operation failed",
+      ) as Error & {
+        retryable?: boolean;
+      };
+      if (msg.retryable) error.retryable = true;
+      handlers.reject(error);
+    }
   }
 };

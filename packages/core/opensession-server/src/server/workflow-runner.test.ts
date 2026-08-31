@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
@@ -15,13 +15,16 @@ import {
 } from "./workflow-runner";
 import {
   getWorkflowRun,
+  markInterruptedWorkflows,
   readWorkflowJournal,
+  readWorkflowScript,
   unregisterLiveWorkflow,
   updateWorkflowRun,
 } from "./workflow-store";
 import {
   WORKFLOW_LIMITS,
   isMcpJournalEntry,
+  isSessionJournalEntry,
   type WorkflowAgentOutcome,
   type WorkflowAgentRequest,
   type WorkflowExecCtx,
@@ -31,6 +34,7 @@ import {
   type WorkflowSessionController,
   type WorkflowSessionStatus,
   type WorkflowSpawnedSession,
+  type WorkflowSpawnSessionOpts,
 } from "./workflow-types";
 import type { WorkflowMcpHost } from "./workflow-mcp";
 
@@ -1204,6 +1208,8 @@ describe("workflow live control and recovery", () => {
 
 type FakeSessionController = WorkflowSessionController & {
   spawnCalls: number;
+  spawnRequestIds: string[];
+  spawnAdmissions: Array<WorkflowSpawnSessionOpts["admission"]>;
   sendCalls: Array<{ id: string; message: string }>;
   cancelCalls: string[];
   cancelActiveCalls: string[];
@@ -1214,6 +1220,8 @@ function fakeSessionController(): FakeSessionController {
   const owned = new Set<string>();
   const api: FakeSessionController = {
     spawnCalls: 0,
+    spawnRequestIds: [],
+    spawnAdmissions: [],
     sendCalls: [],
     cancelCalls: [],
     cancelActiveCalls: [],
@@ -1226,8 +1234,10 @@ function fakeSessionController(): FakeSessionController {
         branchPushed: true,
       });
     },
-    async spawn(opts) {
+    async spawn(opts, requestId) {
       api.spawnCalls++;
+      api.spawnRequestIds.push(requestId);
+      api.spawnAdmissions.push(opts.admission);
       const session: WorkflowSpawnedSession = {
         id: `child-${api.spawnCalls}`,
         url: `https://os.example.test/session/child-${api.spawnCalls}`,
@@ -1349,6 +1359,254 @@ describe("workflow durable session API", () => {
     expect(snap.sessions?.map((session) => session.id)).toEqual(["child-1"]);
   });
 
+  test("restart recovery re-adopts an unfinished wait and preserves its deadline", async () => {
+    const originalSessions = fakeSessionController();
+    const source = [
+      'export const meta = { name: "recover-wait" };',
+      'const child = await spawnSession({ prompt: "one", repo: "renderer", admission: { tokens: 500, costUsd: 2 } });',
+      'return await waitSession(child.id, { until: "pr_checks_passed", timeout: 60000 });',
+    ].join("\n");
+    const original = start({
+      executor: echoExecutor(),
+      sessionController: originalSessions,
+      script: source,
+    });
+    await waitForFinished(original.runId);
+    unregisterLiveWorkflow(original.runId);
+    const journalPath = `${process.env.OPENSESSION_WORKFLOWS_DIR}/${original.runId}/journal.jsonl`;
+    const entries = readFileSync(journalPath, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+      .filter((entry) => entry.operation !== "wait");
+    writeFileSync(
+      journalPath,
+      `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+    );
+    const deadline = Date.now() + 1_000;
+    updateWorkflowRun(original.runId, (snapshot) => {
+      snapshot.status = "interrupted";
+      snapshot.endedAt = new Date().toISOString();
+      snapshot.sessionWaits = [
+        {
+          seq: 1,
+          sessionId: "child-1",
+          until: "pr_checks_passed",
+          startedAt: new Date(Date.now() - 1_000).toISOString(),
+          deadlineAt: new Date(deadline).toISOString(),
+        },
+      ];
+    });
+
+    const recoveredSessions = fakeSessionController();
+    let recoveredTimeout = Infinity;
+    const normalWait = recoveredSessions.wait.bind(recoveredSessions);
+    recoveredSessions.wait = async (id, opts, signal) => {
+      recoveredTimeout = opts.timeout ?? Infinity;
+      return normalWait(id, opts, signal);
+    };
+    const recoveredId = await recoverWorkflow(original.runId, {
+      executor: echoExecutor(),
+      sessionController: recoveredSessions,
+      inProcessMcp: () => ({}),
+    });
+    expect(recoveredId).toBeTruthy();
+    expect((await waitForFinished(recoveredId!)).status).toBe("done");
+    expect(recoveredSessions.spawnCalls).toBe(0);
+    expect(recoveredTimeout).toBeLessThanOrEqual(1_000);
+    expect(getWorkflowRun(recoveredId!)?.sessions?.[0]).toMatchObject({
+      reservedTokens: 10_000,
+      reservedCostUsd: 2,
+    });
+  });
+
+  test("reordered recovered waits keep and clear their request-key deadlines", async () => {
+    const sessions = fakeSessionController();
+    const source = (first: string, second: string) =>
+      [
+        'export const meta = { name: "wait-reorder" };',
+        'const a = await spawnSession({ prompt: "a", repo: "renderer", branch: "a" });',
+        'const b = await spawnSession({ prompt: "b", repo: "renderer", branch: "b" });',
+        "return await Promise.all([",
+        `  waitSession(${first}.id, { until: "done", timeout: 60000 }),`,
+        `  waitSession(${second}.id, { until: "done", timeout: 60000 }),`,
+        "]);",
+      ].join("\n");
+    const original = start({
+      executor: echoExecutor(),
+      sessionController: sessions,
+      script: source("a", "b"),
+    });
+    await waitForFinished(original.runId);
+    const waitEntries = readWorkflowJournal(original.runId)
+      .filter(isSessionJournalEntry)
+      .filter((entry) => entry.operation === "wait");
+    const journalPath = `${process.env.OPENSESSION_WORKFLOWS_DIR}/${original.runId}/journal.jsonl`;
+    const retained = readWorkflowJournal(original.runId).filter(
+      (entry) => !(entry.kind === "session" && entry.operation === "wait"),
+    );
+    writeFileSync(
+      journalPath,
+      `${retained.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+    );
+    const deadlines = [Date.now() + 1_000, Date.now() + 4_000];
+    updateWorkflowRun(original.runId, (snapshot) => {
+      snapshot.status = "interrupted";
+      snapshot.endedAt = new Date().toISOString();
+      snapshot.sessionWaits = waitEntries.map((entry, index) => ({
+        seq: entry.seq,
+        requestKey: entry.requestKey,
+        sessionId: index === 0 ? "child-1" : "child-2",
+        until: "done",
+        startedAt: new Date().toISOString(),
+        deadlineAt: new Date(deadlines[index]).toISOString(),
+      }));
+    });
+    writeFileSync(
+      `${process.env.OPENSESSION_WORKFLOWS_DIR}/${original.runId}/script.mjs`,
+      source("b", "a"),
+    );
+    const observed = new Map<string, number>();
+    sessions.wait = async (id, opts) => {
+      observed.set(id, opts.timeout || 0);
+      return { ...(await sessions.status(id)), status: "done" };
+    };
+    const recoveredId = await recoverWorkflow(original.runId, {
+      executor: echoExecutor(),
+      sessionController: sessions,
+      inProcessMcp: () => ({}),
+    });
+    const recovered = await waitForFinished(recoveredId!);
+    expect(recovered.status).toBe("done");
+    expect(observed.get("child-1")!).toBeLessThan(observed.get("child-2")!);
+    expect(recovered.sessionWaits).toEqual([]);
+  });
+
+  test("spawn request identity survives concurrent reorder across the crash window", async () => {
+    const sessions = fakeSessionController();
+    const physicalSpawn = sessions.spawn.bind(sessions);
+    const created = new Map<string, WorkflowSpawnedSession>();
+    let blockAfterCreate = true;
+    sessions.spawn = async (opts, requestId) => {
+      const existing = created.get(requestId);
+      if (existing) return existing;
+      const child = await physicalSpawn(opts, requestId);
+      created.set(requestId, child);
+      if (blockAfterCreate) await new Promise(() => {});
+      return child;
+    };
+    const source = (first: string, second: string) =>
+      [
+        'export const meta = { name: "crash-window" };',
+        "return await Promise.all([",
+        `  spawnSession({ prompt: "${first}", repo: "renderer", branch: "${first}" }),`,
+        `  spawnSession({ prompt: "${second}", repo: "renderer", branch: "${second}" }),`,
+        "]);",
+      ].join("\n");
+    const original = start({
+      executor: echoExecutor(),
+      sessionController: sessions,
+      script: source("alpha", "beta"),
+    });
+    await waitUntil(() => created.size === 2);
+    expect(cancelWorkflow(original.runId)).toBe(true);
+    await waitForFinished(original.runId);
+    unregisterLiveWorkflow(original.runId);
+    writeFileSync(
+      `${process.env.OPENSESSION_WORKFLOWS_DIR}/${original.runId}/script.mjs`,
+      source("beta", "alpha"),
+    );
+    updateWorkflowRun(original.runId, (snapshot) => {
+      snapshot.status = "interrupted";
+      snapshot.endedAt = new Date().toISOString();
+    });
+    blockAfterCreate = false;
+    const recoveredId = await recoverWorkflow(original.runId, {
+      executor: echoExecutor(),
+      sessionController: sessions,
+      inProcessMcp: () => ({}),
+    });
+    expect((await waitForFinished(recoveredId!)).status).toBe("done");
+    expect(created.size).toBe(2);
+    expect(sessions.spawnCalls).toBe(2);
+  });
+
+  test("recovery adopts a pre-journal spawn row without reserving twice", async () => {
+    const sessions = fakeSessionController();
+    const source = [
+      'export const meta = { name: "row-crash" };',
+      'return await spawnSession({ prompt: "one", repo: "renderer" });',
+    ].join("\n");
+    const original = start({
+      executor: echoExecutor(),
+      sessionController: sessions,
+      script: source,
+      sessionLimits: { maxTokens: 10_000, maxCostUsd: 1 },
+    });
+    await waitForFinished(original.runId);
+    const journalPath = `${process.env.OPENSESSION_WORKFLOWS_DIR}/${original.runId}/journal.jsonl`;
+    writeFileSync(journalPath, "");
+    updateWorkflowRun(original.runId, (snapshot) => {
+      snapshot.status = "interrupted";
+      snapshot.endedAt = new Date().toISOString();
+    });
+    const recoveredId = await recoverWorkflow(original.runId, {
+      executor: echoExecutor(),
+      sessionController: sessions,
+      inProcessMcp: () => ({}),
+    });
+    expect((await waitForFinished(recoveredId!)).status).toBe("done");
+    expect(sessions.spawnCalls).toBe(1);
+    expect(getWorkflowRun(recoveredId!)?.sessions).toHaveLength(1);
+  });
+
+  test("a failed late-child cancel remains durable and retries on recovery", async () => {
+    const sessions = fakeSessionController();
+    const physicalSpawn = sessions.spawn.bind(sessions);
+    const release = deferred<void>();
+    let spawnStarted = false;
+    sessions.spawn = async (opts, requestId) => {
+      spawnStarted = true;
+      await release.promise;
+      return physicalSpawn(opts, requestId);
+    };
+    let failCancel = true;
+    const physicalCancel = sessions.cancel.bind(sessions);
+    sessions.cancel = async (id, requestId) => {
+      if (failCancel) throw new Error("temporary cancel failure");
+      return physicalCancel(id, requestId);
+    };
+    const source = [
+      'export const meta = { name: "cancel-recovery" };',
+      'return await spawnSession({ prompt: "one", repo: "renderer" });',
+    ].join("\n");
+    const original = start({
+      executor: echoExecutor(),
+      sessionController: sessions,
+      script: source,
+    });
+    await waitUntil(() => spawnStarted);
+    cancelWorkflow(original.runId);
+    release.resolve();
+    await waitUntil(
+      () => getWorkflowRun(original.runId)?.sessions?.[0]?.cancelPending,
+    );
+    expect(getWorkflowRun(original.runId)?.status).toBe("cancelled");
+    markInterruptedWorkflows();
+    expect(getWorkflowRun(original.runId)?.status).toBe("interrupted");
+    failCancel = false;
+    const recoveredId = await recoverWorkflow(original.runId, {
+      executor: echoExecutor(),
+      sessionController: sessions,
+      inProcessMcp: () => ({}),
+    });
+    await waitForFinished(recoveredId!);
+    expect(sessions.cancelCalls).toEqual(["child-1"]);
+    expect(getWorkflowRun(recoveredId!)?.sessions?.[0]?.cancelPending).toBe(
+      false,
+    );
+  });
+
   test("explicit workflow cancellation propagates to active children", async () => {
     const sessions = fakeSessionController();
     const gate = deferred<WorkflowAgentOutcome>();
@@ -1367,6 +1625,212 @@ describe("workflow durable session API", () => {
     await waitUntil(() => sessions.cancelActiveCalls.length === 1);
     expect(sessions.cancelActiveCalls[0]).toContain(`workflow:${runId}:cancel`);
     gate.resolve({ ok: false, error: "cancelled" });
+  });
+
+  test("persists external waits until their event resolves", async () => {
+    const sessions = fakeSessionController();
+    const wait = deferred<WorkflowSessionStatus>();
+    sessions.wait = async () => wait.promise;
+    const run = start({
+      executor: echoExecutor(),
+      sessionController: sessions,
+      script: [
+        'export const meta = { name: "durable-wait" };',
+        'const child = await spawnSession({ prompt: "one", repo: "renderer" });',
+        'return await waitSession(child.id, { until: "pr_checks_passed", timeout: 10000 });',
+      ].join("\n"),
+    });
+    await waitUntil(() =>
+      Boolean(getWorkflowRun(run.runId)?.sessionWaits?.length),
+    );
+    expect(getWorkflowRun(run.runId)?.sessionWaits?.[0]).toMatchObject({
+      sessionId: "child-1",
+      until: "pr_checks_passed",
+    });
+    wait.resolve({
+      ...(await sessions.status("child-1")),
+      status: "done",
+      prChecks: { total: 2, passed: 2, failed: 0, pending: 0 },
+    });
+    expect((await waitForFinished(run.runId)).sessionWaits).toEqual([]);
+  });
+
+  test("scoped CAS and refill/retry use journaled calls", async () => {
+    const sessions = fakeSessionController();
+    const normalWait = sessions.wait.bind(sessions);
+    let failedOnce = false;
+    sessions.wait = async (id, opts, signal) => {
+      if (!failedOnce) {
+        failedOnce = true;
+        throw Object.assign(new Error("transient child failure"), {
+          retryable: true,
+        });
+      }
+      return normalWait(id, opts, signal);
+    };
+    const run = start({
+      executor: echoExecutor(),
+      sessionController: sessions,
+      sessionLimits: { maxConcurrent: 1, maxSessions: 3 },
+      script: [
+        'export const meta = { name: "reconcile" };',
+        'const initial = await workflowState.get("cursor");',
+        "const claims = await Promise.all([",
+        '  workflowState.compareAndSet("cursor", initial.version, { owner: "a", next: 3 }),',
+        '  workflowState.compareAndSet("cursor", initial.version, { owner: "b", next: 3 }),',
+        "]);",
+        "const rows = await reconcileSessions([",
+        '  { prompt: "one", repo: "renderer", branch: "one" },',
+        '  { prompt: "two", repo: "renderer", branch: "two" },',
+        '  { prompt: "three", repo: "renderer", branch: "three" },',
+        '], { concurrency: 1, retry: { attempts: 1, message: "Retry transient failure" } });',
+        "return { winners: claims.filter((claim) => claim.swapped).length, count: rows.length };",
+      ].join("\n"),
+    });
+    const snap = await waitForFinished(run.runId);
+    expect(snap.status).toBe("done");
+    expect(snap.result).toMatchObject({ winners: 1, count: 3 });
+    expect(sessions.spawnCalls).toBe(3);
+    expect(sessions.sendCalls).toEqual([
+      { id: "child-1", message: "Retry transient failure" },
+    ]);
+    expect(
+      readWorkflowJournal(run.runId).some(
+        (entry) =>
+          entry.kind === "session" &&
+          entry.operation === "wait" &&
+          !entry.ok &&
+          entry.retryable === true,
+      ),
+    ).toBe(true);
+
+    const replaySessions = fakeSessionController();
+    const replay = start({
+      executor: echoExecutor(),
+      sessionController: replaySessions,
+      script: readWorkflowScript(run.runId)!,
+      resumeFromRunId: run.runId,
+      sessionLimits: { maxConcurrent: 1, maxSessions: 3 },
+    });
+    expect((await waitForFinished(replay.runId)).status).toBe("done");
+    expect(replaySessions.spawnCalls).toBe(0);
+  });
+
+  test("explicit cancellation drains and cancels a late spawn", async () => {
+    const sessions = fakeSessionController();
+    const physicalSpawn = sessions.spawn.bind(sessions);
+    const release = deferred<void>();
+    let spawnStarted = false;
+    sessions.spawn = async (opts, requestId) => {
+      spawnStarted = true;
+      await release.promise;
+      return physicalSpawn(opts, requestId);
+    };
+    const run = start({
+      executor: echoExecutor(),
+      sessionController: sessions,
+      script: [
+        'export const meta = { name: "late-cancel" };',
+        'await spawnSession({ prompt: "one", repo: "renderer" });',
+      ].join("\n"),
+    });
+    await waitUntil(() => spawnStarted);
+    expect(cancelWorkflow(run.runId)).toBe(true);
+    release.resolve();
+    await waitUntil(() => sessions.cancelCalls.length === 1);
+    expect(sessions.cancelCalls).toEqual(["child-1"]);
+  });
+
+  test("reconcile validates retry bounds before spawning", async () => {
+    const sessions = fakeSessionController();
+    const run = start({
+      executor: echoExecutor(),
+      sessionController: sessions,
+      script: [
+        'export const meta = { name: "retry-bounds" };',
+        'await reconcileSessions([{ prompt: "one", repo: "renderer" }], { retry: { attempts: 4, message: "retry" } });',
+      ].join("\n"),
+    });
+    expect((await waitForFinished(run.runId)).error).toContain(
+      "integer from 0 to 3",
+    );
+    expect(sessions.spawnCalls).toBe(0);
+  });
+
+  test("reconcile drains delayed sibling lanes before surfacing failure", async () => {
+    const sessions = fakeSessionController();
+    const physicalSpawn = sessions.spawn.bind(sessions);
+    const delayed = deferred<void>();
+    let entered = 0;
+    sessions.spawn = async (opts, requestId) => {
+      entered++;
+      if (opts.branch === "slow") await delayed.promise;
+      return physicalSpawn(opts, requestId);
+    };
+    const normalWait = sessions.wait.bind(sessions);
+    sessions.wait = async (id, opts, signal) => {
+      const current = await sessions.status(id);
+      if (current.branch === "fail") throw new Error("policy denied");
+      return normalWait(id, opts, signal);
+    };
+    const run = start({
+      executor: echoExecutor(),
+      sessionController: sessions,
+      sessionLimits: { maxConcurrent: 2 },
+      script: [
+        'export const meta = { name: "drain-reconcile" };',
+        "await reconcileSessions([",
+        '  { prompt: "fail", repo: "renderer", branch: "fail" },',
+        '  { prompt: "slow", repo: "renderer", branch: "slow" },',
+        '], { concurrency: 2, retry: { attempts: 1, message: "retry" } });',
+      ].join("\n"),
+    });
+    await waitUntil(() => entered === 2);
+    await Bun.sleep(20);
+    expect(getWorkflowRun(run.runId)?.status).toBe("running");
+    delayed.resolve();
+    const snap = await waitForFinished(run.runId);
+    expect(snap.error).toContain("policy denied");
+    expect(snap.sessions).toHaveLength(2);
+    expect(sessions.sendCalls).toEqual([]);
+  });
+
+  test("caps workflow state calls per run", async () => {
+    const run = start({
+      executor: echoExecutor(),
+      sessionController: fakeSessionController(),
+      script: [
+        'export const meta = { name: "state-cap" };',
+        "let failure = '';",
+        `for (let i = 0; i <= ${WORKFLOW_LIMITS.maxStateCalls}; i++) {`,
+        "  try { await workflowState.get('cursor'); } catch (error) { failure = error.message; break; }",
+        "}",
+        "return failure;",
+      ].join("\n"),
+    });
+    expect((await waitForFinished(run.runId)).result).toContain(
+      "state call limit reached",
+    );
+  });
+
+  test("server admission supplies a conservative floor when caller omits it", async () => {
+    const sessions = fakeSessionController();
+    const run = start({
+      executor: echoExecutor(),
+      sessionController: sessions,
+      sessionLimits: {
+        maxConcurrent: 1,
+        maxSessions: 1,
+        maxTokens: 100_000,
+        maxCostUsd: 10,
+      },
+      script: [
+        'export const meta = { name: "reservation-floor" };',
+        'return await spawnSession({ prompt: "one", repo: "renderer" });',
+      ].join("\n"),
+    });
+    expect((await waitForFinished(run.runId)).status).toBe("done");
+    expect(sessions.spawnAdmissions).toEqual([{ tokens: 10_000, costUsd: 1 }]);
   });
 
   test("active-session and lifetime limits reject excess spawns", async () => {
@@ -1433,5 +1897,72 @@ describe("workflow durable session API", () => {
       "token budget exceeded",
     );
     expect(budgeted.spawnCalls).toBe(1);
+
+    const admission = fakeSessionController();
+    const admissionRun = start({
+      executor: echoExecutor(),
+      sessionController: admission,
+      sessionLimits: { maxTokens: 100, maxCostUsd: 5 },
+      script: [
+        'export const meta = { name: "admission" };',
+        'await spawnSession({ prompt: "too large", repo: "renderer", admission: { tokens: 101, costUsd: 1 } });',
+      ].join("\n"),
+    });
+    expect((await waitForFinished(admissionRun.runId)).error).toContain(
+      "token admission exceeds",
+    );
+    expect(admission.spawnCalls).toBe(0);
+
+    const racing = fakeSessionController();
+    const physicalRaceSpawn = racing.spawn.bind(racing);
+    const raceGate = deferred<void>();
+    let raceEntered = 0;
+    racing.spawn = async (opts, requestId) => {
+      raceEntered++;
+      await raceGate.promise;
+      return physicalRaceSpawn(opts, requestId);
+    };
+    const raceRun = start({
+      executor: echoExecutor(),
+      sessionController: racing,
+      sessionLimits: { maxConcurrent: 3, maxTokens: 100 },
+      script: [
+        'export const meta = { name: "admission-race" };',
+        "const rows = await Promise.allSettled([",
+        '  spawnSession({ prompt: "one", repo: "renderer", admission: { tokens: 60 } }),',
+        '  spawnSession({ prompt: "two", repo: "renderer", admission: { tokens: 60 } }),',
+        "]);",
+        'const failed = rows.find((row) => row.status === "rejected");',
+        "if (failed) throw failed.reason;",
+      ].join("\n"),
+    });
+    await waitUntil(() => raceEntered === 1);
+    raceGate.resolve();
+    expect((await waitForFinished(raceRun.runId)).error).toContain(
+      "token admission exceeds",
+    );
+    expect(raceEntered).toBe(1);
+
+    const refill = fakeSessionController();
+    const refillWait = refill.wait.bind(refill);
+    refill.wait = async (id, opts, signal) => ({
+      ...(await refillWait(id, opts, signal)),
+      status: "done",
+      tokens: 10,
+      costUsd: 0.1,
+    });
+    const refillRun = start({
+      executor: echoExecutor(),
+      sessionController: refill,
+      sessionLimits: { maxConcurrent: 1, maxTokens: 100, maxCostUsd: 2 },
+      script: [
+        'export const meta = { name: "budget-refill" };',
+        'const one = await spawnSession({ prompt: "one", repo: "renderer", admission: { tokens: 80, costUsd: 1 } });',
+        'await waitSession(one.id, { until: "done" });',
+        'await spawnSession({ prompt: "two", repo: "renderer", admission: { tokens: 80, costUsd: 1 } });',
+      ].join("\n"),
+    });
+    expect((await waitForFinished(refillRun.runId)).status).toBe("done");
+    expect(refill.spawnCalls).toBe(2);
   });
 });

@@ -9,6 +9,7 @@ import { Button } from "../ui/button";
 import { DeskVoiceClient, type DeskVoiceState } from "../lib/desk-voice-client";
 import { getDeskVoicePref, onDeskVoiceChanged } from "../lib/desk-voice-pref";
 import { cn } from "../ui/cn";
+import { errorMessage } from "../lib/error-message";
 
 /**
  * The Desk — a summonable overlay (⌘J / the floating desk button) on top of
@@ -86,9 +87,9 @@ function DeskBody({
       },
     });
     voiceRef.current = client;
-    void client.start().catch((e: any) => {
+    void client.start().catch((error) => {
       setVoiceState("error");
-      setVoiceError(e?.message || String(e));
+      setVoiceError(errorMessage(error, "Voice call failed"));
     });
   }
 
@@ -116,8 +117,9 @@ function DeskBody({
           effort: data.session?.effort,
         });
         if (data.clearedAt) setClearedAt(data.clearedAt);
-      })().catch(async (e: any) => {
-        if (!cancelled) setEnsureError(e?.message || "Failed to open the Desk");
+      })().catch(async (error) => {
+        if (!cancelled)
+          setEnsureError(errorMessage(error, "Failed to open the Desk"));
       });
     })();
     return () => {

@@ -182,6 +182,8 @@ export interface UnifiedSession {
   /** Slack messages a teammate sent from this session. */
   slackShares?: SessionSlackShare[];
   automation?: string;
+  /** Immutable trust provenance for workflow-spawned automation descendants. */
+  automationDescendantPolicy?: AutomationDescendantPolicy;
   /** Total live runs in this automation. Present on the bounded sidebar list. */
   automationRunCount?: number;
   /** Stable automation id for linking back to its settings. Older sessions may
@@ -519,6 +521,18 @@ export interface SessionSlackShare {
   announcementKey?: string;
 }
 
+export interface AutomationDescendantPolicy {
+  automationId: string;
+  automationName: string;
+  /** Immutable launch-time scope. Empty stays empty on every later turn. */
+  mcpServers: string[];
+  repo: string;
+  publicationRepo: string;
+  baseBranch: string;
+  allowedRunners: string[];
+  publication: "branch-pr-only";
+}
+
 export interface NativeSessionFile {
   id: string;
   claudeSessionId: string;
@@ -580,6 +594,8 @@ export interface NativeSessionFile {
   parentNotifiedAt?: string;
   automation?: string; // name of the automation that created this session
   automationId?: string; // id of that automation — lets a Slack thread reply "retrigger" re-fire it
+  /** Immutable trust provenance for workflow-spawned automation descendants. */
+  automationDescendantPolicy?: AutomationDescendantPolicy;
   /** The triggering event payload of the automation run that created this
    *  session (truncated like the prompt embed). A "retrigger" replays the
    *  automation with this exact payload. */

@@ -23,6 +23,7 @@ import {
 import { Menu } from "../ui/menu";
 import { IconTile } from "./BrandTile";
 import { IconDotsHorizontal, IconPlus, IconTrash } from "./icons";
+import { errorMessage } from "../lib/error-message";
 
 // Settings → Model providers: third-party Pi providers (xai, openrouter,
 // groq, …) — API key + optional baseURL, stored server-side (0600, returned
@@ -92,8 +93,10 @@ export function ModelProvidersPanel() {
       if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
       toast(`Provider ${p.id} removed`);
       load();
-    })().catch(async (e: any) => {
-      toast(e.message, { variant: "error" });
+    })().catch(async (error) => {
+      toast(errorMessage(error, "Failed to remove provider"), {
+        variant: "error",
+      });
     });
   }
 
@@ -238,8 +241,8 @@ function AddProviderForm({
       if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
       toast(`Provider ${cleanId} saved`);
       onSaved();
-    })().catch(async (e: any) => {
-      setError(e.message);
+    })().catch(async (error) => {
+      setError(errorMessage(error, "Failed to save provider"));
       setSaving(false);
     });
   }

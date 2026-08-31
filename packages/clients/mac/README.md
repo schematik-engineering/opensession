@@ -98,10 +98,12 @@ asked.
   (`contextIsolation`, no Node in the renderer). Use **File → New Window** or
   ⌘N to keep different organizations or workspaces open side by side. Switching
   organizations changes only the focused window. In-window navigation is
-  limited to that window's app origin;
-  everything else opens in the default browser. Additional windows close
+  limited to app pages for that window's organization; everything else opens
+  in the default browser. Additional windows close
   normally; closing the last one hides it to the Dock so its route and drafts
-  stay intact. Window state persists across launches.
+  stay intact. Same-origin documents that are not app pages, including raw
+  reports, assets and downloads, open in the default browser. Window state
+  persists across launches.
 - `src/preload.js`: exposes `window.os1` with `desktop`, `materialBackdrop`,
   `setBadge`, `clearBadge`, `focusWindow`, `organizations`, `updates`,
   `dictation`, and `server`. The main process refuses `server` calls from

@@ -11,7 +11,7 @@ interface BuildWorkspaceRowsInput {
   sessions: UnifiedSession[];
   workspaces: Workspace[];
   openPrs: OpenPr[];
-  activeSubagentIds: ReadonlySet<string>;
+  nestedSubagentIds: ReadonlySet<string>;
   selectedWorkspaceId?: string | null;
   selectedSessionId: string | null;
   reads: Record<string, string>;
@@ -36,7 +36,7 @@ export function buildWorkspaceRows({
   sessions,
   workspaces,
   openPrs,
-  activeSubagentIds,
+  nestedSubagentIds,
   selectedWorkspaceId,
   selectedSessionId,
   reads,
@@ -59,7 +59,7 @@ export function buildWorkspaceRows({
 
   for (const session of sessions) {
     if (
-      activeSubagentIds.has(session.id) &&
+      nestedSubagentIds.has(session.id) &&
       session.workspaceId !== selectedWorkspaceId
     ) {
       continue;
@@ -106,6 +106,16 @@ export function buildWorkspaceRows({
     const hasPinnedLane = members.some((session) =>
       pinnedLaneForSession(session),
     );
+    // The first member with an outstanding mention of you. Both the badge's
+    // face (who tagged you) and its jump target (which session to open to
+    // clear it) come from the same entry, so they can never disagree.
+    const mentionEntry = members
+      .filter((session) => session.id !== selectedSessionId)
+      .map((session) => ({
+        session,
+        mention: mentionForSession(session.id),
+      }))
+      .find((entry) => entry.mention);
     let status =
       STATUS_PRIORITY.find((candidate) =>
         statusSources.some(
@@ -135,10 +145,8 @@ export function buildWorkspaceRows({
       ),
       createdAt: workspace?.createdAt || members[0]?.createdAt || "",
       unread: !!pickUnreadWorkspaceSession(members, selectedSessionId, reads),
-      mention: members
-        .filter((session) => session.id !== selectedSessionId)
-        .map((session) => mentionForSession(session.id))
-        .find(Boolean)?.by,
+      mention: mentionEntry?.mention?.by,
+      mentionSessionId: mentionEntry?.session.id,
       running: members.some((session) => session.isRunning) || reviewRunning,
       owner: ownerKey(
         workspace?.createdBy || members[0]?.startedBy,

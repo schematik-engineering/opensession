@@ -1,6 +1,6 @@
 import { AGENT_NAME } from "../lib/brand";
 import React, { useEffect, useRef, useState } from "react";
-import type { WSServerMessage } from "../lib/types";
+import type { WSClientMessage, WSServerMessage } from "../lib/types";
 import {
   fetchModels,
   fetchPlainThreadById,
@@ -17,7 +17,7 @@ interface Props {
   /** The Plain thread id — the preview's key. */
   threadId: string;
   connected: boolean;
-  send: (msg: any) => void;
+  send: (msg: WSClientMessage) => void;
   addHandler: (handler: (msg: WSServerMessage) => void) => () => void;
   /** Navigate into a session (the triage button resolves to one over HTTP). */
   onOpenSession: (id: string) => void;

@@ -15,6 +15,7 @@ import {
   reserveRunner,
   runnerAllowed,
   runnerAllowsLocalInference,
+  runnerAvailableForSession,
   updateRunner,
 } from "./runners";
 
@@ -136,6 +137,7 @@ describe("Runner policy and reservations", () => {
         fullSessions: true,
         terminals: true,
         portals: true,
+        automationDescendants: true,
       },
     })!;
     expect(
@@ -160,6 +162,22 @@ describe("Runner policy and reservations", () => {
       }),
     ).toBe(false);
     expect(runner.permissions.fullSessions).toBe(false);
+    expect(runner.permissions.automationDescendants).toBe(true);
+    expect(
+      runnerAvailableForSession(runner, {
+        user: "alex",
+        repo: "ios-app",
+        sessionId: "automation-child",
+        automationDescendant: true,
+      }),
+    ).toBe(true);
+    expect(
+      runnerAvailableForSession(runner, {
+        user: "alex",
+        repo: "ios-app",
+        sessionId: "ordinary-session",
+      }),
+    ).toBe(false);
     expect(
       runnerAllowed(runner, {
         user: "alex",

@@ -14,11 +14,12 @@ import type { RouteContext } from "./routes/context";
 function routeContext(
   path: string,
   authUser: RouteContext["authUser"],
+  options: { method?: string; body?: object } = {},
 ): RouteContext {
   const req = new Request(`http://127.0.0.1:3850${path}`, {
-    method: "POST",
+    method: options.method ?? "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message: "Latest response" }),
+    body: JSON.stringify(options.body ?? { message: "Latest response" }),
   });
   return { req, url: new URL(req.url), path, publicPrefix: "", authUser };
 }
@@ -55,6 +56,49 @@ describe("Slack composer lifecycle", () => {
     const response = await handleSlackComposeRoutes(routeContext(path, null));
     expect(response?.status).toBe(401);
     expect(pendingSlackComposers.has("os-test")).toBe(false);
+  });
+
+  test("saves edits for reconnecting viewers", async () => {
+    void openSlackComposer("os-test", { message: "Original response" });
+    const requestId = pendingSlackComposers.get("os-test")!.request.id;
+    const path = "/api/sessions/os-test/slack-composer";
+    const response = await handleSlackComposeRoutes(
+      routeContext(
+        path,
+        { login: "kent", name: "Kent de Bruin" },
+        {
+          method: "PATCH",
+          body: {
+            requestId,
+            message: "Edited response",
+            channel: "C4407",
+            screenshots: [],
+          },
+        },
+      ),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual({
+      id: requestId,
+      message: "Edited response",
+      channel: "C4407",
+      images: [],
+    });
+    const frames: object[] = [];
+    resendPendingSlackComposer("os-test", (frame) => frames.push(frame));
+    expect(frames).toEqual([
+      {
+        type: "slack_composer",
+        sessionId: "os-test",
+        request: {
+          id: requestId,
+          message: "Edited response",
+          channel: "C4407",
+          images: [],
+        },
+      },
+    ]);
   });
 
   test("blocks until the human sends", async () => {

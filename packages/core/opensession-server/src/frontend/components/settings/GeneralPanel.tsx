@@ -11,6 +11,7 @@ import { rememberOrganizationIcon } from "../../hooks/useOrganizationIcon";
 import { PRODUCT_NAME } from "../../lib/brand";
 import { pngFromImageFile, pngFromImageUrl } from "../../lib/icon-image";
 import { REPO_TILE_INK, repoColor, repoIconFill } from "../../lib/repo-colors";
+import { errorMessage } from "../../lib/error-message";
 import { cn } from "../../ui/cn";
 import { OverlayAction } from "../../ui/overlay-action";
 import { Field } from "../../ui/input";
@@ -70,9 +71,12 @@ export function OrganizationProfileSection({
       setSettings(next);
       setDraft(next.organizationName);
       rememberOrganizationIcon(next);
-    })().catch(async (error: any) => {
+    })().catch(async (error) => {
       if (cancelled?.()) return;
-      const message = error?.message || "Couldn’t load organization settings";
+      const message = errorMessage(
+        error,
+        "Couldn’t load organization settings",
+      );
       setLoadError(message);
       toast(message, { variant: "error" });
     });
@@ -100,8 +104,8 @@ export function OrganizationProfileSection({
       rememberOrganizationIcon(next);
       toast(message, { variant: "success" });
     })()
-      .catch(async (error: any) => {
-        toast(error?.message || "Couldn’t save organization settings", {
+      .catch(async (error) => {
+        toast(errorMessage(error, "Couldn’t save organization settings"), {
           variant: "error",
         });
         if (settings) setDraft(settings.organizationName);

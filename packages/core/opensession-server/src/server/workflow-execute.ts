@@ -53,7 +53,10 @@ import {
 
 // ── Agent seam (production detaches; tests inject a fake) ───────────────────
 
-type RunAgentFn = (opts: RunAgentOpts) => AsyncGenerator<StreamEvent>;
+type RunAgentFn = (
+  opts: RunAgentOpts,
+  onEngineSession?: (engineSessionId: string) => void,
+) => AsyncGenerator<StreamEvent>;
 
 let runAgentImpl: RunAgentFn | null = null;
 
@@ -123,12 +126,19 @@ export async function runAgentCollect(
   let error: string | undefined;
   let toolCalls = 0;
   let skipRunnerNotice = false;
+  const noteEngineSession = (id: string) => {
+    if (!id || id === engineSessionId) return;
+    engineSessionId = id;
+    try {
+      onEngineSession?.(id);
+    } catch {}
+  };
 
   // Already cancelled: never start the engine run at all.
   if (signal?.aborted) return { text, toolCalls, error: "cancelled" };
   if (!runner) throw new Error("Workflow agent runner is not configured");
 
-  const it = runner(opts)[Symbol.asyncIterator]();
+  const it = runner(opts, noteEngineSession)[Symbol.asyncIterator]();
   const aborted: Promise<"aborted"> | null = signal
     ? new Promise((resolve) => {
         if (signal.aborted) resolve("aborted");
@@ -163,16 +173,8 @@ export async function runAgentCollect(
       if (next.done) break;
       const event = next.value;
       if (event.type === "init") {
-        const previous = engineSessionId;
-        engineSessionId = event.sessionId || engineSessionId;
+        if (event.sessionId) noteEngineSession(event.sessionId);
         model = event.model || model;
-        // Report the drill-in pointer the moment it exists — the UI can
-        // then watch the agent work live, long before the journal entry.
-        if (engineSessionId && engineSessionId !== previous) {
-          try {
-            onEngineSession?.(engineSessionId);
-          } catch {}
-        }
       } else if (event.type === "model_switch") {
         // Usage-limit fallback: agent-runner re-runs the FULL prompt on the
         // fallback model. The collected text IS the agent() return value, so
@@ -520,7 +522,7 @@ function detachedWorkflowRunner(
   ctx: WorkflowExecCtx,
   signal: AbortSignal,
 ): RunAgentFn {
-  return (opts) =>
+  return (opts, onEngineSession) =>
     runAuxiliaryAgentHosted({
       osSessionId: ctx.sessionId,
       prompt: opts.prompt,
@@ -555,6 +557,7 @@ function detachedWorkflowRunner(
       // behavior instead of projecting subagent chatter into the parent session.
       transcriptTarget: "none",
       signal,
+      onEngineSession,
     });
 }
 

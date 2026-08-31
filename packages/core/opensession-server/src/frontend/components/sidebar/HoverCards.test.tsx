@@ -274,6 +274,30 @@ describe("workspace PR status marks", () => {
     expect(html).not.toContain("text-faint");
   });
 
+  test("shows an open discovered PR without legacy flat PR fields", () => {
+    const html = renderToStaticMarkup(
+      <WsPrStatusMark
+        sessions={[
+          session({
+            prs: [
+              {
+                repo: "tella-fusion",
+                branch: "fix-overlay-timing",
+                source: "discovered",
+                state: "OPEN",
+                number: 5884,
+              },
+            ],
+          }),
+        ]}
+        size={18}
+      />,
+    );
+    expect(html).toContain('title="PR open"');
+    expect(html).toContain("text-green");
+    expect(html).not.toContain("No pull request");
+  });
+
   test("uses an idle dot when the repo ships directly to main", () => {
     const html = renderToStaticMarkup(
       <WsPrStatusMark

@@ -306,6 +306,7 @@ describe("pending ask restart persistence", () => {
         return { status: "queued", message: "queued" };
       },
       cancelSession: () => false,
+      reparentSession: async () => ({ ok: false, error: "not used" }),
       createSession: async () => ({
         id: "unused",
         createdBy: "Test",

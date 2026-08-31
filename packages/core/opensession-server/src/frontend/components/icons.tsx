@@ -349,6 +349,18 @@ export function IconArrowDownRight(p: IconProps) {
   );
 }
 
+export function IconArrowTurnDownRight(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path
+        {...stroke}
+        d="M6.75 5.75V9.25C6.75 13.116 9.884 16.25 13.75 16.25H18.25"
+      />
+      <path {...stroke} d="M15.25 13.25L18.25 16.25L15.25 19.25" />
+    </Svg>
+  );
+}
+
 // ↗ open-in-new / external-link arrow — the icon-set replacement for the raw
 // "↗" glyph on the Preview and Preview environment links.
 export function IconArrowUpRight(p: IconProps) {

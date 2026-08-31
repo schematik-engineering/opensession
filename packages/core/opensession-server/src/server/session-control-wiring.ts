@@ -67,8 +67,10 @@ import {
   getSessionListSnapshotAsync,
   invalidateSessionsCache,
   touchNativeSession,
+  touchNativeSessionStrict,
 } from "./session-cache";
 import { nameKnownSessionReferencesForTitle } from "./session-reference-title";
+import { validateSessionReparent } from "./session-parenting";
 import {
   getSessionControl,
   type CreateSessionOpts,
@@ -136,6 +138,12 @@ import {
 } from "./github-auth";
 import { existsSync, watch } from "fs";
 import { branchNameFromPrompt } from "./suggest-branch";
+import {
+  getRunner,
+  runnerAvailableForSession,
+  runnerWorkspacePath,
+} from "./runners";
+import { isRunnerConnected } from "./runner-ws";
 
 /** Derive the at-a-glance state + control surface for a session (for the MCP). */
 function buildSummary(
@@ -624,6 +632,41 @@ registerSessionControl({
     }
   },
 
+  reparentSession: async (id, parentSessionId) => {
+    const validation = validateSessionReparent(
+      id,
+      parentSessionId,
+      findSession,
+    );
+    if (!validation.ok) return validation;
+
+    const previousParentSessionId = validation.session.parentSessionId;
+    if (previousParentSessionId === parentSessionId) {
+      return {
+        ok: true as const,
+        previousParentSessionId,
+        parentSessionId,
+        changed: false,
+      };
+    }
+
+    // Report receipts and failure-beacon throttles belong to the old parent.
+    // Clear them atomically with the relationship so the new parent can receive
+    // a fresh report without inheriting suppression state.
+    await touchNativeSessionStrict(id, {
+      parentSessionId,
+      lastReportToParentAt: undefined,
+      parentNotifiedAt: undefined,
+    });
+    summaryState.byId.delete(id);
+    return {
+      ok: true as const,
+      previousParentSessionId,
+      parentSessionId,
+      changed: true,
+    };
+  },
+
   createSession: async (input: CreateSessionOpts) => {
     const requestId = input.requestId || randomUUIDv7();
     const actorScope = input.requestScope || input.user || "automation";
@@ -650,6 +693,8 @@ registerSessionControl({
       images: imageUrls,
       files: rawFiles,
       mcpServers,
+      runner: runnerInput,
+      automationDescendantPolicy,
       workspaceId,
       isolatedWorktree,
       parentSessionId,
@@ -799,16 +844,47 @@ registerSessionControl({
         parentRepoContext?.repo ||
         parentSession?.repo,
     );
-    // Sandbox opt-in: true = config default provider, or an explicit
-    // provider id validated against the config — an unconfigured pick fails
-    // the create loudly instead of silently running on the host. Forks
-    // never sandbox — they share/fork the source session's engine state
-    // and cwd (same rule as the web create).
-    const sandboxResolved = fork
-      ? resolveRequestedSandbox(undefined, repo.id, model)
-      : resolveInteractiveSandbox(sandbox, user, repo.id, model);
+    const requestedRunnerId =
+      typeof runnerInput === "string" && runnerInput.trim()
+        ? runnerInput.trim()
+        : undefined;
+    // An explicit Runner bypasses the instance's default Sandbox. Explicitly
+    // asking for both remains an error below.
+    const sandboxResolved =
+      fork || requestedRunnerId
+        ? resolveRequestedSandbox(undefined, repo.id, model)
+        : resolveInteractiveSandbox(sandbox, user, repo.id, model);
     if (!sandboxResolved.ok) throw new Error(sandboxResolved.error);
     const sandboxProvider = sandboxResolved.provider;
+    if (automationDescendantPolicy && !requestedRunnerId && !sandboxProvider)
+      throw new Error(
+        "Automation descendants require an explicit sandbox or isolation-approved Runner",
+      );
+    if (requestedRunnerId && sandbox !== undefined && sandbox !== false)
+      throw new Error("Choose either Sandbox or a Runner for this session");
+    const selectedRunner = requestedRunnerId
+      ? getRunner(requestedRunnerId)
+      : undefined;
+    if (requestedRunnerId) {
+      if (!selectedRunner || !isRunnerConnected(selectedRunner.id))
+        throw new Error("That Runner is offline");
+      if (
+        isAsk ||
+        isScratch ||
+        fork ||
+        joinedWorkspace ||
+        !runnerAvailableForSession(selectedRunner, {
+          user,
+          repo: repo.id,
+          sessionId: bksId,
+          automationDescendant: !!automationDescendantPolicy,
+        }) ||
+        !selectedRunner.workspaceRoots.length
+      )
+        throw new Error(
+          "That Runner is not available for a new code workspace in this repository",
+        );
+    }
     const remoteSandbox = isRemoteSandboxProvider(sandboxProvider);
     const parentWorkspace = parentSession?.workspaceId
       ? getWorkspace(parentSession.workspaceId)
@@ -821,12 +897,13 @@ registerSessionControl({
     // allowlist to the feed's declared servers, else inherit the parent's
     // scoping — never widen back to the full mcp-config.
     const { feedMcpServersForRefs } = await import("./feeds");
-    const effectiveMcpServers = mcpServers?.length
-      ? mcpServers
-      : contextWorkspace?.externalRefs?.length
-        ? ((await feedMcpServersForRefs(contextWorkspace.externalRefs)) ??
-          parentSession?.mcpServers)
-        : parentSession?.mcpServers;
+    const effectiveMcpServers =
+      mcpServers !== undefined
+        ? mcpServers
+        : contextWorkspace?.externalRefs?.length
+          ? ((await feedMcpServersForRefs(contextWorkspace.externalRefs)) ??
+            parentSession?.mcpServers)
+          : parentSession?.mcpServers;
 
     let wtPath: string;
     let materializeWorktree: (() => Promise<string>) | undefined;
@@ -840,7 +917,19 @@ registerSessionControl({
       existsSync(parentRepoContext.dir)
         ? parentRepoContext
         : null;
-    if (fork) {
+    if (selectedRunner) {
+      if (!sessionBranch.trim()) {
+        if (createPlan.branch) sessionBranch = createPlan.branch;
+        else {
+          sessionBranch = await branchNameFromPrompt(prompt);
+          sessionBranch = await resolveUniqueBranch(sessionBranch, repo.id);
+          createPlan = await patchCreationSetupPlan(bksId, createIdentity, {
+            branch: sessionBranch,
+          });
+        }
+      }
+      wtPath = runnerWorkspacePath(selectedRunner, bksId);
+    } else if (fork) {
       // Share the source's cwd so the fork sees the same code state.
       wtPath = fork.source.worktreeDir || repo.repo;
       sessionBranch = fork.source.branch || "";
@@ -1187,6 +1276,7 @@ ${createMentionsNote}`;
       agentStarted,
       spawnedBy,
       reportBack,
+      automationDescendantPolicy,
       model,
       effort: createEffort,
       fastMode: createFastMode || undefined,
@@ -1199,13 +1289,19 @@ ${createMentionsNote}`;
       // same rule as the web tab strip's "+".
       plainThreadId: joinedWorkspace?.plainThreadId,
       // Persist the MCP scoping so follow-up prompts keep it.
-      persistMcpServers: effectiveMcpServers?.length
-        ? effectiveMcpServers
-        : undefined,
+      persistMcpServers: effectiveMcpServers,
       // Unscoped creates leave this undefined (read as "all" downstream,
       // like the web path) — the sandbox launcher fail-closes to [].
       runMcpServers: effectiveMcpServers,
       sandboxProvider,
+      runnerTarget: selectedRunner
+        ? {
+            id: selectedRunner.id,
+            name: selectedRunner.label || selectedRunner.name,
+            workspacePath: wtPath,
+            repositoryUrl: `https://github.com/${repo.ghRepo}.git`,
+          }
+        : undefined,
       volumeWorkspace: false,
       remoteSandbox,
       openingPromptEntryId: `create-${requestId}`,

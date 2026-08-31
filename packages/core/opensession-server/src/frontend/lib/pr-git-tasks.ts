@@ -3,7 +3,8 @@ import { getCurrentUser } from "../components/UserPicker";
 import { gitPushApi } from "./api";
 import { commitPrompt } from "./commit-prompt";
 import { deriveStatus } from "./pr-status-derive";
-import type { GitStatusInfo, PrDetails } from "./types";
+import type { GitStatusInfo, PrDetails, WSClientMessage } from "./types";
+import { errorMessage } from "./error-message";
 
 /**
  * The local/remote work a branch still owes: conflicts to resolve, base
@@ -103,7 +104,7 @@ export function useGitTaskRunner({
 }: {
   sessionId: string;
   repo?: string;
-  send?: (msg: any) => void;
+  send?: (msg: WSClientMessage) => void;
   onRefresh: () => Promise<void> | void;
 }) {
   const [pushing, setPushing] = useState(false);
@@ -125,8 +126,8 @@ export function useGitTaskRunner({
       await gitPushApi(sessionId, repo);
       await onRefresh();
     })()
-      .catch((e: any) => {
-        setError(e.message || "Push failed");
+      .catch((error: unknown) => {
+        setError(errorMessage(error, "Push failed"));
       })
       .finally(() => {
         setPushing(false);

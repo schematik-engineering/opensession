@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { loadSkills } from "@earendil-works/pi-coding-agent";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
@@ -10,6 +20,72 @@ import {
 import { searchSkills } from "./skills";
 
 const dirs: string[] = [];
+
+const PSTACK_UPSTREAM_SKILLS = [
+  "architect",
+  "arena",
+  "automate-me",
+  "blast-radius",
+  "bro",
+  "create-verification-skill",
+  "figure-it-out",
+  "how",
+  "interrogate",
+  "maintain-verification-skill",
+  "no-comments",
+  "poteto-mode",
+  "principle-boundary-discipline",
+  "principle-build-the-lever",
+  "principle-encode-lessons-in-structure",
+  "principle-exhaust-the-design-space",
+  "principle-experience-first",
+  "principle-fix-root-causes",
+  "principle-foundational-thinking",
+  "principle-guard-the-context-window",
+  "principle-laziness-protocol",
+  "principle-make-operations-idempotent",
+  "principle-migrate-callers-then-delete-legacy-apis",
+  "principle-minimize-reader-load",
+  "principle-model-the-domain",
+  "principle-never-block-on-the-human",
+  "principle-outcome-oriented-execution",
+  "principle-prove-it-works",
+  "principle-redesign-from-first-principles",
+  "principle-separate-before-serializing-shared-state",
+  "principle-sequence-verifiable-units",
+  "principle-subtract-before-you-add",
+  "principle-type-system-discipline",
+  "recall",
+  "reflect",
+  "setup-pstack",
+  "show-me-your-work",
+  "swarm",
+  "tdd",
+  "teach",
+  "technical-writing",
+  "typescript-best-practices",
+  "unslop",
+  "why",
+] as const;
+
+function filesUnder(root: string): string[] {
+  const files: string[] = [];
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) files.push(...filesUnder(path));
+    else files.push(path);
+  }
+  return files;
+}
+
+function loadShippedSkills() {
+  return loadSkills({
+    cwd: process.cwd(),
+    agentDir: workspace(),
+    skillPaths: [SHIPPED_SKILLS_DIR],
+    includeDefaults: false,
+  });
+}
 
 function workspace(): string {
   const dir = mkdtempSync(join(tmpdir(), "opensession-skills-"));
@@ -104,6 +180,29 @@ describe("expandSkillCommand", () => {
       "look at /bro in the docs",
     );
   });
+
+  test("expands a nested pstack skill with its references and arguments", () => {
+    const loaded = loadShippedSkills().skills;
+    const skill = loaded.find(
+      (item) => item.name === "create-verification-skill",
+    );
+    expect(skill).toBeDefined();
+    expect(skill!.filePath).toContain(
+      "/pstack-suite/skills/create-verification-skill/SKILL.md",
+    );
+
+    for (const command of [
+      "/create-verification-skill verify this repo",
+      "/skill:create-verification-skill verify this repo",
+    ]) {
+      const expanded = expandSkillCommand(command, loaded);
+      expect(expanded).toContain('<skill name="create-verification-skill"');
+      expect(expanded).toContain(
+        `References are relative to ${skill!.baseDir}.`,
+      );
+      expect(expanded).toEndWith("</skill>\n\nverify this repo");
+    }
+  });
 });
 
 describe("searchSkills", () => {
@@ -126,6 +225,84 @@ describe("searchSkills", () => {
     }
   });
 
+  test("ships the complete upstream pstack skill inventory", () => {
+    const loaded = loadShippedSkills();
+    expect(loaded.diagnostics).toEqual([]);
+
+    for (const name of PSTACK_UPSTREAM_SKILLS) {
+      expect(
+        loaded.skills
+          .filter((skill) => skill.name === name)
+          .map((skill) => skill.name),
+      ).toEqual([name]);
+      expect(
+        searchSkills(undefined, name).filter((skill) => skill.name === name),
+      ).toHaveLength(1);
+    }
+  });
+
+  test("keeps the pstack port free of Pi-only operational instructions", () => {
+    const files = [
+      ...filesUnder(join(SHIPPED_SKILLS_DIR, "pstack")),
+      ...filesUnder(join(SHIPPED_SKILLS_DIR, "pstack-suite")),
+      join(SHIPPED_SKILLS_DIR, "poteto-mode", "SKILL.md"),
+    ].filter(
+      (path) =>
+        (path.endsWith(".md") || path.endsWith(".sh")) &&
+        !path.endsWith("SOURCE.md"),
+    );
+    const forbidden = [
+      ".pi/skills/",
+      "$PI_SESSION_FILE",
+      "pstack_sessions",
+      "pstack_config",
+      "~/.pi/agent/pstack",
+      "poteto-agent",
+      "cloud_base_branch",
+    ];
+
+    for (const file of files) {
+      const body = readFileSync(file, "utf8");
+      for (const token of forbidden) expect(body).not.toContain(token);
+      expect(body).not.toMatch(/`subagent`|\bsubagent tool\b/i);
+    }
+
+    expect(files.some((file) => file.includes("/extensions/"))).toBe(false);
+    const runner = readFileSync(join(import.meta.dir, "pi-runner.ts"), "utf8");
+    expect(runner).toContain("noExtensions: true");
+    expect(runner).toContain("noSkills: true");
+  });
+
+  test("resolves pstack references and preserves the safe helper", () => {
+    const loaded = loadShippedSkills().skills.filter(
+      (skill) =>
+        skill.name === "pstack" ||
+        skill.name === "poteto-mode" ||
+        PSTACK_UPSTREAM_SKILLS.includes(
+          skill.name as (typeof PSTACK_UPSTREAM_SKILLS)[number],
+        ),
+    );
+
+    for (const skill of loaded) {
+      const body = readFileSync(skill.filePath, "utf8");
+      for (const match of body.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
+        const target = match[1].split("#", 1)[0];
+        if (!target || target === "url" || target.includes("://")) continue;
+        expect(existsSync(join(skill.baseDir, target))).toBe(true);
+      }
+    }
+
+    const helper = join(
+      SHIPPED_SKILLS_DIR,
+      "pstack-suite",
+      "skills",
+      "show-me-your-work",
+      "scripts",
+      "log.sh",
+    );
+    expect(statSync(helper).mode & 0o111).not.toBe(0);
+  });
+
   test("a checkout's own skill shadows the shipped one of the same name", () => {
     const ws = workspace();
     writeSkill(
@@ -143,6 +320,18 @@ describe("searchSkills", () => {
         source: "project",
       },
     ]);
+
+    const runtime = loadSkills({
+      cwd: ws,
+      agentDir: workspace(),
+      skillPaths: skillSearchPaths(ws),
+      includeDefaults: false,
+    });
+    expect(
+      runtime.skills
+        .filter((skill) => skill.name === "simplify")
+        .map((skill) => skill.description),
+    ).toEqual(["The checkout's own take"]);
   });
 
   test("builtin commands only join the menu for an existing session", () => {

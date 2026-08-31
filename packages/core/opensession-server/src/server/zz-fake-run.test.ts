@@ -43,6 +43,7 @@ let restoreRunHosts: (() => void) | null = null;
 let redirected = false;
 const previousPiDetach = process.env.OPENSESSION_PI_DETACH;
 const previousMemoryDb = process.env.OPENSESSION_MEMORY_DB;
+const previousTestInProcessRuns = process.env.OPENSESSION_TEST_IN_PROCESS_RUNS;
 
 function writeSessionFile(id: string, extra: Record<string, unknown> = {}) {
   writeFileSync(
@@ -62,6 +63,7 @@ function writeSessionFile(id: string, extra: Record<string, unknown> = {}) {
 
 beforeAll(async () => {
   process.env.OPENSESSION_PI_DETACH = "0";
+  process.env.OPENSESSION_TEST_IN_PROCESS_RUNS = "1";
   process.env.OPENSESSION_MEMORY_DB = `${tmp}/memory-v2.sqlite`;
   (globalThis as any).__opensessionBooted = true;
   const paths = await import("./paths");
@@ -114,6 +116,9 @@ beforeAll(async () => {
 afterAll(() => {
   if (previousPiDetach === undefined) delete process.env.OPENSESSION_PI_DETACH;
   else process.env.OPENSESSION_PI_DETACH = previousPiDetach;
+  if (previousTestInProcessRuns === undefined)
+    delete process.env.OPENSESSION_TEST_IN_PROCESS_RUNS;
+  else process.env.OPENSESSION_TEST_IN_PROCESS_RUNS = previousTestInProcessRuns;
   memoryV2?.closeMemoryRuntime();
   if (previousMemoryDb === undefined) delete process.env.OPENSESSION_MEMORY_DB;
   else process.env.OPENSESSION_MEMORY_DB = previousMemoryDb;

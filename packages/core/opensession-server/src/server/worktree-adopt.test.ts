@@ -30,6 +30,8 @@ for (const k of ENV_KEYS) saved[k] = process.env[k];
 let root: string;
 let repoDir: string;
 let originDir: string;
+let emptyRepoDir: string;
+let emptyOriginDir: string;
 
 async function git(cwd: string, ...args: string[]): Promise<void> {
   await $`git -C ${cwd} ${args}`.quiet();
@@ -39,6 +41,8 @@ beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), "bks-wt-adopt-"));
   originDir = join(root, "origin.git");
   repoDir = join(root, "repo");
+  emptyOriginDir = join(root, "empty-origin.git");
+  emptyRepoDir = join(root, "empty-repo");
   await $`git init --bare -b main ${originDir}`.quiet();
   await $`git init -b main ${repoDir}`.quiet();
   await git(repoDir, "config", "user.email", "test@test");
@@ -48,6 +52,9 @@ beforeAll(async () => {
   await git(repoDir, "commit", "-m", "init");
   await git(repoDir, "remote", "add", "origin", originDir);
   await git(repoDir, "push", "-u", "origin", "main");
+  await $`git init --bare -b main ${emptyOriginDir}`.quiet();
+  await $`git init -b main ${emptyRepoDir}`.quiet();
+  await git(emptyRepoDir, "remote", "add", "origin", emptyOriginDir);
 
   writeFileSync(
     join(root, "config.json"),
@@ -58,6 +65,12 @@ beforeAll(async () => {
           wtPrefix: "scratch",
           defaultBranch: "main",
           ghRepo: "test/scratch",
+        },
+        empty: {
+          repo: emptyRepoDir,
+          wtPrefix: "empty",
+          defaultBranch: "main",
+          ghRepo: "test/empty",
         },
       },
     }),
@@ -72,6 +85,27 @@ afterAll(() => {
     else process.env[k] = saved[k];
   }
   rmSync(root, { recursive: true, force: true });
+});
+
+describe("createWorktree for an empty repository", () => {
+  test("initializes a local base and creates the first session worktree", async () => {
+    const { createWorktree } = await import("./worktree");
+    const wtPath = await createWorktree("build-site", "empty");
+
+    expect(existsSync(join(wtPath, ".git"))).toBe(true);
+    expect(
+      (await $`git -C ${wtPath} branch --show-current`.text()).trim(),
+    ).toBe("build-site");
+    expect(
+      (await $`git -C ${wtPath} rev-list --count HEAD`.text()).trim(),
+    ).toBe("1");
+    expect((await $`git -C ${emptyRepoDir} rev-parse main`.text()).trim()).toBe(
+      (await $`git -C ${wtPath} rev-parse HEAD`.text()).trim(),
+    );
+    expect(
+      (await $`git -C ${emptyRepoDir} ls-remote --heads origin`.text()).trim(),
+    ).toBe("");
+  });
 });
 
 describe("createWorktree branch-collision adoption", () => {

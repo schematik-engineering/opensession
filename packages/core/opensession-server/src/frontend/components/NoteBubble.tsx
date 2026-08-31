@@ -11,6 +11,7 @@ import { getCurrentUser } from "./UserPicker";
 import { openLightbox } from "./media-lightbox-controller";
 import { noAutofill } from "../lib/composer-autofill";
 import { noteSurface } from "../lib/tinted-surface";
+import { errorMessage } from "../lib/error-message";
 
 /**
  * A team note interleaved into the session transcript — a human-to-human
@@ -69,8 +70,8 @@ export function NoteBubble({
       await editSessionNoteApi(sessionId, note.id, text, getCurrentUser());
       setEditing(false);
     })()
-      .catch(async (e: any) => {
-        toast(e?.message || "Failed to edit note");
+      .catch(async (error) => {
+        toast(errorMessage(error, "Failed to edit note"));
       })
       .finally(async () => {
         setBusy(false);
@@ -83,8 +84,8 @@ export function NoteBubble({
     await (async () => {
       await deleteSessionNoteApi(sessionId, note.id, getCurrentUser());
     })()
-      .catch(async (e: any) => {
-        toast(e?.message || "Failed to delete note");
+      .catch(async (error) => {
+        toast(errorMessage(error, "Failed to delete note"));
       })
       .finally(async () => {
         setBusy(false);

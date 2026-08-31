@@ -14,6 +14,7 @@ import { slackIdToFirstName } from "./shared/user-mappings";
 import { isArchivedId, getArchiveReason } from "./archive";
 import { purgeDraftsForSessions } from "./drafts";
 import { removeSessionScratch } from "./session-scratch";
+import { releasePreviewPathLease } from "./preview-path-leases";
 import { getTitleOverride } from "./title-overrides";
 import { getStatusOverride } from "./status-overrides";
 import { getReviewRequest } from "./review-requests";
@@ -1494,6 +1495,14 @@ function removeSessionArtifacts(session: UnifiedSession): void {
   }
   removeIndexedSession(session.id);
   removeAcpSessionState(session.id);
+  try {
+    releasePreviewPathLease(session.id);
+  } catch (error) {
+    console.error(
+      `Failed to release preview reservation for ${session.id}:`,
+      error,
+    );
+  }
   // Nobody's unsent draft should outlive the session it was typed into.
   purgeDraftsForSessions([session.id, ...(session.aliasIds || [])]);
   // Neither should its scratch dir (session-scratch.ts). Best-effort and

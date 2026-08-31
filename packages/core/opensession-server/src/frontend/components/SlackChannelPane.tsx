@@ -13,6 +13,7 @@ import {
 } from "../lib/composer-classes";
 import { noAutofill } from "../lib/composer-autofill";
 import { IconArrowUp } from "./icons";
+import { errorMessage } from "../lib/error-message";
 
 interface MessageReaction {
   name: string;
@@ -271,8 +272,9 @@ export function SlackChannelPane({
         ).catch(() => {});
       }
     })()
-      .catch(async (e: any) => {
-        if (aliveRef.current) setError(e.message);
+      .catch(async (error) => {
+        if (aliveRef.current)
+          setError(errorMessage(error, "Failed to load channel"));
       })
       .finally(async () => {
         if (aliveRef.current) setLoading(false);
@@ -310,8 +312,8 @@ export function SlackChannelPane({
         if (el) el.scrollTop = el.scrollHeight - prevHeight;
       });
     })()
-      .catch(async (e: any) => {
-        setError(e.message);
+      .catch(async (error) => {
+        setError(errorMessage(error, "Failed to load older messages"));
       })
       .finally(async () => {
         setLoadingOlder(false);
@@ -338,8 +340,8 @@ export function SlackChannelPane({
       stickBottomRef.current = true;
       void loadNewest();
     })()
-      .catch(async (e: any) => {
-        setError(e.message);
+      .catch(async (error) => {
+        setError(errorMessage(error, "Failed to send message"));
       })
       .finally(async () => {
         setSending(false);

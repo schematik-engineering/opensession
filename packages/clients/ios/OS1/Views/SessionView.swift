@@ -44,6 +44,9 @@ private struct SessionSceneLifecycle: View {
 struct SessionView: View {
     @State private var viewModel: SessionViewModel
     private let tabs: [Session]
+    /// Direct child sessions delegated by this conversation. They stay out of
+    /// `tabs` and live in the More menu, matching the web session header.
+    private let workerSessions: [Session]
     /// Canonical workspace names, id-keyed, as the sessions list holds them.
     /// Regrouping `tabs` here rebuilds the sidebar row this session sits in,
     /// and without these the row would be titled by whatever the fallback
@@ -265,6 +268,7 @@ struct SessionView: View {
         session: Session,
         seed: SessionViewModel.OptimisticSeed? = nil,
         tabs: [Session]? = nil,
+        workerSessions: [Session] = [],
         workspaceNames: [String: String] = [:],
         composerDraft: SessionViewModel.ComposerDraft? = nil,
         onSelectTab: ((Session) -> Void)? = nil,
@@ -283,6 +287,7 @@ struct SessionView: View {
             composerDraft: composerDraft
         ))
         self.tabs = tabs ?? [session]
+        self.workerSessions = workerSessions
         self.workspaceNames = workspaceNames
         self.onSelectTab = onSelectTab
         self.onSaveComposerDraft = onSaveComposerDraft
@@ -298,6 +303,7 @@ struct SessionView: View {
     init(
         viewModel: SessionViewModel,
         tabs: [Session],
+        workerSessions: [Session] = [],
         workspaceNames: [String: String] = [:],
         onSaveComposerDraft: ((SessionViewModel.ComposerDraft) -> Void)? = nil,
         onNewSession: (() -> Void)? = nil,
@@ -310,6 +316,7 @@ struct SessionView: View {
     ) {
         _viewModel = State(initialValue: viewModel)
         self.tabs = tabs
+        self.workerSessions = workerSessions
         self.workspaceNames = workspaceNames
         self.onSelectTab = nil
         self.onSaveComposerDraft = onSaveComposerDraft
@@ -390,9 +397,14 @@ struct SessionView: View {
                         // `liveText` changes. Follow its measured height, not
                         // the pre-layout text update, so the run footer stays
                         // planted instead of stepping around while words land.
-                        if new.contentHeight > old.contentHeight,
-                           !follow.readerMovedTowardHistory,
-                           wasFollowing || (holdingAtLatest && !readerScrollActive) {
+                        if TranscriptScroll.shouldFollowContentGrowth(
+                            previousContentHeight: old.contentHeight,
+                            contentHeight: new.contentHeight,
+                            readerMovedTowardHistory: follow.readerMovedTowardHistory,
+                            wasFollowing: wasFollowing,
+                            holdingAtLatest: holdingAtLatest,
+                            readerScrollActive: readerScrollActive
+                        ) {
                             nextPinned = true
                             scrollToBottom(proxy, animated: false, repin: false)
                         }
@@ -538,6 +550,11 @@ struct SessionView: View {
                         }
                         .onChange(of: viewModel.sentAskAnswer) {
                             scrollToBottom(proxy, animated: true)
+                            // The answer receipt is optimistic. Its durable
+                            // replacement and the resumed run can change the
+                            // tail while this animation still targets the old
+                            // row, so follow until those rows settle.
+                            beginHold(proxy, after: .milliseconds(450))
                         }
 
                     let deliveryScroll = receivedScroll
@@ -973,6 +990,7 @@ struct SessionView: View {
             SessionActionsMenu(
                 viewModel: viewModel,
                 tabs: tabs,
+                workerSessions: workerSessions,
                 workspaceNames: workspaceNames,
                 catalog: catalog,
                 onNewSession: onNewSession,
@@ -1724,6 +1742,8 @@ private struct SessionActionsMenu: View {
     let viewModel: SessionViewModel
     /// The sessions of this worktree — the sidebar row, regrouped below.
     let tabs: [Session]
+    /// Direct child sessions hidden from the tab strip.
+    let workerSessions: [Session]
     /// Workspace names for that regrouping; see `SessionView.workspaceNames`.
     let workspaceNames: [String: String]
     /// Model/effort catalog for the nested settings rows; nil until the first
@@ -1749,6 +1769,7 @@ private struct SessionActionsMenu: View {
     @State private var pendingMerge: String?
     @State private var merging = false
     @State private var mergeError: String?
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         Menu {
@@ -1776,6 +1797,28 @@ private struct SessionActionsMenu: View {
                         ? "New session"
                         : "New session in this workspace"
                 )
+            }
+            if !workerSessions.isEmpty {
+                Menu {
+                    ForEach(workerSessions) { worker in
+                        Button {
+                            openWorker(worker)
+                        } label: {
+                            Label(
+                                worker.displayTitle,
+                                systemImage: worker.isRunning == true ? "circle.fill" : "circle"
+                            )
+                        }
+                        .accessibilityLabel(
+                            "\(worker.displayTitle), \(worker.isRunning == true ? "running" : "finished")"
+                        )
+                    }
+                } label: {
+                    Label(
+                        "Delegated workers (\(workerSessions.count))",
+                        systemImage: "arrow.down.right"
+                    )
+                }
             }
             // What was closed here, next to the way to open a new one: the
             // two are the same errand, another conversation in this
@@ -1985,6 +2028,11 @@ private struct SessionActionsMenu: View {
         }
     }
 
+    private func openWorker(_ worker: Session) {
+        guard let url = SessionLinks.url(for: worker.id) else { return }
+        openURL(url)
+    }
+
     private var addIntent: SidebarAddition.Intent? {
         SidebarAddition.currentIntent(for: viewModel.session, siblings: tabs)
     }
@@ -2128,6 +2176,8 @@ struct ScrollToLatestButton: View {
 struct SessionTabsView: View {
     let initialSession: Session
     let tabs: [Session]
+    /// Every live session available for resolving direct worker relationships.
+    let relatedSessions: [Session]
     /// Passed straight through to SessionView; see its `workspaceNames`.
     let workspaceNames: [String: String]
     let viewModelForSession: (Session) -> SessionViewModel
@@ -2190,6 +2240,7 @@ struct SessionTabsView: View {
     init(
         session: Session,
         tabs: [Session],
+        relatedSessions: [Session] = [],
         workspaceNames: [String: String] = [:],
         viewModelForSession: @escaping (Session) -> SessionViewModel,
         onSaveComposerDraft: @escaping (Session, SessionViewModel.ComposerDraft) -> Void,
@@ -2203,6 +2254,7 @@ struct SessionTabsView: View {
     ) {
         initialSession = session
         self.tabs = tabs
+        self.relatedSessions = relatedSessions
         self.workspaceNames = workspaceNames
         self.viewModelForSession = viewModelForSession
         self.onSaveComposerDraft = onSaveComposerDraft
@@ -2288,6 +2340,10 @@ struct SessionTabsView: View {
                 SessionView(
                         viewModel: viewModelForSession(session),
                         tabs: visibleTabs,
+                        workerSessions: SessionsListViewModel.workerSessions(
+                            in: relatedSessions,
+                            parentId: session.id
+                        ),
                         workspaceNames: workspaceNames,
                         onSaveComposerDraft: { draft in
                             onSaveComposerDraft(session, draft)
@@ -2900,6 +2956,7 @@ private struct SessionInputBar: View {
     /// a long dictation does — state living in the button would die mid-word.
     @State private var dictation = Dictation()
     @State private var sessionProjection = ComposerSessionProjectionState()
+    @State private var inputSelection: TextSelection?
     /// Notes are one-message context: they post straight to the team and never
     /// enter the engine or busy-message queue.
     @State private var noteMode = false
@@ -3030,6 +3087,16 @@ private struct SessionInputBar: View {
                 )
             }
             #endif
+
+            ComposerMentionPalette(
+                text: projectedDraft.wrappedValue,
+                selection: inputSelection,
+                scope: ComposerMentionScope(sessionId: viewModel.session.id)
+            ) { edit in
+                projectedDraft.wrappedValue = edit.text
+                inputSelection = edit.selection
+                inputFocused = true
+            }
 
             VStack(spacing: 0) {
                 if hasQueueItems {
@@ -3581,11 +3648,8 @@ private struct SessionInputBar: View {
                 }
 
                 TextField(
-                    text: sessionProjection.binding(
-                        $viewModel.draft,
-                        titleGeneration: TranscriptLinks.shared.generation,
-                        refreshTitles: !inputFocused
-                    ),
+                    text: projectedDraft,
+                    selection: $inputSelection,
                     prompt: Text(composerPlaceholder).foregroundStyle(
                         noteMode ? OS1VisualStyle.notePlaceholder : OS1VisualStyle.textFaint
                     ),
@@ -3775,6 +3839,14 @@ private struct SessionInputBar: View {
                 isSingleRow && !inputFocused && !hasQueueItems ? 8 : 0
             )
         #endif
+    }
+
+    private var projectedDraft: Binding<String> {
+        sessionProjection.binding(
+            $viewModel.draft,
+            titleGeneration: TranscriptLinks.shared.generation,
+            refreshTitles: !inputFocused
+        )
     }
 
     /// The composer's "+": attachments plus the session-level actions

@@ -49,7 +49,7 @@ import {
  * and the shadow on the content's left edge (see SETTINGS_CONTENT), so the
  * column itself needs no fill and no border of its own.
  */
-export const SETTINGS_PAGE = "relative flex min-h-0 flex-1 bg-sidebar";
+export const SETTINGS_PAGE = "relative flex h-full min-h-0 flex-1 bg-sidebar";
 
 /**
  * The otherwise-empty desktop titlebar strip. `wco-chrome` makes it a window

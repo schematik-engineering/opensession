@@ -4,6 +4,7 @@ import {
   evaluateCommand,
   EXEC_WRAPPER_NAMES,
   orgFloorPolicy,
+  publicationPolicyDenyReason,
   scannableCommand,
   type CommandPolicy,
 } from "./command-policy";
@@ -433,6 +434,80 @@ describe("evasion corpus", () => {
     };
     expect(evaluateCommand("git status", policy).decision).toBe("allow");
     expect(evaluateCommand("git push", policy).decision).toBe("deny");
+  });
+});
+
+describe("automation descendant publication policy", () => {
+  const policy = {
+    repo: "tellahq/renderer",
+    branch: "main",
+    headBranch: "compat/layout",
+  };
+
+  test("allows feature-branch publication and PR updates", () => {
+    expect(
+      publicationPolicyDenyReason(
+        "git push -u origin HEAD:refs/heads/compat/layout",
+        policy,
+      ),
+    ).toBeUndefined();
+    expect(
+      publicationPolicyDenyReason(
+        "gh pr edit 12 --repo tellahq/renderer --add-label ready",
+        policy,
+      ),
+    ).toBeUndefined();
+  });
+
+  test("denies merge, protected-base push, and external repository writes", () => {
+    expect(
+      publicationPolicyDenyReason("gh pr merge 12 --squash", policy),
+    ).toContain("cannot merge");
+    expect(
+      publicationPolicyDenyReason("git push origin HEAD:main", policy),
+    ).toContain("protected base");
+    expect(
+      publicationPolicyDenyReason(
+        "gh issue create --repo other/project --title nope",
+        policy,
+      ),
+    ).toContain("other/project");
+    expect(
+      publicationPolicyDenyReason(
+        "git push https://github.com/other/project.git HEAD:feature",
+        policy,
+      ),
+    ).toContain("external repository");
+    expect(
+      publicationPolicyDenyReason("git -C . push origin HEAD:main", policy),
+    ).toContain("protected base");
+    expect(
+      publicationPolicyDenyReason(
+        "git --git-dir=.git push origin HEAD:main",
+        policy,
+      ),
+    ).toContain("protected base");
+    expect(
+      publicationPolicyDenyReason("git send-pack origin HEAD:main", policy),
+    ).toContain("send-pack");
+    expect(
+      publicationPolicyDenyReason(
+        "gh --repo tellahq/renderer pr merge 12",
+        policy,
+      ),
+    ).toContain("cannot merge");
+    expect(
+      publicationPolicyDenyReason(
+        "gh issue create -R=other/project --title nope",
+        policy,
+      ),
+    ).toContain("other/project");
+    expect(
+      publicationPolicyDenyReason(
+        "gh api graphql -f query='mutation { x }'",
+        policy,
+      ),
+    ).toContain("general GitHub API");
   });
 });
 

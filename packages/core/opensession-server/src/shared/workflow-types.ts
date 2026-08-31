@@ -37,11 +37,12 @@ export const WORKFLOW_LIMITS = {
   maxAgents: 200,
   /** Lifetime write-agent calls per workflow run (worktrees are expensive). */
   maxWriteAgents: 40,
-  /** Per-agent wall clock before the run is failed. */
-  agentTimeoutMs: 15 * 60_000,
+  /** Per-agent wall clock before the run is failed. An agent may use the
+   * workflow's full active-time budget instead of being cut off early. */
+  agentTimeoutMs: 4 * 60 * 60_000,
   /** Whole-workflow active wall clock before the worker is terminated. Time
    * spent paused does not consume this allowance. */
-  workflowTimeoutMs: 60 * 60_000,
+  workflowTimeoutMs: 4 * 60 * 60_000,
   /** Advisory threshold surfaced in the UI and telemetry. */
   largeWorkflowAgents: 25,
   /** Advisory combined input/output-token threshold. */
@@ -84,6 +85,12 @@ export const WORKFLOW_LIMITS = {
   maxSessionTokens: 2_000_000,
   /** Aggregate provider-reported child-session cost. */
   maxSessionCostUsd: 100,
+  /** Lifetime workflowState get/CAS calls. */
+  maxStateCalls: 500,
+  /** Maximum keys in one replay-lineage state document. */
+  maxStateKeys: 128,
+  /** Maximum aggregate encoded state bytes. */
+  maxStateBytes: 1_000_000,
 } as const;
 
 // ── Script surface ───────────────────────────────────────────────────────────
@@ -127,6 +134,11 @@ export interface WorkflowSpawnSessionOpts {
   prompt: string;
   repo: string;
   mode?: "ask" | "code";
+  /** Route the child to one already-authorized persistent Runner. */
+  runner?: string;
+  /** Reserve aggregate budget before creation. Actual usage replaces this
+   * reservation as it arrives. */
+  admission?: { tokens: number; costUsd?: number };
   workspace?: {
     type: "isolated-worktree";
     /** Start from a committed local/remote Git ref. */
@@ -142,6 +154,11 @@ export type WorkflowSessionState =
   | "waiting"
   | "branch_pushed"
   | "pr_opened"
+  | "pr_checks_passed"
+  | "pr_checks_failed"
+  | "pr_changes_requested"
+  | "pr_approved"
+  | "pr_merged"
   | "done"
   | "error"
   | "cancelled";
@@ -159,11 +176,20 @@ export interface WorkflowSpawnedSession {
  * carrying one here makes isolated siblings inspectable at a glance. */
 export interface WorkflowSessionSnapshot extends WorkflowSpawnedSession {
   seq: number;
+  /** Replay-stable spawn ownership key, persisted before result journaling. */
+  requestKey?: string;
   label: string;
   status: WorkflowSessionState;
   worktreeDir?: string;
   prUrl?: string;
+  prState?: string;
+  prReviewDecision?: string;
+  prChecks?: { total: number; passed: number; failed: number; pending: number };
+  runner?: string;
+  reservedTokens?: number;
+  reservedCostUsd?: number;
   error?: string;
+  cancelPending?: boolean;
   startedAt: string;
   endedAt?: string;
   branchPushed?: boolean;
@@ -175,6 +201,10 @@ export interface WorkflowSessionStatus extends WorkflowSpawnedSession {
   status: WorkflowSessionState;
   worktreeDir?: string;
   prUrl?: string;
+  prState?: string;
+  prReviewDecision?: string;
+  prChecks?: { total: number; passed: number; failed: number; pending: number };
+  runner?: string;
   error?: string;
   branchPushed: boolean;
   tokens?: number;
@@ -186,7 +216,21 @@ export type WorkflowSessionOperation =
   | "status"
   | "wait"
   | "send"
-  | "cancel";
+  | "autofix"
+  | "publish"
+  | "cancel"
+  | "state_get"
+  | "state_cas";
+
+export interface WorkflowStateValue {
+  key: string;
+  version: number;
+  value: unknown;
+}
+
+export interface WorkflowStateCasResult extends WorkflowStateValue {
+  swapped: boolean;
+}
 
 export interface WorkflowSessionController {
   /** Re-adopt a spawn result replayed from a prior journal. */
@@ -202,6 +246,12 @@ export interface WorkflowSessionController {
     signal: AbortSignal,
   ): Promise<WorkflowSessionStatus>;
   send(id: string, message: string, requestId: string): Promise<unknown>;
+  autofix?(
+    id: string,
+    reason: string | undefined,
+    requestId: string,
+  ): Promise<unknown>;
+  publish?(id: string, requestId: string): Promise<unknown>;
   cancel(id: string, requestId: string): Promise<WorkflowSessionStatus>;
   /** Explicit workflow cancellation may propagate to active children. A
    * process crash never calls this, so durable children outlive the worker. */
@@ -418,6 +468,13 @@ export type WorkflowRunStatus =
   /** Marked on boot for runs that were live when the process died. */
   | "interrupted";
 
+export interface WorkflowAutomationSessionPolicy {
+  automationId: string;
+  automationName: string;
+  allowedRepos: string[];
+  allowedRunners: string[];
+}
+
 export interface WorkflowRecoverySnapshot {
   /** Only active runs carrying this descriptor are replayed after restart. */
   autoResume: boolean;
@@ -428,6 +485,8 @@ export interface WorkflowRecoverySnapshot {
   baseBranch?: string;
   mcpAllowlist?: string[];
   deniedTools?: Record<string, string>;
+  /** Explicit human-owned automation policy for durable code children. */
+  automationSessionPolicy?: WorkflowAutomationSessionPolicy;
   sessionLimits?: {
     maxDepth?: number;
     maxConcurrent?: number;
@@ -490,6 +549,16 @@ export interface WorkflowRunSnapshot {
   warnings?: WorkflowWarning[];
   /** Real durable child sessions spawned by this workflow. */
   sessions?: WorkflowSessionSnapshot[];
+  /** Persisted external waits. Recovery replays the script and re-adopts these
+   * conditions instead of losing the coordinator's blocking point. */
+  sessionWaits?: Array<{
+    seq: number;
+    requestKey?: string;
+    sessionId: string;
+    until: WorkflowSessionState;
+    startedAt: string;
+    deadlineAt?: string;
+  }>;
   logs: Array<{ ts: string; message: string }>;
   /** Script return value (JSON-serializable, capped). Set when done. */
   result?: unknown;
@@ -554,9 +623,13 @@ export interface WorkflowSessionJournalEntry {
   hash: string;
   operation: WorkflowSessionOperation;
   args: unknown;
+  /** Replay-stable identity: operation+args hash occurrence, independent of
+   * interleaving with unrelated concurrent calls. */
+  requestKey?: string;
   ok: boolean;
   value?: unknown;
   error?: string;
+  retryable?: boolean;
   startedAt: string;
   endedAt: string;
 }
@@ -662,4 +735,5 @@ export type ParentToWorker =
       ok: boolean;
       value: unknown;
       error?: string;
+      retryable?: boolean;
     };

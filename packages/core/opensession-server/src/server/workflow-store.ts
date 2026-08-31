@@ -35,6 +35,8 @@ import {
   type WorkflowJournalRecord,
   type WorkflowRecoverySnapshot,
   type WorkflowRunSnapshot,
+  type WorkflowStateCasResult,
+  type WorkflowStateValue,
 } from "./workflow-types";
 import {
   workflowPhaseStats,
@@ -268,6 +270,159 @@ export function listWorkflowRunsForSession(
   return runs;
 }
 
+type PersistedWorkflowState = {
+  entries: Record<string, { version: number; value: unknown }>;
+  operations: Record<string, WorkflowStateCasResult>;
+};
+
+function workflowStatePath(scopeId: string): string {
+  return `${runDir(scopeId)}/state.json`;
+}
+
+function validStateKey(key: string): void {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(key))
+    throw new Error("Workflow state keys must be 1-128 safe characters");
+}
+
+function readState(scopeId: string): PersistedWorkflowState {
+  let raw: string;
+  try {
+    raw = readFileSync(workflowStatePath(scopeId), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT")
+      return { entries: {}, operations: {} };
+    throw error;
+  }
+  if (Buffer.byteLength(raw) > WORKFLOW_LIMITS.maxStateBytes)
+    throw new Error(`Workflow state for ${scopeId} exceeds the byte limit`);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`Workflow state for ${scopeId} is corrupt JSON`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    throw new Error(`Workflow state for ${scopeId} has an invalid shape`);
+  const candidate = parsed as Partial<PersistedWorkflowState>;
+  const entries = candidate.entries;
+  const operations = candidate.operations;
+  if (
+    !entries ||
+    typeof entries !== "object" ||
+    Array.isArray(entries) ||
+    !operations ||
+    typeof operations !== "object" ||
+    Array.isArray(operations)
+  )
+    throw new Error(`Workflow state for ${scopeId} has an invalid shape`);
+  if (Object.keys(entries).length > WORKFLOW_LIMITS.maxStateKeys)
+    throw new Error(`Workflow state for ${scopeId} exceeds the key limit`);
+  for (const [key, row] of Object.entries(entries)) {
+    try {
+      validStateKey(key);
+    } catch {
+      throw new Error(`Workflow state key ${key} is corrupt`);
+    }
+    const valueEncoded = row && JSON.stringify(row.value);
+    if (
+      !row ||
+      typeof row !== "object" ||
+      !Number.isSafeInteger(row.version) ||
+      row.version < 1 ||
+      !("value" in row) ||
+      valueEncoded === undefined ||
+      valueEncoded.length > 250_000
+    )
+      throw new Error(`Workflow state key ${key} is corrupt`);
+  }
+  for (const [operationId, result] of Object.entries(operations)) {
+    const valueEncoded = result && JSON.stringify(result.value);
+    let validKey = true;
+    try {
+      if (result && typeof result.key === "string") validStateKey(result.key);
+      else validKey = false;
+    } catch {
+      validKey = false;
+    }
+    if (
+      !operationId ||
+      operationId.length > 200 ||
+      !result ||
+      typeof result !== "object" ||
+      !validKey ||
+      typeof result.swapped !== "boolean" ||
+      !Number.isSafeInteger(result.version) ||
+      result.version < 0 ||
+      valueEncoded === undefined ||
+      valueEncoded.length > 250_000
+    )
+      throw new Error(`Workflow state operation ${operationId} is corrupt`);
+  }
+  return { entries, operations };
+}
+
+/** Replay-lineage-scoped state for long-running coordinators. The synchronous
+ * atomic write makes each compare-and-set indivisible on the server event loop. */
+export function readWorkflowState(
+  scopeId: string,
+  key: string,
+): WorkflowStateValue {
+  validStateKey(key);
+  const current = readState(scopeId).entries[key];
+  return { key, version: current?.version || 0, value: current?.value ?? null };
+}
+
+export function compareAndSetWorkflowState(
+  scopeId: string,
+  key: string,
+  expectedVersion: number,
+  value: unknown,
+  operationId?: string,
+): WorkflowStateCasResult {
+  validStateKey(key);
+  if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 0)
+    throw new Error(
+      "Workflow state expectedVersion must be a non-negative integer",
+    );
+  const encoded = JSON.stringify(value);
+  if (encoded === undefined || encoded.length > 250_000)
+    throw new Error(
+      "Workflow state values must be JSON and at most 250000 characters",
+    );
+  const state = readState(scopeId);
+  if (operationId && state.operations[operationId])
+    return state.operations[operationId];
+  const current = state.entries[key];
+  if (
+    !current &&
+    Object.keys(state.entries).length >= WORKFLOW_LIMITS.maxStateKeys
+  )
+    throw new Error(
+      `Workflow state key limit reached (${WORKFLOW_LIMITS.maxStateKeys})`,
+    );
+  const version = current?.version || 0;
+  const result: WorkflowStateCasResult =
+    version !== expectedVersion
+      ? { key, version, value: current?.value ?? null, swapped: false }
+      : {
+          key,
+          version: version + 1,
+          value: JSON.parse(encoded),
+          swapped: true,
+        };
+  if (result.swapped)
+    state.entries[key] = { version: result.version, value: result.value };
+  if (operationId) state.operations[operationId] = result;
+  const stateEncoded = JSON.stringify(state);
+  if (Buffer.byteLength(stateEncoded) > WORKFLOW_LIMITS.maxStateBytes)
+    throw new Error(
+      `Workflow state byte limit exceeded (${WORKFLOW_LIMITS.maxStateBytes})`,
+    );
+  mkdirSync(runDir(scopeId), { recursive: true });
+  writeJsonAtomic(workflowStatePath(scopeId), state);
+  return result;
+}
+
 export function appendWorkflowJournal(
   runId: string,
   entry: WorkflowJournalRecord,
@@ -379,9 +534,14 @@ export function markInterruptedWorkflows(): void {
   for (const runId of runIdsOnDisk()) {
     if (liveWorkflows.has(runId)) continue;
     const snapshot = readRunJson(runId);
+    if (!snapshot) continue;
+    const pendingCancellation =
+      snapshot.status === "cancelled" &&
+      snapshot.sessions?.some((session) => session.cancelPending);
     if (
-      !snapshot ||
-      (snapshot.status !== "running" && snapshot.status !== "paused")
+      snapshot.status !== "running" &&
+      snapshot.status !== "paused" &&
+      !pendingCancellation
     )
       continue;
     snapshot.status = "interrupted";

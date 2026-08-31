@@ -93,7 +93,7 @@ function BusyWorking({ since }: { since: number | null }) {
   const status = busyActivityStatus(since == null ? 0 : now - since);
   return (
     <>
-      <span role="status" aria-live="polite">
+      <span role="status" aria-live="polite" className="inline-flex">
         <TextShimmer
           className={cn("text-meta font-medium", msgActivityShimmer)}
         >

@@ -1,3 +1,4 @@
+import { sessionPrRefs } from "./session-prs";
 import type { UnifiedSession, Workspace } from "./types";
 
 export function isScratchWorkspace(
@@ -49,6 +50,51 @@ export function spawnedSessionBelongsInSidebar(
   return !session.spawnedBy || needsAttention || claimed;
 }
 
+export function sessionShipsDirectlyToMain(
+  session: { repo?: string; branch?: string | null },
+  directToMainBranches: Readonly<Record<string, string>>,
+): boolean {
+  const defaultBranch = session.repo
+    ? directToMainBranches[session.repo]
+    : undefined;
+  return (
+    !!defaultBranch && (!session.branch || session.branch === defaultBranch)
+  );
+}
+
+/** Whether every real session in this row uses a shared main checkout. */
+export function workspaceRowShipsDirectlyToMain(
+  row: {
+    sessions: readonly Pick<UnifiedSession, "repo" | "branch">[];
+    workspace?: { branch?: string | null; prNumber?: number } | null;
+  },
+  workspaceRepo: string,
+  directToMainBranches: Readonly<Record<string, string>>,
+): boolean {
+  const workspaceHasCodeTarget =
+    !!row.workspace?.branch || row.workspace?.prNumber !== undefined;
+  if (!workspaceHasCodeTarget) {
+    const repoSessions = row.sessions.filter((session) => !!session.repo);
+    if (
+      repoSessions.length > 0 &&
+      repoSessions.every((session) =>
+        sessionShipsDirectlyToMain(session, directToMainBranches),
+      )
+    )
+      return true;
+  }
+
+  return sessionShipsDirectlyToMain(
+    {
+      repo: workspaceRepo,
+      branch:
+        row.workspace?.branch ||
+        row.sessions.find((session) => session.repo === workspaceRepo)?.branch,
+    },
+    directToMainBranches,
+  );
+}
+
 /**
  * Whether a session belongs to the sidebar row that is currently open.
  *
@@ -84,82 +130,122 @@ export function sessionSharesSelectedSidebarGroup(
   );
 }
 
-export interface ActiveWorkspaceSubagent {
+export interface WorkspaceSubagent {
   session: UnifiedSession;
   /** One for a direct child of workspace work, increasing for nested workers. */
   depth: number;
 }
 
-/**
- * Active child sessions owned by one open workspace.
- *
- * `parentSessionId` is the relationship. A worker can carry the parent's
- * workspace, mint a temporary workspace of its own, or omit one, so workspace
- * equality alone is not enough: seed the family from sessions in the selected
- * workspace, then follow child edges. The returned rows remain live while a
- * worker is running, blocked on a question, or has queued work to deliver.
- */
-export function activeSubagentsForWorkspace(
-  sessions: readonly UnifiedSession[],
-  workspaceId: string | null | undefined,
-): ActiveWorkspaceSubagent[] {
-  if (!workspaceId) return [];
+export function sessionHasOpenPr(session: UnifiedSession): boolean {
+  return sessionPrRefs(session).some((pr) => (pr.state ?? "OPEN") === "OPEN");
+}
 
+/**
+ * The workspace whose sidebar row provides context for an open session.
+ *
+ * Workers can mint temporary workspaces of their own. Those workspaces power
+ * the worker's tools and panes, but the sidebar still nests the worker beneath
+ * the root session that spawned it. Follow parent edges to the highest known
+ * ancestor instead of letting a worker's temporary workspace become a new
+ * top-level selection.
+ */
+export function sidebarWorkspaceIdForSession(
+  sessions: readonly Pick<
+    UnifiedSession,
+    "id" | "parentSessionId" | "workspaceId"
+  >[],
+  selected: Pick<
+    UnifiedSession,
+    "id" | "parentSessionId" | "workspaceId"
+  > | null,
+): string | null {
+  if (!selected) return null;
+
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  byId.set(selected.id, selected);
+  let root = selected;
+  const seen = new Set([selected.id]);
+  while (root.parentSessionId && !seen.has(root.parentSessionId)) {
+    const parent = byId.get(root.parentSessionId);
+    if (!parent) break;
+    seen.add(parent.id);
+    root = parent;
+  }
+  return root.workspaceId ?? null;
+}
+
+/**
+ * Unarchived child sessions grouped under their root workspace.
+ *
+ * A worker can mint a temporary workspace of its own, but `parentSessionId`
+ * remains the sidebar relationship. Resolve every child to its highest known
+ * ancestor so finishing or merging its work cannot turn that temporary
+ * workspace into a top-level row. Archiving is the explicit way to remove it.
+ */
+export function subagentsByWorkspace(
+  sessions: readonly UnifiedSession[],
+): Map<string, WorkspaceSubagent[]> {
   // The live session list should already be unique. Keeping the last copy of
   // a duplicate makes this helper defensive against an optimistic list merge
   // without ever rendering the same child twice.
   const byId = new Map<string, UnifiedSession>();
   for (const session of sessions) byId.set(session.id, session);
 
-  const family = new Set<string>();
-  const childrenByParent = new Map<string, string[]>();
+  const groups = new Map<string, WorkspaceSubagent[]>();
   for (const session of byId.values()) {
-    if (session.workspaceId === workspaceId) family.add(session.id);
-    if (session.parentSessionId) {
-      const children = childrenByParent.get(session.parentSessionId) ?? [];
-      children.push(session.id);
-      childrenByParent.set(session.parentSessionId, children);
-    }
-  }
-  const queue = Array.from(family);
-  for (let i = 0; i < queue.length; i++) {
-    for (const childId of childrenByParent.get(queue[i]) ?? []) {
-      if (family.has(childId)) continue;
-      family.add(childId);
-      queue.push(childId);
-    }
-  }
+    if (!session.parentSessionId || session.archived) continue;
 
-  const depthOf = (session: UnifiedSession): number => {
-    let depth = 1;
-    let parentId = session.parentSessionId;
+    let parentId: string | undefined = session.parentSessionId;
+    let root: UnifiedSession | undefined;
+    let depth = 0;
     const seen = new Set([session.id]);
-    while (parentId && family.has(parentId) && !seen.has(parentId)) {
-      seen.add(parentId);
+    while (parentId) {
+      if (seen.has(parentId)) {
+        root = undefined;
+        break;
+      }
       const parent = byId.get(parentId);
-      if (!parent?.parentSessionId) break;
+      if (!parent) {
+        root = undefined;
+        break;
+      }
+      seen.add(parent.id);
+      root = parent;
       depth++;
       parentId = parent.parentSessionId;
     }
-    return depth;
-  };
+    if (!root?.workspaceId) continue;
+    const items = groups.get(root.workspaceId) ?? [];
+    items.push({ session, depth });
+    groups.set(root.workspaceId, items);
+  }
 
-  return Array.from(byId.values())
-    .filter(
-      (session) =>
-        family.has(session.id) &&
-        !!session.parentSessionId &&
-        !session.archived &&
-        (session.isRunning ||
-          !!session.waitingForInput ||
-          (session.queuedCount ?? 0) > 0),
-    )
-    .map((session) => ({ session, depth: depthOf(session) }))
-    .sort(
+  for (const items of groups.values())
+    items.sort(
       (a, b) =>
         (a.session.createdAt || "").localeCompare(b.session.createdAt || "") ||
         a.session.id.localeCompare(b.session.id),
     );
+  return groups;
+}
+
+/** Unarchived children owned by one workspace row. */
+export function subagentsForWorkspace(
+  sessions: readonly UnifiedSession[],
+  workspaceId: string | null | undefined,
+): WorkspaceSubagent[] {
+  if (!workspaceId) return [];
+  return subagentsByWorkspace(sessions).get(workspaceId) ?? [];
+}
+
+/** Expand child rows only beneath the workspace that is currently selected. */
+export function subagentsForSelectedWorkspace(
+  groups: ReadonlyMap<string, WorkspaceSubagent[]>,
+  workspaceId: string | null | undefined,
+  selectedWorkspaceId: string | null | undefined,
+): WorkspaceSubagent[] {
+  if (!workspaceId || workspaceId !== selectedWorkspaceId) return [];
+  return groups.get(workspaceId) ?? [];
 }
 
 /** The root session a workspace row should open, never one of its subagents. */

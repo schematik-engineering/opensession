@@ -5,6 +5,39 @@ export interface TranscriptHydrationOutlineItem {
   ranges: readonly TranscriptIndexedRange[];
 }
 
+/** A rendered decoration does not make its surrounding indexed history loaded. */
+export function transcriptRangesContainPayload(
+  ranges: readonly TranscriptIndexedRange[],
+  hasPayload: (entryId: string) => boolean,
+): boolean {
+  return ranges.some((range) => range.entryIds.some(hasPayload));
+}
+
+/** The bounded opening payload may cut into a range and leave a loaded suffix.
+ * Only that shape inserts later hydration at the start of an existing row.
+ * Normal range pagination starts at firstSeq and appends at the row's end. */
+export function transcriptRangeHasLoadedSuffix(
+  entryIds: readonly string[],
+  hasPayload: (entryId: string) => boolean,
+): boolean {
+  const firstLoaded = entryIds.findIndex(hasPayload);
+  return (
+    firstLoaded > 0 && entryIds.slice(firstLoaded).every((id) => hasPayload(id))
+  );
+}
+
+/** Load backward from the live tail so background work stays contiguous. */
+export function nextBackgroundTranscriptRange(
+  ranges: readonly TranscriptIndexedRange[],
+  hasPayload: (entryId: string) => boolean,
+): TranscriptIndexedRange | null {
+  for (let index = ranges.length - 1; index >= 0; index--) {
+    const range = ranges[index];
+    if (range?.entryIds.some((id) => !hasPayload(id))) return range;
+  }
+  return null;
+}
+
 /**
  * Missing payload can move the opening viewport only when it belongs to a row
  * the virtualizer actually reports as visible. Unloaded ranges occupy no

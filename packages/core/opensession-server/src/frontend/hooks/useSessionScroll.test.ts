@@ -3,7 +3,6 @@ import { expect, test } from "bun:test";
 const source = await Bun.file(
   new URL("./useSessionScroll.ts", import.meta.url),
 ).text();
-
 test("defers resize fallback writes outside observer delivery", () => {
   expect(source).toContain("resizeFrame = requestAnimationFrame(() => {");
   expect(source).toContain(

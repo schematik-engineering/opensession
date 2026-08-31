@@ -33,6 +33,19 @@ test("serves every stable shell asset family", async () => {
   }
 });
 
+test("returns a real 404 for a retired hashed asset", async () => {
+  const path = "/Settings-retired123.js";
+  const url = new URL(`http://127.0.0.1${path}`);
+  const response = await handleStaticAssetsRoutes({
+    req: new Request(url),
+    url,
+    path,
+    publicPrefix: "",
+  });
+  expect(response?.status).toBe(404);
+  expect(response?.headers.get("content-type")).toStartWith("text/plain");
+});
+
 test("recognizes bundled image assets alongside scripts and styles", () => {
   expect(builtAssetContentType("download-mac-abc123.webp")).toBe("image/webp");
   expect(builtAssetContentType("App-abc123.js")).toBe("text/javascript");

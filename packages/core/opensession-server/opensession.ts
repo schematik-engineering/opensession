@@ -88,7 +88,7 @@ import {
   startGithubTokenRefresher,
 } from "./src/server/github-auth";
 import { startGoalTicker } from "./src/server/goal-runner";
-import { startSessionIndexSweeper } from "./src/server/session-index";
+import { startSessionHistoryIndexing } from "./src/server/session-index";
 import { startEventLoopLagMonitor } from "./src/server/system-stats";
 import { ensureWarmTemplateScheduler } from "./src/server/warm-template";
 import { handleRunnerWsUpgrade } from "./src/server/runner-ws";
@@ -853,8 +853,9 @@ if (!g.__opensessionBooted) {
     startLoopTicker();
     startGoalTicker();
 
-    // Distil finished sessions into the search index (session-index.ts).
-    startSessionIndexSweeper();
+    // Finished sessions push durable per-session history index timers. This
+    // registers the handler only; it never scans the session fleet.
+    startSessionHistoryIndexing();
 
     // Gateway event-loop lag telemetry for /api/health and the health MCP tool
     // (system-stats.ts). The session-performance contract only measures the

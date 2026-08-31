@@ -944,6 +944,23 @@ export async function recordRunOutcome(
     errorMessage,
     opts,
   );
+  // Setup and compatibility outcomes without a fenced run do not pass through
+  // the durable turn-outcome executor. Push those specific sessions into the
+  // same history timer without making indexing part of terminal persistence.
+  if (process.env.NODE_ENV !== "test") {
+    try {
+      const { scheduleSessionHistoryIndex } = await import("./session-index");
+      await scheduleSessionHistoryIndex(
+        id,
+        opts?.projectionId || `direct:${crypto.randomUUID()}`,
+      );
+    } catch (error) {
+      console.warn(
+        `[session-index] could not schedule ${id}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
 }
 
 /** Idempotent destination-side implementation for actor-issued projections. */

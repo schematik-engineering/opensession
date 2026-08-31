@@ -4,6 +4,7 @@ import { writeFileAtomic } from "./shared/atomic-write";
 
 export type StableFrontendSnapshot = {
   releaseRoot: string;
+  fallbackRoots: string[];
   version: string;
   indexHtml: string;
   publishedAt: string;
@@ -15,15 +16,51 @@ export function stableFrontendSnapshotPath(deployState: string): string {
   return join(deployState, "stable-frontend.json");
 }
 
+const MAX_FALLBACK_ROOTS = 3;
+
+function validReleaseRoot(
+  deployState: string,
+  candidate: string,
+): string | null {
+  const releases = resolve(deployState, "releases");
+  const root = resolve(candidate);
+  if (
+    !root.startsWith(`${releases}${sep}`) ||
+    !existsSync(join(root, ".opensession-release"))
+  )
+    return null;
+  return root;
+}
+
 export function publishStableFrontendSnapshot(
   deployState: string,
-  snapshot: Omit<StableFrontendSnapshot, "publishedAt">,
-): void {
+  snapshot: Omit<StableFrontendSnapshot, "publishedAt" | "fallbackRoots"> & {
+    fallbackRoots?: string[];
+  },
+): StableFrontendSnapshot {
+  const previous = parseSnapshot(deployState);
+  const fallbackRoots = [
+    ...(snapshot.fallbackRoots ?? []),
+    ...(previous ? [previous.releaseRoot, ...previous.fallbackRoots] : []),
+  ]
+    .map((candidate) => validReleaseRoot(deployState, candidate))
+    .filter((candidate): candidate is string => Boolean(candidate))
+    .filter(
+      (root, index, roots) =>
+        root !== resolve(snapshot.releaseRoot) && roots.indexOf(root) === index,
+    )
+    .slice(0, MAX_FALLBACK_ROOTS);
+  const published: StableFrontendSnapshot = {
+    ...snapshot,
+    fallbackRoots,
+    publishedAt: new Date().toISOString(),
+  };
   writeFileAtomic(
     stableFrontendSnapshotPath(deployState),
-    `${JSON.stringify({ ...snapshot, publishedAt: new Date().toISOString() })}\n`,
+    `${JSON.stringify(published)}\n`,
     0o600,
   );
+  return published;
 }
 
 function parseSnapshot(deployState: string): StableFrontendSnapshot | null {
@@ -38,15 +75,26 @@ function parseSnapshot(deployState: string): StableFrontendSnapshot | null {
       typeof value.publishedAt !== "string"
     )
       return null;
-    const releases = resolve(deployState, "releases");
-    const root = resolve(value.releaseRoot);
-    if (
-      !root.startsWith(`${releases}${sep}`) ||
-      !existsSync(join(root, ".opensession-release"))
-    ) {
-      return null;
-    }
-    return { ...value, releaseRoot: root } as StableFrontendSnapshot;
+    const root = validReleaseRoot(deployState, value.releaseRoot);
+    if (!root) return null;
+    const fallbackRoots = Array.isArray(value.fallbackRoots)
+      ? value.fallbackRoots
+          .filter(
+            (candidate): candidate is string => typeof candidate === "string",
+          )
+          .map((candidate) => validReleaseRoot(deployState, candidate))
+          .filter((candidate): candidate is string => Boolean(candidate))
+          .filter(
+            (candidate, index, roots) =>
+              candidate !== root && roots.indexOf(candidate) === index,
+          )
+          .slice(0, MAX_FALLBACK_ROOTS)
+      : [];
+    return {
+      ...value,
+      releaseRoot: root,
+      fallbackRoots,
+    } as StableFrontendSnapshot;
   } catch {
     return null;
   }
@@ -162,7 +210,8 @@ export function createStableFrontendResponder(
     if (
       next?.releaseRoot !== snapshot?.releaseRoot ||
       next?.version !== snapshot?.version ||
-      next?.indexHtml !== snapshot?.indexHtml
+      next?.indexHtml !== snapshot?.indexHtml ||
+      next?.fallbackRoots.join("\n") !== snapshot?.fallbackRoots.join("\n")
     ) {
       snapshot = next;
       indexBody = next ? Buffer.from(next.indexHtml) : Buffer.alloc(0);
@@ -239,27 +288,29 @@ export function createStableFrontendResponder(
     if (!selected) return null;
     const name = parsed.pathname.slice(1);
     if (name && basename(name) === name) {
-      const asset = join(selected.releaseRoot, ".frontend-dist", name);
-      try {
-        const stat = statSync(asset);
-        if (stat.isFile()) {
-          const extension = name.includes(".")
-            ? name.slice(name.lastIndexOf(".") + 1)
-            : "";
-          return response(
-            "200 OK",
-            head ? Buffer.alloc(0) : cachedAsset(asset, stat.size),
-            {
-              "Content-Type":
-                MIME_TYPES[extension] || "application/octet-stream",
-              "Cache-Control": "public, max-age=31536000, immutable",
-              "X-Content-Type-Options": "nosniff",
-            },
-            head,
-            stat.size,
-          );
-        }
-      } catch {}
+      for (const root of [selected.releaseRoot, ...selected.fallbackRoots]) {
+        const asset = join(root, ".frontend-dist", name);
+        try {
+          const stat = statSync(asset);
+          if (stat.isFile()) {
+            const extension = name.includes(".")
+              ? name.slice(name.lastIndexOf(".") + 1)
+              : "";
+            return response(
+              "200 OK",
+              head ? Buffer.alloc(0) : cachedAsset(asset, stat.size),
+              {
+                "Content-Type":
+                  MIME_TYPES[extension] || "application/octet-stream",
+                "Cache-Control": "public, max-age=31536000, immutable",
+                "X-Content-Type-Options": "nosniff",
+              },
+              head,
+              stat.size,
+            );
+          }
+        } catch {}
+      }
     }
     if (
       !parsed.acceptsHtml ||

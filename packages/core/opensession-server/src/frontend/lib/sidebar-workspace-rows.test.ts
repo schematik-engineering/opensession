@@ -37,7 +37,7 @@ function build(
     sessions: [],
     workspaces: [],
     openPrs: [],
-    activeSubagentIds: new Set(),
+    nestedSubagentIds: new Set(),
     selectedWorkspaceId: null,
     selectedSessionId: null,
     reads: {},
@@ -85,13 +85,67 @@ describe("buildWorkspaceRows", () => {
         }),
       ],
       workspaces: [workspace("workspace-1")],
-      activeSubagentIds: new Set(["worker"]),
+      nestedSubagentIds: new Set(["worker"]),
       selectedWorkspaceId: "workspace-1",
     });
 
     expect(rows).toHaveLength(1);
     expect(rows[0]?.running).toBe(true);
     expect(rows[0]?.status).toBe("inprogress");
+  });
+
+  test("does not create top-level rows for merged or closed subagents", () => {
+    const rows = build({
+      sessions: [
+        session("parent", { workspaceId: "workspace-1" }),
+        session("merged-worker", {
+          workspaceId: "workspace-merged-worker",
+          parentSessionId: "parent",
+          prState: "MERGED",
+        }),
+        session("closed-worker", {
+          workspaceId: "workspace-closed-worker",
+          parentSessionId: "parent",
+          prState: "CLOSED",
+        }),
+      ],
+      workspaces: [workspace("workspace-1")],
+      nestedSubagentIds: new Set(["merged-worker", "closed-worker"]),
+      selectedWorkspaceId: "workspace-1",
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.sessions.map(({ id }) => id)).toEqual(["parent"]);
+  });
+
+  test("badge face and jump target come from the same mentioned member", () => {
+    const rows = build({
+      sessions: [
+        session("hero", { workspaceId: "workspace-1" }),
+        session("sibling", {
+          workspaceId: "workspace-1",
+          createdAt: "2026-08-18T12:30:00.000Z",
+        }),
+      ],
+      workspaces: [workspace("workspace-1")],
+      mentionForSession: (id) =>
+        id === "sibling" ? { by: "Grant" } : undefined,
+    });
+
+    expect(rows[0]?.mention).toBe("Grant");
+    expect(rows[0]?.mentionSessionId).toBe("sibling");
+  });
+
+  test("the selected session's mention never marks the row", () => {
+    const rows = build({
+      sessions: [session("hero", { workspaceId: "workspace-1" })],
+      workspaces: [workspace("workspace-1")],
+      selectedSessionId: "hero",
+      mentionForSession: () => ({ by: "Grant" }),
+    });
+
+    expect(rows[0]?.mention).toBeUndefined();
+    expect(rows[0]?.mentionSessionId).toBeUndefined();
   });
 
   test("includes drafts and excludes non-sidebar session kinds", () => {

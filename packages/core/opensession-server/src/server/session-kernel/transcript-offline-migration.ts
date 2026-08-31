@@ -321,7 +321,11 @@ function readonlySourceSnapshot(
     if (statSync(sourceTranscriptPath).size <= 512 * 1024 * 1024) {
       const original = new Database(sourceTranscriptPath, { readonly: true });
       try {
-        writeFileSync(snapshotPath, original.serialize(), { mode: 0o400 });
+        // Serialized WAL databases may still require SQLite to create private
+        // -shm/-wal companions on macOS even for a readonly connection. The
+        // snapshot directory is mode 0700 and has no writers, so keep the file
+        // owner-writable rather than making the VFS fail with SQLITE_CANTOPEN.
+        writeFileSync(snapshotPath, original.serialize(), { mode: 0o600 });
       } finally {
         original.close();
       }
@@ -347,9 +351,13 @@ function readonlySourceSnapshot(
         throw new Error(
           `Could not snapshot transcript source: ${vacuum.stderr.toString().trim()}`,
         );
-      chmodSync(snapshotPath, 0o400);
+      chmodSync(snapshotPath, 0o600);
     }
-    const source = new Database(snapshotPath, { readonly: true });
+    // Open the private copy read-write so SQLite's WAL VFS can initialize its
+    // companion files on macOS, then enforce query-only semantics at SQL level.
+    // No source path or actor target is writable through this handle.
+    const source = new Database(snapshotPath);
+    source.exec("PRAGMA query_only = ON");
     return {
       source,
       snapshotPath,
@@ -425,8 +433,8 @@ export function rollbackActorTranscriptsOffline(options: {
       const placement = central.sessionPlacement(sessionId)!;
       const target = new Database(
         sessionKernelSessionDbPath(sessionId, isolatedRoot),
-        { readonly: true },
       );
+      target.exec("PRAGMA query_only = ON");
       try {
         target.run("ATTACH DATABASE ? AS source", [snapshot.snapshotPath]);
         verifySourceCoherence(target, sessionId);
@@ -535,6 +543,7 @@ export function migrateActorTranscriptsOffline(options: {
         if (!auditDb) {
           auditDb = new Database(":memory:");
           auditDb.run("ATTACH DATABASE ? AS source", [snapshot.snapshotPath]);
+          auditDb.exec("PRAGMA query_only = ON");
           options.afterSourceAttached?.(auditDb);
         }
         verifySourceCoherence(auditDb, sessionId);
@@ -569,8 +578,10 @@ export function migrateActorTranscriptsOffline(options: {
       const target = new Database(targetPath);
       try {
         target.run("ATTACH DATABASE ? AS source", [snapshot.snapshotPath]);
+        target.exec("PRAGMA query_only = ON");
         options.afterSourceAttached?.(target);
         verifySourceCoherence(target, sessionId, totals);
+        target.exec("PRAGMA query_only = OFF");
         target.exec(`
           CREATE TABLE IF NOT EXISTS session_kernel_transcript_migrations (
             session_id TEXT PRIMARY KEY,

@@ -121,13 +121,14 @@ export async function inspectRepo(repoPath: string): Promise<{
   if (root.exitCode !== 0 || !root.stdout)
     throw new Error("Path is not a Git repository");
   const path = realpathSync(root.stdout);
-  const [origin, remoteSymref, remoteHead] = await Promise.all([
+  const [origin, remoteSymref, remoteHead, localHead] = await Promise.all([
     git(["remote", "get-url", "origin"], path),
     git(["ls-remote", "--symref", "origin", "HEAD"], path),
     git(
       ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
       path,
     ),
+    git(["symbolic-ref", "--quiet", "--short", "HEAD"], path),
   ]);
   if (origin.exitCode !== 0 || !origin.stdout) {
     throw new Error("Repository must have an origin remote");
@@ -135,7 +136,8 @@ export async function inspectRepo(repoPath: string): Promise<{
 
   const defaultBranch =
     defaultBranchFromLsRemote(remoteSymref.stdout) ||
-    remoteHead.stdout.replace(/^origin\//, "");
+    remoteHead.stdout.replace(/^origin\//, "") ||
+    localHead.stdout;
   if (!defaultBranch) {
     throw new Error(
       "Could not determine origin's default branch. Fetch the repository and set origin/HEAD, then try again",
@@ -155,7 +157,19 @@ export async function inspectRepo(repoPath: string): Promise<{
     );
   }
   if (!(await hasCommit(path, remoteRef))) {
-    throw new Error(`Repository must have a commit on origin/${defaultBranch}`);
+    const [remoteBranches, localCommit] = await Promise.all([
+      git(["ls-remote", "--heads", "origin"], path),
+      git(["rev-list", "--all", "--max-count=1"], path),
+    ]);
+    const emptyRepository =
+      remoteBranches.exitCode === 0 &&
+      !remoteBranches.stdout &&
+      localCommit.exitCode === 0 &&
+      !localCommit.stdout;
+    if (!emptyRepository)
+      throw new Error(
+        `Repository must have a commit on origin/${defaultBranch}`,
+      );
   }
 
   const cs = parseCsRemote(origin.stdout);

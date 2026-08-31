@@ -23,6 +23,7 @@ const { execFile } = require("node:child_process");
 const { NativeDictation } = require("./native-dictation");
 const {
   accountForContext,
+  isOpenSessionAppUrl,
   resumableAccountUrl,
 } = require("./account-navigation");
 const packageConfig = require("../package.json").opensession || {};
@@ -699,12 +700,7 @@ function inWindow(url) {
 
 function inActiveWindow(url, target = activeWindow()) {
   const accountURL = accountUrlForWindow(target);
-  if (!accountURL) return false;
-  try {
-    return new URL(url).origin === new URL(accountURL).origin;
-  } catch {
-    return false;
-  }
+  return accountURL ? isOpenSessionAppUrl(accountURL, url) : false;
 }
 
 // Sign-in pages for external services (e.g. the ChatGPT device-code sign-in
@@ -1037,8 +1033,9 @@ function createWindow(initialURL = null, initialAccountID = null) {
     syncBackgroundAccountWindows();
   });
 
-  // Keep app navigation in-window; everything else (the device-code page, PR
-  // links, docs, …) goes to the default browser.
+  // Keep app-page navigation in-window. Same-origin documents such as raw
+  // reports, assets and downloads still belong in the default browser,
+  // alongside the device-code page, PR links and docs.
   createdWindow.webContents.on("will-navigate", (e, url) => {
     if (!inActiveWindow(url, createdWindow)) {
       e.preventDefault();

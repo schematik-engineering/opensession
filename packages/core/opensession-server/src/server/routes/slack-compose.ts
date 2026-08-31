@@ -14,6 +14,7 @@ import {
   restorePendingSlackComposer,
   sendPendingSlackComposer,
   snapshotPendingSlackImages,
+  updatePendingSlackComposer,
 } from "../slack-compose";
 import {
   configuredSlackChannels,
@@ -106,7 +107,8 @@ export async function handleSlackComposeRoutes(
     return Response.json({ status: "undone" });
   }
   const match = ctx.path.match(/^\/api\/sessions\/([^/]+)\/slack-composer$/);
-  if (!match || !["GET", "POST", "DELETE"].includes(ctx.req.method)) return;
+  if (!match || !["GET", "POST", "PATCH", "DELETE"].includes(ctx.req.method))
+    return;
   const sessionId = decodeURIComponent(match[1]);
   if (ctx.req.method === "GET")
     return Response.json(await slackChannelsPayload(ctx));
@@ -136,18 +138,6 @@ export async function handleSlackComposeRoutes(
     return Response.json({ status: "cancelled" });
   }
 
-  const channel = targetChannel(body?.channel);
-  if (!channel)
-    return Response.json(
-      { error: "Choose a configured Slack channel" },
-      { status: 400 },
-    );
-  const message = typeof body?.message === "string" ? body.message.trim() : "";
-  if (message.length > 500)
-    return Response.json(
-      { error: "Slack message must be 500 characters or fewer" },
-      { status: 400 },
-    );
   const requestedScreenshots = Array.isArray(body?.screenshots)
     ? body.screenshots
     : [];
@@ -163,6 +153,42 @@ export async function handleSlackComposeRoutes(
     );
   }
   const screenshots = [...new Set<string>(requestedScreenshots)].slice(0, 10);
+
+  if (ctx.req.method === "PATCH") {
+    const message = typeof body?.message === "string" ? body.message : "";
+    if (message.length > 500)
+      return Response.json(
+        { error: "Slack message must be 500 characters or fewer" },
+        { status: 400 },
+      );
+    const channel =
+      typeof body?.channel === "string" ? body.channel.trim() : "";
+    const request = updatePendingSlackComposer(sessionId, requestId, {
+      message,
+      ...(channel ? { channel } : {}),
+      images: screenshots,
+    });
+    if (!request) {
+      return Response.json(
+        { error: "Slack message is already being sent" },
+        { status: 409 },
+      );
+    }
+    return Response.json(request);
+  }
+
+  const channel = targetChannel(body?.channel);
+  if (!channel)
+    return Response.json(
+      { error: "Choose a configured Slack channel" },
+      { status: 400 },
+    );
+  const message = typeof body?.message === "string" ? body.message.trim() : "";
+  if (message.length > 500)
+    return Response.json(
+      { error: "Slack message must be 500 characters or fewer" },
+      { status: 400 },
+    );
   if (!message && screenshots.length === 0) {
     return Response.json(
       { error: "Write a message or add an image first" },

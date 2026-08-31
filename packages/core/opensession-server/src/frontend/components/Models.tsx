@@ -1,4 +1,5 @@
 import { BASE_PATH } from "../lib/base";
+import { errorMessage } from "../lib/error-message";
 import { useEffect, useState } from "react";
 import { shortModelLabel, splitModelOptions } from "./ModelEffortSelect";
 import { ModelMark } from "./ModelMark";
@@ -89,8 +90,8 @@ function DefaultModelRow({
       if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
       setCurrent(body.default);
       await onChanged?.();
-    })().catch(async (e: any) => {
-      setError(e.message);
+    })().catch(async (error) => {
+      setError(errorMessage(error, "Failed to update the default model"));
     });
     setSaving(false);
   }
@@ -210,8 +211,8 @@ function AutoFallbackRow() {
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
       setAuto(body.autoFallback);
-    })().catch(async (e: any) => {
-      setError(e.message);
+    })().catch(async (error) => {
+      setError(errorMessage(error, "Failed to update auto-switching"));
       setAuto(prev ?? null);
     });
     setSaving(false);

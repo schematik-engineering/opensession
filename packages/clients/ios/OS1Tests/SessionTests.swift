@@ -238,13 +238,31 @@ final class SessionTests: XCTestCase {
         let sessions = try JSONDecoder().decode(
             [Session].self,
             from: Data(
-                #"[{"id":"second","workspaceId":"ws-1","createdAt":"2026-07-02T00:00:00Z"},{"id":"other","workspaceId":"ws-2","createdAt":"2026-07-01T00:00:00Z"},{"id":"first","workspaceId":"ws-1","createdAt":"2026-07-01T00:00:00Z"},{"id":"archived","workspaceId":"ws-1","archived":true}]"#.utf8
+                #"[{"id":"second","workspaceId":"ws-1","createdAt":"2026-07-02T00:00:00Z"},{"id":"other","workspaceId":"ws-2","createdAt":"2026-07-01T00:00:00Z"},{"id":"first","workspaceId":"ws-1","createdAt":"2026-07-01T00:00:00Z"},{"id":"worker","workspaceId":"ws-1","parentSessionId":"first","createdAt":"2026-07-03T00:00:00Z"},{"id":"archived","workspaceId":"ws-1","archived":true}]"#.utf8
             )
         )
 
         XCTAssertEqual(
             SessionsListViewModel.tabSessions(in: sessions, containing: sessions[0]).map(\.id),
             ["first", "second"]
+        )
+        XCTAssertEqual(
+            SessionsListViewModel.tabSessions(in: sessions, containing: sessions[3]).map(\.id),
+            ["worker"]
+        )
+    }
+
+    func testWorkerMenuUsesDirectLiveChildrenAcrossWorkspaces() throws {
+        let sessions = try JSONDecoder().decode(
+            [Session].self,
+            from: Data(
+                #"[{"id":"parent","workspaceId":"ws-1"},{"id":"later","workspaceId":"ws-worker","parentSessionId":"parent","createdAt":"2026-07-03T00:00:00Z"},{"id":"nested","parentSessionId":"later"},{"id":"archived","parentSessionId":"parent","archived":true},{"id":"earlier","parentSessionId":"parent","createdAt":"2026-07-02T00:00:00Z"}]"#.utf8
+            )
+        )
+
+        XCTAssertEqual(
+            SessionsListViewModel.workerSessions(in: sessions, parentId: "parent").map(\.id),
+            ["earlier", "later"]
         )
     }
 

@@ -70,7 +70,12 @@ export interface SessionRunInputs {
  *  need not build a whole UnifiedSession. */
 export type RunInputsSession = Pick<
   UnifiedSession,
-  "automation" | "mcpServers" | "externalRefs" | "goalId" | "startedBy"
+  | "automation"
+  | "automationDescendantPolicy"
+  | "mcpServers"
+  | "externalRefs"
+  | "goalId"
+  | "startedBy"
 >;
 
 /** Which in-process server set the next turn carries. Pure — mirrors the
@@ -78,7 +83,8 @@ export type RunInputsSession = Pick<
 export function sessionInProcessMcpBranch(
   session: RunInputsSession,
 ): InProcessMcpBranch {
-  if (session.automation) return "automation-self-improve";
+  if (session.automation || session.automationDescendantPolicy)
+    return "automation-self-improve";
   return session.goalId ? "interactive+goal-self" : "interactive";
 }
 
@@ -87,7 +93,8 @@ export function sessionInProcessMcpBranch(
 export function sessionMcpScopeSource(
   session: RunInputsSession,
 ): McpScopeSource {
-  if (session.automation) return "automation";
+  if (session.automation || session.automationDescendantPolicy)
+    return "automation";
   if (session.mcpServers && session.mcpServers.length) return "session";
   if (session.externalRefs?.length) return "feed";
   return "all";
@@ -105,20 +112,24 @@ export async function resolveSessionRunInputs(
   session: RunInputsSession,
   opts: { user?: string } = {},
 ): Promise<SessionRunInputs> {
-  const isAutomationSession = !!session.automation;
+  const isAutomationSession = !!(
+    session.automation || session.automationDescendantPolicy
+  );
   const source = sessionMcpScopeSource(session);
-  const mcpServers = isAutomationSession
-    ? automationMcpServersByName(session.automation!)
-    : source === "session"
-      ? session.mcpServers
-      : source === "feed"
-        ? // Feed-workspace sessions are scoped to their feed's declared MCP
-          // servers even when the session file predates the stamping (least
-          // privilege — the feeds design).
-          await (
-            await import("./feeds")
-          ).feedMcpServersForRefs(session.externalRefs!)
-        : undefined;
+  const mcpServers = session.automationDescendantPolicy
+    ? [...session.automationDescendantPolicy.mcpServers]
+    : isAutomationSession
+      ? automationMcpServersByName(session.automation!)
+      : source === "session"
+        ? session.mcpServers
+        : source === "feed"
+          ? // Feed-workspace sessions are scoped to their feed's declared MCP
+            // servers even when the session file predates the stamping (least
+            // privilege — the feeds design).
+            await (
+              await import("./feeds")
+            ).feedMcpServersForRefs(session.externalRefs!)
+          : undefined;
   return {
     isAutomationSession,
     mcpServers,

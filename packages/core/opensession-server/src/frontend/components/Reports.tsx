@@ -7,7 +7,7 @@ import React, {
 } from "react";
 import { docTitle } from "../lib/brand";
 import { fetchReportGroups, fetchReports } from "../lib/api";
-import type { ReportGroup, ReportMeta } from "../lib/types";
+import type { ReportGroup, ReportMeta, WSServerMessage } from "../lib/types";
 import { useIsPhone } from "../hooks/useIsPhone";
 import { BASE_PATH } from "../lib/base";
 import { absoluteLink } from "../lib/share-link";
@@ -23,6 +23,7 @@ import { EmptyState, InlineAlert, LoadingState } from "../ui/state";
 import { SIDEBAR_RAIL } from "../lib/sidebar-classes";
 import { reportUrgencyDot, reportUrgencyLabel } from "../lib/report-urgency";
 import { shortTime } from "../lib/time";
+import { errorMessage } from "../lib/error-message";
 import {
   REPORTS_COLUMN,
   REPORTS_COLUMN_COUNT,
@@ -45,7 +46,7 @@ interface Props {
   onOpenSession: (id: string) => void;
   onOpenSupport: (threadId: string) => void;
   onOpenNewSession: (prefill: NewSessionPrefill) => void;
-  addHandler: (handler: (message: any) => void) => () => void;
+  addHandler: (handler: (message: WSServerMessage) => void) => () => void;
 }
 
 /** When a report landed, spelled out. Only the history picker says this now. */
@@ -92,8 +93,8 @@ export function Reports({
       // auto-select — that would skip straight past it into the detail.
       if (!selectionRef.current && !isPhoneRef.current && next[0])
         onSelect(next[0].automationId);
-    })().catch(async (e: any) => {
-      setError(e?.message || "Failed to load reports");
+    })().catch(async (error: unknown) => {
+      setError(errorMessage(error, "Failed to load reports"));
       setGroups([]);
     });
   }

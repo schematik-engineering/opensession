@@ -151,7 +151,7 @@ interface Props {
   /** Inline only: bumping this puts the caret back in the prompt. The sidebar's
       draft row points at this field. */
   focusSeq?: number;
-  send: (msg: any) => void;
+  send: (msg: WSClientMessage) => void;
   addHandler: (handler: (msg: WSServerMessage) => void) => () => void;
   connected: boolean;
   /** Prefill the prompt (e.g. from the Home "New session" box). */

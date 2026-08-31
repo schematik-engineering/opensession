@@ -56,6 +56,7 @@ declare global {
   interface Window {
     SpeechRecognition?: SpeechRecognizerConstructor;
     webkitSpeechRecognition?: SpeechRecognizerConstructor;
+    webkitAudioContext?: typeof AudioContext;
     os1?: {
       dictation?: DesktopDictationAPI;
       [key: string]: unknown;
@@ -93,7 +94,7 @@ function startDesktopDictation(
   stream: MediaStream,
   onTranscript: (text: string) => void,
 ): BrowserDictation | null {
-  const Ctx = window.AudioContext || (window as any).webkitAudioContext;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
   if (!Ctx) return null;
 
   let context: AudioContext;

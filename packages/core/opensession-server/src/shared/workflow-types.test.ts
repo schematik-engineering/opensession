@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   normalizeWorkflowOutcome,
+  WORKFLOW_LIMITS,
   type WorkflowAgentOutcome,
   type WorkflowJournalEntry,
 } from "./workflow-types";
@@ -28,6 +29,14 @@ const LEGACY_ENTRY: WorkflowJournalEntry = JSON.parse(
     endedAt: "2026-01-01T00:01:00.000Z",
   }),
 );
+
+describe("workflow limits", () => {
+  it("lets one agent use the full workflow active-time budget", () => {
+    expect(WORKFLOW_LIMITS.agentTimeoutMs).toBe(
+      WORKFLOW_LIMITS.workflowTimeoutMs,
+    );
+  });
+});
 
 describe("normalizeWorkflowOutcome", () => {
   it("lifts a legacy entry's write fields into an artifact", () => {

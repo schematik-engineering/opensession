@@ -43,6 +43,7 @@ describe("interactive opensession-sessions MCP", () => {
         message: "not used",
       }),
       cancelSession: () => false,
+      reparentSession: async () => ({ ok: false as const, error: "not used" }),
       createSession: async () => ({
         id: "unused",
         createdBy: "Test",

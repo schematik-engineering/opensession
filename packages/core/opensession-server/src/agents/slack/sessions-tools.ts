@@ -443,6 +443,8 @@ export interface SpawnTaskArgs {
   branch?: string;
   model?: string;
   mode?: "ask" | "code" | "scratch";
+  /** Give the child its own worktree/branch instead of sharing the parent's. */
+  isolatedWorktree?: boolean;
   /** true = config default provider; or an explicit configured provider id. */
   sandbox?:
     | boolean
@@ -499,7 +501,7 @@ export async function spawnTaskImpl(
   // Code mode needs somewhere to work: an explicit branch, or a parent code
   // session whose worktree the child will share (createSession's same-
   // workspace = same-worktree rule; only when the repo matches).
-  if (mode === "code" && !args.branch?.trim()) {
+  if (mode === "code" && !args.branch?.trim() && !args.isolatedWorktree) {
     let sharable = false;
     if (caller) {
       try {
@@ -532,6 +534,7 @@ export async function spawnTaskImpl(
     mode,
     branch: args.branch,
     model: args.model,
+    isolatedWorktree: args.isolatedWorktree,
     parentSessionId: caller,
     reportBack: Boolean(caller),
     user: ctx.createdBy,
@@ -1056,8 +1059,52 @@ export function createSessionsMcpServer(
         },
       ),
       tool(
+        "reparent_session",
+        "Change a native Open Session session's parent/orchestrator link, or detach it by passing null. This changes child/report routing only: it does not move the session to another workspace or worktree, and it does not rewrite prompts already in the transcript. Cycles and unknown session ids are rejected. If the child needs new instructions, send them separately with send_to_session.",
+        {
+          id: z.string().trim().min(1).describe("The session to reparent."),
+          parentSessionId: z
+            .string()
+            .trim()
+            .min(1)
+            .nullable()
+            .describe(
+              "The new parent session id, or null to remove the current parent link.",
+            ),
+        },
+        async (args: { id: string; parentSessionId: string | null }) => {
+          const result = await getSessionControl().reparentSession(
+            args.id,
+            args.parentSessionId ?? undefined,
+          );
+          if (!result.ok) return text(`Could not reparent: ${result.error}`);
+
+          audit({
+            msg: "session_reparented",
+            session_id: args.id,
+            previous_parent_session_id: result.previousParentSessionId,
+            parent_session_id: result.parentSessionId,
+            changed: result.changed,
+            user: ctx.createdBy,
+            source_session_id: ctx.currentSessionId,
+          });
+          if (!result.changed) {
+            return text(
+              result.parentSessionId
+                ? `Session \`${args.id}\` is already a child of \`${result.parentSessionId}\`.`
+                : `Session \`${args.id}\` is already detached.`,
+            );
+          }
+          return text(
+            result.parentSessionId
+              ? `Reparented \`${args.id}\` to \`${result.parentSessionId}\`. Its workspace and worktree are unchanged.`
+              : `Removed the parent link from \`${args.id}\`. Its workspace and worktree are unchanged.`,
+          );
+        },
+      ),
+      tool(
         "create_session",
-        `Spin up a visible ${productName()} session and start it on a prompt. Use this as the sub-session primitive: workers can delegate focused tasks and report back to this parent session. mode 'ask' (default) runs read-only on the selected repo checkout; mode 'code' can edit files / open PRs (never merges). A worker targeting one of the parent's repos shares that exact primary or attached worktree, so reviewers see current/uncommitted work; pass repo explicitly for attached-repo tasks. \`branch\` is only used when there is nothing to share — a standalone worker, or a worker targeting a repo the parent does not carry — and is generated from the prompt when omitted. Repo defaults to the parent session's repo (${defaultRepo().id} when standalone); pass another registered repo id to override. For workers that only need filesystem/code access, pass mcpServers: [] to avoid unrelated MCP startup cost/failures. When called from a session, the worker defaults to the same workspace and is instructed to report back here; set standalone true or reportBack false to opt out. When a HUMAN asks for "a new session" ("create a new session for X", "spin one up on Y"), this tool is what they mean — a detached session that appears in their sidebar and outlives the current run — never an in-process subagent or task agent; reply with the new session's URL.`,
+        `Spin up a visible ${productName()} session and start it on a prompt. Use this as the sub-session primitive: workers can delegate focused tasks and report back to this parent session. mode 'ask' (default) runs read-only on the selected repo checkout; mode 'code' can edit files / open PRs (never merges). A worker targeting one of the parent's repos shares that exact primary or attached worktree, so reviewers see current/uncommitted work; pass repo explicitly for attached-repo tasks. Pass isolatedWorktree true to instead give the worker its own worktree and branch (child/report-back linkage is kept) — use it when fanning work out across separate workspaces. \`branch\` is only used when there is nothing to share — a standalone worker, or a worker targeting a repo the parent does not carry — and is generated from the prompt when omitted. Repo defaults to the parent session's repo (${defaultRepo().id} when standalone); pass another registered repo id to override. For workers that only need filesystem/code access, pass mcpServers: [] to avoid unrelated MCP startup cost/failures. When called from a session, the worker defaults to the same workspace and is instructed to report back here; set standalone true or reportBack false to opt out. When a HUMAN asks for "a new session" ("create a new session for X", "spin one up on Y"), this tool is what they mean — a detached session that appears in their sidebar and outlives the current run — never an in-process subagent or task agent; reply with the new session's URL.`,
         {
           prompt: z
             .string()
@@ -1110,6 +1157,12 @@ export function createSessionsMcpServer(
             .describe(
               "Create an unrelated standalone session instead of a child of the current session.",
             ),
+          isolatedWorktree: z
+            .boolean()
+            .optional()
+            .describe(
+              "Code mode: give the worker its own worktree and branch instead of sharing the parent workspace's worktree, while keeping child/report-back linkage. Use when fanning work out across separate workspaces so each child produces its own diff. Branch is generated from the prompt when omitted.",
+            ),
           sandbox: z
             .union([
               z.boolean(),
@@ -1157,6 +1210,7 @@ export function createSessionsMcpServer(
             parentSessionId?: string;
             reportBack?: boolean;
             standalone?: boolean;
+            isolatedWorktree?: boolean;
             sandbox?:
               | boolean
               | "docker"
@@ -1200,6 +1254,7 @@ export function createSessionsMcpServer(
               branch,
               model: args.model,
               mcpServers: args.mcpServers,
+              isolatedWorktree: args.isolatedWorktree,
               parentSessionId,
               reportBack: shouldReportBack,
               user: ctx.createdBy,
@@ -1271,7 +1326,7 @@ export function createSessionsMcpServer(
     tools.push(
       tool(
         "spawn_task",
-        "Delegate a self-contained task to a child session and return IMMEDIATELY with {taskId, url} — the lightweight alternative to create_session + send_to_session choreography when you just want work done and a handle to poll. The child is created through the same code path as create_session (it shares this session's worktree in code mode when repos match, inherits your user, is linked as a child, and is told to report back here); poll it with task_status and stop it with cancel_task. Mode defaults to 'code' (pass a branch unless the child can share this session's code worktree); use 'ask' for read-only investigation. Loop guard: spawned children may delegate one further level, then spawn_task refuses (depth ≥ 2)." +
+        "Delegate a self-contained task to a child session and return IMMEDIATELY with {taskId, url} — the lightweight alternative to create_session + send_to_session choreography when you just want work done and a handle to poll. The child is created through the same code path as create_session (it shares this session's worktree in code mode when repos match, inherits your user, is linked as a child, and is told to report back here); poll it with task_status and stop it with cancel_task. Mode defaults to 'code' (pass a branch, or isolatedWorktree true for a generated one, unless the child can share this session's code worktree); use 'ask' for read-only investigation. Loop guard: spawned children may delegate one further level, then spawn_task refuses (depth ≥ 2)." +
           (ctx.automationSelf
             ? " Children may edit code and open PRs but NEVER merge — a human reviews every PR."
             : " Not available from automation sessions."),
@@ -1290,6 +1345,12 @@ export function createSessionsMcpServer(
             .optional()
             .describe(
               "Branch for code mode when the child can't share this session's worktree (standalone or different repo).",
+            ),
+          isolatedWorktree: z
+            .boolean()
+            .optional()
+            .describe(
+              "Code mode: give the child its own worktree and branch instead of sharing this session's worktree, keeping child/report-back linkage. Branch is generated from the prompt when omitted.",
             ),
           model: z
             .string()

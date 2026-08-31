@@ -16,6 +16,7 @@ import {
 } from "../lib/composer-classes";
 import { Button } from "../ui/button";
 import { cn } from "../ui/cn";
+import { errorMessage } from "../lib/error-message";
 
 /** "in 45m" / "in 3h" / "in 2d" for a future instant (short form). */
 function inTime(iso: string): string {
@@ -170,8 +171,8 @@ export function SchedulePromptButton({
       setCustomOpen(false);
       onScheduled?.();
       await load();
-    })().catch(async (e: any) => {
-      setError(e.message);
+    })().catch(async (error) => {
+      setError(errorMessage(error, "Failed to schedule prompt"));
     });
     setSaving(false);
   }

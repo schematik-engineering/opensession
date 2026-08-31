@@ -9,6 +9,7 @@ import { OPENSESSION_SESSIONS_DIR } from "./paths";
 import { unpinEverywhere } from "./pins";
 import type { UnifiedSession } from "./types";
 import { setIndexedSessionArchived } from "./session-list-store";
+import { releasePreviewPathLease } from "./preview-path-leases";
 
 const REGISTRY_PATH = `${OPENSESSION_SESSIONS_DIR}/archive-registry.json`;
 
@@ -42,6 +43,17 @@ function load(): Record<string, RawEntry> {
 function save(registry: Record<string, RawEntry>): void {
   cache = registry;
   writeJsonAtomic(REGISTRY_PATH, registry);
+}
+
+function releasePreviewLease(sessionId: string): void {
+  try {
+    releasePreviewPathLease(sessionId);
+  } catch (error) {
+    console.error(
+      `Failed to release preview reservation for ${sessionId}:`,
+      error,
+    );
+  }
 }
 
 function toEntry(raw: RawEntry): Entry {
@@ -101,6 +113,7 @@ export function setArchived(
   // the Pinned band on unarchive. Callers that know more keys (alias ids, the
   // workspace pin) drop those on top of this.
   if (archived) {
+    releasePreviewLease(id);
     unpinEverywhere([id]);
   }
 }
@@ -127,8 +140,10 @@ export function archiveOlderThan(
 
   if (archived > 0) {
     save(registry);
-    for (const session of justArchived)
+    for (const session of justArchived) {
+      releasePreviewLease(session.id);
       setIndexedSessionArchived(session.id, true, "idle");
+    }
     // Registry is written, so isArchivedId now reflects this batch — drop the
     // stale session/alias pins and any workspace pin whose last session just went.
     unpinArchivedSessions(justArchived, sessions);

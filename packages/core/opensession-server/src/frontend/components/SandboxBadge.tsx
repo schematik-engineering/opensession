@@ -7,6 +7,7 @@ import {
   type SessionSandboxStatus,
 } from "../lib/api/sandboxes";
 import { IconBox, IconConnections } from "./icons";
+import { errorMessage } from "../lib/error-message";
 
 type SandboxRef = {
   provider: string;
@@ -45,8 +46,8 @@ export function SandboxBadge({
     await (async () => {
       setStatus(await fetchSessionSandbox(sessionId));
       setError(null);
-    })().catch(async (cause: any) => {
-      setError(cause?.message || "Sandbox status unavailable");
+    })().catch(async (cause) => {
+      setError(errorMessage(cause, "Sandbox status unavailable"));
     });
   }, [sessionId]);
 
@@ -152,8 +153,8 @@ export function SandboxBadge({
     await (async () => {
       setStatus(await sandboxAction(sessionId, action));
     })()
-      .catch(async (cause: any) => {
-        setError(cause?.message || `Could not ${action} sandbox`);
+      .catch(async (cause) => {
+        setError(errorMessage(cause, `Could not ${action} sandbox`));
       })
       .finally(async () => {
         setWorking(null);

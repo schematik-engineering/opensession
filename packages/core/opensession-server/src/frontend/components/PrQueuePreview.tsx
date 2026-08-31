@@ -1,5 +1,9 @@
 import React from "react";
-import type { UnifiedSession, WSServerMessage } from "../lib/types";
+import type {
+  UnifiedSession,
+  WSClientMessage,
+  WSServerMessage,
+} from "../lib/types";
 import { PrPanel } from "./PrPanel";
 
 interface Props {
@@ -9,7 +13,7 @@ interface Props {
   onOpenSession: (id: string) => void;
   /** Open another PR in the review panel (stack map layer links). */
   onOpenPr?: (repo: string, branch: string) => void;
-  send?: (msg: any) => void;
+  send?: (msg: WSClientMessage) => void;
   addHandler?: (handler: (msg: WSServerMessage) => void) => () => void;
 }
 

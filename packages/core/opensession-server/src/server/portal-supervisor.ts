@@ -284,7 +284,7 @@ async function allocateSandboxPort(
   throw new Error("No Sandbox Portal ports are available.");
 }
 
-function normalizedPath(path?: string): string | undefined {
+export function normalizePortalPath(path?: string): string | undefined {
   if (!path?.trim()) return undefined;
   const value = path.trim();
   if (!value.startsWith("/") || value.startsWith("//") || value.includes("\n"))
@@ -481,7 +481,7 @@ function withPortalPath(
   path: string,
   name?: string,
 ): PortalRecord[] {
-  const value = normalizedPath(path);
+  const value = normalizePortalPath(path);
   if (name && !records.some((record) => record.name === validateName(name)))
     throw new Error(`Portal '${name}' does not exist.`);
   return records.map((record) =>

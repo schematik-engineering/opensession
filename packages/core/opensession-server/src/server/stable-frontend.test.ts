@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -96,9 +102,38 @@ describe("stable frontend ingress", () => {
     });
 
     expect(body(respond(request("/workspace/demo"))!)).toContain("App-next.js");
-    expect(respond(request("/App-hash.js", "*/*"))).toBeNull();
+    expect(body(respond(request("/App-hash.js", "*/*"))!)).toBe(
+      "window.loaded = true;",
+    );
     expect(body(respond(request("/App-next.js", "*/*"))!)).toBe(
       "window.next = true;",
+    );
+  });
+
+  test("carries old lazy chunks through consecutive release snapshots", () => {
+    const { state, releaseRoot: firstRoot } = fixture();
+    const respond = createStableFrontendResponder(state, { snapshotTtlMs: 0 });
+
+    const secondSha = "b".repeat(40);
+    const secondRoot = join(state, "releases", secondSha);
+    mkdirSync(join(secondRoot, ".frontend-dist"), { recursive: true });
+    writeFileSync(join(secondRoot, ".opensession-release"), `${secondSha}\n`);
+    writeFileSync(
+      join(secondRoot, ".frontend-dist", "Settings-next.js"),
+      "window.settings = true;",
+    );
+    publishStableFrontendSnapshot(state, {
+      releaseRoot: secondRoot,
+      version: "App-next.js|styles.css",
+      indexHtml: '<script src="/App-next.js"></script>',
+    });
+
+    const snapshot = JSON.parse(
+      readFileSync(join(state, "stable-frontend.json"), "utf8"),
+    );
+    expect(snapshot.fallbackRoots).toEqual([firstRoot]);
+    expect(body(respond(request("/App-hash.js", "*/*"))!)).toBe(
+      "window.loaded = true;",
     );
   });
 

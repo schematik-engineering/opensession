@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   newTailBlockKeys,
+  shouldAnimateTranscriptEntryPosition,
   shouldAnimateTranscriptItemArrival,
   transcriptArrivalAliases,
   transcriptEntryMountKey,
@@ -9,6 +10,22 @@ import {
 } from "./transcript-block-identity";
 
 const entry = (id: string) => ({ id });
+
+describe("transcript decorations", () => {
+  test("keeps live and durable model switches out of position motion", () => {
+    expect(
+      shouldAnimateTranscriptEntryPosition(entry("model-switch-live-1")),
+    ).toBe(false);
+    expect(
+      shouldAnimateTranscriptEntryPosition(
+        entry("model-switch-2026-08-31T14:00:00Z"),
+      ),
+    ).toBe(false);
+    expect(shouldAnimateTranscriptEntryPosition(entry("retry-notice"))).toBe(
+      true,
+    );
+  });
+});
 
 describe("transcript turn identity", () => {
   test("keeps the mounted component when live steps append", () => {
@@ -20,6 +37,15 @@ describe("transcript turn identity", () => {
   test("keeps the scroll anchor when history entries prepend", () => {
     expect(turnScrollAnchor([entry("second"), entry("third")])).toBe(
       turnScrollAnchor([entry("first"), entry("second"), entry("third")]),
+    );
+  });
+
+  test("keeps the mounted component when an indexed slice prepends steps", () => {
+    expect(turnMountKey([entry("second"), entry("third")], "range:user")).toBe(
+      turnMountKey(
+        [entry("first"), entry("second"), entry("third")],
+        "range:user",
+      ),
     );
   });
 });
@@ -61,7 +87,10 @@ describe("optimistic transcript identity", () => {
   });
 
   test("does not animate a durable block over its mounted optimistic alias", () => {
-    const durable = { arrivalAliases: ["outbox-client-prompt"] };
+    const durable = {
+      entryIds: ["durable-prompt"],
+      arrivalAliases: ["outbox-client-prompt"],
+    };
     expect(
       shouldAnimateTranscriptItemArrival(
         durable,
@@ -71,6 +100,33 @@ describe("optimistic transcript identity", () => {
     expect(
       shouldAnimateTranscriptItemArrival(durable, new Set(["older-entry"])),
     ).toBe(true);
+  });
+
+  test("does not animate a refreshed block that retains a painted entry", () => {
+    const refreshed = {
+      entryIds: ["worked-step", "retry-notice"],
+    };
+    expect(
+      shouldAnimateTranscriptItemArrival(
+        refreshed,
+        new Set(["worked-step", "retry-notice"]),
+      ),
+    ).toBe(false);
+    expect(
+      shouldAnimateTranscriptItemArrival(refreshed, new Set(["older-entry"])),
+    ).toBe(true);
+  });
+
+  test("does not animate a newly hydrated transcript slice", () => {
+    expect(
+      shouldAnimateTranscriptItemArrival(
+        {
+          entryIds: ["worked-step", "retry-notice"],
+          animateArrival: false,
+        },
+        new Set(),
+      ),
+    ).toBe(false);
   });
 });
 

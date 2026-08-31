@@ -140,7 +140,16 @@ export function WorkflowAgentTranscript({ runId, agent, onBack }: Props) {
             {running ? "Waiting for the first step…" : "Nothing to show."}
           </Placeholder>
         ) : (
-          <TranscriptBlocks entries={entries} live={running} />
+          // The workspace panel scrolls through PANEL_BODY, not the main
+          // transcript's `.viewer-messages` container. Its virtualizer cannot
+          // measure against that panel and would mount zero rows even though
+          // the API returned entries. Workflow conversations are capped at
+          // 500 entries, so render this bounded drill-in statically.
+          <TranscriptBlocks
+            entries={entries}
+            live={running}
+            virtualize={false}
+          />
         )}
       </div>
     </div>

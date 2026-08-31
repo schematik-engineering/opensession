@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSetupStatus } from "../../hooks/useSetupStatus";
+import { errorMessage } from "../../lib/error-message";
 import {
   SettingCard,
   SettingCardSkeleton,
@@ -63,9 +64,11 @@ function SharedCheckoutSetting() {
     await (async () => {
       setSettings(await setSharedCheckoutMode(mode));
     })()
-      .catch(async (cause: any) => {
+      .catch(async (cause) => {
         setSettings(previous);
-        setError(cause?.message || "Couldn’t save where sessions make changes");
+        setError(
+          errorMessage(cause, "Couldn’t save where sessions make changes"),
+        );
       })
       .finally(async () => {
         setSaving(false);

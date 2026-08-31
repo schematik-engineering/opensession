@@ -25,6 +25,7 @@ import {
 } from "../workflow-runner";
 import {
   findPiNativeTranscript,
+  findPiNativeTranscriptByPrompt,
   readPiNativeTranscript,
 } from "../pi-native-transcript";
 
@@ -94,12 +95,11 @@ export async function handleWorkflowsRoutes(
       const journal = agentJournalEntries(runId).find((e) => e.seq === seq);
       const engineSessionId =
         snap?.engineSessionId || journal?.outcome.engineSessionId;
-      if (!engineSessionId)
-        return Response.json(
-          { error: "Agent has not started a run yet", entries: [] },
-          { status: 404 },
-        );
-      const nativePath = findPiNativeTranscript(engineSessionId);
+      const nativePath = engineSessionId
+        ? findPiNativeTranscript(engineSessionId)
+        : journal
+          ? findPiNativeTranscriptByPrompt(journal)
+          : null;
       if (!nativePath)
         return Response.json(
           { error: "No conversation recorded for this agent", entries: [] },

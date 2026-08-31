@@ -177,6 +177,10 @@ export function localRunHostsSupported(
   systemdBooted = existsSync("/run/systemd/system"),
   commandLookup: (command: string) => string | null = Bun.which,
 ): boolean {
+  // Hermetic end-to-end fixtures have scratch state but no matching privileged
+  // run-host installation. They exercise the same runner in-process instead of
+  // reaching the live VPS executor or fixed helper.
+  if (process.env.OPENSESSION_TEST_IN_PROCESS_RUNS === "1") return false;
   return (
     platform === "linux" &&
     systemdBooted &&
@@ -226,6 +230,7 @@ export interface HostedRunOpts {
   proxyMcpServers?: string[];
   reposNote?: string;
   deniedTools?: Record<string, string>;
+  publicationPolicy?: { repo: string; branch: string; headBranch: string };
   confirmTools?: Record<string, string>;
   aws?: boolean;
   /** Pool credentials for trusted run-spawned CLI tools (deepsec scans). */
@@ -253,6 +258,8 @@ export interface HostedRunOpts {
   resumeAttempts?: number;
   lastResumeAt?: string;
   onAskUser?: RunAgentOpts["onAskUser"];
+  /** Reports the engine id even when its live init frame preceded attachment. */
+  onEngineSession?: (engineSessionId: string) => void;
   /** Fences cancellation admitted while the detached host is still launching. */
   shouldCancel?: () => boolean;
   /** A steer arrived too late at the host — queue it so it isn't dropped. */
@@ -429,6 +436,7 @@ async function* runAgentInProcess(
     inProcessMcp: opts.fallbackInProcessMcp?.(),
     reposNote: opts.reposNote,
     deniedTools: opts.deniedTools,
+    publicationPolicy: opts.publicationPolicy,
     confirmTools: opts.confirmTools,
     aws: opts.aws,
     claudeCliEnv: opts.claudeCliEnv,
@@ -557,6 +565,7 @@ function hostedRunRecord(spec: RunHostSpec): ActiveRunRecord {
     mcpServers: spec.mcpServers,
     user: spec.user,
     deniedTools: spec.deniedTools,
+    publicationPolicy: spec.publicationPolicy,
     confirmTools: spec.confirmTools,
     aws: spec.aws,
     claudeCliEnv: spec.claudeCliEnv,
@@ -614,6 +623,7 @@ async function spawnHostRun(
     rpcToken,
     reposNote: opts.reposNote,
     deniedTools: opts.deniedTools,
+    publicationPolicy: opts.publicationPolicy,
     confirmTools: opts.confirmTools,
     aws: opts.aws,
     claudeCliEnv: opts.claudeCliEnv,
@@ -661,6 +671,7 @@ async function spawnHostRun(
       }
       handle = new HostHandle(dir, spec, {
         onAskUser: opts.onAskUser,
+        onEngineSession: opts.onEngineSession,
         onSteerFailed: opts.onSteerFailed,
       });
       try {
@@ -673,6 +684,7 @@ async function spawnHostRun(
     launchCompleted = true;
     handle = new HostHandle(dir, spec, {
       onAskUser: opts.onAskUser,
+      onEngineSession: opts.onEngineSession,
       onSteerFailed: opts.onSteerFailed,
     });
     await handle.connectWithWait(20_000);
@@ -969,6 +981,7 @@ class AsyncEventQueue {
 
 export interface HandleCallbacks {
   onAskUser?: RunAgentOpts["onAskUser"];
+  onEngineSession?: (engineSessionId: string) => void;
   onSteerFailed?: (text: string) => void;
 }
 
@@ -1255,6 +1268,9 @@ export class HostHandle {
     if (!id || id === this.engineSessionId) return;
     this.engineSessionId = id;
     addHostRunKey(id, this.ctl);
+    try {
+      this.cb.onEngineSession?.(id);
+    } catch {}
   }
 
   private acceptsSideEffectFrame(frameType: string): boolean {

@@ -26,7 +26,9 @@ import { AssetViewToggle } from "./AssetViewToggle";
 import { openLightbox } from "./media-lightbox-controller";
 import { fullTime } from "../lib/time";
 import { commitPrompt } from "../lib/commit-prompt";
+import { errorMessage } from "../lib/error-message";
 import { AGENT_NAME, GITHUB_BOT_LOGINS } from "../lib/brand";
+import { sessionHasConnectedPr } from "../lib/session-prs";
 import { getCurrentUser } from "./UserPicker";
 import { PR_WEBHOOK_FALLBACK_POLL_MS } from "../lib/poll";
 import { PrStatusBar } from "./PrStatusBar";
@@ -46,7 +48,13 @@ import { Button } from "../ui/button";
 import { Menu } from "../ui/menu";
 import { Tooltip } from "../ui/tooltip";
 import { cn } from "../ui/cn";
-import type { PrDetails, PrReviewer, UnifiedSession } from "../lib/types";
+import type {
+  PrCommit,
+  PrDetails,
+  PrReviewer,
+  UnifiedSession,
+  WSClientMessage,
+} from "../lib/types";
 import {
   WS_SUMMARY_ACTION,
   WS_SUMMARY_CARD,
@@ -156,9 +164,8 @@ interface Props {
   onArchive?: () => void;
   /**
    * The teammate this session's review was handed to, if anyone. Open
-   * Session's own request, which is a different thing from the reviewers on
-   * the pull request: this one is a person somebody here asked, and it is the
-   * only one of the two that can be pending with no PR in sight.
+   * Session's own request is different from the reviewers on the pull request,
+   * but the summary only shows either kind after a PR is connected.
    *
    * The workspace's request may live on a sibling session, so the viewer
    * resolves it (see `effectiveReview`) and hands the answer down.
@@ -175,8 +182,10 @@ interface Props {
   prReviewRequested?: string[];
   /** Live run state, so the PR block refetches the moment a turn ends. */
   running?: boolean;
+  /** The worktree is not ready yet, so worktree and PR status stay quiet. */
+  workspacePreparing?: boolean;
   /** Prompt the session (Commit) via WS `prompt`. Absent while disconnected. */
-  send?: (msg: any) => void;
+  send?: (msg: WSClientMessage) => void;
   /** Bumped when a webhook or an auto-push reports workspace activity. */
   refreshTick?: number;
   /** Lets the session column make room for the floating card while it is open. */
@@ -242,6 +251,8 @@ function reviewLines(
   request: UnifiedSession["reviewRequest"] | null | undefined,
   prReviewRequested: string[] | undefined,
 ): ReviewLine[] {
+  if (!pr) return [];
+
   const lines: ReviewLine[] = [];
   const seen = new Map<string, ReviewLine>();
   const add = (line: ReviewLine) => {
@@ -252,8 +263,8 @@ function reviewLines(
     return line;
   };
 
-  // Whoever we asked, first: this is the row that exists even with no pull
-  // request open at all.
+  // Whoever we asked, first: this is the row whose picker can change the
+  // current request while the connected pull request is still visible.
   const requestedPeople = request?.recipients?.length
     ? request.recipients
     : [request?.to];
@@ -516,6 +527,7 @@ export function WorkspaceSummaryBody({
   onReviewChange,
   prReviewRequested,
   running,
+  workspacePreparing,
   send,
   refreshTick,
   close,
@@ -530,11 +542,16 @@ export function WorkspaceSummaryBody({
   // Pictures or rows. One preference, shared with the Workspace panel's own
   // Assets section, so the same folder is not drawn two ways in one window.
   const [assetView, setAssetView] = useAssetViewMode();
+  // `session` follows the session-list poll; the viewer's explicit value follows
+  // the workspace_status socket event and wins when it is available.
+  const workspaceIsPreparing =
+    workspacePreparing ?? Boolean(session.workspacePreparing);
   const prResource = useSessionPrResource(
     session.id,
     session.repo || undefined,
     undefined,
     {
+      enabled: !workspaceIsPreparing,
       refreshInterval: PR_WEBHOOK_FALLBACK_POLL_MS,
       revision: refreshTick,
     },
@@ -543,6 +560,7 @@ export function WorkspaceSummaryBody({
     session.id,
     session.repo || undefined,
     {
+      enabled: !workspaceIsPreparing,
       refreshInterval: PR_WEBHOOK_FALLBACK_POLL_MS,
       revision: refreshTick,
     },
@@ -566,14 +584,19 @@ export function WorkspaceSummaryBody({
   // A PR already carries line totals, so only fetch the much larger worktree
   // patch when there is no PR (or its revalidation failed without stale data).
   const diffResource = useSessionDiffResource(session.id, {
-    enabled: prResource.data === null || Boolean(prResource.error),
+    enabled:
+      !workspaceIsPreparing &&
+      (prResource.data === null || Boolean(prResource.error)),
     refreshInterval: PR_WEBHOOK_FALLBACK_POLL_MS,
     revision: refreshTick,
   });
   const pr = prResource.data ?? null;
+  const hasConnectedPr = sessionHasConnectedPr(session);
   const git = gitResource.data ?? null;
   const assets = assetsResource.data ?? [];
   const commits = overviewResource.data?.commits ?? [];
+  const prCommits = pr?.commits ?? [];
+  const hasCommitDetails = prCommits.length > 0 || commits.length > 0;
   const media = (() => {
     const seen = new Set<string>();
     return [...liveMedia, ...(overviewResource.data?.media ?? [])].filter(
@@ -596,6 +619,7 @@ export function WorkspaceSummaryBody({
     ) ?? null;
   const [prompted, setPrompted] = useState(false);
   const [changesOpen, setChangesOpen] = useState(false);
+  const [commitsOpen, setCommitsOpen] = useState(false);
   const [selectedReview, setSelectedReview] = useState(reviewRequest ?? null);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewBusy, setReviewBusy] = useState(false);
@@ -747,8 +771,8 @@ export function WorkspaceSummaryBody({
         { revalidate: false },
       );
     })()
-      .catch(async (error: any) => {
-        setReviewError(error?.message || "Couldn't cancel the review");
+      .catch((error: unknown) => {
+        setReviewError(errorMessage(error, "Couldn't cancel the review"));
       })
       .finally(async () => {
         setReviewCancelling(false);
@@ -772,8 +796,8 @@ export function WorkspaceSummaryBody({
         go(() => onOpenSession(result.bksId!, result.session ?? null));
       }
     })()
-      .catch(async (error: any) => {
-        setFixError(error?.message || "Couldn't start Auto-fix");
+      .catch((error: unknown) => {
+        setFixError(errorMessage(error, "Couldn't start Auto-fix"));
       })
       .finally(async () => {
         setFixBusy(false);
@@ -799,10 +823,10 @@ export function WorkspaceSummaryBody({
     const owner = (previous && reviewRequestSessionId) || session.id;
     onReviewChange?.(owner, next);
     setSessionReviewerApi(owner, name, getCurrentUser())
-      .catch((error: any) => {
+      .catch((error: unknown) => {
         setSelectedReview(previous);
         onReviewChange?.(owner, previous);
-        setReviewError(error?.message || "Failed to set reviewer");
+        setReviewError(errorMessage(error, "Failed to set reviewer"));
       })
       .finally(() => setReviewBusy(false));
   }
@@ -910,9 +934,26 @@ export function WorkspaceSummaryBody({
     );
   }
 
-  /** A long session can commit dozens of times. Keep the card folded to one
-   *  totals row, then show the individual commits in the same small side
-   *  overlay used for checks rather than stretching the summary itself. */
+  function prCommittedRow(commit: PrCommit) {
+    return (
+      <div
+        key={commit.oid}
+        className={cn(WS_SUMMARY_ROW, "cursor-default")}
+        title={`${commit.messageHeadline} · ${commit.oid.slice(0, 8)} · ${commit.author}`}
+      >
+        <span className={WS_SUMMARY_RAIL}>
+          <IconGitCommit size={20} className={WS_SUMMARY_ICON} />
+        </span>
+        <span className={WS_SUMMARY_LABEL}>{commit.messageHeadline}</span>
+        <code className="shrink-0 text-meta text-faint">
+          {commit.oid.slice(0, 7)}
+        </code>
+      </div>
+    );
+  }
+
+  /** A long session can commit dozens of times. Keep the completed-work totals
+   *  folded, then let the section heading reveal every commit in this card. */
   function committedSummaryRow() {
     if (commits.length === 0) return null;
     const stats = commits.reduce(
@@ -925,55 +966,30 @@ export function WorkspaceSummaryBody({
     );
     const label = `${commits.length} commit${commits.length === 1 ? "" : "s"}`;
     return (
-      <Popover.Root exclusive={false}>
-        <Popover.Trigger
-          render={
-            <button
-              type="button"
-              className={WS_SUMMARY_ROW}
-              title={`View ${label}`}
-            >
-              <span className={WS_SUMMARY_RAIL}>
-                <IconGitCommit size={20} className={WS_SUMMARY_ICON} />
-              </span>
-              <span className={WS_SUMMARY_LABEL}>{label}</span>
-              <span
-                className={cn(
-                  WS_SUMMARY_STATE,
-                  "flex items-baseline gap-2 text-dim tabular-nums",
-                )}
-              >
-                <span>
-                  {stats.files} file{stats.files === 1 ? "" : "s"}
-                </span>
-                <span className="text-green">+{stats.additions}</span>
-                <span className="text-red">−{stats.deletions}</span>
-              </span>
-            </button>
-          }
-        />
-        <Popover.Popup
-          portalContainer={
-            typeof document !== "undefined" ? document.body : undefined
-          }
-          side={embedded ? "bottom" : "left"}
-          align="end"
-          sideOffset={10}
-          className="flex max-h-[min(440px,70vh,var(--available-height))] w-[min(380px,calc(100vw-24px))] flex-col overflow-hidden p-0"
+      <button
+        type="button"
+        className={WS_SUMMARY_ROW}
+        onClick={() => setCommitsOpen(true)}
+        aria-expanded={false}
+        title={`View ${label}`}
+      >
+        <span className={WS_SUMMARY_RAIL}>
+          <IconGitCommit size={20} className={WS_SUMMARY_ICON} />
+        </span>
+        <span className={WS_SUMMARY_LABEL}>{label}</span>
+        <span
+          className={cn(
+            WS_SUMMARY_STATE,
+            "flex items-baseline gap-2 text-dim tabular-nums",
+          )}
         >
-          <div className="flex items-baseline justify-between gap-2.5 border-b border-divider bg-surface px-3 py-[9px]">
-            <span className="text-label font-semibold text-fg">{label}</span>
-            <span className="inline-flex gap-2 text-meta font-semibold tabular-nums">
-              <span className="text-dim">
-                {stats.files} file{stats.files === 1 ? "" : "s"}
-              </span>
-              <span className="text-green">+{stats.additions}</span>
-              <span className="text-red">−{stats.deletions}</span>
-            </span>
-          </div>
-          <div className="overflow-y-auto p-1">{commits.map(committedRow)}</div>
-        </Popover.Popup>
-      </Popover.Root>
+          <span>
+            {stats.files} file{stats.files === 1 ? "" : "s"}
+          </span>
+          <span className="text-green">+{stats.additions}</span>
+          <span className="text-red">−{stats.deletions}</span>
+        </span>
+      </button>
     );
   }
 
@@ -1000,40 +1016,46 @@ export function WorkspaceSummaryBody({
       <div className={cn(prGroupClass, "ws-summary-pr-group")}>
         {/* Which PR, where it stands, and the one thing to do about it. The
 				    strip owns all three; this card only says where they go. */}
-        <PrStatusBar
-          variant="summary"
-          sessionId={session.id}
-          repo={session.repo || undefined}
-          archived={session.archived}
-          prs={session.prs}
-          send={send}
-          running={running}
-          refreshTick={refreshTick}
-          onOpenPrTab={() => go(onOpenPr)}
-          onOpenStackPr={
-            onOpenStackPr
-              ? (repo, branch) => go(() => onOpenStackPr(repo, branch))
-              : undefined
-          }
-          onOpenChecksTab={() => go(onOpenChecks)}
-          onArchive={onArchive ? () => go(onArchive) : undefined}
-        >
-          {/* The PR's preview deploy, inside the band with the rest of that
-				    PR's state rather than as a loose row under it. It is the globe
-				    the header carries while this card is shut: the header stands
-				    down when the card is up, the same way it does for the workspace
-				    panel, so the deploy is in exactly one place at a time. Renders
-				    nothing when the PR has no preview. */}
-          <StagingLink
-            session={session}
+        {!workspaceIsPreparing && (
+          <PrStatusBar
             variant="summary"
+            sessionId={session.id}
+            repo={session.repo || undefined}
+            archived={session.archived}
+            prs={session.prs}
+            send={send}
+            running={running}
             refreshTick={refreshTick}
-          />
-        </PrStatusBar>
+            onOpenPrTab={() => go(onOpenPr)}
+            onOpenStackPr={
+              onOpenStackPr
+                ? (repo, branch) => go(() => onOpenStackPr(repo, branch))
+                : undefined
+            }
+            onOpenChecksTab={() => go(onOpenChecks)}
+            onArchive={onArchive ? () => go(onArchive) : undefined}
+          >
+            {/* The PR's preview deploy, inside the band with the rest of that
+				      PR's state rather than as a loose row under it. It is the globe
+				      the header carries while this card is shut: the header stands
+				      down when the card is up, the same way it does for the workspace
+				      panel, so the deploy is in exactly one place at a time. Renders
+				      nothing when the PR has no preview. */}
+            <StagingLink
+              session={session}
+              variant="summary"
+              refreshTick={refreshTick}
+            />
+          </PrStatusBar>
+        )}
       </div>
 
       {reviewMode && reviewPage && onReviewPageChange && (
-        <div role="tablist" aria-label="Pull request pages">
+        <div
+          className={embedded ? undefined : "mt-1"}
+          role="tablist"
+          aria-label="Pull request pages"
+        >
           <button
             className={WS_SUMMARY_ROW}
             role="tab"
@@ -1073,7 +1095,13 @@ export function WorkspaceSummaryBody({
         </div>
       )}
 
-      <div className={cn(groupClass, "ws-summary-review-group")}>
+      <div
+        className={cn(
+          groupClass,
+          "ws-summary-review-group",
+          !hasConnectedPr && "hidden!",
+        )}
+      >
         {/* One review section for both the automated reading and the people asked
 				    to review. Its action opens the complete workspace review; the final row
 				    owns the picker, so neither action requires the workspace panel. */}
@@ -1351,14 +1379,41 @@ export function WorkspaceSummaryBody({
         )}
       </div>
 
-      {(diffIsCommitted || commits.length > 0) && (
+      {(diffIsCommitted || hasCommitDetails) && (
         <div className={groupClass}>
-          <div className={WS_SUMMARY_SECTION}>Committed</div>
+          {hasCommitDetails ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                WS_SUMMARY_SECTION,
+                "group/committed w-full cursor-pointer justify-between gap-2 border-none bg-transparent text-left",
+              )}
+              onClick={() => setCommitsOpen((open) => !open)}
+              aria-expanded={commitsOpen}
+              title={commitsOpen ? "Hide commits" : "Show all commits"}
+            >
+              <span>Committed</span>
+              <IconChevronDown
+                size={14}
+                className={cn(
+                  "shrink-0 transition-transform motion-reduce:transition-none",
+                  commitsOpen && "rotate-180",
+                )}
+              />
+            </Button>
+          ) : (
+            <div className={WS_SUMMARY_SECTION}>Committed</div>
+          )}
           {diffIsCommitted &&
             diffChangeRow(
               `${changedFiles} file${changedFiles === 1 ? "" : "s"} committed`,
             )}
-          {committedSummaryRow()}
+          {commitsOpen
+            ? prCommits.length > 0
+              ? prCommits.map(prCommittedRow)
+              : commits.map(committedRow)
+            : committedSummaryRow()}
         </div>
       )}
 

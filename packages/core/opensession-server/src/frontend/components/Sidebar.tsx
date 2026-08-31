@@ -78,11 +78,14 @@ import {
 import { mobileFilterBtn } from "../lib/app-header-classes";
 import {
   ASK_BAND,
-  activeSubagentsForWorkspace,
   isAskWorkspace,
   isScratchWorkspace,
+  sessionShipsDirectlyToMain,
+  subagentsByWorkspace,
+  subagentsForSelectedWorkspace,
   workspaceMainSession,
   workspaceRowOwnsSelection,
+  workspaceRowShipsDirectlyToMain,
 } from "../lib/sidebar-workspaces";
 import type { ReviewQueueItem } from "../lib/review-queue";
 import {
@@ -309,7 +312,7 @@ import { AutoCreatedMark } from "./sidebar/AutoCreatedMark";
 import { KeepInSidebarMark } from "./sidebar/KeepInSidebarMark";
 import { OriginMark } from "./sidebar/OriginMark";
 import { AutomationReportRow } from "./sidebar/AutomationReportRow";
-import { ActiveSubagentRows } from "./sidebar/ActiveSubagentRows";
+import { SubagentRows } from "./sidebar/SubagentRows";
 import { DraftRow } from "./sidebar/DraftRow";
 import { WorkspaceDraftIndicator } from "./sidebar/WorkspaceDraftIndicator";
 import { WorkspaceContextMenu } from "./sidebar/WorkspaceContextMenu";
@@ -1105,17 +1108,6 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
 
   const peopleWithAgent = withAgentPerson(people, automationOverview);
 
-  // Child sessions are contextual navigation for the workspace that is open,
-  // not another person/status lane. Derive them from the complete live list so
-  // a teammate or search lens cannot cut a running worker out from under its
-  // selected parent row.
-  const activeWorkspaceSubagents = activeSubagentsForWorkspace(
-    sessions,
-    selectedWorkspaceId,
-  );
-  const activeWorkspaceSubagentIds = new Set(
-    activeWorkspaceSubagents.map(({ session }) => session.id),
-  );
   const selectedSession =
     sessions.find(
       (session) =>
@@ -1132,6 +1124,26 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
     selectedWorkspaceId,
   });
   const sorted = sortSidebarSessions(filtered, filter.sort);
+
+  // Child sessions belong to their root workspace, not to whichever temporary
+  // workspace they created. Derive every family from the complete live list,
+  // then keep only groups whose root row survives the current lens. A worker
+  // therefore stays nested after its run or pull request finishes.
+  const visibleWorkspaceIds = new Set(
+    filtered.flatMap((session) =>
+      session.workspaceId ? [session.workspaceId] : [],
+    ),
+  );
+  const subagentsByWorkspaceId = new Map(
+    Array.from(subagentsByWorkspace(sessions)).filter(([workspaceId]) =>
+      visibleWorkspaceIds.has(workspaceId),
+    ),
+  );
+  const workspaceSubagentIds = new Set(
+    Array.from(subagentsByWorkspaceId.values()).flatMap((items) =>
+      items.map(({ session }) => session.id),
+    ),
+  );
 
   // Team activity is deliberately independent of the workspace lens above it:
   // repo/person/search filters must not make a running teammate disappear from
@@ -1162,7 +1174,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
     sessions: filtered,
     workspaces,
     openPrs: openPrs ?? [],
-    activeSubagentIds: activeWorkspaceSubagentIds,
+    nestedSubagentIds: workspaceSubagentIds,
     selectedWorkspaceId,
     selectedSessionId: selectedId,
     reads,
@@ -1239,7 +1251,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
 
   const groups = buildAutomationGroups({
     sessions: sorted,
-    activeSubagentIds: activeWorkspaceSubagentIds,
+    nestedSubagentIds: workspaceSubagentIds,
     automationOverview,
     filter,
     currentUser,
@@ -2458,10 +2470,13 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
     // have no project, and they sit above the bands rather than in one), so
     // their rows carry a full status mark instead of the plain dot.
     const noSectionHeading = rowIsScratch(row);
-    const subagents =
-      includeSubagents && row.workspace?.id === selectedWorkspaceId
-        ? activeWorkspaceSubagents
-        : [];
+    const subagents = includeSubagents
+      ? subagentsForSelectedWorkspace(
+          subagentsByWorkspaceId,
+          row.workspace?.id,
+          selectedWorkspaceId,
+        )
+      : [];
     const workspaceRow = (
       <div
         key={row.key}
@@ -2746,10 +2761,26 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
             !editing && (
               // Same badge as a session row (SidebarItem): the face of whoever
               // tagged you, with an accent @ so it can't read as a viewer.
+              // Clicking it jumps to the member session the mention lives on —
+              // the row's own click can open a different sibling, and opening
+              // the exact session is what clears the badge (lib/mentions.ts).
               <span
-                className="relative ml-1 flex shrink-0 items-center"
-                title={`${row.mention} mentioned you`}
-                aria-label={`${row.mention} mentioned you`}
+                className="relative ml-1 flex shrink-0 cursor-pointer items-center"
+                title={`${row.mention} mentioned you — open`}
+                aria-label={`${row.mention} mentioned you — open`}
+                onClick={
+                  row.mentionSessionId
+                    ? (e) => {
+                        e.stopPropagation();
+                        if (wsLongPressed.current) return;
+                        const target = row.mentionSessionId;
+                        if (!target) return;
+                        if (row.workspace)
+                          navigation.openWorkspace(row.workspace.id, target);
+                        else navigation.openSession(target);
+                      }
+                    : undefined
+                }
               >
                 <UserAvatar name={row.mention} size={16} className="shrink-0" />
                 <span
@@ -2994,10 +3025,11 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
     return (
       <React.Fragment key={row.key}>
         {workspaceRow}
-        <ActiveSubagentRows
+        <SubagentRows
           items={subagents}
           selectedId={selectedId}
           onSelect={openSidebarSession}
+          onArchive={(session) => onArchive(session, null)}
         />
       </React.Fragment>
     );
@@ -3078,15 +3110,14 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
     repo: string | undefined,
     branch: string | null | undefined,
   ) {
-    const defaultBranch = repo ? directToMainBranches[repo] : undefined;
-    return !!defaultBranch && (!branch || branch === defaultBranch);
+    return sessionShipsDirectlyToMain({ repo, branch }, directToMainBranches);
   }
   function rowShipsDirectlyToMain(row: WsRow) {
-    const repo = wsRowRepo(row);
-    const branch =
-      row.workspace?.branch ||
-      row.sessions.find((session) => session.repo === repo)?.branch;
-    return shipsDirectlyToMain(repo, branch);
+    return workspaceRowShipsDirectlyToMain(
+      row,
+      wsRowRepo(row),
+      directToMainBranches,
+    );
   }
   const rowIsScratch = (row: WsRow) => isScratchWorkspace(row.sessions);
   // Repo-less Ask workspaces get their own band above the projects. Checked
@@ -4893,7 +4924,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
                     // legacy pin can still point at it). Skip it so it can't render
                     // as an un-archivable ghost row.
                     .filter((s): s is UnifiedSession => !!s && !s.archived)
-                    .filter((s) => !activeWorkspaceSubagentIds.has(s.id))
+                    .filter((s) => !workspaceSubagentIds.has(s.id))
                     // Honor the repo filter — a pinned session from another repo
                     // shouldn't leak into a repo-scoped view (workspace pins
                     // already drop out via wsRows/filtered).

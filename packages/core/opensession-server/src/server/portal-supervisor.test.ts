@@ -1,11 +1,12 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createServer } from "node:net";
 import {
   listPortalServices,
   listSandboxPortalServices,
+  normalizePortalPath,
   readPortalRegistry,
   reapOrphanedPortalServices,
   SANDBOX_PORTAL_AGENT_ENTRY,
@@ -20,6 +21,25 @@ import type { Sandbox } from "./sandbox/provider";
 
 let worktree = "";
 const previousStateDir = process.env.OPENSESSION_STATE_DIR;
+const previousPath = process.env.PATH;
+const processTools = mkdtempSync(join(tmpdir(), "os-process-tools-"));
+let testSetsid = Bun.which("setsid");
+if (!testSetsid) {
+  const shim = join(processTools, "setsid");
+  writeFileSync(
+    shim,
+    [
+      "#!/usr/bin/env python3",
+      "import os, sys",
+      "os.setsid()",
+      "os.execvp(sys.argv[1], sys.argv[1:])",
+      "",
+    ].join("\n"),
+  );
+  chmodSync(shim, 0o755);
+  testSetsid = shim;
+  process.env.PATH = `${processTools}:${previousPath || ""}`;
+}
 
 beforeEach(() => {
   worktree = mkdtempSync(join(tmpdir(), "os-portals-test-"));
@@ -29,9 +49,23 @@ afterAll(() => {
   if (worktree) rmSync(worktree, { recursive: true, force: true });
   if (previousStateDir == null) delete process.env.OPENSESSION_STATE_DIR;
   else process.env.OPENSESSION_STATE_DIR = previousStateDir;
+  if (previousPath == null) delete process.env.PATH;
+  else process.env.PATH = previousPath;
+  rmSync(processTools, { recursive: true, force: true });
 });
 
 describe("session Portal supervisor", () => {
+  test("accepts only root-relative default routes", () => {
+    expect(
+      normalizePortalPath(" /video/vid_fixture/edit?status=Subtitles "),
+    ).toBe("/video/vid_fixture/edit?status=Subtitles");
+    expect(normalizePortalPath(" ")).toBeUndefined();
+    for (const path of ["video/fixture", "//other.example/path", "/bad\npath"])
+      expect(() => normalizePortalPath(path)).toThrow(
+        "Portal path must be root-relative",
+      );
+  });
+
   test("launches the remote relay from the current runner layout", () => {
     expect(SANDBOX_PORTAL_AGENT_ENTRY).toEndWith(
       "/packages/core/opensession-server/src/runner-host/sandbox-portal-agent.ts",
@@ -337,13 +371,17 @@ async function freePort(): Promise<number> {
 }
 
 function sandboxFor(cwd: string, port: number): Sandbox {
+  const commandForHarness = (command: string[]) =>
+    testSetsid
+      ? command.map((part) => part.replace(/\bsetsid\b/g, testSetsid!))
+      : command;
   return {
     id: "sandbox-portal-test",
     provider: "docker",
     cwd,
     async exec(command, options) {
       if (options?.background) {
-        const proc = Bun.spawn(command, {
+        const proc = Bun.spawn(commandForHarness(command), {
           cwd,
           env: { ...process.env, ...options.env },
           stdin: "ignore",
@@ -353,7 +391,11 @@ function sandboxFor(cwd: string, port: number): Sandbox {
         proc.unref();
         return { exitCode: 0, stdout: "", stderr: "" };
       }
-      const proc = Bun.spawn(command, { cwd, stdout: "pipe", stderr: "pipe" });
+      const proc = Bun.spawn(commandForHarness(command), {
+        cwd,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
       const [stdout, stderr, exitCode] = await Promise.all([
         new Response(proc.stdout).text(),
         new Response(proc.stderr).text(),

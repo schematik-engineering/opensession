@@ -9,6 +9,7 @@ import {
 import { useIsPhone } from "../../hooks/useIsPhone";
 import { refreshPeople } from "../../lib/people";
 import { isTouchPrimary } from "../../lib/platform";
+import { errorMessage } from "../../lib/error-message";
 import { Button } from "../../ui/button";
 import { cn } from "../../ui/cn";
 import { Field, FieldGrid, Input } from "../../ui/input";
@@ -48,7 +49,10 @@ export function ProfileSection() {
     setLoadError(null);
     fetchProfile(currentUser)
       .then((p) => alive && setProfile(p))
-      .catch((e) => alive && setLoadError(e.message));
+      .catch(
+        (error) =>
+          alive && setLoadError(errorMessage(error, "Failed to load profile")),
+      );
     return () => {
       alive = false;
     };
@@ -158,8 +162,8 @@ function ProfileCard({
       await refreshPeople();
       toast("Picture updated");
     })()
-      .catch(async (e: any) => {
-        setError(e.message);
+      .catch(async (error) => {
+        setError(errorMessage(error, "Failed to update picture"));
       })
       .finally(async () => {
         setBusy(null);
@@ -177,8 +181,8 @@ function ProfileCard({
       await refreshPeople();
       toast("Picture removed");
     })()
-      .catch(async (e: any) => {
-        setError(e.message);
+      .catch(async (error) => {
+        setError(errorMessage(error, "Failed to remove picture"));
       })
       .finally(async () => {
         setBusy(null);
@@ -204,8 +208,8 @@ function ProfileCard({
       );
       setEditing(false);
     })()
-      .catch(async (e: any) => {
-        setError(e.message);
+      .catch(async (error) => {
+        setError(errorMessage(error, "Failed to save profile"));
       })
       .finally(async () => {
         setBusy(null);

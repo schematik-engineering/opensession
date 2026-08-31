@@ -27,6 +27,7 @@ import {
 } from "./PlainThreadPanel";
 import { cn } from "../ui/cn";
 import { IconSparkle } from "./icons";
+import { errorMessage } from "../lib/error-message";
 
 interface Props {
   /** The Plain thread id — the pane's key. */
@@ -153,9 +154,11 @@ export function ConversationPane({
       const sessionId = await startPlainTriageApi(threadId);
       if (aliveRef.current) onOpenSession(sessionId);
     })()
-      .catch(async (e: any) => {
+      .catch(async (error) => {
         if (aliveRef.current)
-          setTriageError(e?.message || "Failed to start the triage run.");
+          setTriageError(
+            errorMessage(error, "Failed to start the triage run."),
+          );
       })
       .finally(async () => {
         if (aliveRef.current) setTriaging(false);

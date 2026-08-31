@@ -92,6 +92,24 @@ export function openSlackComposer(
   );
 }
 
+export function updateSlackComposer(
+  sessionId: string,
+  target: {
+    requestId: string;
+    channel: string;
+    message: string;
+    screenshots: string[];
+  },
+  keepalive = false,
+): Promise<void> {
+  return request(`/sessions/${encodeURIComponent(sessionId)}/slack-composer`, {
+    method: "PATCH",
+    body: target,
+    keepalive,
+    label: "Couldn't save the Slack draft",
+  });
+}
+
 export function sendSlackComposer(
   sessionId: string,
   target: {

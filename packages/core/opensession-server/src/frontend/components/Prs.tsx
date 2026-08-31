@@ -1,6 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { UnifiedSession, WSServerMessage } from "../lib/types";
+import type {
+  UnifiedSession,
+  WSClientMessage,
+  WSServerMessage,
+} from "../lib/types";
 import {
   fetchHomeStats,
   fetchRecentPrs,
@@ -59,7 +63,7 @@ import {
 interface Props {
   sessions: UnifiedSession[];
   onSelect: (session: UnifiedSession) => void;
-  send: (msg: any) => void;
+  send: (msg: WSClientMessage) => void;
   addHandler: (handler: (msg: WSServerMessage) => void) => () => void;
   onNewSession: () => void;
   onShowArchived: () => void;

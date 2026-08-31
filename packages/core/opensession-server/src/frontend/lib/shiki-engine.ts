@@ -1,6 +1,7 @@
 import {
   createHighlighterCore,
   type HighlighterCore,
+  type LanguageRegistration,
   type ShikiTransformer,
 } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
@@ -24,7 +25,26 @@ import githubLight from "@shikijs/themes/github-light-default";
 import rescriptGrammar from "./rescript.tmLanguage.json";
 import { LANG_BY_EXT } from "./lang";
 
-const rescript = { ...(rescriptGrammar as any), name: "rescript" };
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function languageRegistration(
+  grammar: unknown,
+  name: string,
+): LanguageRegistration {
+  if (
+    !isRecord(grammar) ||
+    typeof grammar.scopeName !== "string" ||
+    !Array.isArray(grammar.patterns) ||
+    !isRecord(grammar.repository)
+  ) {
+    throw new TypeError(`Invalid TextMate grammar for ${name}`);
+  }
+  return { ...grammar, name } as LanguageRegistration;
+}
+
+const rescript = languageRegistration(rescriptGrammar, "rescript");
 let highlighterPromise: Promise<HighlighterCore> | null = null;
 
 function getHighlighter(): Promise<HighlighterCore> {

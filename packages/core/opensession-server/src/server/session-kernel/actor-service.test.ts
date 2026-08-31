@@ -15,7 +15,6 @@ import {
 } from "./actor-service";
 import { sessionKernelSessionDbPath } from "./store";
 import { SessionKernelActorClient } from "./actor-client";
-import type { SessionActorReducerCommand } from "./lifecycle-protocol";
 
 const token = "test-session-kernel-token";
 const stateDir = mkdtempSync(join(tmpdir(), "opensession-kernel-service-"));
@@ -424,6 +423,7 @@ describe("session kernel actor service", () => {
         responseTimeoutMs: 700,
         databasePath: join(stateDir, "sessions", "session-kernel.sqlite"),
       });
+      // rpc() caches the prior incarnation after its first handshake.
       serviceEpoch = undefined;
       await expect(
         client.callAsync(
@@ -710,67 +710,6 @@ describe("session kernel actor service", () => {
     });
   });
 
-  test("acknowledges a deletion wake after the permanent tombstone", async () => {
-    const sessionId = `deleted-wake-${crypto.randomUUID()}`;
-    const reduce = async (
-      rpcId: string,
-      command: SessionActorReducerCommand,
-    ) => {
-      const response = await rpc({
-        t: "call",
-        rpcId,
-        outputBytes: 256 * 1024,
-        request: { t: "reduce", command },
-      });
-      expect(response).toMatchObject({ t: "call_result" });
-      return JSON.parse(response.body) as {
-        ok: boolean;
-        result?: unknown;
-        error?: string;
-      };
-    };
-    const deleted = await reduce("delete-wake-transcript", {
-      kind: "transcript",
-      commandId: "delete-wake-transcript",
-      request: {
-        op: "delete",
-        sessionId,
-        requestId: "delete-wake-transcript",
-      },
-    });
-    expect(deleted.ok).toBe(true);
-    const wakeCursor = (deleted.result as { wakeCursor: number }).wakeCursor;
-
-    const tombstoned = await reduce("tombstone-wake-session", {
-      kind: "core",
-      commandId: "tombstone-wake-session",
-      request: { op: "tombstone", sessionId },
-    });
-    expect(tombstoned.ok).toBe(true);
-
-    const acknowledged = await reduce("ack-deleted-wake", {
-      kind: "transcript",
-      commandId: "ack-deleted-wake",
-      request: { op: "ack_wake", sessionId, cursor: wakeCursor },
-    });
-    expect(acknowledged).toMatchObject({ ok: true, result: true });
-
-    const staleAppend = await reduce("append-after-deletion", {
-      kind: "transcript",
-      commandId: "append-after-deletion",
-      request: {
-        op: "append",
-        sessionId,
-        requestId: "append-after-deletion",
-        entries: [],
-      },
-    });
-    expect(staleAppend).toMatchObject({
-      ok: false,
-      error: `Session ${sessionId} is tombstoned`,
-    });
-  });
-
   test("returns the first committed mutation result when it exceeds the service buffer", async () => {
     const sessionId = "large-service-dispatch";
     const content = "x".repeat(9 * 1024 * 1024);
@@ -817,6 +756,7 @@ describe("session kernel actor service", () => {
       result: {
         result: {
           kind: "deliver",
+          // A one-item batch keeps the queued receipt's durable identity.
           promptEntryId: "large",
           items: [{ id: "large", content }],
         },

@@ -57,6 +57,7 @@ describe("Desk voice Realtime session", () => {
         message: "not used",
       }),
       cancelSession: () => false,
+      reparentSession: async () => ({ ok: false, error: "not used" }),
       createSession: async () => ({
         id: "unused",
         createdBy: "Test",

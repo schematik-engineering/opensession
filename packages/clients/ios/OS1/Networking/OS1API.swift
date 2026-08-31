@@ -410,17 +410,48 @@ enum OS1API {
         try await get("/api/recent-commits?days=\(days)")
     }
 
-    /// `@`-mention targets matching a query, for the composer's "Reference a
-    /// file" picker. Scoped to the session, so an attached repo's files come
-    /// back too (labelled with their repo).
-    static func fileMentions(query: String, sessionId: String) async throws -> [FileMention] {
+    /// File and folder `@` targets matching a query. Existing composers search
+    /// every repo attached to their session; new-session composers search the
+    /// repository they are about to use.
+    static func fileMentions(
+        query: String,
+        sessionId: String? = nil,
+        repo: String? = nil
+    ) async throws -> [FileMention] {
         struct MentionsResponse: Decodable, Sendable { let files: [FileMention]? }
-        let allowed = CharacterSet.urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&+"))
-        let q = query.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
+        var components = URLComponents()
+        components.queryItems = [URLQueryItem(name: "q", value: query)]
+        if let sessionId {
+            components.queryItems?.append(URLQueryItem(name: "session", value: sessionId))
+        } else if let repo {
+            components.queryItems?.append(URLQueryItem(name: "repo", value: repo))
+        }
         let response: MentionsResponse = try await get(
-            "/api/files?q=\(q)&session=\(sessionId)"
+            "/api/files?\(components.percentEncodedQuery ?? "")"
         )
-        return response.files ?? []
+        return (response.files ?? []).filter { $0.kind == nil || $0.kind == "dir" }
+    }
+
+    /// People-independent rows for the inline `@` palette. Keeping this request
+    /// separate means tools and recent sessions do not wait for repository
+    /// search, matching the web composer.
+    static func mentionSuggestions(
+        query: String,
+        sessionId: String? = nil
+    ) async throws -> [FileMention] {
+        struct SuggestionsResponse: Decodable, Sendable { let items: [FileMention]? }
+        var components = URLComponents()
+        components.queryItems = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "user", value: ServerConfig.shared.userName),
+        ]
+        if let sessionId {
+            components.queryItems?.append(URLQueryItem(name: "session", value: sessionId))
+        }
+        let response: SuggestionsResponse = try await get(
+            "/api/mention-suggestions?\(components.percentEncodedQuery ?? "")"
+        )
+        return response.items ?? []
     }
 
     /// Promote an ask-mode session to code mode. The server cuts the worktree —

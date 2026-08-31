@@ -14,6 +14,7 @@
 import React, { useState } from "react";
 import { startReportSessions, type StartedReportSession } from "../lib/api";
 import type { ReportMeta } from "../lib/types";
+import { errorMessage } from "../lib/error-message";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Modal, useEnterOnMount } from "../ui/modal";
@@ -65,12 +66,12 @@ export function ReportTasksDialog({
       setFailed(errors);
       setPicked(new Set(errors.map((result) => result.task)));
     })()
-      .catch(async (e: any) => {
+      .catch(async (error) => {
         setFailed([
           {
             task: -1,
             title: "",
-            error: e?.message || "Failed to start sessions",
+            error: errorMessage(error, "Failed to start sessions"),
           },
         ]);
       })

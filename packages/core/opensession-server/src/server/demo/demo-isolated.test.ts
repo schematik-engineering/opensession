@@ -13,7 +13,6 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const CHILD = process.env.OS_DEMO_TEST_CHILD === "1";
@@ -27,7 +26,11 @@ let priorGhBackoff: number | undefined;
 beforeAll(async () => {
   if (!CHILD) return;
   priorHome = process.env.HOME;
-  home = join(tmpdir(), `demo-data-test-${crypto.randomUUID()}`);
+  // demo.test.ts already launches this process with an isolated HOME. Reuse
+  // it instead of tmpdir(): the live VPS points TMPDIR under /home/ubuntu,
+  // which made the "no operator-home literals" assertion fail on its own path.
+  home =
+    process.env.HOME || join("/tmp", `demo-data-test-${crypto.randomUUID()}`);
   process.env.HOME = home;
   priorConfig = process.env.OPENSESSION_CONFIG;
   // Point the config at a nonexistent scratch path so configuredRepos()

@@ -8,6 +8,7 @@ import {
   shouldAdjustTranscriptScroll,
   shouldTransitionTranscriptItemPosition,
   transcriptOverscan,
+  transcriptViewportNeedsHistory,
   type VirtualTranscriptItem,
   virtualTranscriptRange,
 } from "./VirtualTranscriptList";
@@ -32,10 +33,32 @@ describe("VirtualTranscriptList", () => {
     expect(source).toContain("this.measureCommittedRows(prevProps)");
   });
 
+  test("does not flush virtualizer notifications from a React lifecycle", () => {
+    expect(source).toContain("this.runCommitLifecycle(() =>");
+    expect(source).toMatch(
+      /if \(this\.committing\) \{[\s\S]*this\.renderAfterCommit = true;/,
+    );
+    expect(source).toContain("if (this.rendering || sync) this.queueRender()");
+    expect(source).not.toContain("flushSync");
+  });
+
   test("captures history intent before scroll-driven rerenders", () => {
     expect(source).toContain("capture: true");
     expect(source).toMatch(/removeEventListener\(\s*"scroll"/);
   });
+
+  test("loads history when the opening content cannot scroll", () => {
+    expect(transcriptViewportNeedsHistory(700, 700)).toBe(true);
+    expect(transcriptViewportNeedsHistory(699, 700)).toBe(true);
+    expect(transcriptViewportNeedsHistory(701, 700)).toBe(true);
+    expect(transcriptViewportNeedsHistory(702, 700)).toBe(false);
+    expect(transcriptViewportNeedsHistory(0, 0)).toBe(false);
+    expect(source).toContain("this.scheduleUnderfilledHistory()");
+    expect(source).toContain(
+      "if (callback()) this.scheduleUnderfilledHistory()",
+    );
+  });
+
   test("keeps the live-edge tail in the same virtual coordinate space", () => {
     expect(virtualTranscriptRange([10, 11], 40, 3)).toEqual([
       10, 11, 37, 38, 39,
@@ -60,19 +83,89 @@ describe("VirtualTranscriptList", () => {
     expect(didScrollTranscriptTowardHistory(0, 0, 745, 900)).toBe(false);
   });
 
-  test("keeps the viewport stable when measured rows above it resize", () => {
-    expect(shouldAdjustTranscriptScroll(400, 600)).toBe(true);
-    expect(shouldAdjustTranscriptScroll(600, 600)).toBe(true);
-    expect(shouldAdjustTranscriptScroll(700, 600)).toBe(false);
+  test("keeps TanStack's ordinary measurement anchoring semantics", () => {
+    expect(
+      shouldAdjustTranscriptScroll({
+        itemStart: 200,
+        itemEnd: 400,
+        scrollOffset: 600,
+      }),
+    ).toBe(true);
+    expect(
+      shouldAdjustTranscriptScroll({
+        itemStart: 200,
+        itemEnd: 700,
+        scrollOffset: 600,
+      }),
+    ).toBe(false);
+    expect(
+      shouldAdjustTranscriptScroll({
+        itemStart: 200,
+        itemEnd: 700,
+        scrollOffset: 600,
+        firstMeasurement: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldAdjustTranscriptScroll({
+        itemStart: 200,
+        itemEnd: 400,
+        scrollOffset: 600,
+        scrollingBackward: true,
+      }),
+    ).toBe(false);
   });
 
-  test("compensates a newly hydrated head row while it straddles the viewport", () => {
-    expect(shouldAdjustTranscriptScroll(1_200, 600, true)).toBe(true);
+  test("compensates only hydration that grows at the row start", () => {
+    expect(
+      shouldAdjustTranscriptScroll({
+        itemStart: 200,
+        itemEnd: 1_200,
+        scrollOffset: 600,
+        growsAtStart: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldAdjustTranscriptScroll({
+        itemStart: 700,
+        itemEnd: 1_200,
+        scrollOffset: 600,
+        growsAtStart: true,
+      }),
+    ).toBe(false);
+    // A continuation page appends below the point being read inside this row.
+    expect(
+      shouldAdjustTranscriptScroll({
+        itemStart: 200,
+        itemEnd: 1_200,
+        scrollOffset: 600,
+      }),
+    ).toBe(false);
+  });
+
+  test("uses TanStack's native end anchor for prepended history", () => {
+    expect(source).toContain('anchorTo: "end"');
+    expect(source).toContain("scrollEndThreshold: 120");
+    expect(source).not.toContain("getSnapshotBeforeUpdate");
   });
 
   test("keeps positive live-edge growth pinned in the measurement frame", () => {
-    expect(shouldAdjustTranscriptScroll(1_200, 600, false, 140)).toBe(true);
-    expect(shouldAdjustTranscriptScroll(1_200, 600, false, -140)).toBe(false);
+    expect(
+      shouldAdjustTranscriptScroll({
+        itemStart: 200,
+        itemEnd: 1_200,
+        scrollOffset: 600,
+        liveEdgeDelta: 140,
+      }),
+    ).toBe(true);
+    expect(
+      shouldAdjustTranscriptScroll({
+        itemStart: 200,
+        itemEnd: 1_200,
+        scrollOffset: 600,
+        liveEdgeDelta: -140,
+      }),
+    ).toBe(false);
   });
 
   test("keeps prompt reconciliation out of position transitions", () => {
@@ -81,6 +174,12 @@ describe("VirtualTranscriptList", () => {
       shouldTransitionTranscriptItemPosition({
         ...item(0),
         arrivalAliases: ["outbox-prompt"],
+      }),
+    ).toBe(false);
+    expect(
+      shouldTransitionTranscriptItemPosition({
+        ...item(0),
+        animatePositionChanges: false,
       }),
     ).toBe(false);
   });

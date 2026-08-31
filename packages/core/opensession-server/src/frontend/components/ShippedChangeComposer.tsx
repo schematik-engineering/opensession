@@ -1,5 +1,8 @@
-import React, { useEffect, useRef, useState } from "react";
-import { fetchShippedChangeChannels } from "../lib/api/shipped-changes";
+import React, { useEffect, useEffectEvent, useRef, useState } from "react";
+import {
+  fetchShippedChangeChannels,
+  updateSlackComposer,
+} from "../lib/api/shipped-changes";
 import { imageFilesFromPaste, uploadFile } from "../lib/images";
 import { noAutofill } from "../lib/composer-autofill";
 import { Button } from "../ui/button";
@@ -104,6 +107,8 @@ export interface ShippedChangeComposerProps {
     canUploadImages?: boolean;
   }>;
   defaultChannel?: string;
+  /** The pending composer to update while the human edits it. */
+  draftId?: string;
   nextMessage?: string;
   sent?: SlackSent;
   /** Offered on the receipt while the message is still deletable in Slack. */
@@ -122,6 +127,7 @@ export function ShippedChangeComposer({
   onCancel,
   loadChannels,
   defaultChannel,
+  draftId,
   nextMessage,
   sent,
   onUndo,
@@ -142,13 +148,19 @@ export function ShippedChangeComposer({
   const [composingAfterSent, setComposingAfterSent] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sessionRef = useRef(sessionId);
+  const draftDirtyRef = useRef(false);
   const sentKey = sent
     ? `${sent.channelName}\0${sent.permalink || ""}\0${sent.receiptKey || ""}`
     : "";
 
   useEffect(() => {
-    setMessage(defaultMessage);
-    if (sessionRef.current !== sessionId) {
+    if (!draftId || !draftDirtyRef.current) {
+      setMessage(defaultMessage);
+    }
+    if (
+      sessionRef.current !== sessionId ||
+      (draftId && !draftDirtyRef.current)
+    ) {
       sessionRef.current = sessionId;
       setScreenshots(
         [...(screenshot ? [screenshot] : []), ...(initialScreenshots || [])]
@@ -156,7 +168,7 @@ export function ShippedChangeComposer({
           .slice(0, 10),
       );
     }
-  }, [defaultMessage, screenshot, initialScreenshots, sessionId]);
+  }, [defaultMessage, screenshot, initialScreenshots, sessionId, draftId]);
   useEffect(() => {
     setScreenshots((current) =>
       screenshot && !current.includes(screenshot)
@@ -176,18 +188,23 @@ export function ShippedChangeComposer({
         setChannels(result.channels);
         setCanUploadImages(result.canUploadImages !== false);
         const preferred = defaultChannel || result.defaultChannel;
-        setChannel(
-          result.channels.some(
-            (candidate) =>
-              candidate.id === preferred ||
-              candidate.name === preferred?.replace(/^#/, ""),
-          )
-            ? result.channels.find(
-                (candidate) =>
-                  candidate.id === preferred ||
-                  candidate.name === preferred?.replace(/^#/, ""),
-              )!.id
-            : result.channels[0]?.id || "",
+        const preferredChannel = result.channels.some(
+          (candidate) =>
+            candidate.id === preferred ||
+            candidate.name === preferred?.replace(/^#/, ""),
+        )
+          ? result.channels.find(
+              (candidate) =>
+                candidate.id === preferred ||
+                candidate.name === preferred?.replace(/^#/, ""),
+            )!.id
+          : result.channels[0]?.id || "";
+        setChannel((current) =>
+          draftId &&
+          draftDirtyRef.current &&
+          result.channels.some((candidate) => candidate.id === current)
+            ? current
+            : preferredChannel,
         );
       })
       .catch(() => {
@@ -196,7 +213,46 @@ export function ShippedChangeComposer({
     return () => {
       current = false;
     };
-  }, [sessionId, loadChannels, defaultChannel, sent, composingAfterSent]);
+  }, [
+    sessionId,
+    loadChannels,
+    defaultChannel,
+    sent,
+    composingAfterSent,
+    draftId,
+  ]);
+  const persistSlackDraft = useEffectEvent((keepalive = false) => {
+    if (!draftId) return;
+    void updateSlackComposer(
+      sessionId,
+      {
+        requestId: draftId,
+        message,
+        channel,
+        screenshots,
+      },
+      keepalive,
+    ).catch(() => {});
+  });
+  const draftMountedRef = useRef(false);
+  useEffect(() => {
+    if (!draftId) return;
+    if (!draftMountedRef.current) {
+      draftMountedRef.current = true;
+      return;
+    }
+    const timer = window.setTimeout(() => persistSlackDraft(), 400);
+    return () => window.clearTimeout(timer);
+  }, [draftId, message, channel, screenshots]);
+  useEffect(() => {
+    if (!draftId) return;
+    const flush = () => persistSlackDraft(true);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      persistSlackDraft();
+    };
+  }, [draftId]);
   const addImages = async (files: File[]) => {
     const candidates = files.filter((file) => file.type.startsWith("image/"));
     const oversized = candidates.find(
@@ -216,6 +272,7 @@ export function ShippedChangeComposer({
       const uploaded = await Promise.all(
         images.map((file) => uploadFile(file)),
       );
+      draftDirtyRef.current = true;
       setScreenshots((current) =>
         [...new Set([...current, ...uploaded.map((file) => file.path)])].slice(
           0,
@@ -316,7 +373,10 @@ export function ShippedChangeComposer({
           value={message}
           maxLength={500}
           disabled={status !== "idle"}
-          onChange={(event) => setMessage(event.target.value)}
+          onChange={(event) => {
+            draftDirtyRef.current = true;
+            setMessage(event.target.value);
+          }}
           onPaste={(event) => {
             const files = imageFilesFromPaste(event);
             if (files.length) {
@@ -357,11 +417,12 @@ export function ShippedChangeComposer({
                   aria-label="Remove screenshot"
                   disabled={status !== "idle"}
                   icon={<IconX className="text-red" size={16} />}
-                  onClick={() =>
+                  onClick={() => {
+                    draftDirtyRef.current = true;
                     setScreenshots((current) =>
                       current.filter((_, i) => i !== index),
-                    )
-                  }
+                    );
+                  }}
                 />
               </div>
             ))}
@@ -408,7 +469,10 @@ export function ShippedChangeComposer({
                     label: `#${candidate.name}`,
                   }))
             }
-            onChange={setChannel}
+            onChange={(nextChannel) => {
+              draftDirtyRef.current = true;
+              setChannel(nextChannel);
+            }}
             disabled={status !== "idle" || channels.length === 0}
           />
           <Button

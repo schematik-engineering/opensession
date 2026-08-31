@@ -9,6 +9,7 @@ import type {
   PrDetails,
   PrFile,
   PrReviewer,
+  WSClientMessage,
 } from "../../lib/types";
 import {
   IconCheck,
@@ -72,7 +73,7 @@ export function ReviewRail({
     checks: PrCheck[];
     deployments: PrCheck[];
   };
-  send?: (msg: any) => void;
+  send?: (msg: WSClientMessage) => void;
   onRefresh: () => Promise<void> | void;
   onMerge?: () => void;
   merging?: boolean;

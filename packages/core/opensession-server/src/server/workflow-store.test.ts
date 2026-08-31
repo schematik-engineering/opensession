@@ -12,11 +12,13 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
   appendWorkflowJournal,
+  compareAndSetWorkflowState,
   cancelLiveWorkflow,
   controlLiveWorkflowAgent,
   createWorkflowRun,
@@ -25,6 +27,7 @@ import {
   markInterruptedWorkflows,
   pauseLiveWorkflow,
   readWorkflowJournal,
+  readWorkflowState,
   recoverableWorkflowRunIds,
   registerLiveWorkflow,
   resumeLiveWorkflow,
@@ -246,4 +249,89 @@ describe("workflow store", () => {
     expect(getWorkflowRun(live.runId)?.status).toBe("running");
     expect(getWorkflowRun(finished.runId)?.status).toBe("done");
   });
+});
+
+test("workflow state compare-and-set has one winner and persists", () => {
+  const run = makeRun();
+  const first = compareAndSetWorkflowState(run.runId, "queue.cursor", 0, {
+    next: 1,
+  });
+  const stale = compareAndSetWorkflowState(run.runId, "queue.cursor", 0, {
+    next: 2,
+  });
+  expect(first).toMatchObject({ swapped: true, version: 1 });
+  expect(stale).toMatchObject({
+    swapped: false,
+    version: 1,
+    value: { next: 1 },
+  });
+  expect(readWorkflowState(run.runId, "queue.cursor")).toEqual({
+    key: "queue.cursor",
+    version: 1,
+    value: { next: 1 },
+  });
+});
+
+test("workflow state CAS replays the original result by stable operation id", () => {
+  const run = makeRun();
+  const first = compareAndSetWorkflowState(
+    run.runId,
+    "queue.cursor",
+    0,
+    { next: 1 },
+    "stable-op",
+  );
+  const replay = compareAndSetWorkflowState(
+    run.runId,
+    "queue.cursor",
+    0,
+    { next: 1 },
+    "stable-op",
+  );
+  expect(first).toEqual(replay);
+  expect(replay).toMatchObject({ swapped: true, version: 1 });
+});
+
+test("workflow state enforces key and aggregate byte caps", () => {
+  const keys = makeRun();
+  for (let index = 0; index < WORKFLOW_LIMITS.maxStateKeys; index++) {
+    expect(
+      compareAndSetWorkflowState(keys.runId, `key-${index}`, 0, null).swapped,
+    ).toBe(true);
+  }
+  expect(() =>
+    compareAndSetWorkflowState(keys.runId, "one-too-many", 0, null),
+  ).toThrow(/key limit/);
+
+  const bytes = makeRun();
+  const chunk = "x".repeat(249_000);
+  for (let index = 0; index < 4; index++)
+    compareAndSetWorkflowState(bytes.runId, `chunk-${index}`, 0, chunk);
+  expect(() =>
+    compareAndSetWorkflowState(bytes.runId, "chunk-4", 0, chunk),
+  ).toThrow(/byte limit/);
+});
+
+test("workflow state reports corruption instead of widening to empty", () => {
+  const run = makeRun();
+  writeFileSync(
+    `${process.env.OPENSESSION_WORKFLOWS_DIR}/${run.runId}/state.json`,
+    "{not-json",
+  );
+  expect(() => readWorkflowState(run.runId, "cursor")).toThrow(/corrupt JSON/);
+
+  writeFileSync(
+    `${process.env.OPENSESSION_WORKFLOWS_DIR}/${run.runId}/state.json`,
+    JSON.stringify({
+      entries: { "bad key!": { version: 1, value: null } },
+      operations: {},
+    }),
+  );
+  expect(() => readWorkflowState(run.runId, "cursor")).toThrow(/is corrupt/);
+
+  writeFileSync(
+    `${process.env.OPENSESSION_WORKFLOWS_DIR}/${run.runId}/state.json`,
+    " ".repeat(WORKFLOW_LIMITS.maxStateBytes + 1),
+  );
+  expect(() => readWorkflowState(run.runId, "cursor")).toThrow(/byte limit/);
 });

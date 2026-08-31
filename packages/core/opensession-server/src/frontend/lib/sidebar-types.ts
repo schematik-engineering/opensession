@@ -178,6 +178,10 @@ export interface WsRow {
   unread: boolean;
   /** Who tagged you in one of this row's sessions, if anyone. */
   mention?: string;
+  /** The member session that mention lives on. The badge is a jump target:
+      opening that exact session is what clears the mention (lib/mentions.ts),
+      and the row's own click may open a different sibling. */
+  mentionSessionId?: string;
   running: boolean;
   /** Lowercased owner (workspace creator, else the first session's starter). */
   owner: string;

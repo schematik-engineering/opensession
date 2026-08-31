@@ -8,6 +8,7 @@ import {
 import { getCurrentUser } from "../components/UserPicker";
 import { fetchUiPrefs, saveUiPrefsApi } from "./api";
 import { whenCurrentUserReady } from "./auth-ready";
+import { repairDesktopPalettePaint } from "./palette-repaint";
 
 /**
  * Seven accents, ordered as a walk around the hue wheel from the blues.
@@ -74,6 +75,7 @@ export function getOnAccentInk(
 
 export function applyAccentTheme(theme: AccentTheme = getAccentTheme()) {
   document.documentElement.dataset.accent = theme;
+  repairDesktopPalettePaint();
 }
 
 let writeStamp = 0;
