@@ -12,7 +12,7 @@ import {
   acpSessionExhaustedAccounts,
   readAcpAccountBinding,
 } from "./acp-state";
-import { providerFor } from "./models";
+import { providerFor, resolveExecutionModel } from "./models";
 
 export type AcpRunCredentialProjection =
   | { kind: "not-required"; paths: [] }
@@ -32,7 +32,7 @@ export async function projectAcpRunCredentials(
   spec: RunHostSpec,
   runDir: string,
 ): Promise<AcpRunCredentialProjection> {
-  const provider = providerFor(spec.model);
+  const provider = providerFor(resolveExecutionModel(spec.model));
   if (!isAcpProvider(provider)) return { kind: "not-required", paths: [] };
 
   const account = pickAcpAccount(provider, {

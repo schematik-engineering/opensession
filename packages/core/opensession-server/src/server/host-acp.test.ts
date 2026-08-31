@@ -17,10 +17,13 @@ import {
 } from "./acp-accounts";
 import { projectedAcpBootstrapFiles } from "./acp-config";
 import { projectAcpRunCredentials } from "./acp-projection";
+import { __resetModelCachesForTest } from "./models";
 
 let scratch: string;
 let previousStore: string;
 let previousJournal: string | undefined;
+let previousModel: string | undefined;
+let previousStateDir: string | undefined;
 
 beforeEach(() => {
   scratch = mkdtempSync(join(tmpdir(), "opensession-host-acp-"));
@@ -28,12 +31,19 @@ beforeEach(() => {
     join(scratch, "accounts.json"),
   ).store;
   previousJournal = process.env.OPENSESSION_RUN_JOURNAL;
+  previousModel = process.env.OPENSESSION_MODEL;
+  previousStateDir = process.env.OPENSESSION_STATE_DIR;
 });
 
 afterEach(() => {
   __setAcpAccountsPathForTest(previousStore);
   if (previousJournal === undefined) delete process.env.OPENSESSION_RUN_JOURNAL;
   else process.env.OPENSESSION_RUN_JOURNAL = previousJournal;
+  if (previousModel === undefined) delete process.env.OPENSESSION_MODEL;
+  else process.env.OPENSESSION_MODEL = previousModel;
+  if (previousStateDir === undefined) delete process.env.OPENSESSION_STATE_DIR;
+  else process.env.OPENSESSION_STATE_DIR = previousStateDir;
+  __resetModelCachesForTest();
   rmSync(scratch, { recursive: true, force: true });
 });
 
@@ -105,5 +115,29 @@ describe("host ACP credential projection", () => {
     for (const name of ["acp-auth.json", "acp-agent-id", "acp-account-id"]) {
       expect(statSync(join(runDir, name)).mode & 0o777).toBe(0o600);
     }
+  });
+
+  test("projects Grok credentials when an unset run model inherits the global default", async () => {
+    process.env.OPENSESSION_STATE_DIR = join(scratch, "state");
+    process.env.OPENSESSION_MODEL = "grok/grok-4.6";
+    __resetModelCachesForTest();
+    const account = addAcpAccountFromHome("grok", grokLoginHome());
+    if ("error" in account) throw new Error(account.error);
+    const runDir = join(scratch, "default-model-run");
+    mkdirSync(runDir, { mode: 0o700 });
+    const spec = {
+      hostId: "host-default-grok-review",
+      osSessionId: "os-default-grok-review",
+      prompt: "Review this pull request",
+      cwd: scratch,
+      accountId: account.id,
+    } satisfies RunHostSpec;
+
+    const result = await projectAcpRunCredentials(spec, runDir);
+
+    expect(result.kind).toBe("ready");
+    expect(readFileSync(join(runDir, "acp-account-id"), "utf8")).toBe(
+      account.id,
+    );
   });
 });
