@@ -98,7 +98,11 @@ describe("MCP OAuth client registration", () => {
         return Response.json({
           resource: "https://drivemcp.googleapis.com/mcp/v1",
           authorization_servers: ["https://accounts.google.com"],
-          scopes_supported: ["https://www.googleapis.com/auth/drive"],
+          scopes_supported: [
+            "https://www.googleapis.com/auth/drive",
+            "https://www.googleapis.com/auth/drive.readonly",
+            "https://www.googleapis.com/auth/drive.file",
+          ],
         });
       if (
         url ===
@@ -125,7 +129,14 @@ describe("MCP OAuth client registration", () => {
         "GoogleDrive",
         "https://drivemcp.googleapis.com/mcp/v1",
         undefined,
-        { clientId: "google-client", clientSecret: "google-secret" },
+        {
+          clientId: "google-client",
+          clientSecret: "google-secret",
+          scopes: [
+            "https://www.googleapis.com/auth/drive.readonly",
+            "https://www.googleapis.com/auth/drive.file",
+          ],
+        },
       );
       const url = new URL(result.url);
       expect(url.origin + url.pathname).toBe(
@@ -136,7 +147,7 @@ describe("MCP OAuth client registration", () => {
         "https://drivemcp.googleapis.com/mcp/v1",
       );
       expect(url.searchParams.get("scope")).toBe(
-        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file",
       );
       await completeMcpOauthFlow(url.searchParams.get("state")!, "auth-code");
       expect(tokenRequest).toBeDefined();
@@ -147,6 +158,40 @@ describe("MCP OAuth client registration", () => {
       expect(tokenBody.get("resource")).toBe(
         "https://drivemcp.googleapis.com/mcp/v1",
       );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("omits scope when the MCP resource does not advertise one", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "os-mcp-oauth-scope-test-"));
+    __setMcpOauthStorePathForTest(join(dir, "oauth.json"));
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/.well-known/oauth-protected-resource/mcp"))
+        return Response.json({
+          resource: "https://mcp.example.com/mcp",
+          authorization_servers: ["https://auth.example.com"],
+        });
+      if (
+        url ===
+        "https://auth.example.com/.well-known/oauth-authorization-server"
+      )
+        return Response.json({
+          authorization_endpoint: "https://auth.example.com/authorize",
+          token_endpoint: "https://auth.example.com/token",
+        });
+      return new Response("not found", { status: 404 });
+    }) as unknown as typeof fetch;
+
+    try {
+      const result = await startMcpOauthFlow(
+        "NoScopes",
+        "https://mcp.example.com/mcp",
+        undefined,
+        { clientId: "static-client" },
+      );
+      expect(new URL(result.url).searchParams.has("scope")).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

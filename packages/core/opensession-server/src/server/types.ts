@@ -377,6 +377,9 @@ export interface SlackSessionFile {
 // Linear session file format
 export interface LinearSessionFile {
   branch: string;
+  /** Registered repo id. Absent on files written before Linear followed the
+   * new-session repository setting. */
+  repoId?: string;
   claudeSessionId: string | null;
   issueIdentifier?: string;
   issueTitle?: string;

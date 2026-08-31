@@ -2,22 +2,24 @@
 
 The Linear agent (`packages/core/opensession-server/src/agents/linear/`) turns
 Linear agent-session assignments into Open Session coding sessions. It prepares
-the instance's default repository, offers plan/implement/free-form paths, runs
-the work, and uses `gh pr create` after implementation completes.
+the configured new-session repository, offers plan/implement/free-form paths,
+runs the work, and uses `gh pr create` after implementation completes.
 
-All Linear assignments target `defaultRepo()`. There is no per-issue repository
-routing.
+All Linear assignments target the workspace's **Default for new sessions**
+repository, which is also used by the web session picker for people without a
+personal preference. Change it in **Settings → Repositories**. There is no
+per-issue repository routing.
 
 ## Prerequisites
 
 - Configure an HTTPS [public ingress](install.md#public-ingress). The OAuth state
   cookie is `Secure`, and the webhook and OAuth routes exist only on this
   gateway, normally port 3860 behind a TLS proxy.
-- Configure the intended GitHub repository as the instance's default repo. For
+- Configure the intended GitHub repository as **Default for new sessions**. For
   the branch-and-PR workflow, it must not use the live `sharedCheckout` path
   (unless instance `selfDev` is `"worktree"`). The Linear agent does not request
-  an isolated checkout explicitly, so a shared-checkout default repo is edited
-  in place and has no dedicated branch for the automatic PR.
+  an isolated checkout explicitly, so a shared-checkout selection is edited in
+  place and has no dedicated branch for the automatic PR.
 - Give the Open Session service user working Git push credentials and ambient
   `gh` authentication for that repository. The final PR helper invokes
   `gh pr create` with the service process's environment and `HOME`.

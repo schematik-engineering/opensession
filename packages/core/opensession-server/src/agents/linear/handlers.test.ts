@@ -35,6 +35,7 @@ describe("Linear assignment intake", () => {
     const abortController = new AbortController();
     activeSessions.set("old-linear-id", {
       branch: "check-smt-1",
+      repoId: "opensession",
       claudeSessionId: "engine-session",
       accessToken: "test",
       issueTitle: "Test assignment",

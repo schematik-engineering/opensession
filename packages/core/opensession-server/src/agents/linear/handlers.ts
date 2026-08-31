@@ -36,6 +36,7 @@ import {
   formatConversationHistory,
   generateBranchName,
   loadSessionInfo,
+  linearSessionRepoId,
   opensessionSessionUrl,
   runAgentHeadless,
   saveSessionInfo,
@@ -677,7 +678,7 @@ Help with whatever they're asking. You have a worktree ready at ${session.worktr
     }
     const branch = exact.branch;
     try {
-      deleteWorktree(branch);
+      deleteWorktree(branch, exact.repoId);
       deleteSessionFile(branch);
       activeSessions.delete(agentSession.id);
     } catch (e) {
@@ -781,10 +782,12 @@ Help with whatever they're asking. You have a worktree ready at ${session.worktr
   const issueDetails = await getIssueDetails(accessToken, issue.id);
 
   const branch = await generateBranchName(issue.title, issue.identifier);
-  const worktreeDir = worktreePathFor(branch);
+  const repoId = linearSessionRepoId();
+  const worktreeDir = worktreePathFor(branch, repoId);
 
   const session: ActiveSession = {
     branch,
+    repoId,
     claudeSessionId: null,
     accessToken,
     issueTitle: issue.title,
@@ -811,9 +814,11 @@ Help with whatever they're asking. You have a worktree ready at ${session.worktr
         issue.title,
         issue.description || "",
         issue.url,
+        repoId,
       );
 
       await saveSessionInfo(branch, {
+        repoId,
         claudeSessionId: null,
         issueIdentifier: issue.identifier,
         issueTitle: issue.title,

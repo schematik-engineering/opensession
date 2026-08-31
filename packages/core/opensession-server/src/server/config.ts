@@ -506,6 +506,9 @@ function parseConfig(text: string): OpenSessionConfig {
       }
     }
 
+    const newSessionRepo = str(raw.newSessionRepo);
+    if (newSessionRepo) cfg.newSessionRepo = newSessionRepo;
+
     const repos = obj(raw.repos);
     if (repos) {
       const parsed: Record<string, RepoSection> = {};

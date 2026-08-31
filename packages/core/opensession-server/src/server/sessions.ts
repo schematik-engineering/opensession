@@ -870,6 +870,7 @@ function linearSessionRow(file: string): UnifiedSession | null {
     claudeSessionId: data.claudeSessionId,
     source: "linear",
     branch: data.branch,
+    repo: data.repoId,
     worktreeDir: data.worktreeDir || null,
     createdBy: startedBy,
     startedBy,
