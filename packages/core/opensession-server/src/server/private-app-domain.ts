@@ -13,7 +13,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { stateDir } from "./paths";
 import { writeJsonAtomic } from "./shared/atomic-write";
-import { isTailnetIpv4 } from "./shared/network-address";
+import { isBlockedAddress, isTailnetIpv4 } from "./shared/network-address";
 
 export type PrivateAppDnsProvider = "cloudflare" | "vercel";
 export type PrivateAppHealth =
@@ -675,9 +675,24 @@ async function installCertificateAndCaddy(
   }
 }
 
+export function appDnsPointsToOrigin(
+  records: string[],
+  options: { managedPrivate: boolean; tailnetIpv4: string | null },
+): boolean {
+  if (options.managedPrivate) {
+    return Boolean(
+      options.tailnetIpv4 && records.includes(options.tailnetIpv4),
+    );
+  }
+  return records.some(
+    (address) => address === options.tailnetIpv4 || !isBlockedAddress(address),
+  );
+}
+
 async function appHealth(
   origin: string,
   tailnetIpv4: string | null,
+  managedPrivate: boolean,
 ): Promise<PrivateAppHealth> {
   if (!origin || !origin.startsWith("https://")) return "not_configured";
   let domain = "";
@@ -687,7 +702,9 @@ async function appHealth(
     return "not_configured";
   }
   const records = await resolve4(domain).catch((): string[] => []);
-  if (!tailnetIpv4 || !records.includes(tailnetIpv4)) return "waiting_dns";
+  if (!appDnsPointsToOrigin(records, { managedPrivate, tailnetIpv4 })) {
+    return "waiting_dns";
+  }
   try {
     const response = await fetch(`${origin}/api/health`, {
       signal: AbortSignal.timeout(5_000),
@@ -707,8 +724,9 @@ export async function privateAppDomainStatus(
     domain = new URL(origin).hostname;
   } catch {}
   const credential = safeCredential();
+  const managedPrivate = credential?.domain === domain;
   return {
-    health: await appHealth(origin, tailnetIpv4),
+    health: await appHealth(origin, tailnetIpv4, managedPrivate),
     dnsProvider: credential?.domain === domain ? credential.provider : null,
     credentialConfigured: credential?.domain === domain,
     certificateEmailConfigured:
