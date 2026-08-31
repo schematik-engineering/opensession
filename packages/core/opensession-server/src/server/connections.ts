@@ -9,6 +9,7 @@ import { writeFileAtomic } from "./shared/atomic-write";
 import { configuredPaths } from "./config";
 import {
   mcpOauthStatus,
+  mcpOauthStartBlocker,
   mcpSharedGrantHeader,
   mcpUserGrantHeader,
   mcpUserGrantToken,
@@ -389,7 +390,7 @@ async function checkServer(name: string, cfg: any): Promise<McpConnection> {
         try {
           const st = mcpOauthStatus(name);
           if (!st.shared && st.users.length === 0) {
-            if (supportsManualToken(name)) {
+            if (supportsManualToken(name, cfg.url)) {
               return {
                 name,
                 transport: "http",
@@ -397,6 +398,17 @@ async function checkServer(name: string, cfg: any): Promise<McpConnection> {
                 envKeys: Object.keys(cfg.env || {}),
                 status: "needs-auth",
                 detail: "API token required. Connect from this card's menu",
+              };
+            }
+            const oauthBlocker = mcpOauthStartBlocker(name, cfg.url);
+            if (oauthBlocker) {
+              return {
+                name,
+                transport: "http",
+                target,
+                envKeys: Object.keys(cfg.env || {}),
+                status: "needs-auth",
+                detail: oauthBlocker,
               };
             }
             const pr = await fetch(

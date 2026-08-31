@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  mcpOauthStartBlocker,
   startMcpOauthFlow,
   supportsManualToken,
   validateManualMcpToken,
@@ -46,6 +47,15 @@ describe("MCP OAuth client registration", () => {
       "Its remote MCP server accepts only clients listed in the Figma MCP Catalog",
     );
   });
+
+  test("classifies providers that cannot use dynamic client registration", () => {
+    expect(mcpOauthStartBlocker("Fal")).toContain("API keys");
+    expect(mcpOauthStartBlocker("x")).toContain("pre-registered OAuth client");
+    expect(mcpOauthStartBlocker("renamed", "https://mcp.fal.ai/mcp")).toContain(
+      "API keys",
+    );
+    expect(mcpOauthStartBlocker("Cloudflare")).toBeUndefined();
+  });
 });
 
 describe("manual MCP token providers", () => {
@@ -57,6 +67,32 @@ describe("manual MCP token providers", () => {
 
   test("recognizes Vero as a token-connected provider", () => {
     expect(supportsManualToken("vero")).toBe(true);
+  });
+
+  test("recognizes Fal case-insensitively as a token-connected provider", () => {
+    expect(supportsManualToken("Fal")).toBe(true);
+    expect(supportsManualToken("renamed", "https://mcp.fal.ai/mcp")).toBe(true);
+  });
+
+  test("validates a Fal key against the hosted MCP initialize endpoint", async () => {
+    let request: Request | undefined;
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      request = new Request(input, init);
+      return Response.json({ jsonrpc: "2.0", id: 1, result: {} });
+    }) as typeof fetch;
+
+    await validateManualMcpToken("Fal", "test-fal-key");
+
+    expect(request?.url).toBe("https://mcp.fal.ai/mcp");
+    expect(request?.method).toBe("POST");
+    expect(request?.headers.get("authorization")).toBe("Bearer test-fal-key");
+    expect(await request?.json()).toMatchObject({
+      method: "initialize",
+      params: { protocolVersion: "2025-03-26" },
+    });
   });
 
   test("validates a Vero key against the MCP initialize endpoint", async () => {

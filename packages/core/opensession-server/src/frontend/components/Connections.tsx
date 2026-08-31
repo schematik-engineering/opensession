@@ -159,6 +159,7 @@ interface McpOauthStatus {
   users: string[];
   capable?: boolean;
   manualToken?: boolean;
+  connectError?: string;
   managed?: {
     kind: "aws-iam";
     state: "checking" | "ready" | "error";
@@ -461,23 +462,31 @@ export function Connections() {
                     </Menu.Trigger>
                     <Menu.Popup align="end" sideOffset={4}>
                       {!oauthByName[s.name]?.managed &&
-                        (s.transport === "http" ||
-                          oauthByName[s.name]?.capable) && (
+                        (oauthByName[s.name]?.capable ||
+                          oauthByName[s.name]?.manualToken ||
+                          oauthByName[s.name]?.shared ||
+                          oauthByName[s.name]?.users.length) && (
                           <>
-                            <Menu.Item
-                              onClick={() => handleOauthConnect(s, "shared")}
-                            >
-                              <IconPlus size={16} className="text-faint" />
-                              {oauthByName[s.name]?.shared
-                                ? "Reconnect (workspace)"
-                                : "Connect (workspace)"}
-                            </Menu.Item>
-                            <Menu.Item
-                              onClick={() => handleOauthConnect(s, "me")}
-                            >
-                              <IconPlus size={16} className="text-faint" />
-                              Connect my account
-                            </Menu.Item>
+                            {oauthByName[s.name]?.capable ? (
+                              <>
+                                <Menu.Item
+                                  onClick={() =>
+                                    handleOauthConnect(s, "shared")
+                                  }
+                                >
+                                  <IconPlus size={16} className="text-faint" />
+                                  {oauthByName[s.name]?.shared
+                                    ? "Reconnect (workspace)"
+                                    : "Connect (workspace)"}
+                                </Menu.Item>
+                                <Menu.Item
+                                  onClick={() => handleOauthConnect(s, "me")}
+                                >
+                                  <IconPlus size={16} className="text-faint" />
+                                  Connect my account
+                                </Menu.Item>
+                              </>
+                            ) : null}
                             {s.transport === "http" &&
                             oauthByName[s.name]?.manualToken ? (
                               <Menu.Item onClick={() => setTokenConnect(s)}>
@@ -1916,6 +1925,10 @@ const TOKEN_CONNECT_URLS: Record<string, { url: string; label: string }> = {
     url: "https://help.getvero.com/vero-ai/mcp-authentication",
     label: "Vero's MCP authentication guide",
   },
+  fal: {
+    url: "https://fal.ai/dashboard/keys",
+    label: "fal.ai/dashboard/keys",
+  },
 };
 
 /**
@@ -1946,7 +1959,7 @@ function ConnectTokenDialog({
   }, [server]);
   if (!server) return null;
   const active = server;
-  const tokenPage = TOKEN_CONNECT_URLS[active.name];
+  const tokenPage = TOKEN_CONNECT_URLS[active.name.toLowerCase()];
 
   async function connect() {
     if (!token.trim() || saving) return;

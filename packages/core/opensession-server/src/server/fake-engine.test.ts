@@ -154,6 +154,47 @@ describe("fake engine through runAgent", () => {
     expect(fake.calls[1].firstJournaledAt).toBe(fake.calls[0].firstJournaledAt);
   });
 
+  test("Grok 429 exhaustion crosses to the configured fallback in the same turn", async () => {
+    const fake = makeFakeEngine([
+      { kind: "usage_exhausted", engineSessionId: "grok_partial" },
+      { kind: "clean", text: ["recovered across providers"] },
+    ]);
+    __setEngineForTest(fake.engine);
+
+    const events = await collect(
+      runAgent({
+        prompt: "keep going",
+        cwd: "/tmp",
+        mcpServers: [],
+        model: "grok/grok-4.6",
+        fallbackModel: "claude-opus-5",
+        journal: { osSessionId: "bks-test-grok-fallback", kind: "prompt" },
+      }),
+    );
+
+    expect(types(events)).toEqual([
+      "init",
+      "model_switch",
+      "init",
+      "text_chunk",
+      "done",
+    ]);
+    expect(events[1]).toMatchObject({
+      type: "model_switch",
+      fromModel: "grok/grok-4.6",
+      toModel: "pi/openai/gpt-5.6-sol",
+      switchReason: "out of credits",
+    });
+    expect(fake.calls.map((call) => call.model)).toEqual([
+      "grok/grok-4.6",
+      "pi/openai/gpt-5.6-sol",
+    ]);
+    expect(fake.calls[1].opts.promptEntryId).toBe(
+      fake.calls[0].opts.promptEntryId,
+    );
+    expect(fake.calls[1].journalKind).toBe("prompt-fallback");
+  });
+
   test("a provider handoff continues without another visible user turn", () => {
     const handoff = [
       "## Engine handoff",
