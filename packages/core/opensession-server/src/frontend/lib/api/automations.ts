@@ -189,7 +189,31 @@ export type AutomationOutput =
       channel: string;
       minUrgency?: "low" | "medium" | "high" | "critical";
       minConfidence?: "low" | "medium" | "high";
+    }
+  | {
+      id: string;
+      type: "discord";
+      enabled?: boolean;
+      channel: string;
+      minUrgency?: "low" | "medium" | "high" | "critical";
+      minConfidence?: "low" | "medium" | "high";
     };
+
+export interface DiscordAutomationChannel {
+  id: string;
+  name: string;
+  guildId: string;
+  guildName: string;
+}
+
+export function fetchDiscordAutomationChannels(): Promise<{
+  channels: DiscordAutomationChannel[];
+  defaultChannel?: string;
+}> {
+  return request("/discord/channels", {
+    label: "Could not load Discord channels",
+  });
+}
 
 export interface Automation {
   id: string;

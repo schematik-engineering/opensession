@@ -13,6 +13,7 @@ import { handleStaticAssetsRoutes } from "./static-assets";
 import { handlePlainRoutes } from "./plain";
 import { handleFeedsRoutes } from "./feeds";
 import { handleSlackChannelRoutes } from "./slack-channels";
+import { handleDiscordChannelRoutes } from "./discord-channels";
 import { handleSlackComposeRoutes } from "./slack-compose";
 import { handleSystemRoutes } from "./system";
 import { handleSessionAssetsRoutes } from "./session-assets";
@@ -69,6 +70,7 @@ export const routeHandlers: RouteHandler[] = [
   handlePlainRoutes,
   handleFeedsRoutes,
   handleSlackChannelRoutes,
+  handleDiscordChannelRoutes,
   handleSlackComposeRoutes,
   handleSystemRoutes,
   handleOs1UpdateRoutes,

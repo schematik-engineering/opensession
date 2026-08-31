@@ -31,7 +31,7 @@ configuration for the run.
   pass it through a tool-less one-shot reducer as explicitly untrusted data,
   and persist only a cursor after the primary run succeeds. Raw Slack text and
   reductions are not stored in the checkpoint. A Slack input never grants the
-  primary model Slack tools; optional Slack output is likewise server-side,
+  primary model Slack tools. Optional Slack and Discord outputs are server-side,
   disabled independently, and derived from the final structured report.
 - Automation runs hard-deny _customer-facing, identity-mutating, and incident.io
   mutation_ tools (enforced for direct runs and interactive resumes of

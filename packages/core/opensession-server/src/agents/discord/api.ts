@@ -157,6 +157,10 @@ export class DiscordRest {
     return this.request("GET", "/users/@me/guilds");
   }
 
+  guildChannels(guildId: string): Promise<DiscordChannel[]> {
+    return this.request("GET", `/guilds/${guildId}/channels`);
+  }
+
   gatewayBot(): Promise<{ url: string; shards: number }> {
     return this.request("GET", "/gateway/bot");
   }
@@ -211,10 +215,12 @@ export class DiscordRest {
     content: string,
     replyTo?: string,
     nonce?: string,
+    components?: unknown[],
   ): Promise<DiscordMessageResult> {
     return this.request("POST", `/channels/${channelId}/messages`, {
       content: content.slice(0, 2_000),
       allowed_mentions: { parse: [], replied_user: false },
+      ...(components?.length ? { components } : {}),
       ...(nonce ? { nonce, enforce_nonce: true } : {}),
       ...(replyTo
         ? {

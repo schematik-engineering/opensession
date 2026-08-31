@@ -11,6 +11,7 @@ import {
   fetchAutomationTemplates,
   draftAutomationApi,
   fetchConnections,
+  fetchDiscordAutomationChannels,
   fetchProviderAccounts,
   relativeTime,
   type ModelOption,
@@ -19,6 +20,7 @@ import {
   type AutomationInput,
   type AutomationRun,
   type AutomationOutput,
+  type DiscordAutomationChannel,
   type AutomationTemplate,
   type AutomationDraft,
 } from "../lib/api";
@@ -31,10 +33,12 @@ import {
   IconBolt,
   IconChevronLeft,
   IconClock,
+  IconFileText2,
   IconHash,
   IconPlayOutline,
   IconPlug,
   IconPlus,
+  IconTrash,
 } from "./icons";
 import {
   AGENT_NAME,
@@ -53,6 +57,13 @@ import { WorkingPill } from "../ui/status";
 import { Switch } from "../ui/switch";
 import { formatDuration } from "../lib/time";
 import { errorMessage } from "../lib/error-message";
+import {
+  appendMessageOutput,
+  appendReportOutput,
+  automationOutputSummary,
+} from "../lib/automation-output-editor";
+import { BrandMark } from "./BrandMark";
+import { Tooltip } from "../ui/tooltip";
 
 /* The old .automation-form family, as utilities. Two of its rules reached in
    from the form to the fields inside it and have to stay descendant selectors:
@@ -648,13 +659,7 @@ export function Automations({ onOpenSession, selectedId, onSelect }: Props) {
                       <>
                         <DetailKey>Outputs</DetailKey>
                         <span className="text-dim min-w-0">
-                          {sel.outputs
-                            .map((output) => {
-                              if (output.type === "report")
-                                return `Reports · ${output.publish || "always"}`;
-                              return `Slack ${output.channel} · ${output.enabled === false ? "disabled" : `${output.minUrgency || "high"}/${output.minConfidence || "high"}`}`;
-                            })
-                            .join(", ")}
+                          {sel.outputs.map(automationOutputSummary).join(", ")}
                         </span>
                       </>
                     ) : null}
@@ -1392,6 +1397,15 @@ function uniqueFlowId(prefix: string, used: string[]): string {
   return candidate;
 }
 
+type DiscordChannelState =
+  | { status: "loading" }
+  | {
+      status: "ready";
+      channels: DiscordAutomationChannel[];
+      defaultChannel?: string;
+    }
+  | { status: "error" };
+
 function DataFlowEditor({
   inputs,
   outputs,
@@ -1409,6 +1423,30 @@ function DataFlowEditor({
     onOutputsChange(
       outputs.map((output, at) => (at === index ? value : output)),
     );
+  const [discordChannelState, setDiscordChannelState] =
+    useState<DiscordChannelState>({ status: "loading" });
+
+  useEffect(() => {
+    let active = true;
+    fetchDiscordAutomationChannels()
+      .then((result) => {
+        if (active) setDiscordChannelState({ status: "ready", ...result });
+      })
+      .catch(() => {
+        if (active) setDiscordChannelState({ status: "error" });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const addMessageOutput = (type: "slack" | "discord") => {
+    const channel =
+      type === "discord" && discordChannelState.status === "ready"
+        ? discordChannelState.defaultChannel
+        : undefined;
+    onOutputsChange(appendMessageOutput(outputs, type, channel));
+  };
 
   return (
     <div className="flex flex-col gap-2.5">
@@ -1422,58 +1460,73 @@ function DataFlowEditor({
       <div className="flex flex-col gap-2">
         <div className="flex min-h-10 items-center gap-2">
           <span className="text-label font-medium text-dim">Inputs</span>
-          <span className="text-supporting text-faint">
+          <span className="text-supporting text-faint phone:hidden">
             Each source is bounded and treated as untrusted data
           </span>
           <div className="ml-auto flex gap-1.5">
-            <Button
-              size="sm"
-              onClick={() =>
-                onInputsChange([
-                  ...inputs,
-                  {
-                    id: uniqueFlowId(
-                      "slack",
-                      inputs.map((input) => input.id),
-                    ),
-                    label: "Slack channel",
-                    window: {
-                      mode: "since_last_success",
-                      minutes: 120,
-                      overlapMinutes: 10,
+            <Tooltip label="Add Slack input">
+              <Button
+                size="sm"
+                variant="soft"
+                icon={<BrandMark name="slack" size={16} />}
+                aria-label="Add Slack input"
+                className="phone:min-h-11 phone:w-11"
+                onClick={() =>
+                  onInputsChange([
+                    ...inputs,
+                    {
+                      id: uniqueFlowId(
+                        "slack",
+                        inputs.map((input) => input.id),
+                      ),
+                      label: "Slack channel",
+                      window: {
+                        mode: "since_last_success",
+                        minutes: 120,
+                        overlapMinutes: 10,
+                      },
+                      reduce: {
+                        model: "claude-haiku-4-5",
+                        maxOutputChars: 8000,
+                      },
+                      source: {
+                        type: "slack_channel",
+                        channel: "",
+                        includeThreads: true,
+                        includeBots: false,
+                        limit: 200,
+                      },
                     },
-                    reduce: { model: "claude-haiku-4-5", maxOutputChars: 8000 },
-                    source: {
-                      type: "slack_channel",
-                      channel: "",
-                      includeThreads: true,
-                      includeBots: false,
-                      limit: 200,
+                  ])
+                }
+              />
+            </Tooltip>
+            <Tooltip label="Add report input">
+              <Button
+                size="sm"
+                variant="soft"
+                icon={<IconFileText2 size={16} />}
+                aria-label="Add report input"
+                className="phone:min-h-11 phone:w-11"
+                onClick={() =>
+                  onInputsChange([
+                    ...inputs,
+                    {
+                      id: uniqueFlowId(
+                        "reports",
+                        inputs.map((input) => input.id),
+                      ),
+                      label: "Previous reports",
+                      source: {
+                        type: "reports",
+                        automationId: "self",
+                        limit: 3,
+                      },
                     },
-                  },
-                ])
-              }
-            >
-              + Slack
-            </Button>
-            <Button
-              size="sm"
-              onClick={() =>
-                onInputsChange([
-                  ...inputs,
-                  {
-                    id: uniqueFlowId(
-                      "reports",
-                      inputs.map((input) => input.id),
-                    ),
-                    label: "Previous reports",
-                    source: { type: "reports", automationId: "self", limit: 3 },
-                  },
-                ])
-              }
-            >
-              + Reports
-            </Button>
+                  ])
+                }
+              />
+            </Tooltip>
           </div>
         </div>
 
@@ -1490,9 +1543,9 @@ function DataFlowEditor({
               input.source.type === "reports" ? input.source : null;
             return (
               <div key={input.id} className="rounded-panel bg-surface p-3">
-                <div className="mb-2 flex min-h-10 items-center gap-2">
+                <div className="mb-2 flex min-h-10 items-center gap-2 phone:flex-wrap">
                   <Select
-                    className="max-w-[150px]"
+                    className="max-w-[150px] phone:min-h-11 phone:max-w-none phone:flex-1"
                     value={input.source.type}
                     onChange={(e) => {
                       const source =
@@ -1520,21 +1573,25 @@ function DataFlowEditor({
                     <option value="reports">Report history</option>
                   </Select>
                   <Input
+                    className="min-w-0 flex-1 phone:order-3 phone:min-h-11 phone:basis-full"
                     value={input.label || ""}
                     onChange={(e) =>
                       updateInput(index, { ...input, label: e.target.value })
                     }
                     placeholder="Label"
                   />
-                  <Button
-                    size="sm"
-                    className="shrink-0 text-dim hover:text-red"
-                    onClick={() =>
-                      onInputsChange(inputs.filter((_, at) => at !== index))
-                    }
-                  >
-                    Remove
-                  </Button>
+                  <Tooltip label="Remove input">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon={<IconTrash size={16} />}
+                      aria-label="Remove input"
+                      className="shrink-0 text-dim hover:text-red phone:min-h-11 phone:w-11"
+                      onClick={() =>
+                        onInputsChange(inputs.filter((_, at) => at !== index))
+                      }
+                    />
+                  </Tooltip>
                 </div>
 
                 {slack && (
@@ -1669,52 +1726,42 @@ function DataFlowEditor({
       <div className="mt-1 flex flex-col gap-2">
         <div className="flex min-h-10 items-center gap-2">
           <span className="text-label font-medium text-dim">Outputs</span>
-          <span className="text-supporting text-faint">
-            Reports are durable; Slack delivery is optional
+          <span className="text-supporting text-faint phone:hidden">
+            Reports are durable; message delivery is optional
           </span>
           <div className="ml-auto flex gap-1.5">
             {!outputs.some((output) => output.type === "report") && (
+              <Tooltip label="Add report output">
+                <Button
+                  size="sm"
+                  variant="soft"
+                  icon={<IconFileText2 size={16} />}
+                  aria-label="Add report output"
+                  className="phone:min-h-11 phone:w-11"
+                  onClick={() => onOutputsChange(appendReportOutput(outputs))}
+                />
+              </Tooltip>
+            )}
+            <Tooltip label="Send reports to Slack">
               <Button
                 size="sm"
-                onClick={() =>
-                  onOutputsChange([
-                    ...outputs,
-                    {
-                      id: uniqueFlowId(
-                        "report",
-                        outputs.map((output) => output.id),
-                      ),
-                      type: "report",
-                      enabled: true,
-                      publish: "always",
-                    },
-                  ])
-                }
-              >
-                + Report
-              </Button>
-            )}
-            <Button
-              size="sm"
-              onClick={() =>
-                onOutputsChange([
-                  ...outputs,
-                  {
-                    id: uniqueFlowId(
-                      "slack",
-                      outputs.map((output) => output.id),
-                    ),
-                    type: "slack",
-                    enabled: false,
-                    channel: "",
-                    minUrgency: "high",
-                    minConfidence: "high",
-                  },
-                ])
-              }
-            >
-              + Slack
-            </Button>
+                variant="soft"
+                icon={<BrandMark name="slack" size={16} />}
+                aria-label="Add Slack output"
+                className="phone:min-h-11 phone:w-11"
+                onClick={() => addMessageOutput("slack")}
+              />
+            </Tooltip>
+            <Tooltip label="Send reports to Discord">
+              <Button
+                size="sm"
+                variant="soft"
+                icon={<BrandMark name="discord" size={16} />}
+                aria-label="Add Discord output"
+                className="phone:min-h-11 phone:w-11"
+                onClick={() => addMessageOutput("discord")}
+              />
+            </Tooltip>
           </div>
         </div>
 
@@ -1724,105 +1771,176 @@ function DataFlowEditor({
             session.
           </div>
         ) : (
-          outputs.map((output, index) => (
-            <div key={output.id} className="rounded-panel bg-surface p-3">
-              <div className="flex min-h-10 items-center gap-2">
-                <span className="w-[110px] shrink-0 text-label font-medium text-fg">
-                  {output.type === "report" ? "Report" : "Slack"}
-                </span>
-                {output.type === "report" ? (
-                  <Select
-                    value={output.publish || "always"}
-                    onChange={(e) =>
-                      updateOutput(index, {
-                        ...output,
-                        publish: e.target.value as "always" | "on_findings",
-                      })
-                    }
-                  >
-                    <option value="always">Publish every run</option>
-                    <option value="on_findings">Only with findings</option>
-                  </Select>
-                ) : (
-                  <>
-                    <Input
-                      className="mono-input"
-                      value={output.channel}
+          outputs.map((output, index) => {
+            const name =
+              output.type === "report"
+                ? "Report"
+                : output.type === "slack"
+                  ? "Slack"
+                  : "Discord";
+            const discordChannels =
+              discordChannelState.status === "ready"
+                ? discordChannelState.channels
+                : [];
+            const selectedDiscordChannel =
+              output.type === "discord" ? output.channel : "";
+            const hasSelectedDiscordChannel = discordChannels.some(
+              (channel) => channel.id === selectedDiscordChannel,
+            );
+            return (
+              <div key={output.id} className="rounded-panel bg-surface p-3">
+                <div className="flex min-h-10 items-center gap-2 phone:flex-wrap">
+                  <span className="flex w-[110px] shrink-0 items-center gap-2 text-label font-medium text-fg phone:w-auto phone:flex-1">
+                    {output.type === "report" ? (
+                      <IconFileText2 size={18} className="text-dim" />
+                    ) : (
+                      <BrandMark name={output.type} size={18} />
+                    )}
+                    {name}
+                  </span>
+                  {output.type === "report" ? (
+                    <Select
+                      className="phone:order-3 phone:min-h-11 phone:basis-full"
+                      value={output.publish || "always"}
                       onChange={(e) =>
                         updateOutput(index, {
                           ...output,
-                          channel: e.target.value.toUpperCase(),
+                          publish: e.target.value as "always" | "on_findings",
                         })
                       }
-                      placeholder="C0123456789"
+                    >
+                      <option value="always">Publish every run</option>
+                      <option value="on_findings">Only with findings</option>
+                    </Select>
+                  ) : (
+                    <>
+                      {output.type === "discord" &&
+                      discordChannels.length > 0 ? (
+                        <Select
+                          className="min-w-0 flex-1 phone:order-3 phone:min-h-11 phone:basis-full"
+                          aria-label="Discord channel"
+                          value={output.channel}
+                          onChange={(e) =>
+                            updateOutput(index, {
+                              ...output,
+                              channel: e.target.value,
+                            })
+                          }
+                        >
+                          {!hasSelectedDiscordChannel && output.channel && (
+                            <option value={output.channel}>
+                              Channel {output.channel}
+                            </option>
+                          )}
+                          {discordChannels.map((channel) => (
+                            <option key={channel.id} value={channel.id}>
+                              {channel.guildName} / #{channel.name}
+                            </option>
+                          ))}
+                        </Select>
+                      ) : (
+                        <Input
+                          className="mono-input min-w-0 flex-1 phone:order-3 phone:min-h-11 phone:basis-full"
+                          aria-label={`${name} channel ID`}
+                          value={output.channel}
+                          onChange={(e) =>
+                            updateOutput(index, {
+                              ...output,
+                              channel:
+                                output.type === "slack"
+                                  ? e.target.value.toUpperCase()
+                                  : e.target.value,
+                            })
+                          }
+                          placeholder={
+                            output.type === "slack"
+                              ? "C0123456789"
+                              : "Discord channel ID"
+                          }
+                        />
+                      )}
+                      <label className="flex min-h-10 shrink-0 items-center gap-2 text-label text-dim phone:min-h-11">
+                        <Checkbox
+                          checked={output.enabled !== false}
+                          onCheckedChange={(checked) =>
+                            updateOutput(index, { ...output, enabled: checked })
+                          }
+                        />
+                        Send
+                      </label>
+                    </>
+                  )}
+                  <Tooltip label={`Remove ${name.toLowerCase()} output`}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon={<IconTrash size={16} />}
+                      aria-label={`Remove ${name.toLowerCase()} output`}
+                      className="shrink-0 text-dim hover:text-red phone:min-h-11 phone:w-11"
+                      onClick={() =>
+                        onOutputsChange(outputs.filter((_, at) => at !== index))
+                      }
                     />
-                    <label className="flex min-h-10 shrink-0 items-center gap-2 text-label text-dim">
-                      <Checkbox
-                        checked={output.enabled !== false}
-                        onCheckedChange={(checked) =>
-                          updateOutput(index, { ...output, enabled: checked })
-                        }
-                      />
-                      Send
-                    </label>
-                  </>
-                )}
-                <Button
-                  size="sm"
-                  className="shrink-0 text-dim hover:text-red"
-                  onClick={() =>
-                    onOutputsChange(outputs.filter((_, at) => at !== index))
-                  }
-                >
-                  Remove
-                </Button>
-              </div>
-              {output.type === "slack" && (
-                <div className="mt-2 grid grid-cols-2 gap-3 phone:grid-cols-1">
-                  <label className={FIELD_LABEL}>
-                    Minimum urgency
-                    <Select
-                      value={output.minUrgency || "high"}
-                      onChange={(e) =>
-                        updateOutput(index, {
-                          ...output,
-                          minUrgency: e.target.value as
-                            | "low"
-                            | "medium"
-                            | "high"
-                            | "critical",
-                        })
-                      }
-                    >
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                      <option value="critical">Critical</option>
-                    </Select>
-                  </label>
-                  <label className={FIELD_LABEL}>
-                    Minimum confidence
-                    <Select
-                      value={output.minConfidence || "high"}
-                      onChange={(e) =>
-                        updateOutput(index, {
-                          ...output,
-                          minConfidence: e.target.value as
-                            | "low"
-                            | "medium"
-                            | "high",
-                        })
-                      }
-                    >
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                    </Select>
-                  </label>
+                  </Tooltip>
                 </div>
-              )}
-            </div>
-          ))
+                {output.type === "discord" &&
+                  (discordChannelState.status !== "ready" ||
+                    discordChannels.length === 0) && (
+                    <p className="mt-1 text-supporting text-faint">
+                      {discordChannelState.status === "loading"
+                        ? "Loading connected Discord channels…"
+                        : discordChannelState.status === "error"
+                          ? "Enter a channel ID or check the Discord integration setup."
+                          : "No allowed text channels were found. Enter a channel ID."}
+                    </p>
+                  )}
+                {output.type !== "report" && (
+                  <div className="mt-2 grid grid-cols-2 gap-3 phone:grid-cols-1">
+                    <label className={FIELD_LABEL}>
+                      Minimum urgency
+                      <Select
+                        value={output.minUrgency || "high"}
+                        onChange={(e) =>
+                          updateOutput(index, {
+                            ...output,
+                            minUrgency: e.target.value as
+                              | "low"
+                              | "medium"
+                              | "high"
+                              | "critical",
+                          })
+                        }
+                      >
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                        <option value="critical">Critical</option>
+                      </Select>
+                    </label>
+                    <label className={FIELD_LABEL}>
+                      Minimum confidence
+                      <Select
+                        value={output.minConfidence || "high"}
+                        onChange={(e) =>
+                          updateOutput(index, {
+                            ...output,
+                            minConfidence: e.target.value as
+                              | "low"
+                              | "medium"
+                              | "high",
+                          })
+                        }
+                      >
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                      </Select>
+                    </label>
+                  </div>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
     </div>

@@ -179,9 +179,32 @@ describe("Discord REST presentation", () => {
       return Response.json({ id: "m1", channel_id: "c1" });
     }) as typeof fetch;
     const rest = new DiscordRest("token", "1542925450790305903", fakeFetch);
-    await rest.sendMessage("c1", "@everyone <@123>", undefined, "event-1");
+    const components = [
+      {
+        type: 1,
+        components: [
+          {
+            type: 2,
+            style: 5,
+            label: "Open report",
+            url: "https://os.test/reports/a/r",
+          },
+        ],
+      },
+    ];
+    await rest.sendMessage(
+      "c1",
+      "@everyone <@123>",
+      undefined,
+      "event-1",
+      components,
+    );
     expect(body.allowed_mentions).toEqual({ parse: [], replied_user: false });
-    expect(body).toMatchObject({ nonce: "event-1", enforce_nonce: true });
+    expect(body).toMatchObject({
+      nonce: "event-1",
+      enforce_nonce: true,
+      components,
+    });
   });
 
   test("turns a provider 429 into a concise same-session recovery message", () => {

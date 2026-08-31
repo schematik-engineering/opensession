@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { rmSync } from "fs";
 import { join } from "path";
 import {
+  automationDiscordMessage,
   automationSlackBlocks,
   deleteAutomationOutputState,
   deliverAutomationOutputs,
@@ -47,10 +48,16 @@ describe("sanitizeAutomationOutputs", () => {
     ]);
   });
 
-  test("accepts direct-message conversations", () => {
+  test("accepts Slack direct messages and Discord channels", () => {
     expect(
       sanitizeAutomationOutputs([
         { id: "slack", type: "slack", channel: "d0a7zb82npl" },
+        {
+          id: "discord",
+          type: "discord",
+          channel: "1542925450790305912",
+          minUrgency: "medium",
+        },
       ]),
     ).toEqual([
       {
@@ -60,6 +67,15 @@ describe("sanitizeAutomationOutputs", () => {
         channel: "D0A7ZB82NPL",
         source: "report",
         minUrgency: "high",
+        minConfidence: "high",
+      },
+      {
+        id: "discord",
+        type: "discord",
+        enabled: true,
+        channel: "1542925450790305912",
+        source: "report",
+        minUrgency: "medium",
         minConfidence: "high",
       },
     ]);
@@ -73,6 +89,11 @@ describe("sanitizeAutomationOutputs", () => {
     ).toEqual({
       error: "outputs[0].channel must be a Slack C…/D…/G… conversation id",
     });
+    expect(
+      sanitizeAutomationOutputs([
+        { id: "discord", type: "discord", channel: "not-a-snowflake" },
+      ]),
+    ).toEqual({ error: "outputs[0].channel must be a Discord channel id" });
     expect(
       sanitizeAutomationOutputs([
         { id: "same", type: "report" },
@@ -127,6 +148,41 @@ describe("automationSlackBlocks", () => {
   });
 });
 
+describe("automationDiscordMessage", () => {
+  test("builds a mention-safe report summary with a report link", () => {
+    const message = automationDiscordMessage(
+      {
+        id: "report-1",
+        title: "Investigate <@123>",
+        automationId,
+        automationName: "Test",
+        createdAt: new Date().toISOString(),
+        urgency: "high",
+        confidence: "medium",
+        summary: "Two regressions found.",
+      },
+      "https://os.test/reports/a/r",
+    );
+
+    expect(message.content).toBe(
+      "**Investigate ‹@123›**\nhigh urgency · medium confidence\nTwo regressions found.",
+    );
+    expect(message.components).toEqual([
+      {
+        type: 1,
+        components: [
+          {
+            type: 2,
+            style: 5,
+            label: "Open report",
+            url: "https://os.test/reports/a/r",
+          },
+        ],
+      },
+    ]);
+  });
+});
+
 describe("deliverAutomationOutputs", () => {
   test("does not require or deliver a disabled Slack sink", async () => {
     await expect(
@@ -146,11 +202,25 @@ describe("deliverAutomationOutputs", () => {
     ).resolves.toBeUndefined();
   });
 
-  test("fails a required report output when the run did not publish", async () => {
+  test("fails a required report or message output when the run did not publish", async () => {
     await expect(
       deliverAutomationOutputs({
         automationId,
         outputs: [{ id: "report", type: "report", publish: "always" }],
+        sessionId: "os-no-report",
+        startedAt: new Date(),
+      }),
+    ).rejects.toThrow("Required report output was not published");
+    await expect(
+      deliverAutomationOutputs({
+        automationId,
+        outputs: [
+          {
+            id: "discord",
+            type: "discord",
+            channel: "1542925450790305912",
+          },
+        ],
         sessionId: "os-no-report",
         startedAt: new Date(),
       }),
