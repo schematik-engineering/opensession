@@ -399,6 +399,7 @@ export async function createMcpRuntime(opts: {
     opts.mcpServers,
     opts.user,
     opts.mcpGrantUser ? grantUsers : undefined,
+    { allowManagedUserAuth: !!opts.mcpGrantUser },
   ) as Record<string, Record<string, unknown>>;
   for (const [name, cfg] of Object.entries(external)) {
     entries.push({

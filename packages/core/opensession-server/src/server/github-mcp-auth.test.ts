@@ -66,6 +66,7 @@ describe("GitHub MCP managed auth", () => {
           },
         },
         ["Jack"],
+        { allowManagedUserAuth: true },
       ),
     ).toMatchObject({
       Github: { headers: { Authorization: "Bearer github-user-token" } },
@@ -82,6 +83,17 @@ describe("GitHub MCP managed auth", () => {
     expect(
       githubMcpManagedAuth("https://api.githubcopilot.com/mcp/"),
     ).toMatchObject({ kind: "github-app", state: "error" });
+    expect(
+      withDynamicCredentials(
+        {
+          Github: {
+            type: "http",
+            url: "https://api.githubcopilot.com/mcp/",
+          },
+        },
+        ["Jack"],
+      ),
+    ).not.toHaveProperty("Github.headers.Authorization");
     expect(
       withDynamicCredentials({
         Github: {

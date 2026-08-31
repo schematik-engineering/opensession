@@ -77,10 +77,14 @@ export function engineCallView(call: FakeCall) {
 export function enginePolicyView(call: FakeCall) {
   const opts = call.opts;
   const gateReason = runGateReason({ journal: opts.journal });
-  const mcp = filterMcpServers(opts.mcpServers, opts.user, [
-    opts.mcpGrantUser,
+  const mcp = filterMcpServers(
+    opts.mcpServers,
     opts.user,
-  ]);
+    [opts.mcpGrantUser, opts.user],
+    {
+      allowManagedUserAuth: !!opts.mcpGrantUser,
+    },
+  );
   const policy = runToolPolicy({
     deniedTools: opts.deniedTools,
     confirmTools: opts.confirmTools,

@@ -180,11 +180,14 @@ export function describeMcpServers(
   scope: string[] | undefined,
   user: string | undefined,
   grantUsers: Array<string | undefined>,
+  allowManagedUserAuth = false,
 ): McpServerRow[] {
   const grantHolders = grantUsers.filter((u): u is string => !!u);
   return explainMcpServers({
     all: readMcpConfig().mcpServers || {},
-    included: filterMcpServers(scope ?? "all", user, grantUsers),
+    included: filterMcpServers(scope ?? "all", user, grantUsers, {
+      allowManagedUserAuth,
+    }),
     scope,
     // The gate clears on any of these; de-duplicated so the reason reads as
     // the set of identities tried, not as one name repeated.
@@ -376,7 +379,12 @@ export async function buildSessionEffectiveConfig(
       inputs.mcpServers ?? "all",
       "session-run-inputs.ts MCP scope",
     ),
-    servers: describeMcpServers(inputs.mcpServers, inputs.user, grantUsers),
+    servers: describeMcpServers(
+      inputs.mcpServers,
+      inputs.user,
+      grantUsers,
+      !!inputs.mcpGrantUser,
+    ),
     inProcess: {
       branch: row(
         inputs.inProcessMcpBranch,

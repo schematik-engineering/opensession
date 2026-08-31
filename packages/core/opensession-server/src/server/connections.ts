@@ -75,6 +75,7 @@ export function withDynamicCredentials(
    *  a bare string is treated as a one-element list. First personal grant
    *  wins, then the workspace grant. */
   user?: string | Array<string | undefined>,
+  opts: { allowManagedUserAuth?: boolean } = {},
 ): Record<string, any> {
   let out = servers;
   const linear = servers.linear;
@@ -151,7 +152,11 @@ export function withDynamicCredentials(
       );
       const header =
         candidates.map((u) => mcpUserGrantHeader(name, u)).find((h) => !!h) ??
-        candidates.map((u) => githubMcpAuthHeader(c.url, u)).find((h) => !!h) ??
+        (opts.allowManagedUserAuth
+          ? candidates
+              .map((u) => githubMcpAuthHeader(c.url, u))
+              .find((h) => !!h)
+          : undefined) ??
         mcpSharedGrantHeader(name);
       if (!header) continue;
       out = {

@@ -146,10 +146,14 @@ export function acpMcpServersForConfig(
 }
 
 function acpMcpServers(opts: RunAgentOpts): McpServer[] {
-  const external = filterMcpServers(opts.mcpServers ?? "all", opts.user, [
-    opts.mcpGrantUser,
+  const external = filterMcpServers(
+    opts.mcpServers ?? "all",
     opts.user,
-  ]);
+    [opts.mcpGrantUser, opts.user],
+    {
+      allowManagedUserAuth: !!opts.mcpGrantUser,
+    },
+  );
   // Detached/Docker runner-hosts convert trusted in-process servers into
   // narrow stdio proxies. Direct in-memory SDK servers have no ACP transport
   // representation and are deliberately ignored here.
