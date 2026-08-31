@@ -89,10 +89,14 @@ describe("executor deployment", () => {
     const helper = await Bun.file(
       resolve(repoRoot, "deploy/opensession-run-host"),
     ).text();
+    const awsMcpHelper = await Bun.file(
+      resolve(repoRoot, "deploy/opensession-aws-mcp-token"),
+    ).text();
     expect(installer).toContain("/etc/sudoers.d/opensession-run-host");
     expect(installer).toContain("visudo -cf");
     expect(installer).toContain("helper directory cannot be a symlink");
     expect(installer).not.toContain("NOPASSWD: /usr/bin/systemd-run");
+    expect(installer).toContain("opensession-aws-mcp-token");
     expect(helper).toContain(
       "run-host directory is outside the configured state root",
     );
@@ -108,6 +112,9 @@ describe("executor deployment", () => {
     );
     expect(installer).toContain("runner mode must be source or compiled");
     expect(helper).toContain('set -- "$systemd_run"');
+    expect(awsMcpHelper).toContain("signin create-oauth2-token-with-iam");
+    expect(awsMcpHelper).toContain("--resource aws-mcp.amazonaws.com");
+    expect(awsMcpHelper).not.toContain('exec "$@"');
   });
 
   test("credential installation rejects link redirection", async () => {

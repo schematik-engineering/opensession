@@ -140,7 +140,7 @@ if [ -n "$PREVIOUS_HEAD" ] && [ "${OPENSESSION_ROOT_DEPLOY_OVERRIDE:-0}" != "1" 
     exit 1
   fi
   ROOT_IMPACT="$(run_as_service_user git -C "$SOURCE_DIR" diff --no-renames --name-only "$PREVIOUS_HEAD" "$TARGET_COMMIT" -- \
-    | grep -E '^(deploy/(deploy|self-deploy|release-checkout|install-executor-credential|install-session-kernel-credential|install-run-host-helper|install-resource-control)\.sh|deploy/opensession-run-host|deploy/systemd/|packages/core/opensession-server/src/server/(gateway-ingress|gateway-routing|gateway-tcp-proxy|stable-frontend)\.ts|opensession(\.socket|-ingress\.service|-executor\.service|-session-kernel\.service|\.service)$)' \
+    | grep -E '^(deploy/(deploy|self-deploy|release-checkout|install-executor-credential|install-session-kernel-credential|install-run-host-helper|install-resource-control)\.sh|deploy/opensession-(run-host|aws-mcp-token)|deploy/systemd/|packages/core/opensession-server/src/server/(gateway-ingress|gateway-routing|gateway-tcp-proxy|stable-frontend)\.ts|opensession(\.socket|-ingress\.service|-executor\.service|-session-kernel\.service|\.service)$)' \
     || true)"
   if [ -z "$ROOT_IMPACT" ]; then
     echo "[deploy] ERROR: ${TARGET_COMMIT:0:10} changes no root-owned deployment artifacts" >&2
@@ -348,6 +348,9 @@ esac
   0 "$HEALTH_URL" \
   source "$EXECUTOR_BUN"
 run_as_service_user sudo -n /usr/local/libexec/opensession-run-host check
+if [ -x /usr/local/bin/aws ]; then
+  run_as_service_user sudo -n /usr/local/libexec/opensession-aws-mcp-token check
+fi
 
 EXECUTOR_UNIT_RENDERED="$(mktemp)"
 awk -v home="$SERVICE_HOME_DIR" -v state="$STATE_DIR" -v sessions="$SESSIONS_DIR" -v workdir="$CURRENT_LINK" '

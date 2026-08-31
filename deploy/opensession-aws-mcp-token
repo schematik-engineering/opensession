@@ -1,0 +1,75 @@
+#!/bin/sh
+set -eu
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+config="/etc/opensession/run-host.conf"
+aws_bin="/usr/local/bin/aws"
+
+if [ "$(id -u)" -ne 0 ] || [ ! -r "$config" ]; then
+  echo "opensession-aws-mcp-token must run as root with $config installed" >&2
+  exit 1
+fi
+
+line() { sed -n "${1}p" "$config"; }
+service_user="$(line 1)"
+service_uid="$(line 2)"
+service_gid="$(line 3)"
+home_dir="$(line 6)"
+systemd_run="$(line 9)"
+
+check_config() {
+  [ -n "$service_user" ]
+  [ "$service_uid" -eq "$service_uid" ] 2>/dev/null
+  [ "$service_gid" -eq "$service_gid" ] 2>/dev/null
+  [ "$(id -u "$service_user")" = "$service_uid" ]
+  [ "$(id -g "$service_user")" = "$service_gid" ]
+  [ -d "$home_dir" ]
+  [ -x "$systemd_run" ]
+  [ -x "$aws_bin" ]
+  [ "$(stat -Lc %U "$aws_bin")" = "root" ]
+  [ $((0$(stat -Lc %a "$aws_bin") & 22)) -eq 0 ]
+}
+
+check_config || {
+  echo "invalid Open Session AWS MCP helper configuration" >&2
+  exit 1
+}
+
+action="${1:-}"
+if [ "$action" = "check" ]; then
+  [ "$#" -eq 1 ] || exit 2
+  "$aws_bin" --version >/dev/null
+  exit 0
+fi
+
+[ "$#" -eq 1 ] || {
+  echo "usage: opensession-aws-mcp-token check | <aws-region>" >&2
+  exit 2
+}
+printf '%s\n' "$action" | grep -Eq '^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$' || {
+  echo "invalid AWS MCP region" >&2
+  exit 2
+}
+
+# The service account may invoke only this fixed exchange. The transient unit
+# runs outside opensession.service's IMDS-denied cgroup, obtains the instance
+# role through the normal AWS credential chain, and emits only the OAuth token
+# response. It never prints or passes the underlying role credentials.
+exec "$systemd_run" \
+  --pipe --collect --quiet \
+  "--uid=$service_uid" \
+  "--gid=$service_gid" \
+  -p "Environment=HOME=$home_dir" \
+  -p "Environment=AWS_EC2_METADATA_DISABLED=false" \
+  -p "Environment=AWS_PAGER=" \
+  -p "NoNewPrivileges=true" \
+  "$aws_bin" signin create-oauth2-token-with-iam \
+    --grant-type client_credentials \
+    --resource aws-mcp.amazonaws.com \
+    --region "$action" \
+    --output json \
+    --color off \
+    --no-cli-pager \
+    --cli-connect-timeout 5 \
+    --cli-read-timeout 15

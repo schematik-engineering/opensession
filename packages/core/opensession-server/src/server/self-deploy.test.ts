@@ -194,6 +194,7 @@ describe("requiresRootDeploy", () => {
       "deploy/install-run-host-helper.sh",
       "deploy/install-resource-control.sh",
       "deploy/opensession-run-host",
+      "deploy/opensession-aws-mcp-token",
       "deploy/systemd/opensession-session-kernel.service.d/capacity.conf",
       "opensession.service",
       "opensession.socket",

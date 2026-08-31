@@ -35,6 +35,11 @@ import {
   setPiEnabled,
   setPiPickerModels,
 } from "../pi-config";
+import {
+  awsMcpManagedAuth,
+  ensureAwsMcpIamAuth,
+  isAwsMcpIamServer,
+} from "../aws-mcp-auth";
 
 /** Navigate `integrations.github` in a raw parsed config object so the App
  *  routes can set or drop its keys without disturbing anything else the file
@@ -260,6 +265,15 @@ export async function handleConnectionsRoutes(
         // oauthUrl: a stdio server's HTTP OAuth home (see the per-server
         // route below).
         const oauthTarget = cfg?.url || cfg?.oauthUrl;
+        const managed = awsMcpManagedAuth(oauthTarget);
+        if (managed)
+          return {
+            name,
+            capable: false,
+            manualToken: false,
+            ...status,
+            managed,
+          };
         const capable =
           connected || oauthPresetFor(name)
             ? true
@@ -311,6 +325,17 @@ export async function handleConnectionsRoutes(
     // oauthUrl: a stdio server's HTTP OAuth home (e.g. plain runs a local
     // stdio MCP but per-user grants come from Plain's hosted MCP).
     const oauthTarget = cfg?.url || cfg?.oauthUrl;
+    if (isAwsMcpIamServer(oauthTarget)) {
+      try {
+        await ensureAwsMcpIamAuth(oauthTarget!);
+      } catch {}
+      return Response.json({
+        ...status,
+        capable: false,
+        manualToken: false,
+        managed: awsMcpManagedAuth(oauthTarget),
+      });
+    }
     const capable =
       !!oauthPresetFor(name) ||
       (oauthTarget ? await isOauthCapable(oauthTarget) : false);
@@ -342,6 +367,14 @@ export async function handleConnectionsRoutes(
     ] as { url?: string; oauthUrl?: string } | undefined;
     const { startMcpOauthFlow, oauthPresetFor } = await import("../mcp-oauth");
     const oauthTarget = cfg?.url || cfg?.oauthUrl;
+    if (isAwsMcpIamServer(oauthTarget))
+      return Response.json(
+        {
+          error:
+            "AWS uses the workspace IAM role. Browser sign-in is not required.",
+        },
+        { status: 409 },
+      );
     if (!oauthTarget && !oauthPresetFor(name))
       return Response.json(
         { error: "Not an OAuth-capable MCP server" },
@@ -388,6 +421,14 @@ export async function handleConnectionsRoutes(
       return Response.json(
         { error: "Not a remote MCP server" },
         { status: 400 },
+      );
+    if (isAwsMcpIamServer(target))
+      return Response.json(
+        {
+          error:
+            "AWS uses the workspace IAM role. An API token is not required.",
+        },
+        { status: 409 },
       );
     const forUser =
       body.scope === "me"

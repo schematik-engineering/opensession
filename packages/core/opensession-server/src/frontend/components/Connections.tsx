@@ -89,6 +89,7 @@ const STATUS_META: Record<
 };
 
 const MCP_BLURBS: Record<string, string> = {
+  AWS: "AWS resources through the workspace IAM role",
   linear: "Issues and projects: read and update Linear",
   plain: "Customer support threads from Plain",
   sentry: "Errors and performance issues",
@@ -158,6 +159,11 @@ interface McpOauthStatus {
   users: string[];
   capable?: boolean;
   manualToken?: boolean;
+  managed?: {
+    kind: "aws-iam";
+    state: "checking" | "ready" | "error";
+    detail?: string;
+  };
 }
 
 export function Connections() {
@@ -384,8 +390,23 @@ export function Connections() {
                           <LockIcon /> {s.allowedUsers!.join(", ")}
                         </span>
                       )}
-                      {oauthByName[s.name]?.shared ||
-                      oauthByName[s.name]?.users.length ? (
+                      {oauthByName[s.name]?.managed ? (
+                        <span
+                          className={cn(
+                            "flex flex-shrink-0 items-center gap-1 rounded-full bg-active px-1.5 py-0.5 text-meta font-medium",
+                            oauthByName[s.name]?.managed?.state === "error"
+                              ? "text-red"
+                              : "text-green",
+                          )}
+                          title={
+                            oauthByName[s.name]?.managed?.detail ||
+                            "Authenticated by the workspace AWS IAM role"
+                          }
+                        >
+                          IAM · workspace
+                        </span>
+                      ) : oauthByName[s.name]?.shared ||
+                        oauthByName[s.name]?.users.length ? (
                         <span
                           className="flex flex-shrink-0 items-center gap-1 rounded-full bg-active px-1.5 py-0.5 text-meta font-medium text-green"
                           title={[
@@ -439,47 +460,50 @@ export function Connections() {
                       <IconDotsHorizontal size={18} />
                     </Menu.Trigger>
                     <Menu.Popup align="end" sideOffset={4}>
-                      {(s.transport === "http" ||
-                        oauthByName[s.name]?.capable) && (
-                        <>
-                          <Menu.Item
-                            onClick={() => handleOauthConnect(s, "shared")}
-                          >
-                            <IconPlus size={16} className="text-faint" />
-                            {oauthByName[s.name]?.shared
-                              ? "Reconnect (workspace)"
-                              : "Connect (workspace)"}
-                          </Menu.Item>
-                          <Menu.Item
-                            onClick={() => handleOauthConnect(s, "me")}
-                          >
-                            <IconPlus size={16} className="text-faint" />
-                            Connect my account
-                          </Menu.Item>
-                          {s.transport === "http" &&
-                          oauthByName[s.name]?.manualToken ? (
-                            <Menu.Item onClick={() => setTokenConnect(s)}>
-                              <IconPlus size={16} className="text-faint" />
-                              Connect with API token
-                            </Menu.Item>
-                          ) : null}
-                          {oauthByName[s.name]?.shared ||
-                          oauthByName[s.name]?.users.length ? (
+                      {!oauthByName[s.name]?.managed &&
+                        (s.transport === "http" ||
+                          oauthByName[s.name]?.capable) && (
+                          <>
                             <Menu.Item
-                              onClick={() =>
-                                handleOauthDisconnect(
-                                  s,
-                                  oauthByName[s.name]?.shared ? "shared" : "me",
-                                )
-                              }
+                              onClick={() => handleOauthConnect(s, "shared")}
                             >
-                              <IconTrash size={16} className="text-faint" />
-                              Disconnect OAuth
+                              <IconPlus size={16} className="text-faint" />
+                              {oauthByName[s.name]?.shared
+                                ? "Reconnect (workspace)"
+                                : "Connect (workspace)"}
                             </Menu.Item>
-                          ) : null}
-                          <Menu.Separator />
-                        </>
-                      )}
+                            <Menu.Item
+                              onClick={() => handleOauthConnect(s, "me")}
+                            >
+                              <IconPlus size={16} className="text-faint" />
+                              Connect my account
+                            </Menu.Item>
+                            {s.transport === "http" &&
+                            oauthByName[s.name]?.manualToken ? (
+                              <Menu.Item onClick={() => setTokenConnect(s)}>
+                                <IconPlus size={16} className="text-faint" />
+                                Connect with API token
+                              </Menu.Item>
+                            ) : null}
+                            {oauthByName[s.name]?.shared ||
+                            oauthByName[s.name]?.users.length ? (
+                              <Menu.Item
+                                onClick={() =>
+                                  handleOauthDisconnect(
+                                    s,
+                                    oauthByName[s.name]?.shared
+                                      ? "shared"
+                                      : "me",
+                                  )
+                                }
+                              >
+                                <IconTrash size={16} className="text-faint" />
+                                Disconnect OAuth
+                              </Menu.Item>
+                            ) : null}
+                            <Menu.Separator />
+                          </>
+                        )}
                       <Menu.Item onClick={() => handleRestrict(s)}>
                         <IconSliders size={16} className="text-faint" />
                         {restricted ? "Edit access" : "Restrict access"}

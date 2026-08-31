@@ -15,6 +15,11 @@ import {
   oauthPresetFor,
   supportsManualToken,
 } from "./mcp-oauth";
+import {
+  awsMcpIamAuthHeader,
+  ensureAwsMcpIamAuth,
+  isAwsMcpIamServer,
+} from "./aws-mcp-auth";
 
 const HOME = homeDir();
 // mcp-config.json location. OPENSESSION_MCP_CONFIG env → config
@@ -121,6 +126,21 @@ export function withDynamicCredentials(
               [name]: { ...c, env: { ...c.env, [preset.envVar]: token } },
             };
         }
+        continue;
+      }
+      // AWS's hosted MCP endpoint supports a SigV4 client-credentials
+      // exchange. Prefer that workspace role unconditionally over browser
+      // OAuth grants, and never expose the role credentials to the run.
+      if (isAwsMcpIamServer(c.url)) {
+        const header = awsMcpIamAuthHeader(c.url);
+        if (header)
+          out = {
+            ...out,
+            [name]: {
+              ...c,
+              headers: { ...c.headers, Authorization: header },
+            },
+          };
         continue;
       }
       const candidates = (Array.isArray(user) ? user : [user]).filter(
@@ -328,12 +348,35 @@ async function checkServer(name: string, cfg: any): Promise<McpConnection> {
     } catch {}
 
     try {
+      const awsIam = isAwsMcpIamServer(cfg.url);
+      let awsAuthorization: string | undefined;
+      if (awsIam) {
+        try {
+          awsAuthorization = await ensureAwsMcpIamAuth(cfg.url);
+        } catch (error) {
+          return {
+            name,
+            transport: "http",
+            target,
+            envKeys: Object.keys(cfg.env || {}),
+            status: "needs-env",
+            detail:
+              `AWS IAM token unavailable: ${error instanceof Error ? error.message : String(error)}`.slice(
+                0,
+                240,
+              ),
+          };
+        }
+      }
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 4000);
       // Any HTTP response (incl. 401/405) means the endpoint is up;
       // MCP servers typically reject bare GETs but still answer.
       const res = await fetch(cfg.url, {
         method: "GET",
+        ...(awsAuthorization
+          ? { headers: { Authorization: awsAuthorization } }
+          : {}),
         signal: controller.signal,
       });
       clearTimeout(timer);
@@ -342,7 +385,7 @@ async function checkServer(name: string, cfg: any): Promise<McpConnection> {
       // instead of a misleading "Connected" (the GET's 401/405 only proves
       // the endpoint is up). Detection = the origin publishes RFC 9728
       // protected-resource metadata.
-      if (!cfg.headers?.Authorization) {
+      if (!awsIam && !cfg.headers?.Authorization) {
         try {
           const st = mcpOauthStatus(name);
           if (!st.shared && st.users.length === 0) {
@@ -380,7 +423,7 @@ async function checkServer(name: string, cfg: any): Promise<McpConnection> {
         target,
         envKeys: Object.keys(cfg.env || {}),
         status: "connected",
-        detail: `HTTP ${res.status}`,
+        detail: awsIam ? `AWS IAM · HTTP ${res.status}` : `HTTP ${res.status}`,
       };
     } catch (e: any) {
       return {

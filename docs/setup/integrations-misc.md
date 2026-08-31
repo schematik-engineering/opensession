@@ -153,6 +153,30 @@ The endpoint accepts at most 25 MiB per clip. Providers are optional: if no
 hosted key works and the local binary or model is unavailable, dictation
 returns an error and the rest of the app is unaffected.
 
+## AWS-hosted MCP with IAM
+
+An HTTP MCP entry whose host matches `aws-mcp.<region>.api.aws` uses AWS
+Sign-In's non-interactive client-credentials flow. Open Session exchanges the
+host's SigV4 identity for a bearer token scoped to `aws-mcp.amazonaws.com` and
+renews it before its one-hour expiry. Connections labels the server
+`IAM · workspace`; browser OAuth and pasted-token actions are disabled for this
+endpoint.
+
+On a Linux system-scope install, provide the current AWS CLI v2 at
+`/usr/local/bin/aws`, attach a least-privileged EC2 instance role, and allow
+that role `signin:CreateOAuth2Token` on
+`arn:aws:signin:<mcp-region>:<account>:service-principal/aws-mcp.amazonaws.com`.
+The root-owned `opensession-aws-mcp-token` helper launches only the fixed
+`aws signin create-oauth2-token-with-iam` command outside the gateway's IMDS
+deny and returns only its bearer-token JSON. The gateway, executor, run hosts,
+and containers remain unable to query IMDS directly. Permissions for AWS calls
+made through MCP are the permissions of the attached role, so scope that role
+to the read or write operations the workspace actually needs.
+
+This is separate from the raw run-credential feature below. Adding an AWS MCP
+endpoint does not enable `AGENT_AWS_CREDS`, and the MCP bearer cannot be used as
+general-purpose AWS credentials.
+
 ## AWS creds for runs (`AGENT_AWS_REGION`)
 
 `packages/core/opensession-server/src/server/aws-creds.ts` mints short-lived

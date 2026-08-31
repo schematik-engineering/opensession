@@ -22,6 +22,7 @@ import {
 } from "./mcp-tools-cache";
 import { mcpSharedGrantHeader, mcpUserGrantHeader } from "./mcp-oauth";
 import { mcpRelayUrl, mintMcpRelayToken } from "./mcp-relay";
+import { isAwsMcpIamServer } from "./aws-mcp-auth";
 import type { InProcessMcpServer } from "./inprocess-mcp";
 
 const DEFAULT_CALL_TIMEOUT_MS = 120_000;
@@ -324,6 +325,7 @@ export async function createMcpRuntime(opts: {
     if (cfg.type === "http" || cfg.type === "sse" || cfg.url) {
       const candidates = grantUsers.filter((user): user is string => !!user);
       const hasGrant =
+        isAwsMcpIamServer(String(cfg.url)) ||
         candidates.some((user) => mcpUserGrantHeader(name, user)) ||
         !!mcpSharedGrantHeader(name);
       let url = String(cfg.url);
