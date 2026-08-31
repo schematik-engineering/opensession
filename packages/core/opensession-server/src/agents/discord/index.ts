@@ -571,10 +571,16 @@ export class DiscordAgent implements AgentModule {
           return;
         }
       }
+      const contextLink = this.state.conversation(key);
+      const includeRecentContext =
+        startFreshThread ||
+        !contextLink ||
+        (contextLink.sessionId === "" &&
+          contextLink.openingEventId === message.id);
       const fullPrompt = await this.promptWithDiscordContext(
         message,
         prompt,
-        startFreshThread,
+        includeRecentContext,
       );
       await this.enqueueConversation(key, async () => {
         const status = await this.requireRest().sendMessage(
