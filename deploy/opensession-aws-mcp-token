@@ -28,7 +28,7 @@ check_config() {
   [ -x "$systemd_run" ]
   [ -x "$aws_bin" ]
   [ "$(stat -Lc %U "$aws_bin")" = "root" ]
-  [ $((0$(stat -Lc %a "$aws_bin") & 22)) -eq 0 ]
+  [ $((0$(stat -Lc %a "$aws_bin") & 022)) -eq 0 ]
 }
 
 check_config || {

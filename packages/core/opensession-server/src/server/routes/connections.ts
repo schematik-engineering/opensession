@@ -251,6 +251,7 @@ export async function handleConnectionsRoutes(
   if (path === "/api/connections/mcp-oauth" && req.method === "GET") {
     const {
       cachedOauthCapable,
+      mcpOauthStartBlocker,
       mcpOauthStatus,
       oauthPresetFor,
       supportsManualToken,
@@ -274,16 +275,18 @@ export async function handleConnectionsRoutes(
             ...status,
             managed,
           };
+        const connectError = mcpOauthStartBlocker(name, oauthTarget);
         const capable =
-          connected || oauthPresetFor(name)
+          !connectError && (connected || oauthPresetFor(name))
             ? true
-            : oauthTarget
+            : !connectError && oauthTarget
               ? cachedOauthCapable(oauthTarget)
               : false;
         return {
           name,
           capable: capable ?? null,
-          manualToken: supportsManualToken(name) && !!cfg?.url,
+          manualToken: supportsManualToken(name, cfg?.url) && !!cfg?.url,
+          ...(connectError ? { connectError } : {}),
           ...status,
         };
       },
@@ -314,6 +317,7 @@ export async function handleConnectionsRoutes(
     const {
       mcpOauthStatus,
       isOauthCapable,
+      mcpOauthStartBlocker,
       oauthPresetFor,
       supportsManualToken,
     } = await import("../mcp-oauth");
@@ -336,13 +340,16 @@ export async function handleConnectionsRoutes(
         managed: awsMcpManagedAuth(oauthTarget),
       });
     }
+    const connectError = mcpOauthStartBlocker(name, oauthTarget);
     const capable =
-      !!oauthPresetFor(name) ||
-      (oauthTarget ? await isOauthCapable(oauthTarget) : false);
+      !connectError &&
+      (!!oauthPresetFor(name) ||
+        (oauthTarget ? await isOauthCapable(oauthTarget) : false));
     return Response.json({
       ...status,
       capable,
-      manualToken: supportsManualToken(name) && !!cfg?.url,
+      manualToken: supportsManualToken(name, cfg?.url) && !!cfg?.url,
+      ...(connectError ? { connectError } : {}),
     });
   }
   if (mcpOauthMatch && req.method === "DELETE") {
@@ -365,7 +372,8 @@ export async function handleConnectionsRoutes(
     const cfg = (await import("../connections")).readMcpConfig().mcpServers[
       name
     ] as { url?: string; oauthUrl?: string } | undefined;
-    const { startMcpOauthFlow, oauthPresetFor } = await import("../mcp-oauth");
+    const { startMcpOauthFlow, mcpOauthStartBlocker, oauthPresetFor } =
+      await import("../mcp-oauth");
     const oauthTarget = cfg?.url || cfg?.oauthUrl;
     if (isAwsMcpIamServer(oauthTarget))
       return Response.json(
@@ -375,6 +383,9 @@ export async function handleConnectionsRoutes(
         },
         { status: 409 },
       );
+    const connectError = mcpOauthStartBlocker(name, oauthTarget);
+    if (connectError)
+      return Response.json({ error: connectError }, { status: 409 });
     if (!oauthTarget && !oauthPresetFor(name))
       return Response.json(
         { error: "Not an OAuth-capable MCP server" },

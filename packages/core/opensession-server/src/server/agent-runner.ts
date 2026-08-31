@@ -555,12 +555,6 @@ async function* runAgentInner(opts: RunAgentOpts): AsyncGenerator<StreamEvent> {
   const wantsBestCodex = requestedModel?.id === BEST_AVAILABLE_CODEX_MODEL;
   const primaryModel =
     workspacePreset?.model || resolveConcreteModel(opts.model);
-  if (["grok", "cursor"].includes(providerFor(primaryModel))) {
-    // Subscription-backed ACP providers fail closed on their own account.
-    // Never turn a SuperGrok/Cursor exhaustion into separately billed API use.
-    yield* runOnModel(opts, primaryModel);
-    return;
-  }
   const preferredFallback = /^(?:claude|codex)\//.test(primaryModel)
     ? "none"
     : wantsBestCodex

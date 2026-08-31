@@ -114,6 +114,7 @@ describe("executor deployment", () => {
     expect(helper).toContain('set -- "$systemd_run"');
     expect(awsMcpHelper).toContain("signin create-oauth2-token-with-iam");
     expect(awsMcpHelper).toContain("--resource aws-mcp.amazonaws.com");
+    expect(awsMcpHelper).toContain("& 022)) -eq 0 ]");
     expect(awsMcpHelper).not.toContain('exec "$@"');
   });
 

@@ -163,6 +163,33 @@ export function oauthPresetFor(name: string): OauthPreset | undefined {
     : undefined;
 }
 
+/** Providers that publish OAuth metadata but cannot complete Open Session's
+ * dynamic-client flow. Keep these out of the generic Connect action so a
+ * known configuration constraint is not surfaced as an origin 502. */
+export function mcpOauthStartBlocker(
+  name: string,
+  serverUrl?: string,
+): string | undefined {
+  let host = "";
+  try {
+    host = new URL(serverUrl || "").hostname.toLowerCase();
+  } catch {}
+  const provider =
+    host === "mcp.fal.ai"
+      ? "fal"
+      : host === "api.x.com"
+        ? "x"
+        : name.trim().toLowerCase();
+  switch (provider) {
+    case "fal":
+      return "Fal's hosted MCP server currently uses API keys, not OAuth. Choose Connect with API token.";
+    case "x":
+      return "X requires a pre-registered OAuth client and does not allow dynamic client registration.";
+    default:
+      return undefined;
+  }
+}
+
 function callbackUrl(): string {
   return `${configuredServer().publicBaseUrl}/api/connections/mcp-oauth/callback`;
 }
@@ -776,6 +803,39 @@ const TOKEN_VALIDATORS: Record<
   string,
   (token: string) => Promise<{ ok: true } | { ok: false; error: string }>
 > = {
+  fal: async (token) => {
+    const res = await fetch("https://mcp.fal.ai/mcp", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json, text/event-stream",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-03-26",
+          capabilities: {},
+          clientInfo: { name: "Open Session", version: "1" },
+        },
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (res.status === 401 || res.status === 403)
+      return {
+        ok: false,
+        error:
+          "Fal rejected that key. Create an API-scoped key in Fal and paste it again.",
+      };
+    if (!res.ok)
+      return {
+        ok: false,
+        error: `Could not check the key with Fal (HTTP ${res.status})`,
+      };
+    return { ok: true };
+  },
   vercel: async (token) => {
     const res = await fetch("https://api.vercel.com/v2/user", {
       headers: { Authorization: `Bearer ${token}` },
@@ -830,16 +890,25 @@ const TOKEN_VALIDATORS: Record<
 };
 
 /** Can this server be connected by pasting a personal API token? */
-export function supportsManualToken(name: string): boolean {
-  return !!TOKEN_VALIDATORS[name];
+function tokenProvider(name: string, serverUrl?: string): string {
+  try {
+    if (new URL(serverUrl || "").hostname.toLowerCase() === "mcp.fal.ai")
+      return "fal";
+  } catch {}
+  return name.trim().toLowerCase();
+}
+
+export function supportsManualToken(name: string, serverUrl?: string): boolean {
+  return !!TOKEN_VALIDATORS[tokenProvider(name, serverUrl)];
 }
 
 /** Validate a provider token without persisting it. */
 export async function validateManualMcpToken(
   name: string,
   token: string,
+  serverUrl?: string,
 ): Promise<void> {
-  const validate = TOKEN_VALIDATORS[name];
+  const validate = TOKEN_VALIDATORS[tokenProvider(name, serverUrl)];
   if (!validate) throw new Error(`${name} has no token connect flow`);
   const checked = await validate(token);
   if (!checked.ok) throw new Error(checked.error);
@@ -852,7 +921,7 @@ export async function saveManualMcpGrant(
   token: string,
   opts: { connectedBy?: string; forUser?: string } = {},
 ): Promise<void> {
-  await validateManualMcpToken(name, token);
+  await validateManualMcpToken(name, token, serverUrl);
   const teamName = opts.forUser
     ? resolveTeammate(opts.forUser)?.name
     : undefined;
