@@ -220,6 +220,17 @@ export function oauthPresetFor(name: string): OauthPreset | undefined {
     : undefined;
 }
 
+const GOOGLE_WORKSPACE_MCP_HOSTS = new Set([
+  "gmailmcp.googleapis.com",
+  "drivemcp.googleapis.com",
+  "docsmcp.googleapis.com",
+  "sheetsmcp.googleapis.com",
+  "slidesmcp.googleapis.com",
+  "calendarmcp.googleapis.com",
+  "chatmcp.googleapis.com",
+  "people.googleapis.com",
+]);
+
 /** Providers that publish OAuth metadata but cannot complete Open Session's
  * dynamic-client flow. Keep these out of the generic Connect action so a
  * known configuration constraint is not surfaced as an origin 502. */
@@ -239,8 +250,8 @@ export function mcpOauthStartBlocker(
         ? "x"
         : host === "api.githubcopilot.com"
           ? "github"
-          : host === "drivemcp.googleapis.com"
-            ? "google-drive"
+          : GOOGLE_WORKSPACE_MCP_HOSTS.has(host)
+            ? "google-workspace"
             : name.trim().toLowerCase();
   switch (provider) {
     case "fal":
@@ -250,10 +261,10 @@ export function mcpOauthStartBlocker(
       return "X requires a pre-registered OAuth client and does not allow dynamic client registration.";
     case "github":
       return "GitHub MCP uses your connected GitHub account. Connect GitHub in Accounts first.";
-    case "google-drive":
+    case "google-workspace":
       if (resolveMcpOauthClient(oauthClientConfig)?.clientSecret)
         return undefined;
-      return `Google Drive requires a Web application OAuth client with ${callbackUrl()} registered as an authorized redirect URI.`;
+      return `Google Workspace requires a Web application OAuth client with ${callbackUrl()} registered as an authorized redirect URI.`;
     default:
       return undefined;
   }
@@ -572,6 +583,10 @@ export async function startMcpOauthFlow(
   // permits omitting the parameter when the resource publishes no scopes.
   if (auth.scopes?.length) url.searchParams.set("scope", auth.scopes.join(" "));
   url.searchParams.set("prompt", "consent");
+  // Google's default is online-only, which omits the refresh token this
+  // long-lived MCP grant needs after its one-hour access token expires.
+  if (url.hostname.toLowerCase() === "accounts.google.com")
+    url.searchParams.set("access_type", "offline");
   if (auth.resource) url.searchParams.set("resource", auth.resource);
   return { url: url.toString() };
 }
