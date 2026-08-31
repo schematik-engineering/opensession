@@ -122,6 +122,15 @@ async function runPrompt(id: number, params: any): Promise<void> {
   const text = String(
     params.prompt?.find((part: any) => part.type === "text")?.text || "",
   );
+  const retryAfterDenied = text.includes(
+    "The previous ACP tool request was denied",
+  );
+  const permissionCommand =
+    text === "unsafe then safe"
+      ? "git fetch origin --prune && git status --short"
+      : retryAfterDenied
+        ? "git status --short"
+        : "credential boundary probe";
   const omitMessageId = text.includes("without message ids");
   if (text === "malformed") {
     process.stdout.write("this is not json\n");
@@ -156,7 +165,7 @@ async function runPrompt(id: number, params: any): Promise<void> {
     name: "terminal",
     kind: "execute",
     status: "pending",
-    rawInput: { command: "credential boundary probe" },
+    rawInput: { command: permissionCommand },
   });
   const permission = await request("session/request_permission", {
     sessionId,
@@ -164,13 +173,14 @@ async function runPrompt(id: number, params: any): Promise<void> {
       toolCallId: "tool-1",
       title: "Check credential boundary",
       name: "terminal",
+      rawInput: { command: permissionCommand },
     },
     options: [
       { optionId: "allow", name: "Allow once", kind: "allow_once" },
       { optionId: "deny", name: "Deny", kind: "reject_once" },
     ],
   });
-  let terminalOutput = `permission:${permission?.outcome?.outcome || "unknown"}`;
+  let terminalOutput = `permission:${permission?.outcome?.optionId || permission?.outcome?.outcome || "unknown"}`;
   if (provider === "grok" && permission?.outcome?.optionId === "allow") {
     const created = await request("terminal/create", {
       sessionId,
@@ -202,6 +212,14 @@ async function runPrompt(id: number, params: any): Promise<void> {
     status: "completed",
     rawOutput: terminalOutput,
   });
+  if (
+    (text === "unsafe then safe" || text === "human denial") &&
+    permission?.outcome?.optionId !== "allow"
+  ) {
+    promptRequests.delete(sessionId);
+    result(id, { stopReason: "cancelled" });
+    return;
+  }
   update(sessionId, {
     sessionUpdate: "agent_message_chunk",
     ...(omitMessageId ? {} : { messageId: "message-1" }),

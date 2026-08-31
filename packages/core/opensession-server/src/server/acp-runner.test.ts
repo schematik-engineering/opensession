@@ -319,6 +319,45 @@ describe("ACP runner", () => {
     });
   });
 
+  test("continues a headless ask turn after denying an unsafe terminal command", async () => {
+    stageAuth();
+    const runOpts = { ...opts("unsafe then safe"), mode: "ask" as const };
+
+    const events = await collect(runAcp(runOpts, "grok/grok-4.6"));
+
+    expect(events.filter((event) => event.type === "tool_use")).toHaveLength(2);
+    expect(
+      events
+        .filter((event) => event.type === "tool_result")
+        .map((event) => event.content),
+    ).toEqual(["permission:deny", "credential-scrubbed"]);
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      provider: "grok",
+      result: "hello from ACP",
+    });
+  });
+
+  test("does not continue after a human denies an ask-mode terminal command", async () => {
+    stageAuth();
+    const runOpts = {
+      ...opts("human denial"),
+      mode: "ask" as const,
+      onAskUser: async () => ({
+        behavior: "deny" as const,
+        message: "Denied for test",
+      }),
+    };
+
+    const events = await collect(runAcp(runOpts, "grok/grok-4.6"));
+
+    expect(events.filter((event) => event.type === "tool_use")).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({
+      type: "error",
+      content: "grok run cancelled",
+    });
+  });
+
   test("turn timeout cancels and reports a deterministic terminal error", async () => {
     stageAuth();
     process.env.OPENSESSION_ACP_TURN_TIMEOUT_MS = "50";
