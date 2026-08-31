@@ -294,18 +294,26 @@ export async function refreshAcpAuthSource(
 }
 
 /**
- * A Docker launcher projects credentials into the private run directory. The
- * ACP runner consumes and unlinks these before the first model-visible prompt.
+ * A detached-run launcher projects credentials into the private run directory.
+ * The ACP runner consumes and unlinks these before the first model-visible
+ * prompt.
  */
 export function projectedAcpBootstrapFiles(): {
   auth: string;
   agentId: string;
+  accountId?: string;
 } | null {
   const journal = process.env.OPENSESSION_RUN_JOURNAL;
   if (!journal) return null;
   const runDir = dirname(journal);
+  let accountId: string | undefined;
+  try {
+    const value = readFileSync(join(runDir, "acp-account-id"), "utf8").trim();
+    if (/^[a-z0-9-]{1,100}$/i.test(value)) accountId = value;
+  } catch {}
   return {
     auth: join(runDir, "acp-auth.json"),
     agentId: join(runDir, "acp-agent-id"),
+    ...(accountId ? { accountId } : {}),
   };
 }

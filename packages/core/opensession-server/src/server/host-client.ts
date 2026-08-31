@@ -92,6 +92,7 @@ import {
   launchHostUnitDirect,
   stopHostUnitDirect,
 } from "../executor/host-unit";
+import { projectAcpRunCredentials } from "./acp-projection";
 
 const HOSTED_KERNEL_RETRY_ATTEMPTS = 3;
 // The actor client's sync breaker stays open for ten seconds after a timeout.
@@ -721,6 +722,11 @@ async function spawnHostRun(
  * opensession.service deliberately denies.
  */
 async function launchHostUnit(hostId: string, dir: string): Promise<void> {
+  const spec = readJsonSafe<RunHostSpec>(`${dir}/${HOST_SPEC_NAME}`);
+  if (!spec) throw new HostLaunchNotDispatchedError("run host spec is invalid");
+  const projection = await projectAcpRunCredentials(spec, dir);
+  if (projection.kind === "unavailable")
+    throw new HostLaunchNotDispatchedError(projection.message);
   const specHash = new Bun.CryptoHasher("sha256")
     .update(readFileSync(`${dir}/${HOST_SPEC_NAME}`))
     .digest("hex");

@@ -111,7 +111,6 @@
 
 import {
   chmodSync,
-  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -133,7 +132,7 @@ import {
 } from "../run-journal";
 import { shouldPersistModelSwitch, type StreamEvent } from "../run-events";
 import { recoveryKind, restartContinuationPrompt } from "../agent-runner";
-import { modelSupportsSteer, providerFor } from "../models";
+import { modelSupportsSteer } from "../models";
 import {
   hostRunBusy,
   hostSteer,
@@ -167,12 +166,7 @@ import { parseCsRemote } from "../codestorage/remote";
 import { redactUrl } from "../shared/redact";
 import { createWorkloadIdentityEnv } from "../workload-identity";
 import { loadWorkspaceSeedFiles } from "../workspace-seed-files";
-import { isAcpProvider, refreshAcpAuthSource } from "../acp-config";
-import { pickAcpAccount } from "../acp-accounts";
-import {
-  acpSessionExhaustedAccounts,
-  readAcpAccountBinding,
-} from "../acp-state";
+import { projectAcpRunCredentials } from "../acp-projection";
 import {
   REPOS,
   getRepo,
@@ -1217,48 +1211,14 @@ function makeDockerLauncher(
       // written to `dir` — respawns included) and point the host at the run-ws
       // + rpc-ws routes instead of socket paths.
       const spec = readJsonSafe<RunHostSpec>(`${dir}/${HOST_SPEC_NAME}`);
-      const acpProvider = providerFor(spec?.model);
-      const projectedAcpPaths: string[] = [];
-      let projectedAcpAccountId: string | undefined;
-      if (isAcpProvider(acpProvider)) {
-        const account = pickAcpAccount(acpProvider, {
-          exclude: spec?.osSessionId
-            ? acpSessionExhaustedAccounts(spec.osSessionId, acpProvider)
-            : undefined,
-          sessionKey: spec?.accountAffinityKey || spec?.osSessionId,
-          accountId:
-            spec?.accountId ||
-            (spec?.osSessionId
-              ? readAcpAccountBinding(spec.osSessionId, acpProvider)
-              : undefined),
-          strict: spec?.accountStrict,
-          user: spec?.user,
-        });
-        if (!account)
-          throw new HostLaunchNotDispatchedError(
-            `${acpProvider} has no usable subscription account`,
-          );
-        projectedAcpAccountId = account.id;
-        const authSource = await refreshAcpAuthSource(
-          acpProvider,
-          account.authPath,
-        );
-        if (!existsSync(authSource))
-          throw new HostLaunchNotDispatchedError(
-            `${acpProvider} subscription authentication is not configured`,
-          );
-        const authDestination = `${dir}/acp-auth.json`;
-        copyFileSync(authSource, authDestination);
-        chmodSync(authDestination, 0o600);
-        projectedAcpPaths.push(authDestination);
-        const agentIdSource = account.agentIdPath;
-        if (agentIdSource && existsSync(agentIdSource)) {
-          const agentIdDestination = `${dir}/acp-agent-id`;
-          copyFileSync(agentIdSource, agentIdDestination);
-          chmodSync(agentIdDestination, 0o600);
-          projectedAcpPaths.push(agentIdDestination);
-        }
-      }
+      if (!spec)
+        throw new HostLaunchNotDispatchedError("run host spec is invalid");
+      const projection = await projectAcpRunCredentials(spec, dir);
+      if (projection.kind === "unavailable")
+        throw new HostLaunchNotDispatchedError(projection.message);
+      const projectedAcpPaths = projection.paths;
+      const projectedAcpAccountId =
+        projection.kind === "ready" ? projection.accountId : undefined;
       const workloadIdentityEnv = createWorkloadIdentityEnv({
         sandboxId: container,
         provider: "docker",

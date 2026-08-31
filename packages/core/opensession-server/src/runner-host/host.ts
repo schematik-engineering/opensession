@@ -32,6 +32,7 @@ const projectedGithubAuthPath = process.env.OPENSESSION_GITHUB_RUN_AUTH_FILE;
 const projectedAcpAuthPaths = [
   `${hostDir}/acp-auth.json`,
   `${hostDir}/acp-agent-id`,
+  `${hostDir}/acp-account-id`,
 ];
 const cleanupProjectedGithubAuth = () => {
   if (
