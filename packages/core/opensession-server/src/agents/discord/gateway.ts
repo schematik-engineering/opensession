@@ -56,6 +56,7 @@ export class DiscordGateway {
   private heartbeatAcked = true;
   private reconnectAttempt = 0;
   private resumeOnNextConnect = true;
+  private dispatchQueue = Promise.resolve();
   private state: DiscordGatewayHealth = {
     status: "stopped",
     ready: false,
@@ -89,6 +90,10 @@ export class DiscordGateway {
   private connect(): void {
     if (this.stopped || this.state.status === "fatal") return;
     this.clearConnectionTimers();
+    // A failed dispatch poisons only its WebSocket connection. Later events on
+    // that socket must not overtake it, while a reconnect starts a fresh chain
+    // and asks Discord to replay from the last durable sequence.
+    this.dispatchQueue = Promise.resolve();
     // Heartbeat ACK state belongs to one WebSocket connection. Carrying an
     // unacked heartbeat across reconnect would make the new socket close on
     // its first heartbeat tick before Discord can ACK it.
@@ -130,16 +135,20 @@ export class DiscordGateway {
   private async onMessage(raw: unknown): Promise<void> {
     const payload = JSON.parse(await textMessage(raw)) as GatewayPayload;
     this.state.lastEventAt = new Date().toISOString();
-    if (typeof payload.s === "number") {
-      const checkpoint = this.options.checkpoint();
-      this.options.saveCheckpoint({ ...checkpoint, seq: payload.s });
-      this.scheduleCheckpointSave();
-    }
 
     switch (payload.op) {
-      case 0:
-        await this.onDispatch(payload);
+      case 0: {
+        const dispatch = this.dispatchQueue.then(async () => {
+          await this.onDispatch(payload);
+          this.saveSequence(payload.s);
+          if (payload.t === "READY" || payload.t === "RESUMED") {
+            this.flushCheckpoint();
+          }
+        });
+        this.dispatchQueue = dispatch;
+        await dispatch;
         return;
+      }
       case 1:
         this.sendHeartbeat();
         return;
@@ -164,6 +173,7 @@ export class DiscordGateway {
         this.state.lastHeartbeatAckAt = new Date().toISOString();
         return;
     }
+    this.saveSequence(payload.s);
   }
 
   private onHello(data: { heartbeat_interval?: number } | undefined): void {
@@ -229,13 +239,10 @@ export class DiscordGateway {
     const name = payload.t || "";
     if (name === "READY") {
       const data = payload.d || {};
-      const checkpoint = this.options.checkpoint();
       this.options.saveCheckpoint({
-        ...checkpoint,
         sessionId: data.session_id,
         resumeGatewayUrl: data.resume_gateway_url,
       });
-      this.flushCheckpoint();
       this.reconnectAttempt = 0;
       this.state = {
         ...this.state,
@@ -254,6 +261,13 @@ export class DiscordGateway {
       };
     }
     await this.options.onDispatch(name, payload.d);
+  }
+
+  private saveSequence(sequence: number | null | undefined): void {
+    if (typeof sequence !== "number") return;
+    const checkpoint = this.options.checkpoint();
+    this.options.saveCheckpoint({ ...checkpoint, seq: sequence });
+    this.scheduleCheckpointSave();
   }
 
   private onClose(code: number, reason: string): void {

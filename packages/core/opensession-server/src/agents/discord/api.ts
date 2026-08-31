@@ -18,6 +18,7 @@ export interface DiscordChannel {
   name?: string;
   parent_id?: string | null;
   guild_id?: string;
+  owner_id?: string;
 }
 
 export interface DiscordMessageResult {
@@ -50,18 +51,36 @@ function errorLabel(body: unknown): string {
   return `${message}${code}`;
 }
 
+function retryableDiscordError(message: string): Error {
+  return Object.assign(new Error(message), { retryable: true });
+}
+
 export function splitDiscordMessage(text: string, limit = 1_900): string[] {
   const value = text.trim() || "(No text response.)";
   const chunks: string[] = [];
-  let rest = value;
-  while (rest.length > limit) {
-    let cut = rest.lastIndexOf("\n", limit);
-    if (cut < Math.floor(limit / 2)) cut = rest.lastIndexOf(" ", limit);
-    if (cut < Math.floor(limit / 2)) cut = limit;
-    chunks.push(rest.slice(0, cut).trimEnd());
-    rest = rest.slice(cut).trimStart();
+  let remaining = value;
+  let openFence = "";
+  while (remaining.length) {
+    const prefix = openFence ? `${openFence}\n` : "";
+    // Reserve enough room to close a code fence opened by this chunk. Each
+    // Discord message then remains valid Markdown even when an answer splits.
+    const room = limit - prefix.length - 4;
+    let end = Math.min(room, remaining.length);
+    if (end < remaining.length) {
+      const newline = remaining.lastIndexOf("\n", end);
+      const space = remaining.lastIndexOf(" ", end);
+      const natural = Math.max(newline, space);
+      if (natural > Math.floor(room * 0.55)) end = natural;
+    }
+    let body = remaining.slice(0, end).trimEnd();
+    remaining = remaining.slice(end).trimStart();
+    const fences = [...body.matchAll(/```([^\n`]*)/gu)];
+    if (fences.length % 2 === 1) {
+      openFence = openFence ? "" : `\`\`\`${fences.at(-1)?.[1] ?? ""}`;
+    }
+    if (openFence && remaining) body = `${body}\n\`\`\``;
+    chunks.push(`${prefix}${body}`.slice(0, limit));
   }
-  if (rest) chunks.push(rest);
   return chunks;
 }
 
@@ -79,15 +98,28 @@ export class DiscordRest {
     auth = true,
   ): Promise<T> {
     for (let attempt = 0; attempt < 4; attempt++) {
-      const response = await this.fetchImpl(`${API_BASE}${path}`, {
-        method,
-        headers: {
-          ...(auth ? { Authorization: `Bot ${this.token}` } : {}),
-          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-          "User-Agent": "OpenSession-Discord (https://opensession.com, 1)",
-        },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      });
+      let response: Response;
+      try {
+        response = await this.fetchImpl(`${API_BASE}${path}`, {
+          method,
+          headers: {
+            ...(auth ? { Authorization: `Bot ${this.token}` } : {}),
+            ...(body === undefined
+              ? {}
+              : { "Content-Type": "application/json" }),
+            "User-Agent": "OpenSession-Discord (https://opensession.com, 1)",
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        });
+      } catch (error) {
+        if (attempt < 3) {
+          await delay(250 * 2 ** attempt);
+          continue;
+        }
+        throw retryableDiscordError(
+          `Discord API ${method} failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       if (response.status === 429) {
         const rate = (await response.json().catch(() => ({}))) as {
           retry_after?: number;
@@ -101,14 +133,20 @@ export class DiscordRest {
       }
       if (!response.ok) {
         const detail = await response.json().catch(() => ({}));
-        throw new Error(
-          `Discord API ${method} failed (${response.status}): ${errorLabel(detail)}`,
-        );
+        const message = `Discord API ${method} failed (${response.status}): ${errorLabel(detail)}`;
+        if (response.status >= 500) {
+          if (attempt < 3) {
+            await delay(250 * 2 ** attempt);
+            continue;
+          }
+          throw retryableDiscordError(message);
+        }
+        throw new Error(message);
       }
       if (response.status === 204) return undefined as T;
       return (await response.json()) as T;
     }
-    throw new Error(`Discord API ${method} remained rate limited`);
+    throw retryableDiscordError(`Discord API ${method} remained rate limited`);
   }
 
   currentBot(): Promise<DiscordUser> {
@@ -125,6 +163,20 @@ export class DiscordRest {
 
   channel(id: string): Promise<DiscordChannel> {
     return this.request("GET", `/channels/${id}`);
+  }
+
+  message<T>(channelId: string, messageId: string): Promise<T> {
+    return this.request("GET", `/channels/${channelId}/messages/${messageId}`);
+  }
+
+  messages<T>(
+    channelId: string,
+    options: { limit?: number; before?: string } = {},
+  ): Promise<T[]> {
+    const query = new URLSearchParams();
+    query.set("limit", String(Math.max(1, Math.min(options.limit || 50, 100))));
+    if (options.before) query.set("before", options.before);
+    return this.request("GET", `/channels/${channelId}/messages?${query}`);
   }
 
   async syncGuildCommand(
@@ -158,10 +210,12 @@ export class DiscordRest {
     channelId: string,
     content: string,
     replyTo?: string,
+    nonce?: string,
   ): Promise<DiscordMessageResult> {
     return this.request("POST", `/channels/${channelId}/messages`, {
       content: content.slice(0, 2_000),
       allowed_mentions: { parse: [], replied_user: false },
+      ...(nonce ? { nonce, enforce_nonce: true } : {}),
       ...(replyTo
         ? {
             message_reference: {

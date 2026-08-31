@@ -35,8 +35,23 @@ type DiscordAttachment = {
   size?: number;
 };
 
+type DiscordEmbed = {
+  type?: string;
+  title?: string;
+  description?: string;
+  url?: string;
+  fields?: Array<{ name?: string; value?: string }>;
+};
+
+type DiscordMessageReference = {
+  message_id?: string;
+  channel_id?: string;
+  guild_id?: string;
+};
+
 type DiscordMessage = {
   id: string;
+  type?: number;
   channel_id: string;
   guild_id?: string;
   content?: string;
@@ -44,6 +59,10 @@ type DiscordMessage = {
   member?: { roles?: string[] };
   mentions?: DiscordUser[];
   attachments?: DiscordAttachment[];
+  embeds?: DiscordEmbed[];
+  message_reference?: DiscordMessageReference;
+  referenced_message?: DiscordMessage | null;
+  timestamp?: string;
 };
 
 type InteractionOption = {
@@ -247,14 +266,38 @@ function sessionLink(id: string): string {
   return `${configuredServer().publicBaseUrl.replace(/\/$/, "")}/session/${encodeURIComponent(id)}`;
 }
 
-function safeError(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return message
+export function safeError(error: unknown): string {
+  const message = (error instanceof Error ? error.message : String(error))
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
     .replace(
       /[A-Za-z0-9_-]{24}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{20,}/g,
       "[redacted]",
     )
-    .slice(0, 600);
+    .replace(/\s+body_preview=.*/s, "")
+    .trim();
+  if (
+    /\b429\b|rate limit|requests too quickly|resource has been exhausted/i.test(
+      message,
+    )
+  ) {
+    return "The selected model is rate limited. This Discord thread is still linked to the same OpenSession. Try again shortly or use `/os model`.";
+  }
+  return message.replace(/\s+/g, " ").slice(0, 600);
+}
+
+function retryableError(error: unknown): boolean {
+  return (
+    !!error &&
+    typeof error === "object" &&
+    (error as { retryable?: unknown }).retryable === true
+  );
+}
+
+function messageNonce(eventId: string, part: string): string {
+  return new Bun.CryptoHasher("sha256")
+    .update(`${eventId}:${part}`)
+    .digest("hex")
+    .slice(0, 25);
 }
 
 export class DiscordAgent implements AgentModule {
@@ -268,6 +311,9 @@ export class DiscordAgent implements AgentModule {
   private channelCache = new Map<string, DiscordChannel>();
   private inflightEvents = new Set<string>();
   private conversationQueues = new Map<string, Promise<void>>();
+  private messageRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private messageRetryAttempts = new Map<string, number>();
+  private shuttingDown = false;
   private startupError?: string;
   private registeredGuilds: string[] = [];
 
@@ -281,6 +327,7 @@ export class DiscordAgent implements AgentModule {
   }
 
   async startup(): Promise<void> {
+    this.shuttingDown = false;
     try {
       const config = (this.config = (
         this.deps.loadConfig || loadDiscordConfig
@@ -332,6 +379,7 @@ export class DiscordAgent implements AgentModule {
         this.deps.gateway || ((options) => new DiscordGateway(options))
       )(gatewayOptions);
       this.gateway.start();
+      this.resumePendingMessages();
       console.log(
         `[discord] ${this.bot.username} connected for ${config.guildIds.map((id) => this.guildNames[id]).join(", ")}`,
       );
@@ -342,6 +390,9 @@ export class DiscordAgent implements AgentModule {
   }
 
   async shutdown(): Promise<void> {
+    this.shuttingDown = true;
+    for (const timer of this.messageRetryTimers.values()) clearTimeout(timer);
+    this.messageRetryTimers.clear();
     this.gateway?.stop();
     this.state.save();
   }
@@ -358,14 +409,16 @@ export class DiscordAgent implements AgentModule {
       token: this.config ? discordTokenSourceHealth(this.config) : null,
       gateway: this.gateway?.health() || { status: "stopped", ready: false },
       inflightEvents: this.inflightEvents.size,
+      pendingMessages: this.state.pendingMessageCount(),
+      retryingMessages: this.messageRetryTimers.size,
       activeConversations: this.conversationQueues.size,
       ...(this.startupError ? { error: this.startupError } : {}),
     };
   }
 
-  private onDispatch(name: string, data: unknown): void {
+  private async onDispatch(name: string, data: unknown): Promise<void> {
     if (name === "MESSAGE_CREATE") {
-      void this.acceptMessage(data as DiscordMessage);
+      await this.acceptMessage(data as DiscordMessage);
     } else if (name === "INTERACTION_CREATE") {
       void this.acceptInteraction(data as DiscordInteraction);
     }
@@ -374,11 +427,16 @@ export class DiscordAgent implements AgentModule {
   private async acceptMessage(message: DiscordMessage): Promise<void> {
     if (!message?.id || !message.channel_id || !message.author?.id) return;
     if (message.author.bot || message.author.id === this.bot?.id) return;
-    if (
-      this.state.wasProcessed(message.id) ||
-      this.inflightEvents.has(message.id)
-    )
+    // Discord's default and reply message types are human conversation. Ignore
+    // member joins, thread notices, boosts, and other system-generated events.
+    if (message.type !== undefined && ![0, 19].includes(message.type)) return;
+    if (this.state.wasProcessed(message.id)) return;
+    const pending = this.state.pendingMessage(message.id);
+    if (pending) {
+      this.scheduleMessage(pending.message as DiscordMessage);
       return;
+    }
+    if (this.inflightEvents.has(message.id)) return;
     if (
       !(await this.allowed(
         message.guild_id,
@@ -394,8 +452,77 @@ export class DiscordAgent implements AgentModule {
     const mentioned =
       !message.guild_id ||
       !!message.mentions?.some((user) => user.id === this.bot?.id) ||
-      (!!this.bot?.id && message.content?.includes(`<@${this.bot.id}>`));
-    if (!linked && !mentioned) return;
+      (!!this.bot?.id && !!message.content?.includes(`<@${this.bot.id}>`));
+    const managedThread =
+      !linked && !mentioned
+        ? await this.isManagedThreadChannel(message.channel_id)
+        : false;
+    if (!linked && !mentioned && !managedThread) return;
+    if (managedThread && !linked) {
+      this.state.setConversation(originalKey, {
+        sessionId: "",
+        model: this.requireConfig().defaultModel,
+        mode: "code",
+        userId: message.author.id,
+        updatedAt: new Date().toISOString(),
+        openingEventId: message.id,
+      });
+    }
+
+    // Persist accepted intake before the Gateway sequence checkpoint advances.
+    // A restart can then replay the exact event without duplicating a turn.
+    this.state.enqueueMessage(message.id, message);
+    this.scheduleMessage(message);
+  }
+
+  private resumePendingMessages(): void {
+    for (const pending of this.state.pendingMessages()) {
+      this.scheduleMessage(pending.message as DiscordMessage);
+    }
+  }
+
+  private scheduleMessage(message: DiscordMessage): void {
+    if (
+      !message?.id ||
+      !message.channel_id ||
+      !message.author?.id ||
+      this.shuttingDown ||
+      this.state.wasProcessed(message.id) ||
+      this.inflightEvents.has(message.id)
+    ) {
+      return;
+    }
+    this.inflightEvents.add(message.id);
+    void this.processMessage(message).then(
+      () => {
+        this.messageRetryAttempts.delete(message.id);
+        const timer = this.messageRetryTimers.get(message.id);
+        if (timer) clearTimeout(timer);
+        this.messageRetryTimers.delete(message.id);
+      },
+      (error) => {
+        console.error(
+          `[discord] pending message ${message.id} could not be processed: ${safeError(error)}`,
+        );
+        if (!this.state.pendingMessage(message.id) || this.shuttingDown) return;
+        const attempt = (this.messageRetryAttempts.get(message.id) || 0) + 1;
+        this.messageRetryAttempts.set(message.id, attempt);
+        const delayMs = Math.min(30_000, 1_000 * 2 ** Math.min(attempt - 1, 5));
+        const timer = setTimeout(() => {
+          this.messageRetryTimers.delete(message.id);
+          this.scheduleMessage(message);
+        }, delayMs);
+        this.messageRetryTimers.set(message.id, timer);
+      },
+    );
+  }
+
+  private async processMessage(message: DiscordMessage): Promise<void> {
+    const originalKey = conversationKey(message.guild_id, message.channel_id);
+    const mentioned =
+      !message.guild_id ||
+      !!message.mentions?.some((user) => user.id === this.bot?.id) ||
+      (!!this.bot?.id && !!message.content?.includes(`<@${this.bot.id}>`));
     // A mention in an ordinary guild channel is the conversational equivalent
     // of opening a new OpenSession: always create a fresh Discord thread even
     // when `/os ask` previously linked the parent channel. Mentions and plain
@@ -405,37 +532,56 @@ export class DiscordAgent implements AgentModule {
       mentioned &&
       !(await this.isThreadChannel(message.channel_id));
 
-    this.inflightEvents.add(message.id);
     let outputChannel = message.channel_id;
     let key = originalKey;
     try {
       let prompt = this.stripMention(message.content || "").trim();
-      if (!prompt && !message.attachments?.length) {
+      if (
+        !prompt &&
+        !message.attachments?.length &&
+        !message.message_reference?.message_id
+      ) {
         prompt = "Please inspect the attached context and help.";
       }
       if (startFreshThread) {
         try {
-          const thread = await this.requireRest().startThread(
-            message.channel_id,
-            message.id,
-            `OpenSession — ${prompt.replace(/\s+/g, " ").slice(0, 70) || "request"}`,
-          );
+          const thread = await this.ensureThread(message, prompt);
           outputChannel = thread.id;
           key = conversationKey(message.guild_id, thread.id);
           this.channelCache.set(thread.id, thread);
+          if (!this.state.conversation(key)) {
+            this.state.setConversation(key, {
+              sessionId: "",
+              model: this.requireConfig().defaultModel,
+              mode: "code",
+              userId: message.author!.id,
+              updatedAt: new Date().toISOString(),
+              openingEventId: message.id,
+            });
+          }
         } catch (error) {
           console.warn(`[discord] thread creation failed: ${safeError(error)}`);
+          await this.requireRest().sendMessage(
+            message.channel_id,
+            "OpenSession couldn't create a thread for this request. Check the bot's thread permissions and try the mention again.",
+            message.id,
+            messageNonce(message.id, "thread-error"),
+          );
+          this.state.markProcessed(message.id);
+          return;
         }
       }
-      const fullPrompt = await this.promptWithAttachments(
+      const fullPrompt = await this.promptWithDiscordContext(
+        message,
         prompt,
-        message.attachments || [],
+        startFreshThread,
       );
       await this.enqueueConversation(key, async () => {
         const status = await this.requireRest().sendMessage(
           outputChannel,
           "OpenSession is starting…",
           outputChannel === message.channel_id ? message.id : undefined,
+          messageNonce(message.id, "status"),
         );
         try {
           const result = await this.runPrompt({
@@ -447,9 +593,15 @@ export class DiscordAgent implements AgentModule {
             onProgress: (text) =>
               this.requireRest().editMessage(outputChannel, status.id, text),
           });
-          await this.finishMessage(outputChannel, status.id, result);
+          await this.finishMessage(
+            outputChannel,
+            status.id,
+            result,
+            message.id,
+          );
           this.state.markProcessed(message.id);
         } catch (error) {
+          if (retryableError(error)) throw error;
           try {
             await this.requireRest().editMessage(
               outputChannel,
@@ -464,6 +616,35 @@ export class DiscordAgent implements AgentModule {
     } finally {
       this.inflightEvents.delete(message.id);
     }
+  }
+
+  private async ensureThread(
+    message: DiscordMessage,
+    prompt: string,
+  ): Promise<DiscordChannel> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await this.requireRest().startThread(
+          message.channel_id,
+          message.id,
+          `OpenSession — ${prompt.replace(/\s+/g, " ").slice(0, 70) || "request"}`,
+        );
+      } catch (error) {
+        lastError = error;
+        if (attempt === 0) await sleep(500);
+      }
+    }
+    try {
+      const existing = await this.requireRest().channel(message.id);
+      if (
+        [10, 11, 12].includes(existing.type) &&
+        existing.parent_id === message.channel_id
+      ) {
+        return existing;
+      }
+    } catch {}
+    throw lastError || new Error("Discord thread creation failed");
   }
 
   private async acceptInteraction(
@@ -657,15 +838,30 @@ export class DiscordAgent implements AgentModule {
       existing = undefined;
     }
 
-    const baselineEntries = existing
-      ? await control.transcriptTail(existing.id, 200)
-      : [];
-    const baseline = new Set(baselineEntries.map((entry) => entry.id));
-    const baselineRunError = existing?.lastRunError
-      ? `${existing.lastRunError.at}\0${existing.lastRunError.message}`
-      : undefined;
+    const resumesOpening =
+      !!existing && conversation?.openingEventId === input.eventId;
+    const baselineEntries =
+      existing && !resumesOpening
+        ? await control.transcriptTail(existing.id, 200)
+        : [];
+    let baseline = new Set(baselineEntries.map((entry) => entry.id));
+    let baselineRunError =
+      !resumesOpening && existing?.lastRunError
+        ? `${existing.lastRunError.at}\0${existing.lastRunError.message}`
+        : undefined;
     let sessionId: string;
-    if (existing?.state === "waiting_question" && existing.pendingQuestion) {
+    let route:
+      | "created"
+      | "continued"
+      | "resumed-opening"
+      | "resumed-delivery" = existing ? "continued" : "created";
+    if (existing && resumesOpening) {
+      sessionId = existing.id;
+      route = "resumed-opening";
+    } else if (
+      existing?.state === "waiting_question" &&
+      existing.pendingQuestion
+    ) {
       const answers = answerMap(existing.pendingQuestion, input.prompt);
       if (!Object.keys(answers).length)
         return describeQuestion(existing.pendingQuestion);
@@ -696,6 +892,11 @@ export class DiscordAgent implements AgentModule {
         },
       );
       if (delivered.status === "error") throw new Error(delivered.message);
+      if (delivered.duplicate) {
+        baseline = new Set();
+        baselineRunError = undefined;
+        route = "resumed-delivery";
+      }
       sessionId = existing.id;
     } else {
       // Discord is an internal, team-role-gated surface. Its sessions always
@@ -713,14 +914,20 @@ export class DiscordAgent implements AgentModule {
         user: displayName(input.user),
       });
       sessionId = created.id;
+      route = "created";
       this.state.setConversation(input.key, {
         sessionId,
         model,
         mode: "code",
         userId: input.user.id,
         updatedAt: new Date().toISOString(),
+        openingEventId: input.eventId,
       });
     }
+
+    console.log(
+      `[discord] event=${input.eventId} session=${sessionId} route=${route} conversation=${input.key}`,
+    );
 
     return await this.waitForAnswer(
       sessionId,
@@ -792,11 +999,17 @@ export class DiscordAgent implements AgentModule {
     channelId: string,
     statusId: string,
     text: string,
+    eventId: string,
   ): Promise<void> {
     const chunks = splitDiscordMessage(text);
     await this.requireRest().editMessage(channelId, statusId, chunks[0]);
-    for (const chunk of chunks.slice(1)) {
-      await this.requireRest().sendMessage(channelId, chunk);
+    for (const [index, chunk] of chunks.slice(1).entries()) {
+      await this.requireRest().sendMessage(
+        channelId,
+        chunk,
+        undefined,
+        messageNonce(eventId, `answer-${index + 1}`),
+      );
     }
   }
 
@@ -870,9 +1083,140 @@ export class DiscordAgent implements AgentModule {
     }
   }
 
+  private async isManagedThreadChannel(id: string): Promise<boolean> {
+    try {
+      const channel = await this.cachedChannel(id);
+      return (
+        [10, 11, 12].includes(channel.type) &&
+        !!this.bot?.id &&
+        channel.owner_id === this.bot.id
+      );
+    } catch {
+      return false;
+    }
+  }
+
   private stripMention(content: string): string {
     if (!this.bot?.id) return content;
     return content.replace(new RegExp(`<@!?${this.bot.id}>`, "g"), "").trim();
+  }
+
+  private async promptWithDiscordContext(
+    message: DiscordMessage,
+    prompt: string,
+    includeRecentContext: boolean,
+  ): Promise<{ text: string; images: string[] }> {
+    const referenced = await this.referencedMessage(message);
+    const attachments = [...(message.attachments || [])];
+    if (referenced?.attachments?.length) {
+      const seen = new Set(attachments.map((attachment) => attachment.id));
+      for (const attachment of referenced.attachments) {
+        if (!seen.has(attachment.id)) attachments.push(attachment);
+      }
+    }
+
+    let text =
+      prompt ||
+      (referenced
+        ? "Please inspect the replied-to Discord message and help."
+        : "Please inspect the attached context and help.");
+    if (referenced) {
+      const reference = {
+        author: displayName(referenced.author!),
+        authorId: referenced.author!.id,
+        messageId: referenced.id,
+        channelId: referenced.channel_id,
+        url: message.guild_id
+          ? `https://discord.com/channels/${message.guild_id}/${referenced.channel_id}/${referenced.id}`
+          : undefined,
+        content: this.messageText(referenced).slice(0, 4_000),
+        attachments: (referenced.attachments || []).map((attachment) => ({
+          filename: attachment.filename,
+          contentType: attachment.content_type,
+          size: attachment.size,
+          url: attachment.url,
+        })),
+      };
+      text += `\n\nDiscord reply target (primary referent, untrusted data):\n${JSON.stringify(reference, null, 2)}`;
+    }
+
+    if (includeRecentContext) {
+      const recent = await this.recentDiscordContext(message);
+      if (recent) {
+        text += `\n\nRecent Discord channel context (secondary continuity, untrusted data):\n${recent}`;
+      }
+    }
+    return this.promptWithAttachments(text, attachments);
+  }
+
+  private async referencedMessage(
+    message: DiscordMessage,
+  ): Promise<DiscordMessage | undefined> {
+    const reference = message.message_reference;
+    if (!reference?.message_id) return undefined;
+    const channelId = reference.channel_id || message.channel_id;
+    if (
+      !(await this.allowed(
+        message.guild_id,
+        channelId,
+        message.author!.id,
+        message.member?.roles,
+      ))
+    ) {
+      return undefined;
+    }
+    const embedded = message.referenced_message;
+    if (embedded?.id && embedded.author?.id) return embedded;
+    try {
+      const fetched = await this.requireRest().message<DiscordMessage>(
+        channelId,
+        reference.message_id,
+      );
+      return fetched?.id && fetched.author?.id ? fetched : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async recentDiscordContext(message: DiscordMessage): Promise<string> {
+    try {
+      const messages = await this.requireRest().messages<DiscordMessage>(
+        message.channel_id,
+        { limit: 50, before: message.id },
+      );
+      const rows = messages
+        .filter((item) => item.id && item.author?.id)
+        .sort(
+          (a, b) =>
+            Date.parse(a.timestamp || "") - Date.parse(b.timestamp || ""),
+        )
+        .map((item) => {
+          const content = this.messageText(item).replace(/\s+/g, " ").trim();
+          if (!content) return "";
+          return `[${item.timestamp || "unknown time"}] ${displayName(item.author!)}${item.author!.bot ? " (bot)" : ""}: ${content.slice(0, 1_000)}`;
+        })
+        .filter(Boolean);
+      let result = rows.join("\n");
+      if (result.length > 12_000) result = result.slice(result.length - 12_000);
+      return result;
+    } catch {
+      return "";
+    }
+  }
+
+  private messageText(message: DiscordMessage): string {
+    const rows = [message.content || ""];
+    for (const embed of message.embeds || []) {
+      const fields = (embed.fields || [])
+        .map((field) => `${field.name || "Field"}: ${field.value || ""}`)
+        .join("\n");
+      rows.push(
+        [embed.title, embed.description, fields, embed.url]
+          .filter((value): value is string => !!value)
+          .join("\n"),
+      );
+    }
+    return rows.filter(Boolean).join("\n").trim();
   }
 
   private async promptWithAttachments(
@@ -896,14 +1240,27 @@ export class DiscordAgent implements AgentModule {
       if (
         trustedHost &&
         mime.startsWith("image/") &&
-        (attachment.size || 0) <= 4 * 1024 * 1024
+        !!attachment.size &&
+        attachment.size <= 4 * 1024 * 1024
       ) {
         try {
           const response = await fetch(parsed, {
+            redirect: "error",
             signal: AbortSignal.timeout(15_000),
           });
           if (response.ok) {
+            const declaredLength = Number(
+              response.headers.get("content-length") || attachment.size,
+            );
+            if (declaredLength > 4 * 1024 * 1024) {
+              rows.push(`- ${attachment.filename}: ${attachment.url}`);
+              continue;
+            }
             const bytes = new Uint8Array(await response.arrayBuffer());
+            if (bytes.byteLength > 4 * 1024 * 1024) {
+              rows.push(`- ${attachment.filename}: ${attachment.url}`);
+              continue;
+            }
             images.push(
               `data:${mime};base64,${Buffer.from(bytes).toString("base64")}`,
             );
