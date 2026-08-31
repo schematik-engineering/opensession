@@ -149,6 +149,7 @@ describe("MCP OAuth client registration", () => {
       expect(url.searchParams.get("scope")).toBe(
         "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file",
       );
+      expect(url.searchParams.get("access_type")).toBe("offline");
       await completeMcpOauthFlow(url.searchParams.get("state")!, "auth-code");
       expect(tokenRequest).toBeDefined();
       const tokenBody = new URLSearchParams(await tokenRequest!.text());
@@ -192,6 +193,7 @@ describe("MCP OAuth client registration", () => {
         { clientId: "static-client" },
       );
       expect(new URL(result.url).searchParams.has("scope")).toBe(false);
+      expect(new URL(result.url).searchParams.has("access_type")).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -289,6 +291,19 @@ describe("MCP OAuth client registration", () => {
         { clientId: "configured", clientSecret: "configured-secret" },
       ),
     ).toBeUndefined();
+    expect(
+      mcpOauthStartBlocker("Gmail", "https://gmailmcp.googleapis.com/mcp/v1"),
+    ).toContain("Google Workspace requires");
+    expect(
+      mcpOauthStartBlocker(
+        "GoogleCalendar",
+        "https://calendarmcp.googleapis.com/mcp/v1",
+        { clientId: "configured", clientSecret: "configured-secret" },
+      ),
+    ).toBeUndefined();
+    expect(
+      mcpOauthStartBlocker("People", "https://people.googleapis.com/mcp/v1"),
+    ).toContain("authorized redirect URI");
     expect(
       mcpOauthStartBlocker("Github", "https://api.githubcopilot.com/mcp/"),
     ).toContain("connected GitHub account");
