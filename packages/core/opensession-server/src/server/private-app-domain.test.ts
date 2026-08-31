@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  appDnsPointsToOrigin,
   cloudflareZoneCandidates,
   privateAppCaddySnippet,
   privateAppCaddyUpstream,
@@ -8,6 +9,33 @@ import {
 } from "./private-app-domain";
 
 describe("managed private app domains", () => {
+  test("accepts a direct public app origin without weakening managed private DNS", () => {
+    expect(
+      appDnsPointsToOrigin(["203.0.113.10"], {
+        managedPrivate: false,
+        tailnetIpv4: null,
+      }),
+    ).toBe(true);
+    expect(
+      appDnsPointsToOrigin(["203.0.113.10"], {
+        managedPrivate: true,
+        tailnetIpv4: "100.64.0.10",
+      }),
+    ).toBe(false);
+    expect(
+      appDnsPointsToOrigin(["100.64.0.10"], {
+        managedPrivate: true,
+        tailnetIpv4: "100.64.0.10",
+      }),
+    ).toBe(true);
+    expect(
+      appDnsPointsToOrigin(["10.0.0.10"], {
+        managedPrivate: false,
+        tailnetIpv4: null,
+      }),
+    ).toBe(false);
+  });
+
   test("searches Cloudflare zones from the full hostname to the registrable suffix", () => {
     expect(cloudflareZoneCandidates("os.team.example.com")).toEqual([
       "os.team.example.com",
