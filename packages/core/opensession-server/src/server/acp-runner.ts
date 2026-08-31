@@ -53,7 +53,7 @@ import {
 } from "./acp-accounts";
 import { providerFor } from "./models";
 import { AcpTerminalManager } from "./acp-terminal";
-import { filterMcpServers } from "./runner-shared";
+import { askBashDenyReason, filterMcpServers } from "./runner-shared";
 import {
   acpProviderStateDir,
   readAcpAccountBinding,
@@ -64,6 +64,7 @@ import {
 const DEFAULT_TURN_TIMEOUT_MS = 30 * 60_000;
 const MAX_STDERR_BYTES = 8_192;
 const MAX_TOOL_RESULT_CHARS = 100_000;
+const MAX_PERMISSION_RETRIES = 3;
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -386,13 +387,45 @@ function selectedPermission(
 async function permissionResponse(
   opts: RunAgentOpts,
   request: RequestPermissionRequest,
-): Promise<RequestPermissionResponse> {
+): Promise<{
+  response: RequestPermissionResponse;
+  denial?: string;
+  retryWithoutTool?: boolean;
+}> {
   const tool = request.toolCall.name || request.toolCall.title || "tool";
-  if (opts.deniedTools?.[tool]) return selectedPermission(request, false);
+  if (opts.deniedTools?.[tool]) {
+    return {
+      response: selectedPermission(request, false),
+      denial: opts.deniedTools[tool],
+      retryWithoutTool: true,
+    };
+  }
+  if (
+    opts.mode === "ask" &&
+    (tool === "terminal" || tool === "run_terminal_command")
+  ) {
+    const input = record(request.toolCall.rawInput);
+    const command = typeof input?.command === "string" ? input.command : "";
+    const denial = command ? askBashDenyReason(command) : "Missing command";
+    if (!denial) return { response: selectedPermission(request, true) };
+    if (!opts.onAskUser) {
+      return {
+        response: selectedPermission(request, false),
+        denial,
+        retryWithoutTool: true,
+      };
+    }
+  }
   const needsConfirmation = opts.mode === "ask" || !!opts.confirmTools?.[tool];
   if (!needsConfirmation && (opts.mode === "code" || opts.mode === "scratch"))
-    return selectedPermission(request, true);
-  if (!opts.onAskUser) return selectedPermission(request, false);
+    return { response: selectedPermission(request, true) };
+  if (!opts.onAskUser) {
+    return {
+      response: selectedPermission(request, false),
+      denial: `${tool} requires approval, but this run has no interactive approver`,
+      retryWithoutTool: true,
+    };
+  }
   const result = await opts.onAskUser({
     questions: [
       {
@@ -407,7 +440,12 @@ async function permissionResponse(
     ],
     tool: request.toolCall,
   });
-  return selectedPermission(request, result.behavior === "allow");
+  return {
+    response: selectedPermission(request, result.behavior === "allow"),
+    ...(result.behavior === "allow"
+      ? {}
+      : { denial: `${tool} was denied by the user` }),
+  };
 }
 
 function sessionModelState(value: unknown): {
@@ -689,8 +727,15 @@ async function* runAcpAttempt(
     }
   };
 
+  let permissionDenial: string | undefined;
+  let retryWithoutDeniedTool = false;
   const client: Client = {
-    requestPermission: (request) => permissionResponse(opts, request),
+    requestPermission: async (request) => {
+      const decision = await permissionResponse(opts, request);
+      permissionDenial = decision.denial;
+      retryWithoutDeniedTool = decision.retryWithoutTool === true;
+      return decision.response;
+    },
     sessionUpdate: async (notification) => handleUpdate(notification),
     createTerminal: (params) => terminal.createTerminal(params),
     terminalOutput: (params) => terminal.terminalOutput(params),
@@ -809,17 +854,41 @@ async function* runAcpAttempt(
       const timeoutMs =
         Number(process.env.OPENSESSION_ACP_TURN_TIMEOUT_MS) ||
         DEFAULT_TURN_TIMEOUT_MS;
-      const response = await Promise.race([
-        connection.prompt({ sessionId: engineSessionId, prompt }),
-        new Promise<never>((_, reject) => {
-          timeout = setTimeout(() => {
-            control.cancel();
-            reject(
-              new Error(`${provider} ACP turn timed out after ${timeoutMs}ms`),
-            );
-          }, timeoutMs);
-        }),
-      ]).finally(() => clearTimeout(timeout));
+      let response;
+      let nextPrompt = prompt;
+      for (let attempt = 0; ; attempt++) {
+        permissionDenial = undefined;
+        retryWithoutDeniedTool = false;
+        response = await Promise.race([
+          connection.prompt({ sessionId: engineSessionId, prompt: nextPrompt }),
+          new Promise<never>((_, reject) => {
+            timeout = setTimeout(() => {
+              control.cancel();
+              reject(
+                new Error(
+                  `${provider} ACP turn timed out after ${timeoutMs}ms`,
+                ),
+              );
+            }, timeoutMs);
+          }),
+        ]).finally(() => clearTimeout(timeout));
+        if (
+          response.stopReason !== "cancelled" ||
+          cancelled ||
+          !permissionDenial ||
+          !retryWithoutDeniedTool ||
+          attempt >= MAX_PERMISSION_RETRIES
+        )
+          break;
+        nextPrompt = [
+          {
+            type: "text" as const,
+            text:
+              `The previous ACP tool request was denied by Open Session: ${permissionDenial}. ` +
+              "Continue the same task without that command. Use only permitted read-only commands and do not retry the denied operation.",
+          },
+        ];
+      }
       if (response.stopReason === "cancelled" || cancelled) {
         queue.push({
           type: "error",
