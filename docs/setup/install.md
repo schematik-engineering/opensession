@@ -481,12 +481,14 @@ keep it mode `0600`. Open Session-specific fields:
   identity table see the server. Automation runs carry neither gate identity,
   so restricted servers are invisible to them (fail-closed). The field is
   stripped before the config reaches the engine.
-- `oauth: { "clientId": …, "clientSecret": … }` — a pre-registered OAuth
-  client for hosted MCP servers that do not support dynamic client
-  registration. Use `clientIdEnv` and `clientSecretEnv` instead when the
-  values live in the Open Session service environment. The entire `oauth`
-  object is stripped before run configuration reaches an engine. Register
-  `<publicBaseUrl>/api/connections/mcp-oauth/callback` with the provider.
+- `oauth: { "clientId": …, "clientSecret": …, "scopes": […] }` — a
+  pre-registered OAuth client for hosted MCP servers that do not support
+  dynamic client registration. Use `clientIdEnv` and `clientSecretEnv` instead
+  when the values live in the Open Session service environment. `scopes`
+  overrides discovery when a provider documents a narrower set. The entire
+  `oauth` object is stripped before run configuration reaches an engine.
+  Register `<publicBaseUrl>/api/connections/mcp-oauth/callback` with the
+  provider.
 - The `linear` server gets the Linear agent's OAuth token overlaid at run
   time ([linear.md](linear.md)).
 

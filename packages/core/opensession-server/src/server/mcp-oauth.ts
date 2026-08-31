@@ -150,6 +150,9 @@ export interface McpOauthClientConfig {
   clientSecret?: string;
   clientIdEnv?: string;
   clientSecretEnv?: string;
+  /** Exact OAuth scopes to request. When absent, discovery metadata decides;
+   * when both are absent, the authorization request omits `scope`. */
+  scopes?: string[];
 }
 
 interface ResolvedOauthClient {
@@ -172,6 +175,22 @@ export function resolveMcpOauthClient(
     clientId: clientId.trim(),
     ...(clientSecret?.trim() ? { clientSecret: clientSecret.trim() } : {}),
   };
+}
+
+function configuredOauthScopes(
+  config?: McpOauthClientConfig,
+): string[] | undefined {
+  if (!Array.isArray(config?.scopes)) return undefined;
+  return unique(
+    config.scopes
+      .filter((scope): scope is string => typeof scope === "string")
+      .map((scope) => scope.trim())
+      .filter(Boolean),
+  );
+}
+
+function sameScopes(left?: string[], right?: string[]): boolean {
+  return JSON.stringify(left || []) === JSON.stringify(right || []);
 }
 
 const OAUTH_PRESETS: Record<string, OauthPreset> = {
@@ -348,10 +367,13 @@ async function ensureServerAuth(
   const store = readStore();
   const cur = store[name];
   const configuredClient = resolveMcpOauthClient(oauthClientConfig);
+  const requestedScopes = configuredOauthScopes(oauthClientConfig);
   if (
     cur?.clientInfo?.clientId &&
     cur.serverUrl === serverUrl &&
-    (!configuredClient || configuredClient.clientId === cur.clientInfo.clientId)
+    (!configuredClient ||
+      configuredClient.clientId === cur.clientInfo.clientId) &&
+    (requestedScopes === undefined || sameScopes(cur.scopes, requestedScopes))
   ) {
     if (
       configuredClient?.clientSecret !== undefined &&
@@ -363,14 +385,34 @@ async function ensureServerAuth(
     return cur;
   }
   const { resource, scopes, endpoints } = await discoverMcpOauth(serverUrl);
+  if (requestedScopes && scopes) {
+    const unsupported = requestedScopes.filter(
+      (scope) => !scopes.includes(scope),
+    );
+    if (unsupported.length)
+      throw new McpOauthConfigurationError(
+        `${name}: configured OAuth scope is not advertised by the MCP resource: ${unsupported.join(", ")}`,
+      );
+  }
+  const selectedScopes = requestedScopes ?? scopes;
+  // A grant is bound to both its OAuth client and the scopes consented for.
+  // Reconfiguring either must force a fresh consent instead of continuing to
+  // inject or refresh a token with stale, potentially broader authority.
+  const retainedGrants =
+    cur &&
+    (!configuredClient ||
+      configuredClient.clientId === cur.clientInfo.clientId) &&
+    sameScopes(cur.scopes, selectedScopes)
+      ? { shared: cur.shared, users: cur.users }
+      : {};
   if (configuredClient) {
     const next: ServerAuth = {
       serverUrl,
       resource,
-      ...(scopes ? { scopes } : {}),
+      ...(selectedScopes?.length ? { scopes: selectedScopes } : {}),
       endpoints,
       clientInfo: configuredClient,
-      ...(cur ? { shared: cur.shared, users: cur.users } : {}),
+      ...retainedGrants,
     };
     const fresh = readStore();
     fresh[name] = next;
@@ -433,10 +475,10 @@ async function ensureServerAuth(
   const next: ServerAuth = {
     serverUrl,
     resource,
-    ...(scopes ? { scopes } : {}),
+    ...(selectedScopes?.length ? { scopes: selectedScopes } : {}),
     endpoints,
     clientInfo: { clientId: reg.client_id },
-    ...(cur ? { shared: cur.shared, users: cur.users } : {}),
+    ...retainedGrants,
   };
   const fresh = readStore();
   fresh[name] = next;
@@ -525,12 +567,10 @@ export async function startMcpOauthFlow(
   url.searchParams.set("code_challenge", challenge);
   url.searchParams.set("code_challenge_method", "S256");
   url.searchParams.set("state", state);
-  // Scope to what the resource advertises when it does (strict ASes like
-  // Cognito reject unknown scopes); the permissive default otherwise.
-  url.searchParams.set(
-    "scope",
-    auth.scopes?.join(" ") || "openid profile email offline_access",
-  );
+  // Scope only to configured/discovered values. Inventing generic OIDC
+  // scopes breaks non-OIDC authorization servers such as Cloudflare; OAuth
+  // permits omitting the parameter when the resource publishes no scopes.
+  if (auth.scopes?.length) url.searchParams.set("scope", auth.scopes.join(" "));
   url.searchParams.set("prompt", "consent");
   if (auth.resource) url.searchParams.set("resource", auth.resource);
   return { url: url.toString() };

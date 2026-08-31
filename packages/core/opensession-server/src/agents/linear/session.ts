@@ -7,6 +7,7 @@ import { runAgent, cancelAgentRun } from "../../server/agent-runner";
 import {
   configuredServer,
   defaultRepo,
+  newSessionRepoDefault,
   personaName,
   productName,
 } from "../../server/config";
@@ -15,6 +16,7 @@ import { writeJsonAtomic } from "../../server/shared/atomic-write";
 import {
   createWorktree as createRepoWorktree,
   removeWorktree,
+  repoForPathOrNull,
   reviveWorktree,
 } from "../../server/worktree";
 import { existsSync, unlinkSync } from "fs";
@@ -71,6 +73,9 @@ export type SessionPhase = (typeof PHASES)[number];
  */
 export interface StoredSession {
   branch: string;
+  /** Registered repository id. Older files derive it from their worktree path
+   * instead of being moved when the new-session default changes. */
+  repoId: string;
   claudeSessionId: string | null;
   issueIdentifier: string;
   issueTitle: string;
@@ -199,6 +204,13 @@ Co-Authored-By: ${lastActiveUser.name} <${email}>`;
 
 // --- Branch & Worktree ---
 
+/** Repository used for a newly assigned Linear issue. This intentionally
+ * follows the same workspace setting as the New session picker, not the
+ * operational default used by Open Session's own maintenance. */
+export function linearSessionRepoId(): string {
+  return newSessionRepoDefault();
+}
+
 export function generateBranchName(
   title: string,
   issueIdentifier?: string,
@@ -230,8 +242,9 @@ export async function createWorktree(
   _title: string,
   _description: string,
   _url: string,
+  repoId = linearSessionRepoId(),
 ): Promise<string> {
-  const worktreeDir = await createRepoWorktree(branch, defaultRepo().id);
+  const worktreeDir = await createRepoWorktree(branch, repoId);
   console.log(`[linear] Created worktree: ${branch}`);
   return worktreeDir;
 }
@@ -242,6 +255,7 @@ export async function createWorktree(
 function emptyStored(branch: string): StoredSession {
   return {
     branch,
+    repoId: defaultRepo().id,
     claudeSessionId: null,
     issueIdentifier: "",
     issueTitle: "",
@@ -277,6 +291,11 @@ function storedFromFile(
 
   return {
     branch,
+    // A missing repo means this is a pre-migration record. Derive it from the
+    // durable checkout first; only records with no recognizable path fall
+    // back to the operational default they historically used.
+    repoId:
+      raw.repoId ?? repoForPathOrNull(raw.worktreeDir)?.id ?? defaultRepo().id,
     claudeSessionId,
     issueIdentifier: raw.issueIdentifier ?? "",
     issueTitle: raw.issueTitle ?? "",
@@ -350,8 +369,11 @@ export function deleteSessionFile(branch: string): void {
   }
 }
 
-export function deleteWorktree(branch: string): void {
-  void removeWorktree(branch, defaultRepo().id);
+export function deleteWorktree(
+  branch: string,
+  repoId = defaultRepo().id,
+): void {
+  void removeWorktree(branch, repoId);
   console.log(`[linear] Deleted worktree: ${branch}`);
 }
 
@@ -478,14 +500,14 @@ function makeActionStreamer(accessToken: string, linearSessionId: string) {
  * this recovery arm repairs sessions already reaped by an older release. */
 export async function ensureLinearWorktree(
   worktreeDir: string,
-  session?: Pick<ActiveSession, "branch" | "worktreeDir">,
+  session?: Pick<ActiveSession, "branch" | "repoId" | "worktreeDir">,
   revive: (branch: string, repoId?: string) => Promise<string> = reviveWorktree,
 ): Promise<string> {
   if (!session?.branch || existsSync(worktreeDir)) return worktreeDir;
   console.log(
     `[linear] Worktree ${session.branch} was cleaned up; recreating before the turn`,
   );
-  const revived = await revive(session.branch, defaultRepo().id);
+  const revived = await revive(session.branch, session.repoId);
   session.worktreeDir = revived;
   return revived;
 }

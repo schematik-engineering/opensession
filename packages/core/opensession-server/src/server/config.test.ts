@@ -10,6 +10,7 @@ import {
   configuredIdentity,
   configPath,
   defaultRepo,
+  newSessionRepoDefault,
   personaName,
   organizationName,
   productName,
@@ -167,6 +168,21 @@ describe("config loader", () => {
     expect(repos.opensession).toBeUndefined();
     expect(defaultRepo().id).toBe("acme-app");
     expect(configuredPaths().worktreesDir).toBe("/srv/worktrees");
+  });
+
+  test("keeps the operational default separate from the new-session repository", () => {
+    withConfig(
+      JSON.stringify({
+        newSessionRepo: "product",
+        repos: {
+          opensession: { repo: "/srv/opensession", default: true },
+          product: { repo: "/srv/product" },
+        },
+      }),
+    );
+
+    expect(defaultRepo().id).toBe("opensession");
+    expect(newSessionRepoDefault()).toBe("product");
   });
 
   test("unsafe default branch text falls back before reaching prompts", () => {
