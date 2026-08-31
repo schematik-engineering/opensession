@@ -727,6 +727,15 @@ export function previewServerConfig(
   };
 }
 
+export function caddyConfigKeyAlreadyExists(
+  status: number,
+  body: string,
+): boolean {
+  return (
+    status === 409 || (status === 500 && body.includes("key already exists"))
+  );
+}
+
 /** Add/refresh the Caddy server for this webapp (idempotent, cached). */
 async function ensurePreviewRoute(
   httpsPort: number,
@@ -754,10 +763,17 @@ async function ensurePreviewRoute(
     });
   try {
     // PUT creates the key; if it already exists (e.g. Caddy kept the server
-    // across a opensession restart, so our cache is cold) it 409s — drop it and
-    // recreate so the route always ends up pointing at the current webapp port.
+    // across an Open Session restart, so our cache is cold), drop and recreate
+    // it so the route always points at the current webapp port. Caddy versions
+    // disagree on whether that conflict is a 409 or a 500 response.
     let res = await put();
-    if (res.status === 409) {
+    const responseBody = res.ok
+      ? ""
+      : await res
+          .clone()
+          .text()
+          .catch(() => "");
+    if (caddyConfigKeyAlreadyExists(res.status, responseBody)) {
       await caddyFetch(path, { method: "DELETE" }).catch(() => {});
       res = await put();
     }

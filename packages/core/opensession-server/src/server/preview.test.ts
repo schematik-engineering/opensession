@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
+  caddyConfigKeyAlreadyExists,
   getPreviewStatus,
   listenerLinesForPort,
   parsePreviewPortalRecipes,
@@ -13,6 +14,21 @@ import {
   seedSandboxPortsConf,
   startPreview,
 } from "./preview";
+
+describe("Caddy preview route recovery", () => {
+  test("recognizes the key-exists response returned by supported Caddy versions", () => {
+    expect(caddyConfigKeyAlreadyExists(409, "")).toBe(true);
+    expect(
+      caddyConfigKeyAlreadyExists(
+        500,
+        '{"error":"key already exists: preview_10016"}',
+      ),
+    ).toBe(true);
+    expect(caddyConfigKeyAlreadyExists(500, '{"error":"listen failed"}')).toBe(
+      false,
+    );
+  });
+});
 
 // The resolver is the ONE bring-up chain shared by host and sandbox previews:
 // repo-committed .agents/start.sh → configured previewCommand.
