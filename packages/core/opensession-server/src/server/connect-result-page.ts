@@ -20,7 +20,9 @@ import {
   BRANDS,
   brandKey,
   brandLogo,
+  brandLogoDataUri,
   displayName,
+  isSvgBrandLogo,
 } from "../frontend/brand-logos";
 
 const ESCAPES: Record<string, string> = {
@@ -46,21 +48,24 @@ function mark(server: string | undefined, ok: boolean): string {
   // nothing to sit on, so the alert becomes the mark.
   if (!server)
     return `<div class="mark"><span class="tile tile-alert">${ALERT}</span></div>`;
-  const face = logo
-    ? `<svg viewBox="${logo.viewBox}" fill="currentColor" aria-hidden="true">${logo.paths
-        .map((d, index) => {
-          const fill = logo.fills?.[index]
-            ? ` fill="${logo.fills[index]}"`
-            : "";
-          const opacity =
-            logo.opacities?.[index] != null
-              ? ` opacity="${logo.opacities[index]}"`
-              : "";
-          const rule = logo.evenOdd ? ' fill-rule="evenodd"' : "";
-          return `<path d="${d}"${fill}${opacity}${rule}/>`;
-        })
-        .join("")}</svg>`
-    : esc(server.charAt(0).toUpperCase());
+  const face =
+    logo && isSvgBrandLogo(logo)
+      ? `<img src="${esc(brandLogoDataUri(logo))}" alt="" aria-hidden="true">`
+      : logo
+        ? `<svg viewBox="${logo.viewBox}" fill="currentColor" aria-hidden="true">${logo.paths
+            .map((d, index) => {
+              const fill = logo.fills?.[index]
+                ? ` fill="${logo.fills[index]}"`
+                : "";
+              const opacity =
+                logo.opacities?.[index] != null
+                  ? ` opacity="${logo.opacities[index]}"`
+                  : "";
+              const rule = logo.evenOdd ? ' fill-rule="evenodd"' : "";
+              return `<path d="${d}"${fill}${opacity}${rule}/>`;
+            })
+            .join("")}</svg>`
+        : esc(server.charAt(0).toUpperCase());
   const style = brand
     ? `background:${brand.bg};color:${brand.fg || "#fff"}`
     : "background:var(--wash);color:var(--dim)";
@@ -100,7 +105,7 @@ body{
   width:56px;height:56px;border-radius:16px;display:grid;place-items:center;
   font-size:24px;font-weight:600;
 }
-.tile svg{width:31px;height:31px}
+.tile svg,.tile img{width:31px;height:31px}
 /* Stands in for a brand tile when the redirect lost the server name, so it
    keeps the tile's shape rather than going round: under the squircle
    @supports below, a 50% radius renders as a rounded square anyway. */

@@ -1,5 +1,5 @@
 import React from "react";
-import { brandLogo } from "../brand-logos";
+import { brandLogo, brandLogoDataUri, isSvgBrandLogo } from "../brand-logos";
 
 export function BrandMark({
   name,
@@ -11,6 +11,17 @@ export function BrandMark({
   const key = name.toLowerCase();
   const logo = brandLogo(key);
   if (!logo) return null;
+  if (isSvgBrandLogo(logo))
+    return (
+      <img
+        data-brand={key}
+        src={brandLogoDataUri(logo)}
+        width={size}
+        height={size}
+        alt=""
+        aria-hidden="true"
+      />
+    );
   return (
     <svg
       data-brand={key}
