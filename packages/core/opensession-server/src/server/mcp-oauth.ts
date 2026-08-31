@@ -17,17 +17,18 @@
  * the shared grant. Engines never see refresh tokens; rotation happens here
  * (lazy kick + 2-min ticker parked on globalThis, refresh-on-first-use).
  *
- * Discovery follows the MCP auth spec: RFC 9728 protected-resource metadata
- * on the server origin → authorization server → RFC 8414 AS metadata →
- * dynamic client registration (RFC 7591, token_endpoint_auth_method "none").
+ * Discovery follows the MCP auth spec: path-aware RFC 9728 protected-resource
+ * metadata → authorization server → path-aware RFC 8414 AS metadata. Servers
+ * then use either dynamic client registration (RFC 7591) or an explicitly
+ * configured static client (required by hosted providers such as Google Drive).
  */
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { randomBytes, createHash } from "crypto";
 import { configuredServer, productName } from "./config";
 import { statePath } from "./paths";
-import { resolveTeammate } from "./shared/user-mappings";
+import { resolveTeamMemberName } from "./shared/user-mappings";
 
-const STORE_PATH = statePath(".opensession-mcp-oauth.json");
+let storePath = statePath(".opensession-mcp-oauth.json");
 
 interface OauthEndpoints {
   authorize: string;
@@ -55,7 +56,7 @@ interface ServerAuth {
    *  what the resource advertises. */
   scopes?: string[];
   endpoints: OauthEndpoints;
-  clientInfo: { clientId: string };
+  clientInfo: { clientId: string; clientSecret?: string };
   shared?: Grant;
   users?: Record<string, Grant>;
 }
@@ -100,16 +101,21 @@ function writeGrant(entry: ServerAuth, slot: GrantSlot, grant: Grant): void {
 
 function readStore(): Store {
   try {
-    return JSON.parse(readFileSync(STORE_PATH, "utf8"));
+    return JSON.parse(readFileSync(storePath, "utf8"));
   } catch {
     return {};
   }
 }
 
 function writeStore(store: Store): void {
-  writeFileSync(STORE_PATH, JSON.stringify(store, null, 2) + "\n", {
+  writeFileSync(storePath, JSON.stringify(store, null, 2) + "\n", {
     mode: 0o600,
   });
+}
+
+/** Test-only store isolation. Passing no path restores normal resolution. */
+export function __setMcpOauthStorePathForTest(path?: string): void {
+  storePath = path || statePath(".opensession-mcp-oauth.json");
 }
 
 /**
@@ -136,6 +142,38 @@ interface OauthPreset {
   envVar?: string;
 }
 
+/** Static OAuth client settings accepted on an MCP server config. The direct
+ * values match the shape documented by hosted providers such as Google Drive;
+ * env indirection keeps operator-managed secrets out of mcp-config.json. */
+export interface McpOauthClientConfig {
+  clientId?: string;
+  clientSecret?: string;
+  clientIdEnv?: string;
+  clientSecretEnv?: string;
+}
+
+interface ResolvedOauthClient {
+  clientId: string;
+  clientSecret?: string;
+}
+
+export function resolveMcpOauthClient(
+  config?: McpOauthClientConfig,
+): ResolvedOauthClient | undefined {
+  if (!config) return undefined;
+  const clientId =
+    config.clientId ||
+    (config.clientIdEnv ? process.env[config.clientIdEnv] : undefined);
+  const clientSecret =
+    config.clientSecret ||
+    (config.clientSecretEnv ? process.env[config.clientSecretEnv] : undefined);
+  if (!clientId?.trim()) return undefined;
+  return {
+    clientId: clientId.trim(),
+    ...(clientSecret?.trim() ? { clientSecret: clientSecret.trim() } : {}),
+  };
+}
+
 const OAUTH_PRESETS: Record<string, OauthPreset> = {
   slack: {
     authorize: "https://slack.com/oauth/v2/authorize",
@@ -156,7 +194,7 @@ const OAUTH_PRESETS: Record<string, OauthPreset> = {
 };
 
 export function oauthPresetFor(name: string): OauthPreset | undefined {
-  const p = OAUTH_PRESETS[name];
+  const p = OAUTH_PRESETS[name.trim().toLowerCase()];
   if (!p) return undefined;
   return process.env[p.clientIdEnv] && process.env[p.clientSecretEnv]
     ? p
@@ -169,6 +207,7 @@ export function oauthPresetFor(name: string): OauthPreset | undefined {
 export function mcpOauthStartBlocker(
   name: string,
   serverUrl?: string,
+  oauthClientConfig?: McpOauthClientConfig,
 ): string | undefined {
   let host = "";
   try {
@@ -179,12 +218,23 @@ export function mcpOauthStartBlocker(
       ? "fal"
       : host === "api.x.com"
         ? "x"
-        : name.trim().toLowerCase();
+        : host === "api.githubcopilot.com"
+          ? "github"
+          : host === "drivemcp.googleapis.com"
+            ? "google-drive"
+            : name.trim().toLowerCase();
   switch (provider) {
     case "fal":
       return "Fal's hosted MCP server currently uses API keys, not OAuth. Choose Connect with API token.";
     case "x":
+      if (resolveMcpOauthClient(oauthClientConfig)) return undefined;
       return "X requires a pre-registered OAuth client and does not allow dynamic client registration.";
+    case "github":
+      return "GitHub MCP uses your connected GitHub account. Connect GitHub in Accounts first.";
+    case "google-drive":
+      if (resolveMcpOauthClient(oauthClientConfig)?.clientSecret)
+        return undefined;
+      return `Google Drive requires a Web application OAuth client with ${callbackUrl()} registered as an authorized redirect URI.`;
     default:
       return undefined;
   }
@@ -194,8 +244,66 @@ function callbackUrl(): string {
   return `${configuredServer().publicBaseUrl}/api/connections/mcp-oauth/callback`;
 }
 
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+/** RFC 9728 puts a path-scoped resource's path after the well-known name. */
+export function protectedResourceMetadataUrls(serverUrl: string): string[] {
+  const url = new URL(serverUrl);
+  const path = url.pathname === "/" ? "" : url.pathname;
+  return unique([
+    `${url.origin}/.well-known/oauth-protected-resource${path}`,
+    `${url.origin}/.well-known/oauth-protected-resource`,
+  ]);
+}
+
+/** RFC 8414 uses the same prefix form when an issuer has a path. Keep the
+ * legacy suffix candidates as fallbacks for providers that shipped them. */
+export function authorizationServerMetadataUrls(asBase: string): string[] {
+  const url = new URL(asBase);
+  const path = url.pathname === "/" ? "" : url.pathname.replace(/\/$/, "");
+  const base = asBase.replace(/\/$/, "");
+  return unique([
+    `${url.origin}/.well-known/oauth-authorization-server${path}`,
+    `${base}/.well-known/oauth-authorization-server`,
+    `${base}/.well-known/openid-configuration`,
+    `${url.origin}/.well-known/openid-configuration${path}`,
+  ]);
+}
+
+interface ProtectedResourceMetadata {
+  resource?: string;
+  authorization_servers?: string[];
+  scopes_supported?: string[];
+}
+
+async function protectedResourceMetadata(
+  serverUrl: string,
+  timeoutMs = 10_000,
+): Promise<ProtectedResourceMetadata | undefined> {
+  for (const metadataUrl of protectedResourceMetadataUrls(serverUrl)) {
+    try {
+      const response = await fetch(metadataUrl, {
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!response.ok) continue;
+      const metadata = (await response.json()) as ProtectedResourceMetadata;
+      if (metadata && typeof metadata === "object") return metadata;
+    } catch {}
+  }
+  return undefined;
+}
+
+export async function hasOauthProtectedResource(
+  serverUrl: string,
+  timeoutMs = 6_000,
+): Promise<boolean> {
+  return !!(await protectedResourceMetadata(serverUrl, timeoutMs));
+}
+
 /** RFC 9728 → RFC 8414 discovery for an MCP server URL. */
-async function discover(serverUrl: string): Promise<{
+export async function discoverMcpOauth(serverUrl: string): Promise<{
   resource?: string;
   scopes?: string[];
   endpoints: OauthEndpoints;
@@ -204,25 +312,12 @@ async function discover(serverUrl: string): Promise<{
   let asBase = origin;
   let resource: string | undefined;
   let scopes: string[] | undefined;
-  try {
-    const pr = (await (
-      await fetch(`${origin}/.well-known/oauth-protected-resource`, {
-        signal: AbortSignal.timeout(10_000),
-      })
-    ).json()) as {
-      resource?: string;
-      authorization_servers?: string[];
-      scopes_supported?: string[];
-    };
-    if (pr.authorization_servers?.[0]) asBase = pr.authorization_servers[0];
-    resource = pr.resource;
-    if (Array.isArray(pr.scopes_supported) && pr.scopes_supported.length)
-      scopes = pr.scopes_supported;
-  } catch {}
-  for (const wk of [
-    `${asBase.replace(/\/$/, "")}/.well-known/oauth-authorization-server`,
-    `${asBase.replace(/\/$/, "")}/.well-known/openid-configuration`,
-  ]) {
+  const pr = await protectedResourceMetadata(serverUrl);
+  if (pr?.authorization_servers?.[0]) asBase = pr.authorization_servers[0];
+  resource = pr?.resource;
+  if (Array.isArray(pr?.scopes_supported) && pr.scopes_supported.length)
+    scopes = pr.scopes_supported;
+  for (const wk of authorizationServerMetadataUrls(asBase)) {
     try {
       const meta = (await (
         await fetch(wk, { signal: AbortSignal.timeout(10_000) })
@@ -242,17 +337,48 @@ async function discover(serverUrl: string): Promise<{
   throw new Error(`No OAuth authorization-server metadata for ${serverUrl}`);
 }
 
+export class McpOauthConfigurationError extends Error {}
+
 /** Ensure a registered public client for this server (cached in the store). */
 async function ensureServerAuth(
   name: string,
   serverUrl: string,
+  oauthClientConfig?: McpOauthClientConfig,
 ): Promise<ServerAuth> {
   const store = readStore();
   const cur = store[name];
-  if (cur?.clientInfo?.clientId && cur.serverUrl === serverUrl) return cur;
-  const { resource, scopes, endpoints } = await discover(serverUrl);
+  const configuredClient = resolveMcpOauthClient(oauthClientConfig);
+  if (
+    cur?.clientInfo?.clientId &&
+    cur.serverUrl === serverUrl &&
+    (!configuredClient || configuredClient.clientId === cur.clientInfo.clientId)
+  ) {
+    if (
+      configuredClient?.clientSecret !== undefined &&
+      configuredClient.clientSecret !== cur.clientInfo.clientSecret
+    ) {
+      cur.clientInfo.clientSecret = configuredClient.clientSecret;
+      writeStore(store);
+    }
+    return cur;
+  }
+  const { resource, scopes, endpoints } = await discoverMcpOauth(serverUrl);
+  if (configuredClient) {
+    const next: ServerAuth = {
+      serverUrl,
+      resource,
+      ...(scopes ? { scopes } : {}),
+      endpoints,
+      clientInfo: configuredClient,
+      ...(cur ? { shared: cur.shared, users: cur.users } : {}),
+    };
+    const fresh = readStore();
+    fresh[name] = next;
+    writeStore(fresh);
+    return next;
+  }
   if (!endpoints.register)
-    throw new Error(
+    throw new McpOauthConfigurationError(
       `${name}: authorization server offers no dynamic client registration`,
     );
   const registrationUrl = new URL(endpoints.register);
@@ -274,7 +400,7 @@ async function ensureServerAuth(
       registrationResponse.status === 403 &&
       registrationUrl.hostname === "api.figma.com"
     ) {
-      throw new Error(
+      throw new McpOauthConfigurationError(
         "Figma does not currently allow Open Session to connect. Its remote MCP server accepts only clients listed in the Figma MCP Catalog.",
       );
     }
@@ -285,7 +411,7 @@ async function ensureServerAuth(
     ) {
       // Vercel MCP is a closed program: only clients Vercel has reviewed get
       // their redirect URI approved (docs/agent-resources/vercel-mcp).
-      throw new Error(
+      throw new McpOauthConfigurationError(
         "Vercel MCP only connects to AI clients Vercel has approved (Claude Code, ChatGPT, Cursor, …), so it rejects Open Session's callback URL.",
       );
     }
@@ -351,10 +477,15 @@ export async function startMcpOauthFlow(
   name: string,
   serverUrl: string,
   forUser?: string,
+  oauthClientConfig?: McpOauthClientConfig,
 ): Promise<{ url: string }> {
-  const teamName = forUser ? resolveTeammate(forUser)?.name : undefined;
+  const teamName = forUser
+    ? (resolveTeamMemberName(forUser) ?? undefined)
+    : undefined;
   if (forUser && !teamName)
-    throw new Error(`"${forUser}" doesn't resolve to a configured teammate`);
+    throw new McpOauthConfigurationError(
+      `"${forUser}" doesn't resolve to a configured teammate`,
+    );
   const preset = oauthPresetFor(name);
   if (preset) {
     const state = b64url(randomBytes(24));
@@ -380,7 +511,7 @@ export async function startMcpOauthFlow(
     writeStore(store);
     return { url: url.toString() };
   }
-  const auth = await ensureServerAuth(name, serverUrl);
+  const auth = await ensureServerAuth(name, serverUrl, oauthClientConfig);
   const verifier = b64url(randomBytes(32));
   const challenge = b64url(createHash("sha256").update(verifier).digest());
   const state = b64url(randomBytes(24));
@@ -464,6 +595,8 @@ export async function completeMcpOauthFlow(
     client_id: auth.clientInfo.clientId,
     code_verifier: flow.verifier,
   });
+  if (auth.clientInfo.clientSecret)
+    body.set("client_secret", auth.clientInfo.clientSecret);
   if (auth.resource) body.set("resource", auth.resource);
   const res = (await (
     await fetch(auth.endpoints.token, {
@@ -516,6 +649,8 @@ async function refreshGrant(
     refresh_token: grant.tokens.refreshToken,
     client_id: auth.clientInfo.clientId,
   });
+  if (auth.clientInfo.clientSecret)
+    body.set("client_secret", auth.clientInfo.clientSecret);
   if (auth.resource) body.set("resource", auth.resource);
   try {
     const res = (await (
@@ -606,7 +741,7 @@ export function mcpUserGrantHeader(
   user?: string,
 ): string | undefined {
   if (!user) return undefined;
-  const teamName = resolveTeammate(user)?.name;
+  const teamName = resolveTeamMemberName(user);
   if (!teamName) return undefined;
   return grantHeader(name, { kind: "user", teamName });
 }
@@ -647,16 +782,16 @@ export function mcpOauthStatus(name: string): {
   };
 }
 
-// OAuth-capability probe (RFC 9728 protected-resource metadata on the
-// server origin) — drives "Connect my account" visibility for servers that
+// OAuth-capability probe (RFC 9728 protected-resource metadata followed by
+// RFC 8414 authorization-server metadata) — drives Connect visibility for servers that
 // run on a static workspace key today (e.g. posthog).
 //
 // The answer is kept on disk, not only in memory, because it decides
 // MEMBERSHIP of the My accounts list rather than one row's state: a cold
 // process cannot say which tools belong on that list at all, so the panel
 // would have to wait on a probe per configured server before it could draw a
-// single row. Whether an origin publishes OAuth metadata is a stable fact
-// about that service, so the last answer is a good one to show while a fresh
+// single row. Whether a server URL offers a flow Open Session can actually
+// start is a stable fact, so the last answer is a good one to show while a fresh
 // probe runs behind it.
 //
 // A probe that never got an answer is remembered in memory only, and briefly:
@@ -685,9 +820,9 @@ function capabilities(): Map<string, Capability> {
       string,
       Capability
     >;
-    for (const [origin, e] of Object.entries(raw))
+    for (const [serverUrl, e] of Object.entries(raw))
       if (typeof e?.capable === "boolean" && typeof e?.ts === "number")
-        capableCache.set(origin, { capable: e.capable, ts: e.ts });
+        capableCache.set(serverUrl, { capable: e.capable, ts: e.ts });
   } catch {}
   return capableCache;
 }
@@ -696,43 +831,43 @@ function capabilityFresh(e: Capability): boolean {
   return Date.now() - e.ts < (e.soft ? CAPABLE_ERROR_TTL_MS : CAPABLE_TTL_MS);
 }
 
-function originOf(serverUrl: string): string | undefined {
+function capabilityKey(serverUrl: string): string | undefined {
   try {
-    return new URL(serverUrl).origin;
+    const url = new URL(serverUrl);
+    return `${url.origin}${url.pathname}`;
   } catch {
     return undefined;
   }
 }
 
-function probeCapable(origin: string): Promise<boolean> {
-  const running = capableInflight.get(origin);
+function probeCapable(serverUrl: string): Promise<boolean> {
+  const key = capabilityKey(serverUrl);
+  if (!key) return Promise.resolve(false);
+  const running = capableInflight.get(key);
   if (running) return running;
   const p = (async () => {
     let capable = false;
     let answered = false;
     try {
-      const res = await fetch(
-        `${origin}/.well-known/oauth-protected-resource`,
-        { signal: AbortSignal.timeout(6_000) },
-      );
-      capable = res.ok;
+      const discovery = await discoverMcpOauth(serverUrl);
+      capable = !!discovery.endpoints.register;
       answered = true;
     } catch {}
-    capabilities().set(origin, {
+    capabilities().set(key, {
       capable,
       ts: Date.now(),
       ...(answered ? {} : { soft: true }),
     });
     if (answered) persistCapabilities();
     return capable;
-  })().finally(() => capableInflight.delete(origin));
-  capableInflight.set(origin, p);
+  })().finally(() => capableInflight.delete(key));
+  capableInflight.set(key, p);
   return p;
 }
 
 function persistCapabilities(): void {
   const out: Record<string, Capability> = {};
-  for (const [origin, e] of capabilities()) if (!e.soft) out[origin] = e;
+  for (const [serverUrl, e] of capabilities()) if (!e.soft) out[serverUrl] = e;
   try {
     writeFileSync(CAPABLE_PATH, JSON.stringify(out, null, 2) + "\n");
   } catch {}
@@ -740,24 +875,24 @@ function persistCapabilities(): void {
 
 /**
  * The last known capability answer, refreshing a stale one in the background.
- * `undefined` means no probe has ever finished for this origin, which the
+ * `undefined` means no probe has ever finished for this server URL, which the
  * caller should report as still checking rather than as "no personal sign-in
  * here" — the two look identical to a reader and only one of them is true.
  */
 export function cachedOauthCapable(serverUrl: string): boolean | undefined {
-  const origin = originOf(serverUrl);
-  if (!origin) return false;
-  const hit = capabilities().get(origin);
-  if (!hit || !capabilityFresh(hit)) probeCapable(origin).catch(() => {});
+  const key = capabilityKey(serverUrl);
+  if (!key) return false;
+  const hit = capabilities().get(key);
+  if (!hit || !capabilityFresh(hit)) probeCapable(serverUrl).catch(() => {});
   return hit?.capable;
 }
 
 export async function isOauthCapable(serverUrl: string): Promise<boolean> {
-  const origin = originOf(serverUrl);
-  if (!origin) return false;
-  const hit = capabilities().get(origin);
+  const key = capabilityKey(serverUrl);
+  if (!key) return false;
+  const hit = capabilities().get(key);
   if (hit && capabilityFresh(hit)) return hit.capable;
-  return probeCapable(origin);
+  return probeCapable(serverUrl);
 }
 
 /** Raw grant token (no "Bearer " prefix) — stdio env injection. */
@@ -782,7 +917,7 @@ export function removeMcpOauthGrant(name: string, forUser?: string): boolean {
   const auth = store[name];
   if (!auth) return false;
   if (forUser) {
-    const teamName = resolveTeammate(forUser)?.name;
+    const teamName = resolveTeamMemberName(forUser);
     if (!teamName || !auth.users?.[teamName]) return false;
     delete auth.users[teamName];
   } else {
@@ -923,10 +1058,10 @@ export async function saveManualMcpGrant(
 ): Promise<void> {
   await validateManualMcpToken(name, token, serverUrl);
   const teamName = opts.forUser
-    ? resolveTeammate(opts.forUser)?.name
+    ? (resolveTeamMemberName(opts.forUser) ?? undefined)
     : undefined;
   if (opts.forUser && !teamName)
-    throw new Error(
+    throw new McpOauthConfigurationError(
       `"${opts.forUser}" doesn't resolve to a configured teammate`,
     );
   const store = readStore();

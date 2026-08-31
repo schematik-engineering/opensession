@@ -40,6 +40,7 @@ import {
   ensureAwsMcpIamAuth,
   isAwsMcpIamServer,
 } from "../aws-mcp-auth";
+import { githubMcpManagedAuth } from "../github-mcp-auth";
 
 /** Navigate `integrations.github` in a raw parsed config object so the App
  *  routes can set or drop its keys without disturbing anything else the file
@@ -193,7 +194,10 @@ export async function handleConnectionsRoutes(
   // ── Connections ──
   if (path === "/api/connections" && req.method === "GET") {
     const force = url.searchParams.get("refresh") === "1";
-    const mcpServers = await getConnections(force);
+    const mcpServers = await getConnections(
+      force,
+      ctx.authUser?.login || ctx.authUser?.name || undefined,
+    );
     const agentHealth: Record<string, unknown> = {};
     for (const a of getAgents()) agentHealth[a.name] = a.health();
     return Response.json({
@@ -254,6 +258,7 @@ export async function handleConnectionsRoutes(
       mcpOauthStartBlocker,
       mcpOauthStatus,
       oauthPresetFor,
+      resolveMcpOauthClient,
       supportsManualToken,
     } = await import("../mcp-oauth");
     const servers = Object.entries(readMcpConfig().mcpServers).map(
@@ -266,7 +271,10 @@ export async function handleConnectionsRoutes(
         // oauthUrl: a stdio server's HTTP OAuth home (see the per-server
         // route below).
         const oauthTarget = cfg?.url || cfg?.oauthUrl;
-        const managed = awsMcpManagedAuth(oauthTarget);
+        const caller = ctx.authUser?.login || ctx.authUser?.name || undefined;
+        const managed =
+          awsMcpManagedAuth(oauthTarget) ||
+          githubMcpManagedAuth(oauthTarget, caller);
         if (managed)
           return {
             name,
@@ -275,9 +283,16 @@ export async function handleConnectionsRoutes(
             ...status,
             managed,
           };
-        const connectError = mcpOauthStartBlocker(name, oauthTarget);
+        const connectError = mcpOauthStartBlocker(
+          name,
+          oauthTarget,
+          cfg?.oauth,
+        );
         const capable =
-          !connectError && (connected || oauthPresetFor(name))
+          !connectError &&
+          (connected ||
+            oauthPresetFor(name) ||
+            resolveMcpOauthClient(cfg?.oauth))
             ? true
             : !connectError && oauthTarget
               ? cachedOauthCapable(oauthTarget)
@@ -319,31 +334,47 @@ export async function handleConnectionsRoutes(
       isOauthCapable,
       mcpOauthStartBlocker,
       oauthPresetFor,
+      resolveMcpOauthClient,
       supportsManualToken,
     } = await import("../mcp-oauth");
     const name = decodeURIComponent(mcpOauthMatch[1]);
     const status = mcpOauthStatus(name);
     const cfg = (await import("../connections")).readMcpConfig().mcpServers[
       name
-    ] as { url?: string; oauthUrl?: string } | undefined;
+    ] as
+      | {
+          url?: string;
+          oauthUrl?: string;
+          oauth?: import("../mcp-oauth").McpOauthClientConfig;
+        }
+      | undefined;
     // oauthUrl: a stdio server's HTTP OAuth home (e.g. plain runs a local
     // stdio MCP but per-user grants come from Plain's hosted MCP).
     const oauthTarget = cfg?.url || cfg?.oauthUrl;
-    if (isAwsMcpIamServer(oauthTarget)) {
-      try {
-        await ensureAwsMcpIamAuth(oauthTarget!);
-      } catch {}
+    const caller = ctx.authUser?.login || ctx.authUser?.name || undefined;
+    const managed =
+      awsMcpManagedAuth(oauthTarget) ||
+      githubMcpManagedAuth(oauthTarget, caller);
+    if (managed) {
+      if (isAwsMcpIamServer(oauthTarget)) {
+        try {
+          await ensureAwsMcpIamAuth(oauthTarget!);
+        } catch {}
+      }
       return Response.json({
         ...status,
         capable: false,
         manualToken: false,
-        managed: awsMcpManagedAuth(oauthTarget),
+        managed:
+          awsMcpManagedAuth(oauthTarget) ||
+          githubMcpManagedAuth(oauthTarget, caller),
       });
     }
-    const connectError = mcpOauthStartBlocker(name, oauthTarget);
+    const connectError = mcpOauthStartBlocker(name, oauthTarget, cfg?.oauth);
     const capable =
       !connectError &&
       (!!oauthPresetFor(name) ||
+        !!resolveMcpOauthClient(cfg?.oauth) ||
         (oauthTarget ? await isOauthCapable(oauthTarget) : false));
     return Response.json({
       ...status,
@@ -371,9 +402,19 @@ export async function handleConnectionsRoutes(
     const body = (await req.json().catch(() => ({}))) as { scope?: string };
     const cfg = (await import("../connections")).readMcpConfig().mcpServers[
       name
-    ] as { url?: string; oauthUrl?: string } | undefined;
-    const { startMcpOauthFlow, mcpOauthStartBlocker, oauthPresetFor } =
-      await import("../mcp-oauth");
+    ] as
+      | {
+          url?: string;
+          oauthUrl?: string;
+          oauth?: import("../mcp-oauth").McpOauthClientConfig;
+        }
+      | undefined;
+    const {
+      McpOauthConfigurationError,
+      startMcpOauthFlow,
+      mcpOauthStartBlocker,
+      oauthPresetFor,
+    } = await import("../mcp-oauth");
     const oauthTarget = cfg?.url || cfg?.oauthUrl;
     if (isAwsMcpIamServer(oauthTarget))
       return Response.json(
@@ -383,7 +424,21 @@ export async function handleConnectionsRoutes(
         },
         { status: 409 },
       );
-    const connectError = mcpOauthStartBlocker(name, oauthTarget);
+    const githubManaged = githubMcpManagedAuth(
+      oauthTarget,
+      ctx.authUser?.login || ctx.authUser?.name || undefined,
+    );
+    if (githubManaged)
+      return Response.json(
+        {
+          error:
+            githubManaged.state === "ready"
+              ? "GitHub MCP already uses your connected GitHub account."
+              : githubManaged.detail,
+        },
+        { status: 409 },
+      );
+    const connectError = mcpOauthStartBlocker(name, oauthTarget, cfg?.oauth);
     if (connectError)
       return Response.json({ error: connectError }, { status: 409 });
     if (!oauthTarget && !oauthPresetFor(name))
@@ -405,10 +460,14 @@ export async function handleConnectionsRoutes(
         name,
         oauthTarget || `stdio://${name}`,
         forUser,
+        cfg?.oauth,
       );
       return Response.json({ url: authorizeUrl });
     } catch (e: any) {
-      return Response.json({ error: e?.message || String(e) }, { status: 502 });
+      return Response.json(
+        { error: e?.message || String(e) },
+        { status: e instanceof McpOauthConfigurationError ? 409 : 502 },
+      );
     }
   }
 

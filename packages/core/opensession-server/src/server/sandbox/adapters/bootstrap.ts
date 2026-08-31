@@ -1758,6 +1758,7 @@ function makeRemoteLauncher(
         spec.mcpServers ?? "all",
         spec.user,
         [spec.mcpGrantUser, spec.user],
+        { allowManagedUserAuth: !!spec.mcpGrantUser },
       );
       const claudeAccountsPath = `${REMOTE_HOME}/.opensession-claude-accounts.json`;
       await Promise.all([

@@ -8,6 +8,7 @@ import { existsSync, readFileSync, copyFileSync, watchFile } from "fs";
 import { writeFileAtomic } from "./shared/atomic-write";
 import { configuredPaths } from "./config";
 import {
+  hasOauthProtectedResource,
   mcpOauthStatus,
   mcpOauthStartBlocker,
   mcpSharedGrantHeader,
@@ -16,6 +17,7 @@ import {
   oauthPresetFor,
   supportsManualToken,
 } from "./mcp-oauth";
+import { githubMcpAuthHeader } from "./github-mcp-auth";
 import {
   awsMcpIamAuthHeader,
   ensureAwsMcpIamAuth,
@@ -73,6 +75,7 @@ export function withDynamicCredentials(
    *  a bare string is treated as a one-element list. First personal grant
    *  wins, then the workspace grant. */
   user?: string | Array<string | undefined>,
+  opts: { allowManagedUserAuth?: boolean } = {},
 ): Record<string, any> {
   let out = servers;
   const linear = servers.linear;
@@ -149,6 +152,11 @@ export function withDynamicCredentials(
       );
       const header =
         candidates.map((u) => mcpUserGrantHeader(name, u)).find((h) => !!h) ??
+        (opts.allowManagedUserAuth
+          ? candidates
+              .map((u) => githubMcpAuthHeader(c.url, u))
+              .find((h) => !!h)
+          : undefined) ??
         mcpSharedGrantHeader(name);
       if (!header) continue;
       out = {
@@ -318,27 +326,35 @@ export interface McpConnection {
   allowedUsers?: string[];
 }
 
-let cache: { data: McpConnection[]; ts: number } | null = null;
+let cache: { data: McpConnection[]; ts: number; user?: string } | null = null;
 const TTL = 60_000;
 
-export async function getConnections(force = false): Promise<McpConnection[]> {
-  if (!force && cache && Date.now() - cache.ts < TTL) return cache.data;
+export async function getConnections(
+  force = false,
+  user?: string,
+): Promise<McpConnection[]> {
+  if (!force && cache && cache.user === user && Date.now() - cache.ts < TTL)
+    return cache.data;
 
   const servers = readMcpConfig().mcpServers;
   const results = await Promise.all(
     Object.entries(servers).map(async ([name, cfg]) => {
-      const conn = await checkServer(name, cfg);
+      const conn = await checkServer(name, cfg, user);
       const allowedUsers = cleanAllowedUsers(cfg?.allowedUsers);
       if (allowedUsers) conn.allowedUsers = allowedUsers;
       return conn;
     }),
   );
 
-  cache = { data: results, ts: Date.now() };
+  cache = { data: results, ts: Date.now(), user };
   return results;
 }
 
-async function checkServer(name: string, cfg: any): Promise<McpConnection> {
+async function checkServer(
+  name: string,
+  cfg: any,
+  user?: string,
+): Promise<McpConnection> {
   const isHttp = cfg.type === "http" || cfg.type === "sse" || !!cfg.url;
 
   if (isHttp) {
@@ -369,14 +385,16 @@ async function checkServer(name: string, cfg: any): Promise<McpConnection> {
           };
         }
       }
+      const githubAuthorization = githubMcpAuthHeader(cfg.url, user);
+      const probeAuthorization = awsAuthorization ?? githubAuthorization;
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 4000);
       // Any HTTP response (incl. 401/405) means the endpoint is up;
       // MCP servers typically reject bare GETs but still answer.
       const res = await fetch(cfg.url, {
         method: "GET",
-        ...(awsAuthorization
-          ? { headers: { Authorization: awsAuthorization } }
+        ...(probeAuthorization
+          ? { headers: { Authorization: probeAuthorization } }
           : {}),
         signal: controller.signal,
       });
@@ -386,7 +404,7 @@ async function checkServer(name: string, cfg: any): Promise<McpConnection> {
       // instead of a misleading "Connected" (the GET's 401/405 only proves
       // the endpoint is up). Detection = the origin publishes RFC 9728
       // protected-resource metadata.
-      if (!awsIam && !cfg.headers?.Authorization) {
+      if (!awsIam && !githubAuthorization && !cfg.headers?.Authorization) {
         try {
           const st = mcpOauthStatus(name);
           if (!st.shared && st.users.length === 0) {
@@ -400,7 +418,7 @@ async function checkServer(name: string, cfg: any): Promise<McpConnection> {
                 detail: "API token required. Connect from this card's menu",
               };
             }
-            const oauthBlocker = mcpOauthStartBlocker(name, cfg.url);
+            const oauthBlocker = mcpOauthStartBlocker(name, cfg.url, cfg.oauth);
             if (oauthBlocker) {
               return {
                 name,
@@ -411,11 +429,7 @@ async function checkServer(name: string, cfg: any): Promise<McpConnection> {
                 detail: oauthBlocker,
               };
             }
-            const pr = await fetch(
-              `${new URL(cfg.url).origin}/.well-known/oauth-protected-resource`,
-              { signal: AbortSignal.timeout(3000) },
-            );
-            if (pr.ok) {
+            if (await hasOauthProtectedResource(cfg.url, 3000)) {
               return {
                 name,
                 transport: "http",
@@ -435,7 +449,11 @@ async function checkServer(name: string, cfg: any): Promise<McpConnection> {
         target,
         envKeys: Object.keys(cfg.env || {}),
         status: "connected",
-        detail: awsIam ? `AWS IAM · HTTP ${res.status}` : `HTTP ${res.status}`,
+        detail: awsIam
+          ? `AWS IAM · HTTP ${res.status}`
+          : githubAuthorization
+            ? `GitHub account · HTTP ${res.status}`
+            : `HTTP ${res.status}`,
       };
     } catch (e: any) {
       return {

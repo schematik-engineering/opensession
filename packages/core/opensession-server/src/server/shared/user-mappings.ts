@@ -121,6 +121,39 @@ export function resolveTeammate(
   return null;
 }
 
+/**
+ * Resolve any configured identity reference to its canonical roster name.
+ * Unlike `resolveTeammate`, this does not require the member to have Slack or
+ * git-email metadata: browser-authenticated GitHub logins still need a stable
+ * key for personal provider grants.
+ */
+export function resolveTeamMemberName(
+  ref?: string | null,
+  team: TeamMember[] = identity.team,
+): string | null {
+  if (!ref) return null;
+  const key = ref
+    .trim()
+    .replace(/\s*\([^)]*\)\s*$/, "")
+    .replace(/^@/, "")
+    .toLowerCase();
+  if (!key) return null;
+  const member = team.find((candidate) => {
+    const aliases =
+      candidate.aliases?.map((alias) => alias.toLowerCase()) ?? [];
+    return (
+      candidate.github?.toLowerCase() === key ||
+      candidate.slackId?.toLowerCase() === key ||
+      candidate.email?.toLowerCase() === key ||
+      candidate.linearEmails?.some((email) => email.toLowerCase() === key) ||
+      candidate.name.toLowerCase() === key ||
+      candidate.name.split(" ")[0]?.toLowerCase() === key ||
+      aliases.includes(key)
+    );
+  });
+  return member?.name ?? null;
+}
+
 export function githubUsernameToSlackId(username: string): string | null {
   return GITHUB_TO_SLACK[username] || null;
 }

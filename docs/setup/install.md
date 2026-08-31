@@ -472,15 +472,21 @@ MCP servers give runs their external tools. Copy
 `mcp-config.json` in the repo root (or point `OPENSESSION_MCP_CONFIG`
 elsewhere). Per server: `{ "type": "http", "url": … }` or
 `{ "command": …, "args": [], "env": {} }`. Credentials belong to that
-server's `env`, headers, URL, or managed OAuth grant, never the Open Session
-process environment. `mcp-config.json` is gitignored; if it contains inline
-credentials, keep it mode `0600`. Two Open Session-specific fields:
+server's `env`, headers, URL, managed OAuth grant, or static OAuth client
+settings. `mcp-config.json` is gitignored; if it contains inline credentials,
+keep it mode `0600`. Open Session-specific fields:
 
 - `allowedUsers: ["Alice", "alice@example.com"]` — optional per-user gate;
   only runs whose prompter or interactive-session creator matches through the
   identity table see the server. Automation runs carry neither gate identity,
   so restricted servers are invisible to them (fail-closed). The field is
   stripped before the config reaches the engine.
+- `oauth: { "clientId": …, "clientSecret": … }` — a pre-registered OAuth
+  client for hosted MCP servers that do not support dynamic client
+  registration. Use `clientIdEnv` and `clientSecretEnv` instead when the
+  values live in the Open Session service environment. The entire `oauth`
+  object is stripped before run configuration reaches an engine. Register
+  `<publicBaseUrl>/api/connections/mcp-oauth/callback` with the provider.
 - The `linear` server gets the Linear agent's OAuth token overlaid at run
   time ([linear.md](linear.md)).
 

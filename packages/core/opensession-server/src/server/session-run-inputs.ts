@@ -127,7 +127,11 @@ export async function resolveSessionRunInputs(
     mcpServersSource: mcpServers === undefined ? "all" : source,
     deniedTools: isAutomationSession ? automationDeniedTools() : undefined,
     user: isAutomationSession ? undefined : opts.user,
-    mcpGrantUser: session.startedBy || undefined,
+    // Automation-owned sessions must not inherit the human creator's personal
+    // OAuth or managed-provider credentials on a later interactive resume.
+    mcpGrantUser: isAutomationSession
+      ? undefined
+      : session.startedBy || undefined,
     inProcessMcpBranch: sessionInProcessMcpBranch(session),
     sessionNote: !isAutomationSession,
   };

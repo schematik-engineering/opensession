@@ -122,6 +122,7 @@ describe("resolveSessionRunInputs", () => {
     // The gate that keeps allowedUsers-scoped servers invisible to untrusted
     // text: an automation run passes no user at all.
     expect(inputs.user).toBeUndefined();
+    expect(inputs.mcpGrantUser).toBeUndefined();
     expect(inputs.deniedTools).toBeDefined();
     expect(inputs.deniedTools).toHaveProperty("mcp__plain__reply_to_thread");
     // No memory / repos / personal-prompt note for an automation run.

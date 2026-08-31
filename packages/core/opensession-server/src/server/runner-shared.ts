@@ -36,10 +36,14 @@ export function filterMcpServers(
    *  allowedUsers VISIBILITY gate below always uses `user` (the prompter) —
    *  that's least-privilege, not identity preference. */
   grantUsers?: Array<string | undefined>,
+  /** Managed provider credentials, such as the renewable GitHub App user
+   *  token, are only valid in explicitly trusted interactive runs. */
+  opts: { allowManagedUserAuth?: boolean } = {},
 ): Record<string, unknown> {
   const all = withDynamicCredentials(
     readMcpConfig().mcpServers,
     grantUsers ?? user,
+    opts,
   );
   const out: Record<string, unknown> = {};
   const allowlist = scope === "all" ? undefined : scope;
@@ -53,7 +57,7 @@ export function filterMcpServers(
         );
       continue;
     }
-    const { allowedUsers, oauthUrl, ...entry } = cfg;
+    const { allowedUsers, oauthUrl, oauth, ...entry } = cfg;
     if (Array.isArray(allowedUsers) && allowedUsers.length) {
       // Cleared when the prompter OR the session creator (grantUsers[0]) is
       // on the list — anyone with access to a cleared person's session can

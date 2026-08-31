@@ -161,7 +161,7 @@ interface McpOauthStatus {
   manualToken?: boolean;
   connectError?: string;
   managed?: {
-    kind: "aws-iam";
+    kind: "aws-iam" | "github-app";
     state: "checking" | "ready" | "error";
     detail?: string;
   };
@@ -401,10 +401,14 @@ export function Connections() {
                           )}
                           title={
                             oauthByName[s.name]?.managed?.detail ||
-                            "Authenticated by the workspace AWS IAM role"
+                            (oauthByName[s.name]?.managed?.kind === "github-app"
+                              ? "Authenticated with your connected GitHub account"
+                              : "Authenticated by the workspace AWS IAM role")
                           }
                         >
-                          IAM · workspace
+                          {oauthByName[s.name]?.managed?.kind === "github-app"
+                            ? "GitHub · personal"
+                            : "IAM · workspace"}
                         </span>
                       ) : oauthByName[s.name]?.shared ||
                         oauthByName[s.name]?.users.length ? (
