@@ -1188,7 +1188,7 @@ export function fallbackTier(id: string | undefined | null): number {
 
 export type FallbackMode = "auto" | "ask";
 export interface FallbackHop {
-  /** Pi-mapped id to run next */
+  /** Canonical engine-qualified id to run next. */
   id: string;
   /** "auto" = keep going silently (equal-or-smarter); "ask" = confirm with a
    *  human first (downgrade to a dumber model). */
@@ -1213,7 +1213,11 @@ export function nextFallbackModel(
   exhausted: Set<string>,
   preferredFallbackModel?: string,
 ): FallbackHop | null {
-  const currentRouted = toPiModel(currentModel) || currentModel;
+  const executableModel = (id: string): string | undefined => {
+    const resolved = resolveModel(id);
+    return resolved ? routeModel(resolved.id).model : undefined;
+  };
+  const currentRouted = executableModel(currentModel) || currentModel;
   const currentTier = fallbackTier(currentRouted);
 
   const candidates: string[] = [];
@@ -1223,7 +1227,7 @@ export function nextFallbackModel(
       for (const c of CODEX_MODEL_ORDER) add(c);
       return;
     }
-    const routed = toPiModel(id);
+    const routed = executableModel(id);
     if (
       !routed ||
       routed === currentRouted ||
@@ -1274,8 +1278,7 @@ export function fallbackPlan(
   if (!preferredFallbackModel || preferredFallbackModel === "none") return [];
   const exhausted = new Set<string>();
   const out: FallbackHop[] = [];
-  let current =
-    toPiModel(primaryModel || getDefaultModel()) || getDefaultModel();
+  let current = routeModel(primaryModel || getDefaultModel()).model;
   for (let i = 0; i < 32; i++) {
     const hop = nextFallbackModel(current, exhausted, preferredFallbackModel);
     if (!hop) break;

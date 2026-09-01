@@ -1,12 +1,11 @@
-// Dismissed "Send to Slack" cards. The card appears in the transcript under a
+// Dismissed shipped-change cards. The card appears in the transcript under a
 // merged-PR notice and offers to announce the change; closing it with the X
 // means "not this one", so the dismissal has to outlive a reload. Stored per
 // user in the ui-prefs map (a JSON list of `<sessionId>:<prNumber>` keys) so
 // the decision follows you to your phone rather than living in one browser.
 //
-// Dismissing is not a dead end: the composer menu's "Send to Slack…" still
-// opens a composer for the same session, so nothing is lost by closing the
-// card.
+// Keep the original Slack-named storage keys so existing dismissals survive
+// the card's move to Discord.
 //
 // The store is built on first use rather than at import: makeUserPref touches
 // localStorage and window immediately, and the pure helpers below are unit
@@ -22,7 +21,7 @@ const CHANGE_EVENT = "opensession-slack-share-dismiss-changed";
 const CAP = 200;
 
 /** Identity of one card: the session it renders in, and the PR it announces. */
-export function slackShareDismissKey(
+export function shippedChangeShareDismissKey(
   sessionId: string,
   prNumber: number,
 ): string {
@@ -63,12 +62,12 @@ function prefStore(): UserPref<string> {
   return store;
 }
 
-export function isSlackShareDismissed(key: string): boolean {
+export function isShippedChangeShareDismissed(key: string): boolean {
   if (!key) return false;
   return parseDismissed(prefStore().get()).includes(key);
 }
 
-export function dismissSlackShare(key: string): void {
+export function dismissShippedChangeShare(key: string): void {
   if (!key) return;
   const current = parseDismissed(prefStore().get());
   const next = withDismissed(current, key);
@@ -76,6 +75,8 @@ export function dismissSlackShare(key: string): void {
   prefStore().set(JSON.stringify(next));
 }
 
-export function onSlackShareDismissChanged(handler: () => void): () => void {
+export function onShippedChangeShareDismissChanged(
+  handler: () => void,
+): () => void {
   return prefStore().onChanged(handler);
 }

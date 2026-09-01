@@ -26,7 +26,11 @@
  * into the gateway control-plane cgroup; old hosts finish normally.
  */
 
-import type { McpScope } from "./runner-shared";
+import {
+  isProviderOverloadError,
+  isTransientRunError,
+  type McpScope,
+} from "./runner-shared";
 import { audit } from "./audit";
 import { waitForRunHostAdmission } from "./host-admission";
 import {
@@ -36,8 +40,12 @@ import {
 import { existsSync, mkdirSync, readFileSync, rmSync } from "fs";
 import {
   runAgent,
+  runModelFallbackWalk,
+  fallbackContinuationPrompt,
   recoveryKind,
   resumeContinuationPrompt,
+  transcriptProviderFor,
+  type EngineRunner,
   type RunAgentOpts,
   type StreamEvent,
 } from "./agent-runner";
@@ -56,7 +64,23 @@ import {
 } from "./transcript-persistence";
 import { sameProcess } from "./process-identity";
 import type { GitIdentity } from "./shared/user-mappings";
-import { modelSupportsSteer, providerFor } from "./models";
+import {
+  modelSupportsSteer,
+  providerFor,
+  resolveExecutionModel,
+} from "./models";
+import { isAcpProvider, type AcpProvider } from "./acp-config";
+import {
+  listAcpAccounts,
+  markAcpAccountExhausted,
+  pickAcpAccount,
+} from "./acp-accounts";
+import {
+  acpSessionExhaustedAccounts,
+  recordAcpSessionAccountExhausted,
+} from "./acp-state";
+import { readEngineHandoffTranscriptAsync } from "./sessions";
+import { buildEngineSwitchHandoffNote } from "./fork-handoff";
 import { OPENSESSION_SESSIONS_DIR } from "./paths";
 import { writeJsonAtomic } from "./shared/atomic-write";
 import {
@@ -78,6 +102,7 @@ import {
   HOST_JOURNAL_NAME,
   type RunHostSpec,
   type RunHostMeta,
+  type AskResult,
   type HostToClientMsg,
   type ClientToHostMsg,
 } from "../runner-host/protocol";
@@ -204,6 +229,18 @@ export function __setRunHostsInProcessForTest(enabled: boolean): boolean {
   return previous;
 }
 
+type HostedPhysicalRunner = (
+  opts: HostedRunOpts,
+) => AsyncGenerator<StreamEvent>;
+let hostedPhysicalRunnerForTest: HostedPhysicalRunner | null = null;
+export function __setHostedPhysicalRunnerForTest(
+  runner: HostedPhysicalRunner | null,
+): HostedPhysicalRunner | null {
+  const previous = hostedPhysicalRunnerForTest;
+  hostedPhysicalRunnerForTest = runner;
+  return previous;
+}
+
 /** Options for a hosted run: RunAgentOpts minus the non-serializable bits,
  *  plus the host/session context. */
 export interface HostedRunOpts {
@@ -221,6 +258,9 @@ export interface HostedRunOpts {
   mode?: "ask" | "code" | "scratch";
   mcpGrantUser?: string;
   model?: string;
+  /** Effective picker state while a coordinator-owned fallback is active. */
+  selectedModel?: string;
+  transientFallback?: boolean;
   images?: ImageInput[];
   forkSession?: boolean;
   resumeSessionAt?: string;
@@ -240,6 +280,11 @@ export interface HostedRunOpts {
   author?: GitIdentity | null;
   user?: string;
   fallbackModel?: string;
+  /** Original logical-turn policy copied onto every one-attempt host spec so
+   * restart recovery can continue the server-owned coordinator. */
+  logicalFallbackModel?: string;
+  logicalAccountId?: string;
+  logicalAccountStrict?: boolean;
   /** Stable provider-account affinity for internal fan-out workers. */
   accountAffinityKey?: string;
   /** Reasoning effort / service tier / account pinning for the run (see the
@@ -263,6 +308,8 @@ export interface HostedRunOpts {
   onEngineSession?: (engineSessionId: string) => void;
   /** Fences cancellation admitted while the detached host is still launching. */
   shouldCancel?: () => boolean;
+  /** Auxiliary-owner cancellation, never serialized into a host spec. */
+  abortSignal?: AbortSignal;
   /** A steer arrived too late at the host — queue it so it isn't dropped. */
   onSteerFailed?: (text: string) => void;
   /** Builds SDK MCP servers only on platforms without detached run hosts. */
@@ -274,15 +321,21 @@ export interface HostedRunOpts {
  * runAgent. A Linux host never falls back into the gateway: launch failure is
  * visible and retryable, while non-systemd platforms retain in-process mode.
  */
-export async function* runAgentHosted(
+async function* runAgentHostedPhysical(
   opts: HostedRunOpts,
+  lifecycle: "session" | "auxiliary" = "session",
+  transcriptTarget: "session" | "engine" | "none" = "session",
 ): AsyncGenerator<StreamEvent> {
   if (opts.shouldCancel?.()) return;
+  if (hostedPhysicalRunnerForTest) {
+    yield* hostedPhysicalRunnerForTest(opts);
+    return;
+  }
   if (forceInProcessForTest) {
     yield* runAgentInProcess(opts);
     return;
   }
-  if (!runHostsEnabled()) {
+  if (!hostedPhysicalRunnerForTest && !runHostsEnabled()) {
     if (localRunHostsSupported()) {
       throw new Error(
         "Detached run hosts are disabled; refusing to run agent work inside the gateway",
@@ -315,7 +368,7 @@ export async function* runAgentHosted(
   try {
     // spawnHostRun reserves activeHostedRunKeys synchronously before its first
     // await. Transfer the admission reservation without opening a race.
-    const launch = spawnHostRun(opts);
+    const launch = spawnHostRun(opts, lifecycle, transcriptTarget);
     pendingRunHostAdmissions.delete(admission);
     spawned = await launch;
   } catch (error) {
@@ -323,7 +376,10 @@ export async function* runAgentHosted(
     throw error;
   }
 
+  const cancel = () => spawned.handle.requestCancel();
+  let completed = false;
   try {
+    opts.abortSignal?.addEventListener("abort", cancel, { once: true });
     if (opts.shouldCancel?.()) {
       spawned.handle.requestCancel();
       // Drain through the host's `end`, not merely its terminal event: the
@@ -332,9 +388,315 @@ export async function* runAgentHosted(
       }
       return;
     }
-    yield* hostedEventsWithJournal(spawned.handle, spawned.spec);
+    if (lifecycle === "session")
+      yield* hostedEventsWithJournal(spawned.handle, spawned.spec);
+    else for await (const event of spawned.handle.events()) yield event;
+    completed = true;
   } finally {
-    activeHostedRunKeys.delete(spawned.spec.hostId);
+    opts.abortSignal?.removeEventListener("abort", cancel);
+    if (!completed && !spawned.handle.ended) cancel();
+    if (lifecycle === "session")
+      activeHostedRunKeys.delete(spawned.spec.hostId);
+  }
+}
+
+function hostedAttemptOpts(
+  base: HostedRunOpts,
+  attempt: RunAgentOpts,
+  model: string,
+): HostedRunOpts {
+  return {
+    ...base,
+    prompt: attempt.prompt,
+    promptEntryId: attempt.promptEntryId,
+    seedTranscriptEntries: attempt.seedTranscriptEntries,
+    sessionId: attempt.sessionId,
+    model,
+    selectedModel: attempt.selectedModel,
+    transientFallback: attempt.transientFallback,
+    accountId: attempt.accountId,
+    accountStrict: attempt.accountStrict,
+    logicalFallbackModel: base.logicalFallbackModel ?? base.fallbackModel,
+    logicalAccountId: base.logicalAccountId ?? base.accountId,
+    logicalAccountStrict: base.logicalAccountStrict ?? base.accountStrict,
+    // A physical host owns one model attempt. The server-side fallback walk
+    // launches another immutable host after evaluating the terminal cause.
+    fallbackModel: "none",
+  };
+}
+
+function hostedCoordinatorOpts(opts: HostedRunOpts): RunAgentOpts {
+  return {
+    prompt: opts.prompt,
+    promptEntryId: opts.promptEntryId,
+    startToken: opts.startToken,
+    seedTranscriptEntries: opts.seedTranscriptEntries,
+    sessionId: opts.sessionId,
+    cwd: opts.cwd,
+    mode: opts.mode,
+    mcpGrantUser: opts.mcpGrantUser,
+    model: opts.model,
+    selectedModel: opts.selectedModel ?? opts.model,
+    transientFallback: opts.transientFallback,
+    images: opts.images,
+    forkSession: opts.forkSession,
+    resumeSessionAt: opts.resumeSessionAt,
+    mcpServers: opts.mcpServers ?? "all",
+    reposNote: opts.reposNote,
+    deniedTools: opts.deniedTools,
+    publicationPolicy: opts.publicationPolicy,
+    confirmTools: opts.confirmTools,
+    aws: opts.aws,
+    claudeCliEnv: opts.claudeCliEnv,
+    codexCliEnv: opts.codexCliEnv,
+    author: opts.author,
+    user: opts.user,
+    fallbackModel: opts.fallbackModel,
+    accountAffinityKey: opts.accountAffinityKey,
+    effort: opts.effort,
+    fastMode: opts.fastMode,
+    accountId: opts.accountId,
+    accountStrict: opts.accountStrict,
+    usageCredits: opts.usageCredits,
+    prReviewer: opts.prReviewer,
+    journal: {
+      osSessionId: opts.osSessionId,
+      kind: opts.journalKind || "prompt",
+      firstJournaledAt: opts.firstJournaledAt,
+      resumeAttempts: opts.resumeAttempts,
+      lastResumeAt: opts.lastResumeAt,
+    },
+    onAskUser: opts.onAskUser,
+    shouldCancel: opts.shouldCancel,
+  };
+}
+
+async function* runHostedModelAttempt(
+  base: HostedRunOpts,
+  initial: RunAgentOpts,
+  model: string,
+  lifecycle: "session" | "auxiliary" = "session",
+  transcriptTarget: "session" | "engine" | "none" = "session",
+): AsyncGenerator<StreamEvent> {
+  const provider = providerFor(model);
+  if (!isAcpProvider(provider)) {
+    let terminal: StreamEvent | undefined;
+    for await (const event of runAgentHostedPhysical(
+      hostedAttemptOpts(base, initial, model),
+      lifecycle,
+      transcriptTarget,
+    )) {
+      if (event.type === "done" || event.type === "error") {
+        terminal = event;
+        continue;
+      }
+      if (!terminal) yield event;
+    }
+    if (terminal) yield terminal;
+    return;
+  }
+
+  const attempted = new Set<string>();
+  let attemptOpts = initial;
+  const maxAttempts = Math.max(1, listAcpAccounts(provider).length);
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const excluded = acpSessionExhaustedAccounts(base.osSessionId, provider);
+    for (const accountId of attempted) excluded.add(accountId);
+    const account = pickAcpAccount(provider, {
+      exclude: excluded,
+      sessionKey: initial.accountAffinityKey || base.osSessionId,
+      accountId: initial.accountId,
+      strict: initial.accountStrict,
+      user: initial.user,
+    });
+    if (!account) {
+      yield {
+        type: "error",
+        content: `${provider}: no usable subscription account is available`,
+        provider,
+        model,
+        usageLimitExhausted: true,
+      };
+      return;
+    }
+    attempted.add(account.id);
+
+    const buffered: StreamEvent[] = [];
+    let visible = false;
+    let engineSessionId = attemptOpts.sessionId;
+    let usageFailure: StreamEvent | undefined;
+    let protocolFailure: StreamEvent | undefined;
+    const physical = hostedAttemptOpts(
+      base,
+      {
+        ...attemptOpts,
+        accountId: account.id,
+        // The coordinator selected this exact account. A physical attempt may
+        // neither repick from the pool nor perform a model fallback itself.
+        accountStrict: true,
+      },
+      model,
+    );
+    let terminal: StreamEvent | undefined;
+    try {
+      for await (const event of runAgentHostedPhysical(
+        physical,
+        lifecycle,
+        transcriptTarget,
+      )) {
+        if (event.type === "init") engineSessionId = event.sessionId;
+        if (!visible && event.type === "init") {
+          buffered.push(event);
+          continue;
+        }
+        if (event.type === "done" || event.type === "error") {
+          terminal = event;
+          continue;
+        }
+        if (terminal) continue;
+        for (const pending of buffered.splice(0)) yield pending;
+        yield event;
+        visible = true;
+      }
+    } catch (error) {
+      if (
+        error instanceof AcpAccountUnavailableError &&
+        error.provider === provider &&
+        error.accountId === account.id
+      ) {
+        markAcpAccountExhausted(account.id);
+        recordAcpSessionAccountExhausted(
+          base.osSessionId,
+          provider,
+          account.id,
+        );
+        if (initial.accountStrict) {
+          yield {
+            type: "error",
+            content: error.message,
+            provider,
+            model,
+            usageLimitExhausted: true,
+          };
+          return;
+        }
+        continue;
+      }
+      throw error;
+    }
+
+    if (
+      terminal &&
+      terminal.usageLimitExhausted === true &&
+      (terminal.type === "error" || terminal.type === "done")
+    ) {
+      if (terminal.provider !== provider || terminal.model !== model) {
+        protocolFailure = {
+          type: "error",
+          content:
+            `${provider} host reported usage for an unexpected attempt identity ` +
+            `(provider=${terminal.provider || "missing"}, model=${terminal.model || "missing"})`,
+          provider,
+          model,
+        };
+      } else usageFailure = terminal;
+    } else if (terminal) {
+      for (const pending of buffered.splice(0)) yield pending;
+      yield terminal;
+      return;
+    }
+
+    if (protocolFailure) {
+      yield protocolFailure;
+      return;
+    }
+    if (!usageFailure) return;
+    markAcpAccountExhausted(account.id);
+    recordAcpSessionAccountExhausted(base.osSessionId, provider, account.id);
+    if (initial.accountStrict) {
+      yield usageFailure;
+      return;
+    }
+
+    if (visible && engineSessionId) {
+      const entries = await readEngineHandoffTranscriptAsync(
+        attemptOpts.cwd,
+        engineSessionId,
+        transcriptProviderFor(model),
+      );
+      if (!entries.length) {
+        yield usageFailure;
+        return;
+      }
+      const handoff = buildEngineSwitchHandoffNote({
+        fromModel: model,
+        fromProvider: provider,
+        toProvider: provider,
+        targetResuming: false,
+        entries,
+      });
+      attemptOpts = {
+        ...attemptOpts,
+        prompt: fallbackContinuationPrompt(
+          handoff,
+          attemptOpts.prompt,
+          !!attemptOpts.images?.length,
+        ),
+        sessionId: undefined,
+        seedTranscriptEntries: entries,
+      };
+    } else {
+      attemptOpts = { ...attemptOpts, sessionId: undefined };
+    }
+  }
+  yield {
+    type: "error",
+    content: `${provider}: every eligible subscription account is exhausted`,
+    provider,
+    model,
+    usageLimitExhausted: true,
+  };
+}
+
+/**
+ * Coordinate a logical detached turn. Each physical host receives one model
+ * and, for ACP, one centrally selected account. Account rotation completes
+ * before the provider-neutral model fallback walk advances.
+ */
+export async function* runAgentHosted(
+  opts: HostedRunOpts,
+): AsyncGenerator<StreamEvent> {
+  if (opts.shouldCancel?.()) return;
+  if (forceInProcessForTest) {
+    yield* runAgentInProcess(opts);
+    return;
+  }
+  if (!runHostsEnabled()) {
+    if (localRunHostsSupported())
+      throw new Error(
+        "Detached run hosts are disabled; refusing to run agent work inside the gateway",
+      );
+    yield* runAgentInProcess(opts);
+    return;
+  }
+  const coordinated: HostedRunOpts = opts.startToken
+    ? opts
+    : { ...opts, startToken: `rh-${Bun.randomUUIDv7()}` };
+  const driver: EngineRunner = (attempt, model) =>
+    runHostedModelAttempt(coordinated, attempt, model);
+  let logicalTerminal = false;
+  try {
+    for await (const event of runModelFallbackWalk(
+      hostedCoordinatorOpts(coordinated),
+      driver,
+    )) {
+      if (event.type === "done" || event.type === "error")
+        logicalTerminal = true;
+      yield event;
+    }
+  } finally {
+    if (logicalTerminal && coordinated.startToken)
+      journalClear(coordinated.startToken);
   }
 }
 
@@ -371,48 +733,20 @@ export async function* runAuxiliaryAgentHosted(
     return;
   }
   if (shouldCancel()) return;
-
-  const admission = Symbol(opts.osSessionId);
-  if (
-    (await waitForRunHostAdmission({
-      sessionId: opts.osSessionId,
-      activeHosts: activeRunHostCount,
-      pendingHosts: () => pendingRunHostAdmissions.size,
-      onAdmit: () => pendingRunHostAdmissions.add(admission),
-      shouldCancel,
-    })) === "cancelled"
-  )
-    return;
-  if (shouldCancel()) {
-    pendingRunHostAdmissions.delete(admission);
-    return;
-  }
-
-  let spawned: { handle: HostHandle; spec: RunHostSpec };
-  try {
-    const launch = spawnHostRun(
-      { ...opts, shouldCancel },
+  const coordinated = {
+    ...opts,
+    shouldCancel,
+    abortSignal: opts.signal,
+  };
+  const driver: EngineRunner = (attempt, model) =>
+    runHostedModelAttempt(
+      coordinated,
+      attempt,
+      model,
       "auxiliary",
       opts.transcriptTarget ?? "none",
     );
-    pendingRunHostAdmissions.delete(admission);
-    spawned = await launch;
-  } catch (error) {
-    pendingRunHostAdmissions.delete(admission);
-    throw error;
-  }
-
-  const cancel = () => spawned.handle.requestCancel();
-  opts.signal?.addEventListener("abort", cancel, { once: true });
-  let completed = false;
-  try {
-    if (shouldCancel()) cancel();
-    for await (const event of spawned.handle.events()) yield event;
-    completed = true;
-  } finally {
-    opts.signal?.removeEventListener("abort", cancel);
-    if (!completed && !spawned.handle.ended) cancel();
-  }
+  yield* runModelFallbackWalk(hostedCoordinatorOpts(coordinated), driver);
 }
 
 /** The in-process execution tail for platforms without local run-host support. */
@@ -430,6 +764,8 @@ async function* runAgentInProcess(
     mode: opts.mode,
     mcpGrantUser: opts.mcpGrantUser,
     model: opts.model,
+    selectedModel: opts.selectedModel,
+    transientFallback: opts.transientFallback,
     images: opts.images,
     forkSession: opts.forkSession,
     resumeSessionAt: opts.resumeSessionAt,
@@ -506,6 +842,7 @@ async function* hostedEventsWithJournal(
   await hostedKernelCall(spec, "initial_journal", () => journalSet(record));
   let sourceCompleted = false;
   let sawTerminal = false;
+  let terminalNeedsCoordinator = false;
   try {
     for await (const ev of handle.events()) {
       const isCurrent = await hostedKernelCall(spec, "event_owner_read", () =>
@@ -539,18 +876,31 @@ async function* hostedEventsWithJournal(
           journalSet(record),
         );
       }
-      if (ev.type === "done" || ev.type === "error") sawTerminal = true;
+      if (ev.type === "done" || ev.type === "error") {
+        sawTerminal = true;
+        terminalNeedsCoordinator = hostedTerminalNeedsCoordinator(ev);
+      }
       yield ev;
     }
     sourceCompleted = true;
   } finally {
-    if (handle.ended && sourceCompleted && sawTerminal)
-      journalClear(record.runKey);
-    else if (handle.ended && sourceCompleted)
+    if (handle.ended && sourceCompleted && sawTerminal) {
+      if (!terminalNeedsCoordinator) journalClear(record.runKey);
+    } else if (handle.ended && sourceCompleted)
       await hostedKernelCall(spec, "abnormal_completion_journal", () =>
         journalRecordAbnormalCompletion(record),
       );
   }
+}
+
+export function hostedTerminalNeedsCoordinator(event: StreamEvent): boolean {
+  if (event.type === "done") return event.usageLimitExhausted === true;
+  if (event.type !== "error") return false;
+  return (
+    event.usageLimitExhausted === true ||
+    isProviderOverloadError(event.content) ||
+    isTransientRunError(event.content)
+  );
 }
 
 function hostedRunRecord(spec: RunHostSpec): ActiveRunRecord {
@@ -576,12 +926,13 @@ function hostedRunRecord(spec: RunHostSpec): ActiveRunRecord {
     transientFallback: spec.transientFallback,
     effort: spec.effort,
     fastMode: spec.fastMode,
-    accountId: spec.accountId,
-    accountStrict: spec.accountStrict,
+    accountId: spec.logicalAccountId ?? spec.accountId,
+    physicalAccountId: spec.accountId,
+    accountStrict: spec.logicalAccountStrict ?? spec.accountStrict,
     usageCredits: spec.usageCredits,
     prReviewer: spec.prReviewer,
     trustProfile: spec.trustProfile,
-    fallbackModel: spec.fallbackModel,
+    fallbackModel: spec.logicalFallbackModel ?? spec.fallbackModel,
     kind: spec.journalKind || "prompt",
     firstJournaledAt: spec.firstJournaledAt,
     resumeAttempts: spec.resumeAttempts,
@@ -616,6 +967,8 @@ async function spawnHostRun(
     mode: opts.mode,
     mcpGrantUser: opts.mcpGrantUser,
     model: opts.model,
+    selectedModel: opts.selectedModel,
+    transientFallback: opts.transientFallback,
     images: opts.images,
     forkSession: opts.forkSession,
     resumeSessionAt: opts.resumeSessionAt,
@@ -632,6 +985,9 @@ async function spawnHostRun(
     author: opts.author,
     user: opts.user,
     fallbackModel: opts.fallbackModel,
+    logicalFallbackModel: opts.logicalFallbackModel,
+    logicalAccountId: opts.logicalAccountId,
+    logicalAccountStrict: opts.logicalAccountStrict,
     accountAffinityKey: opts.accountAffinityKey,
     effort: opts.effort,
     fastMode: opts.fastMode,
@@ -704,7 +1060,11 @@ async function spawnHostRun(
       // The HostHandle ctor registered its host-registry control. Drop it only
       // after absence is proven; uncertain launches must remain visibly busy.
       handle?.abandon();
-      if (lifecycle === "session") journalClear(spec.hostId);
+      if (
+        lifecycle === "session" &&
+        !(error instanceof AcpAccountUnavailableError)
+      )
+        journalClear(spec.hostId);
       unregisterRunToken(rpcToken);
       try {
         rmSync(dir, { recursive: true, force: true });
@@ -725,8 +1085,16 @@ async function launchHostUnit(hostId: string, dir: string): Promise<void> {
   const spec = readJsonSafe<RunHostSpec>(`${dir}/${HOST_SPEC_NAME}`);
   if (!spec) throw new HostLaunchNotDispatchedError("run host spec is invalid");
   const projection = await projectAcpRunCredentials(spec, dir);
-  if (projection.kind === "unavailable")
+  if (projection.kind === "unavailable") {
+    const provider = providerFor(resolveExecutionModel(spec.model));
+    if (projection.accountId && isAcpProvider(provider))
+      throw new AcpAccountUnavailableError(
+        provider,
+        projection.accountId,
+        projection.message,
+      );
     throw new HostLaunchNotDispatchedError(projection.message);
+  }
   const specHash = new Bun.CryptoHasher("sha256")
     .update(readFileSync(`${dir}/${HOST_SPEC_NAME}`))
     .digest("hex");
@@ -792,6 +1160,17 @@ export class HostLaunchNotDispatchedError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "HostLaunchNotDispatchedError";
+  }
+}
+
+export class AcpAccountUnavailableError extends HostLaunchNotDispatchedError {
+  constructor(
+    readonly provider: AcpProvider,
+    readonly accountId: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "AcpAccountUnavailableError";
   }
 }
 
@@ -1006,6 +1385,10 @@ export class HostHandle {
   private effectiveModel?: string;
   private transientFallback = false;
   private handlingAsks = new Set<string>();
+  private askAnswersAwaitingAck = new Map<
+    string,
+    { deliveryId: string; result: AskResult }
+  >();
   private steerRetractions = new Map<
     string,
     {
@@ -1457,6 +1840,7 @@ export class HostHandle {
         )
           for (const ask of msg.pendingAsks)
             this.handleAsk(ask.askId, ask.input);
+        this.resendAskAnswersAwaitingAck();
         if (msg.state === "ended") {
           if (msg.done && !this.sawTerminal) {
             this.sawTerminal = true;
@@ -1493,6 +1877,12 @@ export class HostHandle {
         if (this.acceptsSideEffectFrame("ask"))
           this.handleAsk(msg.askId, msg.input);
         break;
+      case "ask_answer_ack": {
+        const pending = this.askAnswersAwaitingAck.get(msg.askId);
+        if (pending?.deliveryId === msg.deliveryId)
+          this.askAnswersAwaitingAck.delete(msg.askId);
+        break;
+      }
       case "transcript":
         // Transcript frames bypass the StreamEvent queue, so fence them here
         // against the same run generation as ordinary host events.
@@ -1549,8 +1939,9 @@ export class HostHandle {
 
   private handleAsk(askId: string, input: Record<string, unknown>): void {
     // A reconnect re-delivers pending asks in hello — don't double-handle ones
-    // this process is already blocking a human on.
-    if (this.handlingAsks.has(askId)) return;
+    // this process is already blocking a human on or has already answered.
+    if (this.handlingAsks.has(askId) || this.askAnswersAwaitingAck.has(askId))
+      return;
     this.handlingAsks.add(askId);
     void (async () => {
       let result:
@@ -1572,8 +1963,15 @@ export class HostHandle {
       }
       this.handlingAsks.delete(askId);
       if (!this.acceptsSideEffectFrame("ask_answer")) return;
-      this.send({ t: "ask_answer", askId, result });
+      const answer = { deliveryId: crypto.randomUUID(), result };
+      this.askAnswersAwaitingAck.set(askId, answer);
+      this.send({ t: "ask_answer", askId, ...answer });
     })();
+  }
+
+  private resendAskAnswersAwaitingAck(): void {
+    for (const [askId, answer] of this.askAnswersAwaitingAck)
+      this.send({ t: "ask_answer", askId, ...answer });
   }
 
   /**
@@ -1832,6 +2230,205 @@ export function resolveInactiveHostRecovery(
   return { kind: "replay" };
 }
 
+function recoveredHostedOpts(
+  run: ActiveRunRecord,
+  spec: RunHostSpec,
+  callbacks: HandleCallbacks,
+  continuation: {
+    prompt: string;
+    sessionId?: string;
+    seedTranscriptEntries?: TranscriptEntry[];
+  },
+): HostedRunOpts {
+  return {
+    osSessionId: spec.osSessionId,
+    prompt: continuation.prompt,
+    promptEntryId: spec.promptEntryId,
+    startToken: run.runKey,
+    seedTranscriptEntries: continuation.seedTranscriptEntries,
+    sessionId: continuation.sessionId,
+    cwd: spec.cwd,
+    mode: spec.mode,
+    mcpGrantUser: spec.mcpGrantUser,
+    model: run.model ?? spec.model,
+    selectedModel: run.selectedModel ?? spec.selectedModel,
+    transientFallback: run.transientFallback ?? spec.transientFallback,
+    images: spec.images,
+    forkSession: spec.forkSession,
+    resumeSessionAt: spec.resumeSessionAt,
+    mcpServers: spec.mcpServers ?? "all",
+    proxyMcpServers: spec.proxyMcpServers,
+    reposNote: spec.reposNote,
+    deniedTools: spec.deniedTools,
+    publicationPolicy: spec.publicationPolicy,
+    confirmTools: spec.confirmTools,
+    aws: spec.aws,
+    claudeCliEnv: spec.claudeCliEnv,
+    codexCliEnv: spec.codexCliEnv,
+    author: spec.author,
+    user: spec.user,
+    fallbackModel: run.fallbackModel,
+    logicalFallbackModel: run.fallbackModel,
+    accountAffinityKey: spec.accountAffinityKey,
+    effort: run.effort ?? spec.effort,
+    fastMode: run.fastMode ?? spec.fastMode,
+    accountId: run.accountId,
+    accountStrict: run.accountStrict,
+    logicalAccountId: run.accountId,
+    logicalAccountStrict: run.accountStrict,
+    usageCredits: run.usageCredits ?? spec.usageCredits,
+    prReviewer: run.prReviewer ?? spec.prReviewer,
+    trustProfile: run.trustProfile ?? spec.trustProfile,
+    journalKind: recoveryKind(run.kind, "resume"),
+    firstJournaledAt: run.firstJournaledAt,
+    resumeAttempts: run.resumeAttempts,
+    lastResumeAt: run.lastResumeAt,
+    onAskUser: callbacks.onAskUser,
+    onEngineSession: callbacks.onEngineSession,
+    onSteerFailed: callbacks.onSteerFailed,
+  };
+}
+
+/** Test seam for the restart continuation that normally follows HostHandle. */
+export async function* continueRecoveredAcpUsage(
+  run: ActiveRunRecord,
+  spec: RunHostSpec,
+  callbacks: HandleCallbacks,
+  failure: StreamEvent,
+  visibleWork: boolean,
+  engineSessionId?: string,
+): AsyncGenerator<StreamEvent> {
+  const model = run.model ?? spec.model ?? "";
+  const provider = providerFor(model);
+  const usageFailure =
+    (failure.type === "error" || failure.type === "done") &&
+    failure.usageLimitExhausted === true;
+  if (!hostedTerminalNeedsCoordinator(failure)) {
+    yield failure;
+    return;
+  }
+  if (
+    usageFailure &&
+    (failure.provider !== provider || failure.model !== model)
+  ) {
+    yield {
+      type: "error",
+      content:
+        `${provider} host reported usage for an unexpected recovered attempt identity ` +
+        `(provider=${failure.provider || "missing"}, model=${failure.model || "missing"})`,
+      provider,
+      model,
+    };
+    return;
+  }
+
+  if (usageFailure && isAcpProvider(provider)) {
+    const physicalAccountId = run.physicalAccountId;
+    if (!physicalAccountId) {
+      yield {
+        type: "error",
+        content: `${provider} recovery has no server-owned physical account binding`,
+        provider,
+        model,
+      };
+      return;
+    }
+    markAcpAccountExhausted(physicalAccountId);
+    recordAcpSessionAccountExhausted(
+      spec.osSessionId,
+      provider,
+      physicalAccountId,
+    );
+    if (run.accountStrict) {
+      if (!run.fallbackModel || run.fallbackModel === "none") {
+        yield failure;
+        return;
+      }
+      yield* continueRecoveredModelFallback(
+        run,
+        spec,
+        callbacks,
+        failure,
+        engineSessionId,
+      );
+      return;
+    }
+
+    let prompt = spec.prompt;
+    let seedTranscriptEntries = spec.seedTranscriptEntries;
+    if (visibleWork) {
+      if (!engineSessionId) {
+        yield failure;
+        return;
+      }
+      const entries = await readEngineHandoffTranscriptAsync(
+        spec.cwd,
+        engineSessionId,
+        transcriptProviderFor(model),
+      );
+      if (!entries.length) {
+        yield failure;
+        return;
+      }
+      const handoff = buildEngineSwitchHandoffNote({
+        fromModel: model,
+        fromProvider: provider,
+        toProvider: provider,
+        targetResuming: false,
+        entries,
+      });
+      prompt = fallbackContinuationPrompt(
+        handoff,
+        spec.prompt,
+        !!spec.images?.length,
+      );
+      seedTranscriptEntries = entries;
+    }
+
+    yield* runAgentHosted(
+      recoveredHostedOpts(run, spec, callbacks, {
+        prompt,
+        sessionId: undefined,
+        seedTranscriptEntries,
+      }),
+    );
+    return;
+  }
+
+  yield* continueRecoveredModelFallback(
+    run,
+    spec,
+    callbacks,
+    failure,
+    engineSessionId,
+  );
+}
+
+async function* continueRecoveredModelFallback(
+  run: ActiveRunRecord,
+  spec: RunHostSpec,
+  callbacks: HandleCallbacks,
+  failure: StreamEvent,
+  engineSessionId?: string,
+): AsyncGenerator<StreamEvent> {
+  const recovered = recoveredHostedOpts(run, spec, callbacks, {
+    prompt: spec.prompt,
+    sessionId: engineSessionId,
+    seedTranscriptEntries: spec.seedTranscriptEntries,
+  });
+  let injectFailure = true;
+  const driver: EngineRunner = (attempt, model) => {
+    if (injectFailure) {
+      injectFailure = false;
+      return (async function* () {
+        yield failure;
+      })();
+    }
+    return runHostedModelAttempt(recovered, attempt, model);
+  };
+  yield* runModelFallbackWalk(hostedCoordinatorOpts(recovered), driver);
+}
+
 /**
  * Boot reattach for a LOCAL detached run host (journal record with `hostId`,
  * no sandbox/runner): the local sibling of resumeDockerSandboxRun /
@@ -1882,9 +2479,14 @@ export async function resumeLocalHostRun(
       try {
         rmSync(dir, { recursive: true, force: true });
       } catch {}
-      return (async function* () {
-        yield done;
-      })();
+      return continueRecoveredAcpUsage(
+        run,
+        spec,
+        callbacks,
+        done,
+        meta.visibleWork === true,
+        meta.engineSessionId ?? run.claudeSessionId,
+      );
     }
     try {
       if (await hostUnitActive(run.hostId)) return "uncertain";
@@ -1937,9 +2539,14 @@ export async function resumeLocalHostRun(
     }
     meta = readJsonSafe<RunHostMeta>(`${dir}/${HOST_META_NAME}`);
     if (meta?.done) {
-      return (async function* () {
-        yield meta.done!;
-      })();
+      return continueRecoveredAcpUsage(
+        run,
+        spec,
+        callbacks,
+        meta.done,
+        meta.visibleWork === true,
+        meta.engineSessionId ?? run.claudeSessionId,
+      );
     }
     const recovery = resolveInactiveHostRecovery(
       meta,
@@ -1954,6 +2561,7 @@ export async function resumeLocalHostRun(
     return null;
   }
   return (async function* (): AsyncGenerator<StreamEvent> {
+    let usageFailure: StreamEvent | undefined;
     try {
       for await (const event of handle.events()) {
         let changed = false;
@@ -1973,7 +2581,27 @@ export async function resumeLocalHostRun(
           changed = true;
         }
         if (changed) await journalSet({ ...run, claimedAt: undefined });
+        if (
+          (event.type === "done" || event.type === "error") &&
+          event.usageLimitExhausted === true
+        ) {
+          usageFailure = event;
+          continue;
+        }
         yield event;
+      }
+      if (usageFailure) {
+        const settledMeta = readJsonSafe<RunHostMeta>(
+          `${dir}/${HOST_META_NAME}`,
+        );
+        yield* continueRecoveredAcpUsage(
+          run,
+          spec,
+          callbacks,
+          usageFailure,
+          settledMeta?.visibleWork === true,
+          settledMeta?.engineSessionId ?? run.claudeSessionId,
+        );
       }
     } finally {
       if (handle.ended) journalClear(run.runKey);

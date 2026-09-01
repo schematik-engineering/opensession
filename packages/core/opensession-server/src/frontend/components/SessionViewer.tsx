@@ -37,8 +37,8 @@ import { plainThreadUrl } from "./PlainThreadPanel";
 import type {
   UnifiedSession,
   GitStatusInfo,
+  SessionDiscordShare,
   SessionNote,
-  SessionSlackShare,
   TranscriptEntry,
 } from "../lib/types";
 import {
@@ -118,11 +118,11 @@ import {
 } from "../lib/api/shipped-changes";
 import { suggestedShippedChangeMessage } from "../lib/shipped-change-copy";
 import {
-  dismissSlackShare,
-  isSlackShareDismissed,
-  onSlackShareDismissChanged,
-  slackShareDismissKey,
-} from "../lib/slack-share-dismiss";
+  dismissShippedChangeShare,
+  isShippedChangeShareDismissed,
+  onShippedChangeShareDismissChanged,
+  shippedChangeShareDismissKey,
+} from "../lib/shipped-change-share-dismiss";
 import { latestFeaturedScreenshot } from "../../shared/shipped-change-media";
 import { useBackSwipe } from "../hooks/useBackSwipe";
 import { useNavigation } from "../hooks/useNavigation";
@@ -143,6 +143,7 @@ import { SchedulePromptButton } from "./SchedulePrompt";
 import {
   ShippedChangeComposer,
   SlackSentNotice,
+  type ShippedChangeComposerProps,
   type SlackSent,
 } from "./ShippedChangeComposer";
 import { BrandMark } from "./BrandMark";
@@ -436,6 +437,7 @@ const INDEXED_OPEN_SETTLE_MAX_MS = 2_500;
 const JUMP_PAGE_ENTRIES = HISTORY_PAGE_ENTRIES;
 const JUMP_MAX_ENTRIES = 4_000;
 const EMPTY_TRANSCRIPT_ENTRIES: TranscriptEntry[] = [];
+const DEFAULT_SHIPPED_CHANGE_SERVICE = "discord";
 export function SessionViewer({
   session,
   composer: {
@@ -600,11 +602,9 @@ export function SessionViewer({
   const [shippedChangeStatus, setShippedChangeStatus] = useState<
     "idle" | "sharing"
   >("idle");
-  const [shippedSlackReconnectRequired, setShippedSlackReconnectRequired] =
-    useState(false);
   // The share this view just made. The persisted receipt on the session is the
   // same thing after a reload; this only covers the gap before it refreshes.
-  const [shippedShare, setShippedShare] = useState<SessionSlackShare | null>(
+  const [shippedShare, setShippedShare] = useState<SessionDiscordShare | null>(
     null,
   );
   const walkthroughScreenshot = session.walkthrough?.shots?.find(
@@ -612,31 +612,29 @@ export function SessionViewer({
   )?.after;
   useEffect(() => {
     setShippedChangeStatus("idle");
-    setShippedSlackReconnectRequired(false);
     setShippedShare(null);
   }, [session.id, mergedPr?.number]);
   // Closing the card is a decision about this PR, not a fold, so it sticks
-  // across reloads and devices (lib/slack-share-dismiss). The next merged PR
-  // in the same session gets its own card, and "Send to Slack…" in the
-  // composer menu still opens a composer, so closing loses nothing.
+  // across reloads and devices. The next merged PR in the same session gets
+  // its own card, and the composer menu still offers explicit Slack sharing.
   const shareDismissKey = mergedPr?.number
-    ? slackShareDismissKey(session.id, mergedPr.number)
+    ? shippedChangeShareDismissKey(session.id, mergedPr.number)
     : "";
   const [shareDismissed, setShareDismissed] = useState(() =>
-    isSlackShareDismissed(shareDismissKey),
+    isShippedChangeShareDismissed(shareDismissKey),
   );
   const isSessionFocused = useEffectEvent(() => focused);
   useEffect(() => {
     const sync = () =>
-      setShareDismissed(isSlackShareDismissed(shareDismissKey));
+      setShareDismissed(isShippedChangeShareDismissed(shareDismissKey));
     sync();
-    return onSlackShareDismissChanged(sync);
+    return onShippedChangeShareDismissChanged(sync);
   }, [shareDismissKey]);
-  const dismissShippedChangeShare = useCallback(
-    () => dismissSlackShare(shareDismissKey),
+  const closeShippedChangeShare = useCallback(
+    () => dismissShippedChangeShare(shareDismissKey),
     [shareDismissKey],
   );
-  const sendShippedChangeToSlack = useCallback(
+  const sendShippedChangeToDiscord = useCallback(
     async (message: string, channel: string, screenshots: string[]) => {
       if (!mergedPr) return;
       setShippedChangeStatus("sharing");
@@ -649,59 +647,35 @@ export function SessionViewer({
           screenshots,
         });
         setShippedChangeStatus("idle");
-        setShippedSlackReconnectRequired(false);
         if (result.share) setShippedShare(result.share);
         else toast("This post was already sent");
       } catch (error) {
         setShippedChangeStatus("idle");
-        if (
-          error instanceof ApiError &&
-          error.status === 403 &&
-          /Reconnect Slack/.test(error.message)
-        ) {
-          setShippedSlackReconnectRequired(true);
-          toast("Reconnect Slack to add image access");
-        } else {
-          toast(
-            error instanceof Error
-              ? error.message
-              : "Couldn't share the shipped update",
-          );
-        }
+        toast(
+          error instanceof Error
+            ? error.message
+            : "Couldn't share the shipped update",
+        );
       }
     },
     [mergedPr, session.id],
   );
-  // Undo deletes the message in Slack and drops the receipt, so the card can
-  // offer the send again. Slack only lets someone delete their own message, so
-  // a teammate's post fails here rather than silently doing nothing.
   const undoShippedChangeShare = useCallback(
     async (at: string) => {
       try {
         await undoShippedChange(session.id, at);
         setShippedShare(null);
-        toast("Removed from Slack");
+        toast("Removed from Discord");
       } catch (error) {
         toast(
           error instanceof Error
             ? error.message
-            : "Couldn't undo the Slack message",
+            : "Couldn't undo the Discord message",
         );
       }
     },
     [session.id],
   );
-  const reconnectShippedSlack = useCallback(async () => {
-    try {
-      await reconnectSlack();
-      setShippedSlackReconnectRequired(false);
-      toast("Approve image access in Slack, then send again");
-    } catch (error) {
-      toast(
-        error instanceof Error ? error.message : "Couldn't reconnect Slack",
-      );
-    }
-  }, []);
   const promotedPr =
     prPresentation.primary?.source !== "primary"
       ? prPresentation.primary
@@ -3496,10 +3470,14 @@ export function SessionViewer({
     entries
       .findLast((entry) => entry.type === "assistant" && entry.content.trim())
       ?.content.trim() || "";
+  const hasLegacyShippedSlackShare = Boolean(
+    mergedPr &&
+    session.slackShares?.some((share) => share.prNumber === mergedPr.number),
+  );
   const shippedSentValue =
     shippedShare ||
     (mergedPr
-      ? session.slackShares?.findLast(
+      ? session.discordShares?.findLast(
           (share) => share.prNumber === mergedPr.number,
         )
       : undefined);
@@ -3508,13 +3486,13 @@ export function SessionViewer({
   const sentChannelName = shippedSentValue?.channelName ?? "";
   const sentPermalink = shippedSentValue?.permalink;
   const sentAt = shippedSentValue?.at ?? "";
-  const sentTs = shippedSentValue?.ts;
+  const sentMessageId = shippedSentValue?.messageId;
   const shippedSentKey = shippedSentValue
     ? [
         shippedSentValue.channelName,
         shippedSentValue.permalink,
         shippedSentValue.at,
-        shippedSentValue.ts,
+        shippedSentValue.messageId,
       ].join("\u0000")
     : "";
   const shippedSent = useMemo(() => {
@@ -3523,13 +3501,16 @@ export function SessionViewer({
       channelName: sentChannelName,
       permalink: sentPermalink,
       at: sentAt,
-      ts: sentTs,
+      messageId: sentMessageId,
     };
-  }, [shippedSentKey, sentChannelName, sentPermalink, sentAt, sentTs]);
-  const shippedChangeShare = useMemo(
+  }, [shippedSentKey, sentChannelName, sentPermalink, sentAt, sentMessageId]);
+  const shippedChangeShare = useMemo<
+    (ShippedChangeComposerProps & { prNumber: number }) | undefined
+  >(
     () =>
-      mergedPr && !shareDismissed
+      mergedPr && !shareDismissed && !hasLegacyShippedSlackShare
         ? {
+            service: DEFAULT_SHIPPED_CHANGE_SERVICE,
             prNumber: mergedPr.number!,
             sessionId: session.id,
             defaultMessage: suggestedShippedChangeMessage(
@@ -3537,11 +3518,9 @@ export function SessionViewer({
               session.walkthrough?.summary,
             ),
             screenshot: shippedScreenshot,
-            reconnectRequired: shippedSlackReconnectRequired,
             status: shippedChangeStatus,
-            onShare: sendShippedChangeToSlack,
-            onReconnectSlack: reconnectShippedSlack,
-            onCancel: dismissShippedChangeShare,
+            onShare: sendShippedChangeToDiscord,
+            onCancel: closeShippedChangeShare,
             nextMessage: latestAssistantMessage,
             ...(shippedSent
               ? {
@@ -3550,7 +3529,7 @@ export function SessionViewer({
                     permalink: shippedSent.permalink,
                     receiptKey: shippedSent.at,
                   },
-                  ...(shippedSent.ts
+                  ...(shippedSent.messageId
                     ? { onUndo: () => undoShippedChangeShare(shippedSent.at) }
                     : {}),
                 }
@@ -3559,14 +3538,13 @@ export function SessionViewer({
         : undefined,
     [
       mergedPr,
-      shippedSlackReconnectRequired,
+      hasLegacyShippedSlackShare,
       shippedScreenshot,
       session.id,
       session.walkthrough?.summary,
-      sendShippedChangeToSlack,
-      reconnectShippedSlack,
+      sendShippedChangeToDiscord,
       undoShippedChangeShare,
-      dismissShippedChangeShare,
+      closeShippedChangeShare,
       shareDismissed,
       shippedChangeStatus,
       shippedSent,
@@ -6627,7 +6605,7 @@ export function SessionViewer({
                         }
                         walkthrough={sessionWalkthrough}
                         notes={notes}
-                        slackShare={shippedChangeShare}
+                        shippedChangeShare={shippedChangeShare}
                         onFork={canForkSession ? handleFork : undefined}
                         onOpenSubagent={openSubagent}
                         // For automation-owned sessions (e.g. a GitHub PR run), the
@@ -6696,6 +6674,7 @@ export function SessionViewer({
                   {slackComposer && (
                     <ShippedChangeComposer
                       key={slackComposer.id}
+                      service="slack"
                       sessionId={session.id}
                       defaultMessage={slackComposer.message}
                       initialScreenshots={slackComposer.images}

@@ -2492,7 +2492,10 @@ struct SessionsListView: View {
                             .first { $0.after != nil }?.after
                     )
                 } label: {
-                    Label("Share to Slack", systemImage: "paperplane")
+                    Label(
+                        session.prState == "MERGED" ? "Send to Discord" : "Share to Slack",
+                        systemImage: "paperplane"
+                    )
                 }
                 Link(destination: prURL) {
                     Label {

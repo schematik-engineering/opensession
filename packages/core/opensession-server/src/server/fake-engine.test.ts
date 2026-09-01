@@ -372,14 +372,14 @@ describe("fake engine through runAgent", () => {
     expect(events.at(-1)).toMatchObject({ type: "done" });
   });
 
-  test("stops on a provider overload without burning a same-provider fallback", async () => {
+  test("uses the configured cross-provider fallback on provider overload", async () => {
     const fake = makeFakeEngine([
       {
         kind: "error",
         content:
           "Our servers are currently overloaded. Please try again later.",
       },
-      { kind: "clean", text: ["should never run"] },
+      { kind: "clean", text: ["recovered on fallback"] },
     ]);
     __setEngineForTest(fake.engine);
     const events = await collect(
@@ -391,12 +391,15 @@ describe("fake engine through runAgent", () => {
         fallbackModel: "claude-opus-5",
       }),
     );
-    expect(fake.calls).toHaveLength(1);
-    expect(events).toHaveLength(2);
-    expect(events.at(-1)?.content).toBe(
-      "The model provider is temporarily overloaded. Your session and completed work are preserved. " +
-        "Retry this prompt in a minute.",
+    expect(fake.calls).toHaveLength(2);
+    expect(events.find((event) => event.type === "model_switch")).toMatchObject(
+      {
+        fromModel: "gpt-5.6-sol",
+        toModel: "pi/anthropic/claude-opus-5",
+        temporaryFallback: true,
+      },
     );
+    expect(events.at(-1)).toMatchObject({ type: "done" });
   });
 
   test("journals the selected model behind a transient fallback for restart recovery", async () => {

@@ -61,6 +61,7 @@ import {
   recordAcpSessionAccountExhausted,
   writeAcpAccountBinding,
 } from "./acp-state";
+import { createGrokAcpExtension } from "./grok-acp-extension";
 
 const DEFAULT_TURN_TIMEOUT_MS = 30 * 60_000;
 const MAX_STDERR_BYTES = 8_192;
@@ -215,6 +216,59 @@ class EventQueue {
   }
 }
 
+class AcpActivityWatchdog {
+  readonly expired: Promise<never>;
+  private reject!: (error: Error) => void;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private pauseDepth = 0;
+  private stopped = false;
+
+  constructor(
+    private readonly provider: AcpProvider,
+    private readonly timeoutMs: number,
+    private readonly onExpire: () => void,
+  ) {
+    this.expired = new Promise<never>((_, reject) => {
+      this.reject = reject;
+    });
+    void this.expired.catch(() => {});
+    this.touch();
+  }
+
+  touch = (): void => {
+    if (this.stopped || this.pauseDepth > 0) return;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = setTimeout(() => {
+      this.stopped = true;
+      this.onExpire();
+      this.reject(
+        new Error(
+          `${this.provider} ACP turn was inactive for ${this.timeoutMs}ms`,
+        ),
+      );
+    }, this.timeoutMs);
+  };
+
+  pause = (): void => {
+    if (this.stopped) return;
+    this.pauseDepth += 1;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = undefined;
+  };
+
+  resume = (): void => {
+    if (this.stopped || this.pauseDepth === 0) return;
+    this.pauseDepth -= 1;
+    if (this.pauseDepth === 0) this.touch();
+  };
+
+  stop(): void {
+    this.stopped = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = undefined;
+  }
+}
+
 interface PreparedAuth {
   home: string;
   scrub: () => void;
@@ -328,6 +382,50 @@ function cleanError(value: unknown): string {
       "$1=[redacted]",
     )
     .slice(0, 2_000);
+}
+
+async function terminateAcpChild(
+  child: ChildProcessWithoutNullStreams,
+): Promise<void> {
+  if (!child.pid) {
+    child.stdin.destroy();
+    child.stdout.destroy();
+    child.stderr.destroy();
+    return;
+  }
+  const exited = new Promise<void>((resolve) => {
+    const finish = () => resolve();
+    if (child.exitCode !== null || child.signalCode !== null) {
+      finish();
+      return;
+    }
+    child.once("exit", finish);
+    if (child.exitCode !== null || child.signalCode !== null) {
+      child.off("exit", finish);
+      finish();
+    }
+  });
+  try {
+    child.stdin.end();
+  } catch {}
+  if (child.exitCode === null && child.signalCode === null) {
+    await Promise.race([exited, Bun.sleep(500)]);
+  }
+  if (child.exitCode === null && child.signalCode === null) {
+    try {
+      child.kill("SIGTERM");
+    } catch {}
+    await Promise.race([exited, Bun.sleep(500)]);
+    if (child.exitCode === null && child.signalCode === null) {
+      try {
+        child.kill("SIGKILL");
+      } catch {}
+      await Promise.race([exited, Bun.sleep(500)]);
+    }
+  }
+  child.stdin.destroy();
+  child.stdout.destroy();
+  child.stderr.destroy();
 }
 
 function append(
@@ -562,13 +660,36 @@ async function* runAcpAttempt(
     };
     return;
   }
-  if (account) await refreshAcpAuthSource(provider, account.authPath);
-  const auth = prepareAuth(provider, unifiedSessionId, account);
   const selectedAccountId =
     account?.id ||
     projected?.accountId ||
     process.env.OPENSESSION_ACP_ACCOUNT_ID ||
     "projected";
+  let auth: PreparedAuth;
+  try {
+    if (account) await refreshAcpAuthSource(provider, account.authPath);
+    auth = prepareAuth(provider, unifiedSessionId, account);
+  } catch (error) {
+    const content = `${provider}: ${cleanError(error)}`;
+    const usageLimitExhausted = isUsageFailure(content) || undefined;
+    if (usageLimitExhausted) {
+      if (!projected && account) markAcpAccountExhausted(account.id);
+      if (unifiedSessionId)
+        recordAcpSessionAccountExhausted(
+          unifiedSessionId,
+          provider,
+          selectedAccountId,
+        );
+    }
+    yield {
+      type: "error",
+      content,
+      provider,
+      model,
+      usageLimitExhausted,
+    };
+    return;
+  }
   // Provider-native session ids are account-owned. When a spent/removed pin
   // rotates to another subscription, begin a fresh ACP session and let the
   // OpenSession transcript handoff preserve the visible conversation.
@@ -635,6 +756,18 @@ async function* runAcpAttempt(
 
   let connection: ClientSideConnection;
   let engineSessionId = resumeSessionId;
+  let activeWatchdog: AcpActivityWatchdog | undefined;
+  const grokExtension =
+    provider === "grok"
+      ? createGrokAcpExtension({
+          currentSessionId: () => engineSessionId,
+          unattended: isUnattendedKind(baseJournalKind(opts.journal?.kind)),
+          onAskUser: opts.onAskUser,
+          onActivity: () => activeWatchdog?.touch(),
+          onInteractionStart: () => activeWatchdog?.pause(),
+          onInteractionEnd: () => activeWatchdog?.resume(),
+        })
+      : undefined;
   let acceptUpdates = false;
   // Some ACP agents (Grok Build today) omit messageId on streamed chunks. A
   // provider-native session spans many OpenSession turns, so an engine-only
@@ -735,17 +868,50 @@ async function* runAcpAttempt(
   let retryWithoutDeniedTool = false;
   const client: Client = {
     requestPermission: async (request) => {
-      const decision = await permissionResponse(opts, request);
-      permissionDenial = decision.denial;
-      retryWithoutDeniedTool = decision.retryWithoutTool === true;
-      return decision.response;
+      activeWatchdog?.touch();
+      activeWatchdog?.pause();
+      try {
+        const decision = await permissionResponse(opts, request);
+        permissionDenial = decision.denial;
+        retryWithoutDeniedTool = decision.retryWithoutTool === true;
+        return decision.response;
+      } finally {
+        activeWatchdog?.resume();
+      }
     },
-    sessionUpdate: async (notification) => handleUpdate(notification),
-    createTerminal: (params) => terminal.createTerminal(params),
-    terminalOutput: (params) => terminal.terminalOutput(params),
-    waitForTerminalExit: (params) => terminal.waitForTerminalExit(params),
-    killTerminal: (params) => terminal.killTerminal(params),
-    releaseTerminal: (params) => terminal.releaseTerminal(params),
+    sessionUpdate: async (notification) => {
+      if (notification.sessionId === engineSessionId) activeWatchdog?.touch();
+      handleUpdate(notification);
+    },
+    createTerminal: (params) => {
+      activeWatchdog?.touch();
+      return terminal.createTerminal(params);
+    },
+    terminalOutput: (params) => {
+      activeWatchdog?.touch();
+      return terminal.terminalOutput(params);
+    },
+    waitForTerminalExit: (params) => {
+      activeWatchdog?.touch();
+      return terminal.waitForTerminalExit(params);
+    },
+    killTerminal: (params) => {
+      activeWatchdog?.touch();
+      return terminal.killTerminal(params);
+    },
+    releaseTerminal: (params) => {
+      activeWatchdog?.touch();
+      return terminal.releaseTerminal(params);
+    },
+    ...(grokExtension
+      ? {
+          createElicitation: grokExtension.createElicitation,
+          extMethod: (method: string, params: Record<string, unknown>) =>
+            grokExtension.extMethod(method, params),
+          extNotification: (method: string, params: Record<string, unknown>) =>
+            grokExtension.extNotification(method, params),
+        }
+      : {}),
   };
   connection = new ClientSideConnection(
     () => client,
@@ -759,8 +925,13 @@ async function* runAcpAttempt(
     cancel: () => {
       if (cancelled) return;
       cancelled = true;
-      if (engineSessionId)
-        void connection.cancel({ sessionId: engineSessionId }).catch(() => {});
+      if (engineSessionId) {
+        try {
+          void connection
+            .cancel({ sessionId: engineSessionId })
+            .catch(() => {});
+        } catch {}
+      }
     },
   };
   for (const alias of aliases) register(alias, control);
@@ -770,7 +941,10 @@ async function* runAcpAttempt(
       const initialized = await Promise.race([
         connection.initialize({
           protocolVersion: PROTOCOL_VERSION,
-          clientCapabilities: { terminal: provider === "grok" },
+          clientCapabilities: {
+            terminal: provider === "grok",
+            ...(provider === "grok" ? { elicitation: { form: {} } } : {}),
+          },
           clientInfo: { name: "OpenSession", version: "1" },
         }),
         spawnError,
@@ -779,15 +953,14 @@ async function* runAcpAttempt(
         throw new Error(
           `${provider} ACP protocol ${initialized.protocolVersion} is incompatible with ${PROTOCOL_VERSION}`,
         );
-      if (
-        !initialized.authMethods?.some(
-          (method) => method.id === definition.authMethod,
-        )
-      )
+      const authMethod = definition.authMethods.find((supported) =>
+        initialized.authMethods?.some((offered) => offered.id === supported),
+      );
+      if (!authMethod)
         throw new Error(
-          `${provider} ACP did not offer subscription authentication`,
+          `${provider} ACP did not offer a supported subscription authentication method`,
         );
-      await connection.authenticate({ methodId: definition.authMethod });
+      await connection.authenticate({ methodId: authMethod });
       const mcpServers = acpMcpServers(opts);
       const agentCapabilities = initialized.agentCapabilities || {};
       let resumedWithoutState = false;
@@ -854,7 +1027,6 @@ async function* runAcpAttempt(
           data: image.data,
         })),
       ];
-      let timeout: ReturnType<typeof setTimeout> | undefined;
       const timeoutMs =
         Number(process.env.OPENSESSION_ACP_TURN_TIMEOUT_MS) ||
         DEFAULT_TURN_TIMEOUT_MS;
@@ -863,19 +1035,35 @@ async function* runAcpAttempt(
       for (let attempt = 0; ; attempt++) {
         permissionDenial = undefined;
         retryWithoutDeniedTool = false;
-        response = await Promise.race([
-          connection.prompt({ sessionId: engineSessionId, prompt: nextPrompt }),
-          new Promise<never>((_, reject) => {
-            timeout = setTimeout(() => {
-              control.cancel();
-              reject(
-                new Error(
-                  `${provider} ACP turn timed out after ${timeoutMs}ms`,
-                ),
-              );
-            }, timeoutMs);
-          }),
-        ]).finally(() => clearTimeout(timeout));
+        const grokPrompt = grokExtension?.beginPrompt(engineSessionId);
+        const request = {
+          sessionId: engineSessionId,
+          prompt: nextPrompt,
+          ...(grokPrompt
+            ? {
+                _meta: {
+                  promptId: grokPrompt.promptId,
+                  requestId: grokPrompt.promptId,
+                },
+              }
+            : {}),
+        };
+        activeWatchdog = new AcpActivityWatchdog(
+          provider,
+          timeoutMs,
+          control.cancel,
+        );
+        try {
+          response = await Promise.race([
+            connection.prompt(request),
+            ...(grokPrompt ? [grokPrompt.completion] : []),
+            activeWatchdog.expired,
+          ]);
+        } finally {
+          activeWatchdog.stop();
+          activeWatchdog = undefined;
+          grokPrompt?.finish(response);
+        }
         if (
           response.stopReason !== "cancelled" ||
           cancelled ||
@@ -948,9 +1136,7 @@ async function* runAcpAttempt(
       acceptUpdates = false;
       child.off("error", onSpawnError);
       await terminal.close();
-      try {
-        child.kill("SIGTERM");
-      } catch {}
+      await terminateAcpChild(child);
       auth.destroy();
       try {
         rmSync(toolHome, { recursive: true, force: true });

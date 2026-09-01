@@ -75,11 +75,12 @@ const entries: TranscriptEntry[] = [
 ];
 
 describe("TranscriptBlocks shipped change action", () => {
-  test("places the Slack composer after the merged response", () => {
+  test("places the Discord composer after the merged response", () => {
     const html = renderToStaticMarkup(
       <TranscriptBlocks
         entries={entries}
-        slackShare={{
+        shippedChangeShare={{
+          service: "discord",
           prNumber: 5606,
           sessionId: "session-1",
           defaultMessage: "We updated the toggle style in Tella.",
@@ -90,14 +91,14 @@ describe("TranscriptBlocks shipped change action", () => {
       />,
     );
     expect(html.indexOf("PR #5606 is merged")).toBeLessThan(
-      html.indexOf("Send to Slack"),
+      html.indexOf("Send to Discord"),
     );
-    expect(html.indexOf("Send to Slack")).toBeLessThan(
+    expect(html.indexOf("Send to Discord")).toBeLessThan(
       html.indexOf("Deployment finished"),
     );
     expect(html).toContain("We updated the toggle style in Tella.");
-    expect(html).toContain("Send to Slack");
-    expect(html).toContain('data-brand="slack"');
+    expect(html).toContain("Send to Discord");
+    expect(html).toContain('data-brand="discord"');
     expect(html).toContain("%2Ftmp%2Ftoggle-after.png");
     expect(html).toContain('aria-label="Open screenshot preview"');
     expect(html).toContain('aria-label="Remove screenshot"');
@@ -105,7 +106,7 @@ describe("TranscriptBlocks shipped change action", () => {
     expect(html).toContain("group-hover/overlay-action:opacity-100");
     expect(html).toContain("bg-white");
     expect(html).toContain('aria-label="Add images"');
-    expect(html).toContain('aria-label="Slack channel"');
+    expect(html).toContain('aria-label="Discord channel"');
     expect(html).toContain("border-line bg-surface");
     // The channel picker is the app's own select (ui/select), not a bare
     // <select> with an overlaid chevron.
@@ -127,7 +128,8 @@ describe("TranscriptBlocks shipped change action", () => {
               }
             : e,
         )}
-        slackShare={{
+        shippedChangeShare={{
+          service: "discord",
           prNumber: 5606,
           sessionId: "session-1",
           defaultMessage: "We updated the toggle style in Tella.",
@@ -136,14 +138,15 @@ describe("TranscriptBlocks shipped change action", () => {
         }}
       />,
     );
-    expect(html).toContain("Send to Slack");
+    expect(html).toContain("Send to Discord");
   });
 
   test("keeps image attachment explicit when no screenshot exists", () => {
     const html = renderToStaticMarkup(
       <TranscriptBlocks
         entries={entries}
-        slackShare={{
+        shippedChangeShare={{
+          service: "discord",
           prNumber: 5606,
           sessionId: "session-1",
           defaultMessage: "Background names are now visible in tooltips.",
@@ -161,7 +164,8 @@ describe("TranscriptBlocks shipped change action", () => {
     const html = renderToStaticMarkup(
       <TranscriptBlocks
         entries={entries}
-        slackShare={{
+        shippedChangeShare={{
+          service: "discord",
           prNumber: 5606,
           sessionId: "session-1",
           defaultMessage: "We updated the toggle style in Tella.",
@@ -174,14 +178,15 @@ describe("TranscriptBlocks shipped change action", () => {
     expect(html).toContain("Sent to");
     expect(html).toContain("#chat");
     expect(html).toContain("Send another");
-    expect(html).not.toContain('aria-label="Slack message"');
+    expect(html).not.toContain('aria-label="Discord message"');
   });
 
   test("does not show the action for a different merged PR", () => {
     const html = renderToStaticMarkup(
       <TranscriptBlocks
         entries={entries}
-        slackShare={{
+        shippedChangeShare={{
+          service: "discord",
           prNumber: 5607,
           sessionId: "session-1",
           defaultMessage: "We shipped another update.",
@@ -190,7 +195,7 @@ describe("TranscriptBlocks shipped change action", () => {
         }}
       />,
     );
-    expect(html).not.toContain("Send to Slack");
+    expect(html).not.toContain("Send to Discord");
   });
 });
 

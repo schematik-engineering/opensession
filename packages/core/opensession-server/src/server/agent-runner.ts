@@ -482,7 +482,7 @@ export async function* runAgent(
     : undefined;
   try {
     if (!key) {
-      for await (const event of runAgentInner(effectiveOpts))
+      for await (const event of runModelFallbackWalk(effectiveOpts))
         yield observe(event);
       return;
     }
@@ -492,7 +492,7 @@ export async function* runAgent(
       sessionId: opts.journal?.osSessionId,
     });
     try {
-      for await (const event of runAgentInner(effectiveOpts)) {
+      for await (const event of runModelFallbackWalk(effectiveOpts)) {
         observe(event);
         // Pi reports every bridged MCP call as the `mcp_call` dispatcher with
         // the real tool inside its input, so the ledger is fed the unwrapped
@@ -546,7 +546,16 @@ export async function* runAgent(
   }
 }
 
-async function* runAgentInner(opts: RunAgentOpts): AsyncGenerator<StreamEvent> {
+/**
+ * Provider-neutral model fallback walk. Production in-process runs use the
+ * local engine dispatcher. Detached execution supplies a one-model physical
+ * attempt driver so account and model fallback stay owned by the coordinator
+ * instead of the credential-bearing host.
+ */
+export async function* runModelFallbackWalk(
+  opts: RunAgentOpts,
+  runModel: EngineRunner = runOnModel,
+): AsyncGenerator<StreamEvent> {
   const wasCancelled = () => opts.shouldCancel?.() === true;
   if (wasCancelled()) return;
   // Workspace presets stay as their picker id on the session. Resolve their
@@ -577,7 +586,7 @@ async function* runAgentInner(opts: RunAgentOpts): AsyncGenerator<StreamEvent> {
       };
       return;
     }
-    yield* runOnModel(opts, primaryModel);
+    yield* runModel(opts, primaryModel);
     return;
   }
 
@@ -610,7 +619,7 @@ async function* runAgentInner(opts: RunAgentOpts): AsyncGenerator<StreamEvent> {
       recordPoolDryShortCircuit(currentOpts, currentModel, dry);
       failure = { transient: false, content: dry };
     } else {
-      for await (const event of runOnModel(currentOpts, currentModel)) {
+      for await (const event of runModel(currentOpts, currentModel)) {
         if (event.type === "init") {
           currentEngineId = event.sessionId || currentEngineId;
         }
@@ -625,7 +634,7 @@ async function* runAgentInner(opts: RunAgentOpts): AsyncGenerator<StreamEvent> {
           }
           if (isProviderOverloadError(event.content)) {
             failure = {
-              transient: false,
+              transient: true,
               providerOverloaded: true,
               content: event.content,
             };
@@ -644,18 +653,6 @@ async function* runAgentInner(opts: RunAgentOpts): AsyncGenerator<StreamEvent> {
     }
 
     if (!failure || wasCancelled()) return;
-
-    if (failure.providerOverloaded) {
-      yield {
-        type: "error",
-        content:
-          "The model provider is temporarily overloaded. Your session and completed work are preserved. " +
-          "Retry this prompt in a minute.",
-        provider: providerFor(currentModel),
-        model: currentModel,
-      };
-      return;
-    }
 
     // Two models in a row dying the TRANSIENT way is an infrastructure
     // problem (dead rpc socket, wedged bridge, network) — every further rung
@@ -705,17 +702,7 @@ async function* runAgentInner(opts: RunAgentOpts): AsyncGenerator<StreamEvent> {
       };
       return;
     }
-    const nextModel = toPiModel(hop.id);
-    if (!nextModel) {
-      yield {
-        type: "error",
-        content: `${modelLabel(currentModel)} is out of usage, and its fallback cannot run on Pi.`,
-        provider: providerFor(currentModel),
-        model: currentModel,
-        usageLimitExhausted: true,
-      };
-      return;
-    }
+    const nextModel = hop.id;
 
     // Downgrade to a dumber model (Fable→Opus, Opus→Sonnet, Sol→Opus): a human
     // decides. Interactive runs get an AskUserQuestion; headless runs

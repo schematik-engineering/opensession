@@ -27,6 +27,18 @@ export interface DiscordMessageResult {
   content?: string;
 }
 
+export interface DiscordUpload {
+  filename: string;
+  contentType: string;
+  data: ArrayBuffer;
+  description?: string;
+}
+
+export type DiscordFetch = (
+  input: string | URL | Request,
+  init?: RequestInit,
+) => Promise<Response>;
+
 export interface DiscordApplicationCommand {
   name: string;
   description: string;
@@ -88,7 +100,7 @@ export class DiscordRest {
   constructor(
     private readonly token: string,
     private readonly applicationId: string,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: DiscordFetch = fetch,
   ) {}
 
   private async request<T>(
@@ -100,16 +112,19 @@ export class DiscordRest {
     for (let attempt = 0; attempt < 4; attempt++) {
       let response: Response;
       try {
+        const multipart = body instanceof FormData;
         response = await this.fetchImpl(`${API_BASE}${path}`, {
           method,
           headers: {
             ...(auth ? { Authorization: `Bot ${this.token}` } : {}),
-            ...(body === undefined
+            ...(body === undefined || multipart
               ? {}
               : { "Content-Type": "application/json" }),
             "User-Agent": "OpenSession-Discord (https://opensession.com, 1)",
           },
-          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          ...(body === undefined
+            ? {}
+            : { body: multipart ? body : JSON.stringify(body) }),
         });
       } catch (error) {
         if (attempt < 3) {
@@ -232,6 +247,42 @@ export class DiscordRest {
           }
         : {}),
     });
+  }
+
+  sendFiles(
+    channelId: string,
+    content: string,
+    files: readonly DiscordUpload[],
+  ): Promise<DiscordMessageResult> {
+    const uploads = files.slice(0, 10);
+    const form = new FormData();
+    form.append(
+      "payload_json",
+      JSON.stringify({
+        content: content.slice(0, 2_000),
+        allowed_mentions: { parse: [], replied_user: false },
+        attachments: uploads.map((file, id) => ({
+          id,
+          filename: file.filename,
+          ...(file.description ? { description: file.description } : {}),
+        })),
+      }),
+    );
+    uploads.forEach((file, index) => {
+      form.append(
+        `files[${index}]`,
+        new Blob([file.data], { type: file.contentType }),
+        file.filename,
+      );
+    });
+    return this.request("POST", `/channels/${channelId}/messages`, form);
+  }
+
+  deleteMessage(channelId: string, messageId: string): Promise<void> {
+    return this.request(
+      "DELETE",
+      `/channels/${channelId}/messages/${messageId}`,
+    );
   }
 
   editMessage(

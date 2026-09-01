@@ -2909,8 +2909,8 @@ async function runSessionPromptInner(
     return;
   }
 
-  // Local detached run host for the pi engine: pi drives its turn in-process
-  // via the SDK, so unlike pi there is no detachable engine server to
+  // Local detached run host for every local engine. Pi and ACP drive their
+  // turns in-process, so there is no detachable engine server to
   // outlive a restart. Instead the whole turn moves into a transient
   // run-host unit (host-client.ts) that survives `systemctl restart` and is
   // reattached by the boot sweep (resumeLocalHostRun). Transcript writes are
@@ -2922,7 +2922,7 @@ async function runSessionPromptInner(
   // set the run-rpc fallback builder serves, the repos note and MCP grant
   // identity are withheld, and the automation's prReviewer rides the spec.
   const hostedRun =
-    !runnerRun && !sandboxRun && routedEngine === "pi"
+    !runnerRun && !sandboxRun
       ? runAgentHosted({
           osSessionId: session.id,
           prompt,

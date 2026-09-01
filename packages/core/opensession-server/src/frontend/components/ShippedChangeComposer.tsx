@@ -15,9 +15,14 @@ import { openLightbox } from "./media-lightbox-controller";
 import { IconPlus, IconUndo, IconX } from "./icons";
 import { Spinner } from "../ui/spinner";
 
-const MAX_SLACK_IMAGE_BYTES = 20 * 1024 * 1024;
+type MessageService = "discord" | "slack";
 
-export interface SlackSent {
+const IMAGE_LIMITS = {
+  discord: 10 * 1024 * 1024,
+  slack: 20 * 1024 * 1024,
+} satisfies Record<MessageService, number>;
+
+export interface SentMessage {
   channelName: string;
   permalink?: string;
   receiptKey?: string;
@@ -26,19 +31,24 @@ export interface SlackSent {
   ts?: string;
 }
 
-export function SlackSentNotice({
+export type SlackSent = SentMessage;
+
+function SentNotice({
+  service,
   channelName,
   permalink,
   onSendAnother,
   onUndo,
-}: SlackSent & {
+}: SentMessage & {
+  service: MessageService;
   onSendAnother: () => void;
   onUndo?: () => void | Promise<void>;
 }) {
   const [undoing, setUndoing] = useState(false);
+  const serviceName = service === "discord" ? "Discord" : "Slack";
   return (
     <div className="mx-auto mt-2 mb-6 flex w-full max-w-[var(--session-col)] items-center gap-1.5 px-1 text-label leading-5 text-dim">
-      <BrandMark name="slack" size={12} />
+      <BrandMark name={service} size={12} />
       <span>
         Sent to <span className="font-semibold text-fg">#{channelName}</span>
       </span>
@@ -53,7 +63,7 @@ export function SlackSentNotice({
             target="_blank"
             rel="noreferrer"
           >
-            Open in Slack
+            Open in {serviceName}
           </a>
         </>
       )}
@@ -91,7 +101,17 @@ export function SlackSentNotice({
   );
 }
 
+export function SlackSentNotice(
+  props: SentMessage & {
+    onSendAnother: () => void;
+    onUndo?: () => void | Promise<void>;
+  },
+) {
+  return <SentNotice {...props} service="slack" />;
+}
+
 export interface ShippedChangeComposerProps {
+  service: MessageService;
   sessionId: string;
   defaultMessage: string;
   screenshot?: string;
@@ -110,12 +130,13 @@ export interface ShippedChangeComposerProps {
   /** The pending composer to update while the human edits it. */
   draftId?: string;
   nextMessage?: string;
-  sent?: SlackSent;
+  sent?: SentMessage;
   /** Offered on the receipt while the message is still deletable in Slack. */
   onUndo?: () => void | Promise<void>;
 }
 
 export function ShippedChangeComposer({
+  service,
   sessionId,
   defaultMessage,
   screenshot,
@@ -150,7 +171,7 @@ export function ShippedChangeComposer({
   const sessionRef = useRef(sessionId);
   const draftDirtyRef = useRef(false);
   const sentKey = sent
-    ? `${sent.channelName}\0${sent.permalink || ""}\0${sent.receiptKey || ""}`
+    ? `${service}\0${sent.channelName}\0${sent.permalink || ""}\0${sent.receiptKey || ""}`
     : "";
 
   useEffect(() => {
@@ -255,16 +276,17 @@ export function ShippedChangeComposer({
   }, [draftId]);
   const addImages = async (files: File[]) => {
     const candidates = files.filter((file) => file.type.startsWith("image/"));
-    const oversized = candidates.find(
-      (file) => file.size > MAX_SLACK_IMAGE_BYTES,
-    );
+    const imageLimit = IMAGE_LIMITS[service];
+    const oversized = candidates.find((file) => file.size > imageLimit);
     if (oversized) {
-      toast(`${oversized.name} is larger than Slack's 20 MB image limit`, {
-        variant: "error",
-      });
+      const serviceName = service === "discord" ? "Discord" : "Slack";
+      toast(
+        `${oversized.name} is larger than ${serviceName}'s ${imageLimit / 1024 / 1024} MB image limit`,
+        { variant: "error" },
+      );
     }
     const images = candidates
-      .filter((file) => file.size <= MAX_SLACK_IMAGE_BYTES)
+      .filter((file) => file.size <= imageLimit)
       .slice(0, 10 - screenshots.length);
     if (!images.length) return;
     setUploading(true);
@@ -325,8 +347,9 @@ export function ShippedChangeComposer({
 
   if (sent && !composingAfterSent) {
     return (
-      <SlackSentNotice
+      <SentNotice
         {...sent}
+        service={service}
         onUndo={onUndo}
         onSendAnother={() => {
           setMessage(nextMessage?.trim().slice(0, 500) || "");
@@ -337,11 +360,12 @@ export function ShippedChangeComposer({
     );
   }
 
+  const serviceName = service === "discord" ? "Discord" : "Slack";
   return (
     <div className="mx-auto mt-2 mb-6 w-full max-w-[var(--session-col)]">
       <div className="mb-2 flex items-center gap-1.5 px-1 text-label leading-5 text-dim">
-        <BrandMark name="slack" size={12} />
-        <span className="font-semibold">Send to Slack</span>
+        <BrandMark name={service} size={12} />
+        <span className="font-semibold">Send to {serviceName}</span>
         {onCancel && (
           <Tooltip label="Close" side="bottom">
             <Button
@@ -368,7 +392,7 @@ export function ShippedChangeComposer({
       >
         <textarea
           className="block min-h-14 max-h-32 w-full resize-none border-0 bg-transparent p-0 text-body leading-[1.55] text-fg outline-none [field-sizing:content] placeholder:text-faint phone:text-input-phone"
-          aria-label="Slack message"
+          aria-label={`${serviceName} message`}
           {...noAutofill}
           value={message}
           maxLength={500}
@@ -458,7 +482,7 @@ export function ShippedChangeComposer({
 					    position it, which is the primitive rebuilt by hand around a
 					    control it exists to replace. */}
           <OptionSelect
-            label="Slack channel"
+            label={`${serviceName} channel`}
             className="w-28 phone:w-32"
             value={channel}
             options={
@@ -478,7 +502,7 @@ export function ShippedChangeComposer({
           <Button
             variant="primary"
             size="md"
-            icon={<BrandMark name="slack" size={12} />}
+            icon={<BrandMark name={service} size={12} />}
             disabled={
               status !== "idle" ||
               awaitingSlack ||

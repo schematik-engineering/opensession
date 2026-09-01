@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import type { UnifiedSession } from "../../server/types";
+import type { DiscordRest } from "../discord/api";
 import {
   claimShippedChangeAnnouncement,
   selectShippedVisualChange,
@@ -10,6 +11,7 @@ import {
   shippedChangeAnnouncementKey,
   shippedChangeOneLiner,
   normalizeShippedChangeMessage,
+  shareShippedVisualChange,
   validWalkthroughScreenshot,
   validFeaturedScreenshot,
 } from "./shipped-change-notify";
@@ -143,6 +145,68 @@ describe("shipped change copy", () => {
 
   test("does not announce without a prose explanation", () => {
     expect(shippedChangeOneLiner("## Screenshot only")).toBe("");
+  });
+});
+
+describe("Discord shipped change delivery", () => {
+  test("posts selected screenshots and returns a Discord permalink", async () => {
+    const root = mkdtempSync(join(tmpdir(), "shipped-discord-delivery-"));
+    scratch.push(root);
+    const image = join(root, "after.png");
+    writeFileSync(image, "png");
+    const calls: Array<{
+      channelId: string;
+      content: string;
+      filenames: string[];
+    }> = [];
+    const discord: Pick<DiscordRest, "sendMessage" | "sendFiles"> = {
+      sendFiles: async (channelId, content, files) => {
+        calls.push({
+          channelId,
+          content,
+          filenames: files.map((file) => file.filename),
+        });
+        return { id: "message-1", channel_id: channelId };
+      },
+      sendMessage: async (channelId) => ({
+        id: "message-1",
+        channel_id: channelId,
+      }),
+    };
+
+    const result = await shareShippedVisualChange({
+      session: session("discord", "2026-09-01T10:00:00Z", []),
+      pr: {
+        number: 44,
+        title: "Default shipped updates to Discord",
+        url: "https://github.com/example/repo/pull/44",
+      },
+      repoFullName: "example/repo",
+      channel: {
+        id: "1542925450790305912",
+        name: "general",
+        guildId: "1542925450790305904",
+        guildName: "Schematik",
+      },
+      message: "Shipped to Discord.",
+      screenshots: [image],
+      discord,
+      announcementRoot: join(root, "announcements"),
+    });
+
+    expect(calls).toEqual([
+      {
+        channelId: "1542925450790305912",
+        content: "Shipped to Discord.",
+        filenames: ["after.png"],
+      },
+    ]);
+    expect(result).toMatchObject({
+      status: "shared",
+      messageId: "message-1",
+      permalink:
+        "https://discord.com/channels/1542925450790305904/1542925450790305912/message-1",
+    });
   });
 });
 

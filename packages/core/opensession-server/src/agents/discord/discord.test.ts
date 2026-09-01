@@ -10,7 +10,7 @@ import {
 import { join } from "path";
 import { tmpdir } from "os";
 import type { SessionControl } from "../../server/session-control";
-import { DiscordRest, splitDiscordMessage } from "./api";
+import { DiscordRest, splitDiscordMessage, type DiscordFetch } from "./api";
 import { loadDiscordConfig, type DiscordConfig } from "./config";
 import { DiscordGateway } from "./gateway";
 import { DISCORD_COMMANDS, DiscordAgent, safeError } from "./index";
@@ -205,6 +205,55 @@ describe("Discord REST presentation", () => {
       enforce_nonce: true,
       components,
     });
+  });
+
+  test("uploads attachments as multipart data and deletes sent messages", async () => {
+    let upload: FormData | undefined;
+    const requests: Array<{ method: string; url: string }> = [];
+    const fakeFetch: DiscordFetch = async (input, init) => {
+      requests.push({
+        method: init?.method || "GET",
+        url: String(input),
+      });
+      if (init?.method === "DELETE") return new Response(null, { status: 204 });
+      if (!(init?.body instanceof FormData))
+        throw new Error("Expected Discord multipart form data");
+      upload = init.body;
+      return Response.json({ id: "m1", channel_id: "c1" });
+    };
+    const rest = new DiscordRest("token", "1542925450790305903", fakeFetch);
+
+    await rest.sendFiles("c1", "Shipped.", [
+      {
+        filename: "after.png",
+        contentType: "image/png",
+        data: Uint8Array.from(new TextEncoder().encode("png")).buffer,
+        description: "After screenshot",
+      },
+    ]);
+    await rest.deleteMessage("c1", "m1");
+
+    expect(JSON.parse(String(upload?.get("payload_json")))).toEqual({
+      content: "Shipped.",
+      allowed_mentions: { parse: [], replied_user: false },
+      attachments: [
+        { id: 0, filename: "after.png", description: "After screenshot" },
+      ],
+    });
+    const file = upload?.get("files[0]");
+    expect(file).toBeInstanceOf(Blob);
+    if (!(file instanceof Blob)) throw new Error("Expected uploaded file");
+    expect(await file.text()).toBe("png");
+    expect(requests).toEqual([
+      {
+        method: "POST",
+        url: "https://discord.com/api/v10/channels/c1/messages",
+      },
+      {
+        method: "DELETE",
+        url: "https://discord.com/api/v10/channels/c1/messages/m1",
+      },
+    ]);
   });
 
   test("turns a provider 429 into a concise same-session recovery message", () => {

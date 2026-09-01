@@ -302,6 +302,19 @@ export interface SessionSlackShare {
   announcementKey?: string;
 }
 
+export interface SessionDiscordShare {
+  channelId: string;
+  channelName: string;
+  guildId: string;
+  guildName: string;
+  permalink: string;
+  messageId: string;
+  at: string;
+  by?: string;
+  prNumber?: number;
+  announcementKey?: string;
+}
+
 /** A team note on a session: human-to-human, interleaved into the transcript
  *  by `ts`, and never shown to the agent. See src/server/session-notes.ts. */
 export interface SessionNote {
@@ -468,6 +481,8 @@ export interface UnifiedSession {
   /** Slack messages a teammate sent from this session. A share collapses the
    *  composer that sent it into a receipt, so nobody re-sends the update. */
   slackShares?: SessionSlackShare[];
+  /** Discord messages sent from this session's shipped-change card. */
+  discordShares?: SessionDiscordShare[];
   automation?: string;
   /** Total live runs in this automation. Present on the bounded sidebar list. */
   automationRunCount?: number;

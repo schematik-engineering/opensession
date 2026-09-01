@@ -1,4 +1,4 @@
-import type { SessionSlackShare } from "../types";
+import type { SessionDiscordShare } from "../types";
 import { request } from "./request";
 
 export function shareShippedChange(
@@ -10,7 +10,10 @@ export function shareShippedChange(
     message?: string;
     screenshots?: string[];
   },
-): Promise<{ status: "shared" | "already_shared"; share?: SessionSlackShare }> {
+): Promise<{
+  status: "shared" | "already_shared";
+  share?: SessionDiscordShare;
+}> {
   return request(
     `/sessions/${encodeURIComponent(sessionId)}/share-shipped-change`,
     {
@@ -21,7 +24,7 @@ export function shareShippedChange(
   );
 }
 
-/** Take a shared update back out of Slack and let the card offer it again. */
+/** Remove a shared update and let the card offer it again. */
 export function undoShippedChange(
   sessionId: string,
   at: string,
@@ -31,7 +34,7 @@ export function undoShippedChange(
     {
       method: "PUT",
       body: { at },
-      label: "Couldn't undo the Slack message",
+      label: "Couldn't undo the shared message",
     },
   );
 }
@@ -44,7 +47,7 @@ export function fetchShippedChangeChannels(sessionId: string): Promise<{
   return request(
     `/sessions/${encodeURIComponent(sessionId)}/share-shipped-change`,
     {
-      label: "Couldn't load Slack channels",
+      label: "Couldn't load Discord channels",
     },
   );
 }

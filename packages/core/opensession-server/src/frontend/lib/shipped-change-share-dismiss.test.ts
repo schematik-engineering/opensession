@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   parseDismissed,
-  slackShareDismissKey,
+  shippedChangeShareDismissKey,
   withDismissed,
-} from "./slack-share-dismiss";
+} from "./shipped-change-share-dismiss";
 
-describe("slack share dismissals", () => {
+describe("shipped-change share dismissals", () => {
   test("a key names the session and the PR it announces", () => {
-    expect(slackShareDismissKey("os-1", 42)).toBe("os-1:42");
+    expect(shippedChangeShareDismissKey("os-1", 42)).toBe("os-1:42");
   });
 
   test("reads a stored list, and shrugs off anything else", () => {

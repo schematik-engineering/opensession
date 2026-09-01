@@ -87,6 +87,9 @@ export interface ActiveRunRecord {
   effort?: string; // reasoning effort, preserved across resume
   fastMode?: boolean; // OpenAI priority service tier, preserved across resume
   accountId?: string; // pinned provider account, preserved across resume
+  /** Exact provider account selected for the journaled physical attempt.
+   * Server-owned recovery evidence; unlike accountId this is not policy. */
+  physicalAccountId?: string;
   accountStrict?: boolean; // hard pin: never rotate into the pool (automation cost cap)
   usageCredits?: boolean; // may run on accounts spending usage-credits past their limits
   fallbackModel?: string; // usage-limit fallback policy, preserved across resume
