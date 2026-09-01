@@ -76,6 +76,10 @@ function update(sessionId: string, value: Record<string, unknown>): void {
   });
 }
 
+function notification(method: string, params: unknown): void {
+  send({ jsonrpc: "2.0", method, params });
+}
+
 const models =
   provider === "cursor"
     ? {
@@ -138,6 +142,91 @@ async function runPrompt(id: number, params: any): Promise<void> {
     return;
   }
   if (text === "hang") return;
+  if (text === "private plan approval") {
+    const decision = await request("_x.ai/exit_plan_mode", {
+      sessionId,
+      toolCallId: "plan-tool-1",
+      plan: "# Compatibility plan\n\nImplement and verify the ACP adapter.",
+    });
+    update(sessionId, {
+      sessionUpdate: "agent_message_chunk",
+      messageId: "plan-result",
+      content: {
+        type: "text",
+        text: `plan:${String(decision?.outcome || "missing")}`,
+      },
+    });
+    promptRequests.delete(sessionId);
+    result(id, { stopReason: "end_turn" });
+    return;
+  }
+  if (text === "private user question") {
+    const decision = await request("_x.ai/ask_user_question", {
+      method: "x.ai/ask_user_question",
+      params: {
+        sessionId,
+        toolCallId: "question-tool-1",
+        questions: [
+          {
+            id: "scope",
+            question: "Which scope should Grok use?",
+            options: [
+              { label: "Workspace", description: "Use the workspace" },
+              { label: "Session", description: "Use the session" },
+            ],
+            multiSelect: null,
+          },
+        ],
+        mode: "default",
+      },
+    });
+    update(sessionId, {
+      sessionUpdate: "agent_message_chunk",
+      messageId: "question-result",
+      content: {
+        type: "text",
+        text: `question:${String(decision?.outcome || "missing")}`,
+      },
+    });
+    promptRequests.delete(sessionId);
+    result(id, { stopReason: "end_turn" });
+    return;
+  }
+  if (text === "private prompt complete") {
+    update(sessionId, {
+      sessionUpdate: "agent_message_chunk",
+      messageId: "private-complete",
+      content: { type: "text", text: "completed by notification" },
+    });
+    notification("_x.ai/session/prompt_complete", {
+      sessionId,
+      promptId: params._meta?.promptId,
+      stopReason: "end_turn",
+      agentResult: null,
+    });
+    promptRequests.delete(sessionId);
+    return;
+  }
+  if (text === "slow active") {
+    for (let index = 0; index < 4; index++) {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      update(sessionId, {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "slow-active",
+        content: { type: "text", text: String(index) },
+      });
+    }
+    promptRequests.delete(sessionId);
+    result(id, { stopReason: "end_turn" });
+    return;
+  }
+  if (text === "linger after done") {
+    process.on("SIGTERM", () => {});
+    setInterval(() => {}, 60_000);
+    promptRequests.delete(sessionId);
+    result(id, { stopReason: "end_turn" });
+    return;
+  }
   if (
     text === "usage failure" ||
     (text === "usage first account" && authFixture.includes("first-account"))
@@ -251,7 +340,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     return;
   }
   if (message.id !== undefined && !message.method) {
-    pending.get(Number(message.id))?.(message.result);
+    pending.get(Number(message.id))?.(
+      message.error ? { error: message.error } : message.result,
+    );
     pending.delete(Number(message.id));
     return;
   }
@@ -267,7 +358,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         },
         authMethods: [
           {
-            id: provider === "cursor" ? "cursor_login" : "cached_token",
+            id: provider === "cursor" ? "cursor_login" : "grok.com",
             name: "Subscription",
           },
         ],

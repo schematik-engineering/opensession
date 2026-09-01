@@ -976,6 +976,102 @@ describe("HostHandle model recovery", () => {
     }
   });
 
+  test("resends an ask answer until the host acknowledges its delivery", async () => {
+    const root = mkdtempSync(join(tmpdir(), "host-client-ask-ack-test-"));
+    roots.push(root);
+    const dir = join(root, "rh-ask-ack");
+    mkdirSync(dir);
+    const sent: any[] = [];
+    const launcher: HostLauncher = {
+      alive: () => true,
+      newRunDir: (hostId) => join(root, hostId),
+      launch: async () => {},
+      connector: () => ({
+        connect: async () => ({
+          send: (message) => {
+            sent.push(message);
+            return true;
+          },
+          close: () => {},
+        }),
+      }),
+    };
+    const kernelStore = new SessionKernelStore(join(root, "kernel.db"));
+    const previousKernel = __setSessionKernelStoreForTest(kernelStore);
+    const spec: RunHostSpec = {
+      hostId: "rh-ask-ack",
+      osSessionId: "os-ask-ack",
+      prompt: "test",
+      cwd: "/tmp",
+    };
+    registerTestRun(spec.osSessionId, spec.hostId);
+    let askCalls = 0;
+    const handle = new HostHandle(
+      dir,
+      spec,
+      {
+        onAskUser: async () => {
+          askCalls += 1;
+          return {
+            behavior: "allow",
+            updatedInput: { answer: "approved" },
+          };
+        },
+      },
+      launcher,
+    );
+    try {
+      await handle.connectWithWait(100);
+      (handle as any).handleMsg({
+        t: "ask",
+        askId: "ask-1",
+        input: { question: "Proceed?" },
+      });
+      await Bun.sleep(0);
+
+      const initial = sent.find((message) => message.t === "ask_answer");
+      expect(initial).toMatchObject({
+        t: "ask_answer",
+        askId: "ask-1",
+        result: {
+          behavior: "allow",
+          updatedInput: { answer: "approved" },
+        },
+      });
+      expect(initial.deliveryId).toBeString();
+
+      sent.length = 0;
+      (handle as any).handleMsg({
+        ...hello(spec, "model-a"),
+        pendingAsks: [{ askId: "ask-1", input: { question: "Proceed?" } }],
+      });
+      expect(sent).toContainEqual(initial);
+      expect(askCalls).toBe(1);
+
+      (handle as any).handleMsg({
+        t: "ask_answer_ack",
+        askId: "ask-1",
+        deliveryId: "wrong-delivery",
+      });
+      sent.length = 0;
+      (handle as any).handleMsg(hello(spec, "model-a"));
+      expect(sent).toContainEqual(initial);
+
+      (handle as any).handleMsg({
+        t: "ask_answer_ack",
+        askId: "ask-1",
+        deliveryId: initial.deliveryId,
+      });
+      sent.length = 0;
+      (handle as any).handleMsg(hello(spec, "model-a"));
+      expect(sent).not.toContainEqual(initial);
+    } finally {
+      (handle as any).finish();
+      __setSessionKernelStoreForTest(previousKernel);
+      kernelStore.close();
+    }
+  });
+
   test("reconciles unix reconnects without duplicating reported switches", async () => {
     const spec: RunHostSpec = {
       hostId: "rh-test",

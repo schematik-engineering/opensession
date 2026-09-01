@@ -31,6 +31,7 @@ import {
 
 let STORE_PATH = stateDir("acp-accounts.json");
 let STATE_PATH = stateDir("acp-accounts-state.json");
+let MANAGED_ROOT = stateDir("acp-accounts");
 const DEFAULT_EXHAUST_MS = 60 * 60 * 1000;
 
 export interface AcpAccount {
@@ -225,7 +226,7 @@ export function addAcpAccountFromHome(
   }
 
   const id = crypto.randomUUID();
-  const directory = stateDir(`acp-accounts/${provider}/${id}`);
+  const directory = join(MANAGED_ROOT, provider, id);
   const authPath = join(directory, "auth.json");
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   copyFileSync(source, authPath);
@@ -270,10 +271,9 @@ export function removeAcpAccount(id: string): boolean {
   exhaustedUntil.delete(id);
   lastPickedAt.delete(id);
   persistState();
-  const managedRoot = stateDir("acp-accounts");
   const directory = dirname(account.authPath);
   if (
-    directory.startsWith(`${managedRoot}/`) &&
+    directory.startsWith(`${MANAGED_ROOT}/`) &&
     basename(directory) === account.id
   ) {
     rmSync(directory, { recursive: true, force: true });
@@ -384,6 +384,7 @@ export function __setAcpAccountsPathForTest(path: string): {
   const previous = { store: STORE_PATH, state: STATE_PATH };
   STORE_PATH = path;
   STATE_PATH = path.replace(/\.json$/, "-state.json");
+  MANAGED_ROOT = join(dirname(path), basename(path, ".json"));
   exhaustedUntil.clear();
   lastPickedAt.clear();
   loadState();

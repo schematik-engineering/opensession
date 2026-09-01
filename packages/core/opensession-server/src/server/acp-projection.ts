@@ -7,7 +7,11 @@ import {
 } from "fs";
 import type { RunHostSpec } from "../runner-host/protocol";
 import { pickAcpAccount } from "./acp-accounts";
-import { isAcpProvider, refreshAcpAuthSource } from "./acp-config";
+import {
+  AcpAccountAuthUnavailableError,
+  isAcpProvider,
+  refreshAcpAuthSource,
+} from "./acp-config";
 import {
   acpSessionExhaustedAccounts,
   readAcpAccountBinding,
@@ -16,7 +20,12 @@ import { providerFor, resolveExecutionModel } from "./models";
 
 export type AcpRunCredentialProjection =
   | { kind: "not-required"; paths: [] }
-  | { kind: "unavailable"; message: string; paths: [] }
+  | {
+      kind: "unavailable";
+      message: string;
+      accountId?: string;
+      paths: [];
+    }
   | { kind: "ready"; accountId: string; paths: string[] };
 
 function removeFiles(paths: string[]): void {
@@ -47,15 +56,30 @@ export async function projectAcpRunCredentials(
     return {
       kind: "unavailable",
       message: `${provider} has no usable subscription account`,
+      ...(spec.accountStrict && spec.accountId
+        ? { accountId: spec.accountId }
+        : {}),
       paths: [],
     };
   }
 
-  const authSource = await refreshAcpAuthSource(provider, account.authPath);
+  let authSource: string;
+  try {
+    authSource = await refreshAcpAuthSource(provider, account.authPath);
+  } catch (error) {
+    if (!(error instanceof AcpAccountAuthUnavailableError)) throw error;
+    return {
+      kind: "unavailable",
+      message: error.message,
+      accountId: account.id,
+      paths: [],
+    };
+  }
   if (!existsSync(authSource)) {
     return {
       kind: "unavailable",
       message: `${provider} subscription authentication is not configured`,
+      accountId: account.id,
       paths: [],
     };
   }
@@ -83,5 +107,11 @@ export async function projectAcpRunCredentials(
     throw error;
   }
 
+  if (spec.accountStrict && spec.accountId !== account.id) {
+    removeFiles(paths);
+    throw new Error(
+      `${provider} credential projection selected an unexpected account`,
+    );
+  }
   return { kind: "ready", accountId: account.id, paths };
 }

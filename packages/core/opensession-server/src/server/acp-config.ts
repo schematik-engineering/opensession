@@ -21,7 +21,8 @@ interface AcpSettingsFile {
 export interface AcpProviderDefinition {
   id: AcpProvider;
   command: readonly [string, ...string[]];
-  authMethod: string;
+  /** Provider-native ACP auth ids, newest first for rolling CLI upgrades. */
+  authMethods: readonly string[];
   authRelativePath: string;
   agentIdRelativePath?: string;
 }
@@ -33,14 +34,14 @@ export const ACP_PROVIDER_DEFINITIONS: Record<
   grok: {
     id: "grok",
     command: ["grok", "agent", "stdio"],
-    authMethod: "cached_token",
+    authMethods: ["grok.com", "cached_token"],
     authRelativePath: ".grok/auth.json",
     agentIdRelativePath: ".grok/agent_id",
   },
   cursor: {
     id: "cursor",
     command: ["cursor-agent", "acp"],
-    authMethod: "cursor_login",
+    authMethods: ["cursor_login"],
     authRelativePath: ".config/cursor/auth.json",
   },
 };
@@ -132,6 +133,15 @@ const grokRefreshes = new Map<string, Promise<string>>();
 
 type JsonRecord = Record<string, unknown>;
 
+/** A credential-local Grok failure. Rotating to another managed account is
+ * safe; network, filesystem, and launcher failures deliberately use Error. */
+export class AcpAccountAuthUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AcpAccountAuthUnavailableError";
+  }
+}
+
 function record(value: unknown): JsonRecord | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as JsonRecord)
@@ -141,14 +151,14 @@ function record(value: unknown): JsonRecord | null {
 function privateRegularFile(path: string): void {
   const metadata = statSync(path);
   if (!metadata.isFile() || (metadata.mode & 0o077) !== 0) {
-    throw new Error(
+    throw new AcpAccountAuthUnavailableError(
       `Grok subscription authentication file ${path} must be a private regular file (mode 0600 or stricter)`,
     );
   }
 }
 
 function grokReloginError(detail: string): Error {
-  return new Error(
+  return new AcpAccountAuthUnavailableError(
     `Grok subscription sign-in ${detail}; run grok login again on the OpenSession host`,
   );
 }
@@ -175,7 +185,9 @@ export async function refreshGrokAuthFile(
   options: GrokAuthRefreshOptions = {},
 ): Promise<boolean> {
   if (!existsSync(path))
-    throw new Error("grok subscription authentication is not configured");
+    throw new AcpAccountAuthUnavailableError(
+      "grok subscription authentication is not configured",
+    );
   privateRegularFile(path);
 
   let root: JsonRecord;
@@ -214,25 +226,23 @@ export async function refreshGrokAuthFile(
       { signal: AbortSignal.timeout(10_000) },
     );
   } catch {
-    throw grokReloginError("refresh service is unavailable");
+    throw new Error("Grok subscription refresh service is unavailable");
   }
   if (!discoveryResponse.ok)
-    throw grokReloginError(
-      `refresh discovery failed (${discoveryResponse.status})`,
-    );
+    throw new Error(`refresh discovery failed (${discoveryResponse.status})`);
   const discovery = record(await discoveryResponse.json().catch(() => null));
   const endpointValue = discovery?.token_endpoint;
   let tokenEndpoint: URL;
   try {
     tokenEndpoint = new URL(String(endpointValue || ""));
   } catch {
-    throw grokReloginError("refresh discovery is invalid");
+    throw new Error("Grok subscription refresh discovery is invalid");
   }
   if (
     tokenEndpoint.protocol !== "https:" ||
     tokenEndpoint.origin !== GROK_OIDC_ISSUER
   ) {
-    throw grokReloginError("refresh discovery is invalid");
+    throw new Error("Grok subscription refresh discovery is invalid");
   }
 
   let tokenResponse: Response;
@@ -248,7 +258,7 @@ export async function refreshGrokAuthFile(
       signal: AbortSignal.timeout(10_000),
     });
   } catch {
-    throw grokReloginError("refresh service is unavailable");
+    throw new Error("Grok subscription refresh service is unavailable");
   }
   const tokenBody = record(await tokenResponse.json().catch(() => null));
   if (!tokenResponse.ok) {

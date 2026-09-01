@@ -166,6 +166,42 @@ describe("Pi-only model routing", () => {
     ).toSatisfy((hops) => hops.every((hop) => hop.id.startsWith("pi/")));
   });
 
+  test("keeps an explicit Grok fallback executable without adding it implicitly", () => {
+    const exhaustedImplicitDestinations = new Set([
+      "pi/openai/gpt-5.6-sol",
+      "pi/anthropic/claude-opus-5",
+      "pi/openai/gpt-5.6-terra",
+      "pi/openai/gpt-5.6-luna",
+      "pi/anthropic/claude-sonnet-5",
+      "pi/anthropic/claude-sonnet-4-6",
+      "pi/anthropic/claude-haiku-4-5",
+    ]);
+
+    expect(
+      nextFallbackModel(
+        "pi/anthropic/claude-fable-5",
+        exhaustedImplicitDestinations,
+        "grok/grok-4.6",
+      ),
+    ).toEqual({ id: "grok/grok-4.6", mode: "ask" });
+    expect(
+      nextFallbackModel(
+        "pi/anthropic/claude-fable-5",
+        exhaustedImplicitDestinations,
+        "grok",
+      ),
+    ).toEqual({ id: "grok/grok-4.6", mode: "ask" });
+    expect(
+      nextFallbackModel("grok/grok-4.6", exhaustedImplicitDestinations, "grok"),
+    ).toBeNull();
+    expect(
+      nextFallbackModel(
+        "pi/anthropic/claude-fable-5",
+        exhaustedImplicitDestinations,
+      ),
+    ).toBeNull();
+  });
+
   test("crosses exhausted Haiku sessions to OpenAI", () => {
     expect(automaticFallbackModel("claude-haiku-4-5")).toBe(
       "pi/openai/gpt-5.6-luna",

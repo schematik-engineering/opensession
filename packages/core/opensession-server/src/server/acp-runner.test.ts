@@ -1,4 +1,11 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  setDefaultTimeout,
+  test,
+} from "bun:test";
 import {
   chmodSync,
   existsSync,
@@ -32,6 +39,9 @@ import type { RunAgentOpts } from "./agent-runner";
 const fakeAgent = fileURLToPath(
   new URL("./testing/fake-acp-agent.ts", import.meta.url),
 );
+
+setDefaultTimeout(30_000);
+
 let scratch: string;
 let previousJournal: string | undefined;
 let previousTimeout: string | undefined;
@@ -372,12 +382,111 @@ describe("ACP runner", () => {
     });
   });
 
-  test("turn timeout cancels and reports a deterministic terminal error", async () => {
+  test("answers Grok's private plan approval method and completes the turn", async () => {
+    stageAuth();
+    const events = await collect(
+      runAcp(
+        {
+          ...opts("private plan approval"),
+          journal: { kind: "automation" },
+        },
+        "grok/grok-4.6",
+      ),
+    );
+
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      provider: "grok",
+      result: "plan:approved",
+    });
+  });
+
+  test("routes Grok's private question through the durable ask callback", async () => {
+    stageAuth();
+    let asks = 0;
+    const events = await collect(
+      runAcp(
+        {
+          ...opts("private user question"),
+          onAskUser: async () => {
+            asks += 1;
+            return {
+              behavior: "allow" as const,
+              updatedInput: { answers: { scope: "Workspace" } },
+            };
+          },
+        },
+        "grok/grok-4.6",
+      ),
+    );
+
+    expect(asks).toBe(1);
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      result: "question:accepted",
+    });
+  });
+
+  test("does not count a durable human wait as ACP inactivity", async () => {
+    stageAuth();
+    process.env.OPENSESSION_ACP_TURN_TIMEOUT_MS = "30";
+    const events = await collect(
+      runAcp(
+        {
+          ...opts("private user question"),
+          onAskUser: async () => {
+            await Bun.sleep(80);
+            return {
+              behavior: "allow" as const,
+              updatedInput: { answers: { scope: "Workspace" } },
+            };
+          },
+        },
+        "grok/grok-4.6",
+      ),
+    );
+
+    expect(events.at(-1)).toMatchObject({ type: "done" });
+  });
+
+  test("finishes when Grok sends prompt_complete but leaves session/prompt open", async () => {
+    stageAuth();
+    process.env.OPENSESSION_ACP_TURN_TIMEOUT_MS = "100";
+    const events = await collect(
+      runAcp(opts("private prompt complete"), "grok/grok-4.6"),
+    );
+
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      result: "completed by notification",
+    });
+  });
+
+  test("resets the inactivity watchdog on ACP activity", async () => {
+    stageAuth();
+    process.env.OPENSESSION_ACP_TURN_TIMEOUT_MS = "50";
+    const events = await collect(runAcp(opts("slow active"), "grok/grok-4.6"));
+
+    expect(events.at(-1)).toMatchObject({ type: "done", result: "0123" });
+  });
+
+  test("force-reaps an ACP child that lingers after a successful turn", async () => {
+    stageAuth();
+    const startedAt = performance.now();
+    const events = await collect(
+      runAcp(opts("linger after done"), "grok/grok-4.6"),
+    );
+
+    expect(events.at(-1)).toMatchObject({ type: "done" });
+    expect(performance.now() - startedAt).toBeLessThan(4_000);
+  });
+
+  test("turn inactivity cancels and reports a deterministic terminal error", async () => {
     stageAuth();
     process.env.OPENSESSION_ACP_TURN_TIMEOUT_MS = "50";
     const events = await collect(runAcp(opts("hang"), "grok/grok-4.6"));
     expect(events.at(-1)?.type).toBe("error");
-    expect(events.at(-1)?.content).toContain("timed out");
+    expect(events.at(-1)?.content).toContain("inactive for 50ms");
   });
 
   test("malformed NDJSON fails without leaking the staged credential", async () => {

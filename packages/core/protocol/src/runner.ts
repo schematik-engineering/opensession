@@ -108,6 +108,13 @@ export interface RunHostSpec {
   author?: GitIdentity | null;
   user?: string;
   fallbackModel?: string;
+  /** Server-owned policy for the complete logical turn. A physical detached
+   * host still receives fallbackModel:"none" and one strict ACP account, but
+   * restart recovery must retain the original policy so the gateway can
+   * continue account rotation and model fallback after reattaching it. */
+  logicalFallbackModel?: string;
+  logicalAccountId?: string;
+  logicalAccountStrict?: boolean;
   /** Stable provider-account affinity for internal fan-out workers. */
   accountAffinityKey?: string;
   /** Reasoning effort for the run (UI scale; each runner normalizes it). */
@@ -147,6 +154,10 @@ export interface RunHostMeta {
   selectedModel?: string;
   effectiveModel?: string;
   transientFallback?: boolean;
+  /** At least one model-visible text/tool event was emitted in this physical
+   * attempt. Recovery uses this fence to avoid replaying side effects when a
+   * provider fails after partial work. */
+  visibleWork?: boolean;
   /** Terminal done/error StreamEvent once the run generator finished. */
   done?: StreamEvent;
   endedAt?: string;
@@ -160,6 +171,32 @@ export interface PendingAskView {
 export type AskResult =
   | { behavior: "allow"; updatedInput: Record<string, unknown> }
   | { behavior: "deny"; message: string };
+
+/**
+ * Recent delivery receipts kept by a protocol endpoint. The set is bounded so
+ * a long-lived run cannot grow memory use without limit. Adding an existing id
+ * is a no-op and does not evict another receipt.
+ */
+export class BoundedDeliveryReceipts {
+  private readonly ids = new Set<string>();
+
+  constructor(private readonly limit: number) {
+    if (!Number.isSafeInteger(limit) || limit < 1)
+      throw new RangeError("delivery receipt limit must be a positive integer");
+  }
+
+  add(deliveryId: string): void {
+    if (this.ids.has(deliveryId)) return;
+    this.ids.add(deliveryId);
+    if (this.ids.size <= this.limit) return;
+    const oldest = this.ids.values().next().value;
+    if (oldest !== undefined) this.ids.delete(oldest);
+  }
+
+  has(deliveryId: string): boolean {
+    return this.ids.has(deliveryId);
+  }
+}
 
 /**
  * WS transport only: host→server frames (except `hello`/`ping`, which are
@@ -193,6 +230,9 @@ type HostToClientPayload =
    */
   | { t: "catchup_complete" }
   | { t: "ask"; askId: string; input: Record<string, unknown> }
+  /** Confirms that one ask answer reached the host. Replayed acknowledgements
+   * are harmless because the server matches both ids before clearing it. */
+  | { t: "ask_answer_ack"; askId: string; deliveryId: string }
   /**
    * A steer/interrupt_steer arrived too late (run already finishing, or the
    * backend doesn't support steering). The client should queue the text for
@@ -242,7 +282,14 @@ type HostToClientPayload =
     };
 
 export type ClientToHostMsg =
-  | { t: "ask_answer"; askId: string; result: AskResult }
+  | {
+      t: "ask_answer";
+      askId: string;
+      /** Optional only for compatibility with servers from before delivery
+       * acknowledgements. Current servers always set it. */
+      deliveryId?: string;
+      result: AskResult;
+    }
   /**
    * Mid-run steer. `images` carries composer attachments the same way the
    * opening prompt's `RunHostSpec.images` does, so a screenshot folds into

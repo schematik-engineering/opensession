@@ -103,6 +103,7 @@ const {
   MCP_PROXY_ENTRY,
   mcpProxyArgv,
   rpcSocketPath,
+  BoundedDeliveryReceipts,
 } = await import("./protocol");
 const { WsFrameBuffer, replayStartFor } = await import("./ws-buffer");
 const { OPENSESSION_SESSIONS_DIR } = await import("../server/paths");
@@ -195,6 +196,7 @@ const pendingAsks = new Map<
   string,
   { input: Record<string, unknown>; resolve: (r: AskResult) => void }
 >();
+const settledAskAnswerDeliveries = new BoundedDeliveryReceipts(256);
 
 // ── Transcript relay (in-process engines: pi) ────────────────────────────────
 // Engine drivers that persist transcript entries in-process consult the
@@ -269,10 +271,25 @@ function sendHello(): void {
 function handleClientMsg(msg: ClientToHostMsg): void {
   switch (msg.t) {
     case "ask_answer": {
+      if (msg.deliveryId && settledAskAnswerDeliveries.has(msg.deliveryId)) {
+        send({
+          t: "ask_answer_ack",
+          askId: msg.askId,
+          deliveryId: msg.deliveryId,
+        });
+        break;
+      }
       const ask = pendingAsks.get(msg.askId);
       if (ask) {
         pendingAsks.delete(msg.askId);
+        if (msg.deliveryId) settledAskAnswerDeliveries.add(msg.deliveryId);
         ask.resolve(msg.result);
+        if (msg.deliveryId)
+          send({
+            t: "ask_answer_ack",
+            askId: msg.askId,
+            deliveryId: msg.deliveryId,
+          });
       }
       break;
     }
@@ -640,6 +657,15 @@ try {
       if (event.toModel && shouldPersistModelSwitch(event)) {
         meta.selectedModel = event.toModel;
       }
+      saveMeta();
+    }
+    if (
+      !meta.visibleWork &&
+      (event.type === "text_chunk" ||
+        event.type === "tool_use" ||
+        event.type === "tool_result")
+    ) {
+      meta.visibleWork = true;
       saveMeta();
     }
     if (event.type === "done" || event.type === "error") terminal = event;

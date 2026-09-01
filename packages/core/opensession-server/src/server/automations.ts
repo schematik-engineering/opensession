@@ -29,11 +29,12 @@ import {
 } from "./runner-shared";
 import { getAccountById } from "./claude-accounts";
 import { getCodexAccountById } from "./codex-accounts";
-import { runAgent } from "./agent-runner";
+import { getAcpAccountById } from "./acp-accounts";
 import { activeRunRecords } from "./run-journal";
 import { runAgentHosted } from "./host-client";
 import {
   providerFor,
+  accountProviderForModel,
   resolveModel,
   automaticFallbackModel,
   modelLabel,
@@ -444,9 +445,30 @@ function sanitizeAccountId(
   if (typeof v !== "string") return { error: "accountId must be a string" };
   const id = v.trim();
   if (!id) return undefined;
-  if (!getAccountById(id) && !getCodexAccountById(id))
-    return { error: `Unknown model account id "${id}"` };
   return id;
+}
+
+/** An automation account pin must belong to the provider that starts the run. */
+export function validateAutomationAccountPin(
+  automation: Pick<Automation, "model" | "accountId">,
+): { error: string } | null {
+  if (!automation.accountId) return null;
+  const accountProvider = getAccountById(automation.accountId)
+    ? "claude"
+    : getCodexAccountById(automation.accountId)
+      ? "codex"
+      : getAcpAccountById(automation.accountId)?.provider;
+  if (!accountProvider)
+    return { error: `Unknown model account id "${automation.accountId}"` };
+  const modelProvider = accountProviderForModel(
+    automationModel(automation.model),
+  );
+  if (modelProvider !== accountProvider) {
+    return {
+      error: `Model account id "${automation.accountId}" belongs to ${accountProvider}, not ${modelProvider || "the selected model"}`,
+    };
+  }
+  return null;
 }
 
 function validateSandboxAutomation(
@@ -637,6 +659,8 @@ function normalizeAutomation(
       next.schedule = "";
     }
   }
+  const accountValidation = validateAutomationAccountPin(next);
+  if (accountValidation) return accountValidation;
   const sandboxValidation = validateSandboxAutomation(next);
   if (sandboxValidation) return sandboxValidation;
   return next;
@@ -1347,6 +1371,12 @@ export function resumePendingAutomationRuns(
   return resumed;
 }
 
+export function automationTriggerAllowsConcurrency(
+  trigger: AutomationRun["trigger"],
+): boolean {
+  return trigger === "event" || trigger === "webhook";
+}
+
 export async function runAutomation(
   automation: Automation,
   onSessionCreated?: (sessionId: string) => void,
@@ -1373,8 +1403,10 @@ export async function runAutomation(
 ): Promise<void> {
   const trigger = options?.trigger || "manual";
   // Cron/manual runs don't stack; event/webhook runs are per-event, so they may overlap
-  const concurrent = trigger === "event" || trigger === "webhook";
-  if (!concurrent && isAutomationRunning(automation.id)) {
+  if (
+    !automationTriggerAllowsConcurrency(trigger) &&
+    isAutomationRunning(automation.id)
+  ) {
     console.log(`[automations] "${automation.name}" still running, skipping`);
     return;
   }
@@ -1757,21 +1789,14 @@ export async function runAutomation(
         // instance identity would otherwise collapse every routine into one.
         author: labelIdentity(automation.name),
       };
-      events =
-        providerFor(runModel) === "pi"
-          ? runAgentHosted({
-              ...common,
-              osSessionId: bksId,
-              proxyMcpServers: Object.keys(inProcessMcp),
-              fallbackInProcessMcp: () => inProcessMcp,
-              journalKind: "automation",
-              trustProfile: "automation",
-            })
-          : runAgent({
-              ...common,
-              inProcessMcp,
-              journal: { osSessionId: bksId, kind: "automation" },
-            });
+      events = runAgentHosted({
+        ...common,
+        osSessionId: bksId,
+        proxyMcpServers: Object.keys(inProcessMcp),
+        fallbackInProcessMcp: () => inProcessMcp,
+        journalKind: "automation",
+        trustProfile: "automation",
+      });
     }
     for await (const event of events) {
       // The engine stream is now physically adopted by agent-runner accounting.
@@ -2058,10 +2083,6 @@ export function getWebhookRoutes(
     if (!automation.enabled) {
       return Response.json({ ok: false, skipped: "disabled" });
     }
-    if (isAutomationRunning(automation.id)) {
-      return Response.json({ ok: false, skipped: "already running" });
-    }
-
     let payload = "";
     try {
       payload = await readRequestTextWithinLimit(req, 10_000);

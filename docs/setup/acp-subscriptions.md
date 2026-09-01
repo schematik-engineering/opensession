@@ -4,8 +4,9 @@ OpenSession runs Grok and Cursor through each vendor's official
 [Agent Client Protocol](https://agentclientprotocol.com/) command. This uses
 the existing SuperGrok and Cursor subscriptions; it does not proxy the consumer
 subscription through an OpenAI-compatible API, add API-key billing, or fall
-back to a different provider on exhaustion. Multiple subscriptions for the
-same provider can be pooled and rotated before model fallback begins.
+back to separate xAI API-key billing. Multiple subscriptions for the same
+provider can be pooled and rotated before the configured cross-model fallback
+begins.
 
 The Docker runner image pins:
 
@@ -17,6 +18,8 @@ service's `PATH`; installing them only in the Docker runner is not sufficient.
 Keep the host and runner versions aligned so switching sandbox targets does not
 change ACP protocol or session-state behavior. If a command is unavailable,
 the affected turn reports a provider error without terminating the gateway.
+OpenSession negotiates Grok's current `grok.com` ACP authentication method and
+the earlier `cached_token` id during rolling CLI upgrades.
 
 ## Credential projection
 
@@ -66,7 +69,9 @@ run retries immediately on another eligible account before the cross-model
 fallback chain; a credential-minimal Docker run records the exhausted account
 and selects another subscription on its next run. Switching subscriptions
 starts a fresh provider-native session rather than loading one account's native
-session under another account.
+session under another account. The server retains that rotation and fallback
+policy while a detached host is running, so gateway restart recovery continues
+the logical turn instead of settling the current account's usage error.
 
 If the refresh grant is revoked or invalid, the run fails explicitly and asks
 an operator to run `grok login` again on the OpenSession host. It never falls
@@ -85,6 +90,18 @@ per-user identity policy, then supplied through ACP session setup. In a Docker
 run, trusted in-process OpenSession tools travel through the existing
 session-scoped MCP proxy. Ask-mode permission requests still require human
 approval; code-mode requests honor the normal denied/confirmation tool policy.
+Interactive sessions and automations use the detached host route for Grok, so
+their OpenSession MCP tools use the same scoped proxy as Pi models. Automation
+definitions may pin a Grok account; validation rejects unknown accounts and
+accounts owned by another model provider.
+
+Grok's private ACP compatibility methods are handled at the client boundary.
+`ask_user_question` uses OpenSession's durable ask flow, and `exit_plan_mode`
+shows the proposed plan to an interactive user. Explicitly unattended runs
+approve leaving plan mode but do not widen tool, MCP, publication, or credential
+permissions. Human wait time is excluded from the inactivity watchdog. Grok's
+private `prompt_complete` notification can finish a turn when the standard ACP
+prompt request remains open.
 
 ## Verification
 

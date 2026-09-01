@@ -5,8 +5,13 @@
 set -euo pipefail
 
 readonly jobs="${OPENSESSION_TEST_JOBS:-1}"
+readonly timeout_ms="${OPENSESSION_TEST_TIMEOUT_MS:-30000}"
 if ! [[ "$jobs" =~ ^[1-9][0-9]*$ ]]; then
   echo "OPENSESSION_TEST_JOBS must be a positive integer (got: $jobs)" >&2
+  exit 2
+fi
+if ! [[ "$timeout_ms" =~ ^[1-9][0-9]*$ ]]; then
+  echo "OPENSESSION_TEST_TIMEOUT_MS must be a positive integer (got: $timeout_ms)" >&2
   exit 2
 fi
 
@@ -28,7 +33,17 @@ printf 'Running %d unit-test files in isolated processes (%d at a time)\n' \
 # A developer's service shell may carry runtime bypasses used by previews or
 # snapshot fixtures. Unit files that test the default executor and run-host
 # policy must not inherit those process-wide overrides.
+# Machine-wide Git hooks and author policy must not leak into fixture
+# repositories created by unit tests.
+tmp_git_config="$(mktemp)"
+trap 'rm -f "$tmp_git_config"' EXIT
+git config --file "$tmp_git_config" user.name "OpenSession Tests"
+git config --file "$tmp_git_config" user.email "tests@opensession.invalid"
+git config --file "$tmp_git_config" init.defaultBranch main
+
 find_tests | xargs -0 -n 1 -P "$jobs" env \
   -u OPENSESSION_EXECUTOR \
   -u OPENSESSION_TEST_IN_PROCESS_RUNS \
-  bun test --no-orphans --reporter dots
+  GIT_CONFIG_GLOBAL="$tmp_git_config" \
+  GIT_CONFIG_NOSYSTEM=1 \
+  bun test --no-orphans --reporter dots --timeout "$timeout_ms"

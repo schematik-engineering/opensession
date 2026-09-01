@@ -30,8 +30,6 @@ import {
   isAwsMcpIamServer,
 } from "./aws-mcp-auth";
 
-const HOME = homeDir();
-
 // Cache the parsed MCP config with file-watcher invalidation. Resolve the path
 // per access so a live config reload cannot retain the watcher or cached value
 // for a previously configured path.
@@ -71,8 +69,6 @@ export function readMcpConfig(): { mcpServers: Record<string, any> } {
   return cachedMcpConfig;
 }
 
-const LINEAR_AGENT_TOKENS_PATH = `${HOME}/.linear-agent-tokens.json`;
-
 /**
  * Overlay credentials that rotate outside this process. Linear runs as the
  * bot via the linear-agent's OAuth token (actor=app, refreshed by
@@ -89,11 +85,16 @@ export function withDynamicCredentials(
   opts: { allowManagedUserAuth?: boolean } = {},
 ): Record<string, any> {
   let out = servers;
-  const linear = servers.linear;
-  if (linear?.url?.includes("mcp.linear.app")) {
+  const linearEntry = Object.entries(servers).find(
+    ([name, config]) =>
+      name.toLowerCase() === "linear" &&
+      config?.url?.includes("mcp.linear.app"),
+  );
+  if (linearEntry) {
+    const [linearName, linear] = linearEntry;
     try {
       const tokens = JSON.parse(
-        readFileSync(LINEAR_AGENT_TOKENS_PATH, "utf-8"),
+        readFileSync(`${homeDir()}/.linear-agent-tokens.json`, "utf-8"),
       );
       const t: any = Object.values(tokens)[0];
       if (
@@ -102,7 +103,7 @@ export function withDynamicCredentials(
       ) {
         out = {
           ...out,
-          linear: {
+          [linearName]: {
             ...linear,
             headers: {
               ...linear.headers,

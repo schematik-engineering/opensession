@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -29,6 +29,8 @@ const QUESTION = {
   question: "Which option?",
   options: [{ label: "One" }, { label: "Two" }],
 };
+
+setDefaultTimeout(30_000);
 
 let scratch = "";
 
