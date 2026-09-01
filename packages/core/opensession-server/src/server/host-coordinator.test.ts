@@ -330,6 +330,7 @@ describe("hosted model coordinator", () => {
   test("continues account rotation and model fallback after gateway recovery", async () => {
     const first = addGrokAccount("recovered-a");
     const second = addGrokAccount("recovered-b");
+    const mutableSpecAccount = "recovered-mutated-spec";
     const attempts: HostedRunOpts[] = [];
     __setHostedPhysicalRunnerForTest(async function* (attempt) {
       attempts.push(attempt);
@@ -358,7 +359,7 @@ describe("hosted model coordinator", () => {
       model: "grok/grok-4.6",
       fallbackModel: "none",
       logicalFallbackModel: "pi/openai/gpt-5.6-sol",
-      accountId: second,
+      accountId: mutableSpecAccount,
       accountStrict: true,
       logicalAccountStrict: false,
       mcpServers: [],
@@ -371,6 +372,7 @@ describe("hosted model coordinator", () => {
       cwd: spec.cwd,
       model: spec.model,
       fallbackModel: spec.logicalFallbackModel,
+      accountId: second,
       physicalAccountId: first,
       accountStrict: false,
       startedAt: new Date().toISOString(),
@@ -410,6 +412,11 @@ describe("hosted model coordinator", () => {
     ).toBe(true);
     expect(
       acpSessionExhaustedAccounts(spec.osSessionId, "grok").has(second),
+    ).toBe(true);
+    expect(
+      acpSessionExhaustedAccounts(spec.osSessionId, "grok").has(
+        mutableSpecAccount,
+      ),
     ).toBe(false);
   });
 
