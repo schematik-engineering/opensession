@@ -11,7 +11,14 @@
 - [x] Unit 5: hosted MCP parity, ACP automation pins, and provider-neutral fallbacks.
 - [x] Run focused blast-radius suites and module-side-effect check.
 - [x] Run `bun run check`.
-- [ ] Fetch, rebase if required, commit, and push.
-- [ ] Deploy with `deploy_self`.
-- [ ] Verify the production web, reconnect, MCP, rotation, fallback, and detached routes.
-- [ ] Cross-model review the decision trail and close remaining findings.
+- [x] Fetch, rebase if required, commit, and push the base compatibility work.
+- [x] Deploy the base compatibility work with `deploy_self`.
+- [x] Verify the installed client, private extensions, account rotation, fallback, and detached routes.
+- [x] Cross-model review the base decision trail and close its findings.
+- [x] Reproduce the public-route search-only terminal with two independent Grok accounts.
+- [x] Add a bounded same-session continuation and an explicit fallback terminal.
+- [x] Prove continuation, retry exhaustion, account health, and hosted fallback with deterministic tests.
+- [x] Run the complete repository gate for the search-only correction.
+- [x] Cross-model review the final correction and close all findings.
+- [ ] Commit, push, deploy, rebuild the runner image, and verify a fresh production route.
+- [ ] Set Grok 4.6 as the default and verify the stored and live values.
