@@ -114,13 +114,35 @@ const PRESETS: Array<{ label: string; cron: string }> = [
   { label: "Custom cron…", cron: CUSTOM },
 ];
 
-const EVENT_OPTIONS: Array<{ key: string; label: string }> = [
-  { key: "plain:thread_created", label: "Plain · new support ticket created" },
+type EventOption =
+  | { kind: "generic"; key: string; label: string }
+  | {
+      kind: "existing-config-only";
+      key: "github:pull_request";
+      label: string;
+    };
+
+const EVENT_OPTIONS: EventOption[] = [
   {
+    kind: "generic",
+    key: "plain:thread_created",
+    label: "Plain · new support ticket created",
+  },
+  {
+    kind: "generic",
     key: "stripe:charge.dispute.created",
     label: "Stripe · dispute (chargeback) created",
   },
-  { key: "github:pr_merged", label: "GitHub · PR merged" },
+  {
+    kind: "existing-config-only",
+    key: "github:pull_request",
+    label: "GitHub · PR created",
+  },
+  {
+    kind: "generic",
+    key: "github:pr_merged",
+    label: "GitHub · PR merged",
+  },
 ];
 
 /** Claude and Codex accounts for provider-aware automation pins. */
@@ -788,7 +810,7 @@ function triggerSummary(a: Automation): string {
   if (a.slackWatch) return `watching #${a.slackWatch.channel}`;
   const parts: string[] = [];
   if (a.schedule) parts.push(a.schedule);
-  if (a.eventKey) parts.push(`on ${a.eventKey}`);
+  if (a.eventKey) parts.push(`on ${eventLabel(a.eventKey)}`);
   if (!parts.length)
     parts.push(a.webhookEnabled === false ? "manual only" : "webhook / manual");
   return parts.join(" · ");
@@ -2224,9 +2246,13 @@ function AutomationForm({
                 onChange={(e) => setEventKey(e.target.value)}
               >
                 <option value="">None</option>
-                {EVENT_OPTIONS.map((o) => (
-                  <option key={o.key} value={o.key}>
-                    {o.label}
+                {EVENT_OPTIONS.filter(
+                  (option) =>
+                    option.kind === "generic" ||
+                    initial?.eventKey === option.key,
+                ).map((option) => (
+                  <option key={option.key} value={option.key}>
+                    {option.label}
                   </option>
                 ))}
               </Select>
