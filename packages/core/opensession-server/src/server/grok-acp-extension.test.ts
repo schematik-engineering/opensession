@@ -341,7 +341,7 @@ describe("Grok ACP extension", () => {
           },
         }),
       ).toEqual({
-        action: "accept",
+        outcome: "accept",
         content: { label: "stable", retries: 3, notify: true },
       });
     });

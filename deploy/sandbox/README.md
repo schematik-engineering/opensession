@@ -16,7 +16,7 @@ session's git worktree **bind-mounted at its identical host path**.
 | `python3`, `build-essential`      | worktree `bun install` native deps                                                                                                                                                           | apt                                               |
 | `just`, `direnv`, `lsof`          | common repo dev-server bring-up chains (in-sandbox previews)                                                                                                                                 | apt / pinned release                              |
 | Claude Code CLI                   | baked at the identical host CLI path for session-resume parity                                                                                                                               | `2.1.218` (host); build FAILS on version mismatch |
-| Grok CLI (ACP)                    | official SuperGrok subscription agent (`grok agent stdio`)                                                                                                                                   | `1.0.5`; build FAILS on version mismatch          |
+| Grok CLI (ACP)                    | official SuperGrok subscription agent (`grok agent stdio`)                                                                                                                                   | `1.0.16`; build FAILS on version mismatch         |
 | Cursor Agent (ACP)                | official Cursor subscription agent (`cursor-agent acp`)                                                                                                                                      | `2026.08.25-3e8eec8`; immutable package pin       |
 | runner bundle                     | stable container path (`/home/ubuntu/.opensession-runner`): root manifests, lockfile, patches and `tsconfig.json`; copied protocol, server, and root runtime scripts; installed dependencies | from lockfile                                     |
 | minimal `~/.claude/settings.json` | so `settingSources:["user"]` doesn't error                                                                                                                                                   | `{}`                                              |
@@ -48,7 +48,7 @@ Tags `opensession-runner:latest` and `opensession-runner:<git-sha>` from the rep
 root context. Override the name with `IMAGE=... deploy/sandbox/build.sh`.
 
 Version pins are Dockerfile `ARG`s: `BUN_VERSION`, `CLAUDE_VERSION`,
-`NODE_MAJOR`, and `JUST_VERSION`. `build.sh` supports `IMAGE=...` but does not
+`GROK_VERSION`, `NODE_MAJOR`, and `JUST_VERSION`. `build.sh` supports `IMAGE=...` but does not
 forward command-line options. To override a pin, invoke `docker build` directly
 with `--build-arg` or change the Dockerfile default. The runner root is a code
 contract, not a deployment-specific build argument. The image build also
