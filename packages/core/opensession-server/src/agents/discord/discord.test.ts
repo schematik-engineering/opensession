@@ -10,7 +10,12 @@ import {
 import { join } from "path";
 import { tmpdir } from "os";
 import type { SessionControl } from "../../server/session-control";
-import { DiscordRest, splitDiscordMessage, type DiscordFetch } from "./api";
+import {
+  DiscordApiError,
+  DiscordRest,
+  splitDiscordMessage,
+  type DiscordFetch,
+} from "./api";
 import { loadDiscordConfig, type DiscordConfig } from "./config";
 import { DiscordGateway } from "./gateway";
 import { DISCORD_COMMANDS, DiscordAgent, safeError } from "./index";
@@ -261,6 +266,23 @@ describe("Discord REST presentation", () => {
         url: "https://discord.com/api/v10/channels/c1/messages/m1",
       },
     ]);
+  });
+
+  test("treats an already-deleted message as an idempotent delete", async () => {
+    const errors = [
+      { code: 10_008, message: "Unknown Message" },
+      { code: 10_003, message: "Unknown Channel" },
+    ];
+    const fakeFetch: DiscordFetch = async () =>
+      Response.json(errors.shift(), { status: 404 });
+    const rest = new DiscordRest("token", "1542925450790305903", fakeFetch);
+
+    await expect(rest.deleteMessage("c1", "gone")).resolves.toBeUndefined();
+    await expect(rest.deleteMessage("missing", "m1")).rejects.toMatchObject({
+      name: DiscordApiError.name,
+      status: 404,
+      code: 10_003,
+    });
   });
 
   test("turns a provider 429 into a concise same-session recovery message", () => {

@@ -52,15 +52,34 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function errorLabel(body: unknown): string {
-  if (!body || typeof body !== "object") return "request rejected";
-  const value = body as Record<string, unknown>;
-  const code = typeof value.code === "number" ? ` code ${value.code}` : "";
+function discordErrorDetail(body: unknown): {
+  message: string;
+  code?: number;
+} {
+  if (!body || typeof body !== "object") return { message: "request rejected" };
+  const code =
+    "code" in body && typeof body.code === "number" ? body.code : undefined;
   const message =
-    typeof value.message === "string"
-      ? value.message.slice(0, 240)
+    "message" in body && typeof body.message === "string"
+      ? body.message.slice(0, 240)
       : "request rejected";
-  return `${message}${code}`;
+  return { message, ...(code === undefined ? {} : { code }) };
+}
+
+export class DiscordApiError extends Error {
+  readonly status: number;
+  readonly code?: number;
+
+  constructor(method: string, status: number, body: unknown) {
+    const detail = discordErrorDetail(body);
+    const codeLabel = detail.code === undefined ? "" : ` code ${detail.code}`;
+    super(
+      `Discord API ${method} failed (${status}): ${detail.message}${codeLabel}`,
+    );
+    this.name = "DiscordApiError";
+    this.status = status;
+    this.code = detail.code;
+  }
 }
 
 function retryableDiscordError(message: string): Error {
@@ -148,15 +167,15 @@ export class DiscordRest {
       }
       if (!response.ok) {
         const detail = await response.json().catch(() => ({}));
-        const message = `Discord API ${method} failed (${response.status}): ${errorLabel(detail)}`;
+        const error = new DiscordApiError(method, response.status, detail);
         if (response.status >= 500) {
           if (attempt < 3) {
             await delay(250 * 2 ** attempt);
             continue;
           }
-          throw retryableDiscordError(message);
+          throw retryableDiscordError(error.message);
         }
-        throw new Error(message);
+        throw error;
       }
       if (response.status === 204) return undefined as T;
       return (await response.json()) as T;
@@ -280,11 +299,21 @@ export class DiscordRest {
     return this.request("POST", `/channels/${channelId}/messages`, form);
   }
 
-  deleteMessage(channelId: string, messageId: string): Promise<void> {
-    return this.request(
-      "DELETE",
-      `/channels/${channelId}/messages/${messageId}`,
-    );
+  async deleteMessage(channelId: string, messageId: string): Promise<void> {
+    try {
+      await this.request(
+        "DELETE",
+        `/channels/${channelId}/messages/${messageId}`,
+      );
+    } catch (error) {
+      if (
+        error instanceof DiscordApiError &&
+        error.status === 404 &&
+        error.code === 10_008
+      )
+        return;
+      throw error;
+    }
   }
 
   editMessage(
