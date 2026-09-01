@@ -223,19 +223,26 @@ describe("Discord REST presentation", () => {
     };
     const rest = new DiscordRest("token", "1542925450790305903", fakeFetch);
 
-    await rest.sendFiles("c1", "Shipped.", [
-      {
-        filename: "after.png",
-        contentType: "image/png",
-        data: Uint8Array.from(new TextEncoder().encode("png")).buffer,
-        description: "After screenshot",
-      },
-    ]);
+    await rest.sendFiles(
+      "c1",
+      "Shipped.",
+      [
+        {
+          filename: "after.png",
+          contentType: "image/png",
+          data: Uint8Array.from(new TextEncoder().encode("png")).buffer,
+          description: "After screenshot",
+        },
+      ],
+      "announcement-1",
+    );
     await rest.deleteMessage("c1", "m1");
 
     expect(JSON.parse(String(upload?.get("payload_json")))).toEqual({
       content: "Shipped.",
       allowed_mentions: { parse: [], replied_user: false },
+      nonce: "announcement-1",
+      enforce_nonce: true,
       attachments: [
         { id: 0, filename: "after.png", description: "After screenshot" },
       ],

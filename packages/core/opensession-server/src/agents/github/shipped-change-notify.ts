@@ -38,25 +38,112 @@ const ANNOUNCEMENT_STATE_ROOT = `${stateDir("github")}/shipped-visual-changes`;
 const MAX_SCREENSHOT_BYTES = 10 * 1024 * 1024;
 const SCREENSHOT_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 
-interface AnnouncementReceipt {
-  status: "pending" | "sent";
-  claimId: string;
+export interface ShippedChangeDelivery {
+  channel: ShippedChangeChannel;
+  permalink: string;
+  messageId: string;
   at: string;
-  sessionId?: string;
+  requestedBy?: string;
+  prNumber: number;
 }
+
+type AnnouncementReceipt =
+  | {
+      status: "pending";
+      claimId: string;
+      at: string;
+    }
+  | {
+      status: "sent";
+      claimId: string;
+      at: string;
+      sessionId?: string;
+      delivery?: ShippedChangeDelivery;
+    };
 
 function announcementReceiptPath(key: string, root: string): string {
   const digest = createHash("sha256").update(key).digest("hex");
   return `${root}/${digest}.json`;
 }
 
+function isShippedChangeChannel(value: unknown): value is ShippedChangeChannel {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    "id" in value &&
+    typeof value.id === "string" &&
+    "name" in value &&
+    typeof value.name === "string" &&
+    "guildId" in value &&
+    typeof value.guildId === "string" &&
+    "guildName" in value &&
+    typeof value.guildName === "string"
+  );
+}
+
+function isShippedChangeDelivery(
+  value: unknown,
+): value is ShippedChangeDelivery {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    "channel" in value &&
+    isShippedChangeChannel(value.channel) &&
+    "permalink" in value &&
+    typeof value.permalink === "string" &&
+    "messageId" in value &&
+    typeof value.messageId === "string" &&
+    "at" in value &&
+    typeof value.at === "string" &&
+    (!("requestedBy" in value) ||
+      value.requestedBy === undefined ||
+      typeof value.requestedBy === "string") &&
+    "prNumber" in value &&
+    typeof value.prNumber === "number"
+  );
+}
+
 function readAnnouncementReceipt(path: string): AnnouncementReceipt | null {
   try {
-    const value = JSON.parse(readFileSync(path, "utf8"));
-    return value && typeof value === "object" ? value : null;
+    const value: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (
+      !value ||
+      typeof value !== "object" ||
+      !("status" in value) ||
+      (value.status !== "pending" && value.status !== "sent") ||
+      !("claimId" in value) ||
+      typeof value.claimId !== "string" ||
+      !("at" in value) ||
+      typeof value.at !== "string"
+    )
+      return null;
+    if (value.status === "pending")
+      return { status: "pending", claimId: value.claimId, at: value.at };
+    const sessionId =
+      "sessionId" in value && typeof value.sessionId === "string"
+        ? value.sessionId
+        : undefined;
+    const delivery = "delivery" in value ? value.delivery : undefined;
+    if (delivery !== undefined && !isShippedChangeDelivery(delivery))
+      return null;
+    return {
+      status: "sent",
+      claimId: value.claimId,
+      at: value.at,
+      ...(sessionId ? { sessionId } : {}),
+      ...(delivery ? { delivery } : {}),
+    };
   } catch {
     return null;
   }
+}
+
+export function shippedChangeAnnouncementDelivery(
+  key: string,
+  root = ANNOUNCEMENT_STATE_ROOT,
+): ShippedChangeDelivery | null {
+  const receipt = readAnnouncementReceipt(announcementReceiptPath(key, root));
+  return receipt?.status === "sent" ? (receipt.delivery ?? null) : null;
 }
 
 export function claimShippedChangeAnnouncement(
@@ -92,6 +179,7 @@ export function settleShippedChangeAnnouncement(
   sent: boolean,
   sessionId?: string,
   root = ANNOUNCEMENT_STATE_ROOT,
+  delivery?: ShippedChangeDelivery,
 ): void {
   const receiptPath = announcementReceiptPath(key, root);
   const receipt = readAnnouncementReceipt(receiptPath);
@@ -102,6 +190,7 @@ export function settleShippedChangeAnnouncement(
       claimId,
       at: new Date().toISOString(),
       sessionId,
+      ...(delivery ? { delivery } : {}),
     });
   } else {
     rmSync(receiptPath, { force: true });
@@ -231,6 +320,11 @@ export function shippedChangeAnnouncementKey(
   return `${repoFullName}#${prNumber}:${createHash("sha256").update(payload).digest("hex")}`;
 }
 
+/** Discord accepts nonce strings up to 25 characters for message deduplication. */
+export function shippedChangeAnnouncementNonce(key: string): string {
+  return createHash("sha256").update(key).digest("base64url").slice(0, 25);
+}
+
 function screenshotUpload(path: string, title: string): DiscordUpload {
   const extension = extname(path).toLowerCase();
   const contentType =
@@ -249,6 +343,13 @@ function screenshotUpload(path: string, title: string): DiscordUpload {
   };
 }
 
+export type ShippedVisualChangeResult =
+  | ({
+      status: "shared" | "already_shared";
+      announcementKey: string;
+    } & ShippedChangeDelivery)
+  | { status: "already_shared" };
+
 export async function shareShippedVisualChange(opts: {
   session: UnifiedSession;
   pr: { number: number; title: string; url: string };
@@ -259,13 +360,11 @@ export async function shareShippedVisualChange(opts: {
   screenshots?: string[];
   discord: Pick<DiscordRest, "sendMessage" | "sendFiles">;
   announcementRoot?: string;
-}): Promise<{
-  status: "shared" | "already_shared";
-  channel?: ShippedChangeChannel;
-  permalink?: string;
-  messageId?: string;
-  announcementKey?: string;
-}> {
+}): Promise<ShippedVisualChangeResult> {
+  if (opts.screenshots?.some((path) => !validFeaturedScreenshot(path)))
+    throw new Error(
+      "Each Discord screenshot must be a PNG, JPEG, GIF, or WebP file no larger than 10 MB",
+    );
   const visual = selectShippedVisualChange(
     opts.session,
     validWalkthroughScreenshot,
@@ -287,7 +386,16 @@ export async function shareShippedVisualChange(opts: {
     announcementKey,
     opts.announcementRoot,
   );
-  if (!claimId) return { status: "already_shared" };
+  if (!claimId) {
+    const delivery = shippedChangeAnnouncementDelivery(
+      announcementKey,
+      opts.announcementRoot,
+    );
+    return delivery
+      ? { status: "already_shared", ...delivery, announcementKey }
+      : { status: "already_shared" };
+  }
+  const nonce = shippedChangeAnnouncementNonce(announcementKey);
   let messageId: string;
   try {
     const posted = visual
@@ -295,16 +403,15 @@ export async function shareShippedVisualChange(opts: {
           opts.channel.id,
           message,
           visual.screenshots.map((path) => screenshotUpload(path, title)),
+          nonce,
         )
-      : await opts.discord.sendMessage(opts.channel.id, message);
+      : await opts.discord.sendMessage(
+          opts.channel.id,
+          message,
+          undefined,
+          nonce,
+        );
     messageId = posted.id;
-    settleShippedChangeAnnouncement(
-      announcementKey,
-      claimId,
-      true,
-      opts.session.id,
-      opts.announcementRoot,
-    );
   } catch (error) {
     settleShippedChangeAnnouncement(
       announcementKey,
@@ -315,7 +422,22 @@ export async function shareShippedVisualChange(opts: {
     );
     throw error;
   }
-  const permalink = `https://discord.com/channels/${opts.channel.guildId}/${opts.channel.id}/${messageId}`;
+  const delivery: ShippedChangeDelivery = {
+    channel: opts.channel,
+    permalink: `https://discord.com/channels/${opts.channel.guildId}/${opts.channel.id}/${messageId}`,
+    messageId,
+    at: new Date().toISOString(),
+    ...(opts.requestedBy ? { requestedBy: opts.requestedBy } : {}),
+    prNumber: opts.pr.number,
+  };
+  settleShippedChangeAnnouncement(
+    announcementKey,
+    claimId,
+    true,
+    opts.session.id,
+    opts.announcementRoot,
+    delivery,
+  );
   audit({
     msg: "github_shipped_visual_change_announced",
     repo: opts.repoFullName,
@@ -329,9 +451,7 @@ export async function shareShippedVisualChange(opts: {
   );
   return {
     status: "shared",
-    channel: opts.channel,
-    permalink,
-    messageId,
+    ...delivery,
     announcementKey,
   };
 }

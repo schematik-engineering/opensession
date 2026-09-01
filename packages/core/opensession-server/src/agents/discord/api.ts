@@ -253,6 +253,7 @@ export class DiscordRest {
     channelId: string,
     content: string,
     files: readonly DiscordUpload[],
+    nonce?: string,
   ): Promise<DiscordMessageResult> {
     const uploads = files.slice(0, 10);
     const form = new FormData();
@@ -261,6 +262,7 @@ export class DiscordRest {
       JSON.stringify({
         content: content.slice(0, 2_000),
         allowed_mentions: { parse: [], replied_user: false },
+        ...(nonce ? { nonce, enforce_nonce: true } : {}),
         attachments: uploads.map((file, id) => ({
           id,
           filename: file.filename,

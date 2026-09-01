@@ -20,6 +20,16 @@ async function discordDestination() {
   return { discord, ...payload };
 }
 
+export function appendDiscordShare(
+  current: readonly SessionDiscordShare[] | undefined,
+  share: SessionDiscordShare,
+): SessionDiscordShare[] {
+  const shares = current || [];
+  return shares.some((candidate) => candidate.messageId === share.messageId)
+    ? [...shares]
+    : [...shares, share].slice(-20);
+}
+
 export async function handleShippedChangeRoutes(
   ctx: RouteContext,
 ): Promise<Response | undefined> {
@@ -161,7 +171,7 @@ export async function handleShippedChangeRoutes(
       session,
       pr: { number: pr.number, title: pr.title, url: pr.url },
       repoFullName: target.ghRepo,
-      requestedBy: requestUser(ctx, body?.user),
+      requestedBy: caller,
       channel,
       message: body?.message,
       screenshots: Array.isArray(body?.screenshots)
@@ -172,7 +182,7 @@ export async function handleShippedChangeRoutes(
       discord,
     });
     const share: SessionDiscordShare | undefined =
-      result.channel && result.permalink && result.messageId
+      "channel" in result
         ? {
             channelId: result.channel.id,
             channelName: result.channel.name,
@@ -180,18 +190,16 @@ export async function handleShippedChangeRoutes(
             guildName: result.channel.guildName,
             permalink: result.permalink,
             messageId: result.messageId,
-            at: new Date().toISOString(),
-            by: caller,
-            prNumber: pr.number,
-            ...(result.announcementKey
-              ? { announcementKey: result.announcementKey }
-              : {}),
+            at: result.at,
+            by: result.requestedBy,
+            prNumber: result.prNumber,
+            announcementKey: result.announcementKey,
           }
         : undefined;
     if (share) {
       await updateSessionFile(session.id, (data) => ({
         ...data,
-        discordShares: [...(data.discordShares || []), share].slice(-20),
+        discordShares: appendDiscordShare(data.discordShares, share),
       }));
     }
     return Response.json({ ...result, share });
