@@ -31,6 +31,10 @@ import { handleSetupCodestorageRoutes } from "./setup-codestorage";
 import { handleSetupGithubManifestRoutes } from "./setup-github-manifest";
 import { handleSetupRepoRoutes } from "./setup-repos";
 import { handleSetupTeamRoutes } from "./setup-team";
+import {
+  handleSetupTranscriptionRoutes,
+  transcriptionSnapshot,
+} from "./setup-transcription";
 
 /** One integration's status snapshot. `envValues` (the env FILE's active
  *  definitions) overrides process.env presence so a response issued right
@@ -370,6 +374,7 @@ export async function handleSetupRoutes(
       // a checklist that went all-green on an instance that couldn't run a turn.
       engine: engineStatus(),
       github: await githubSnapshot(),
+      transcription: transcriptionSnapshot(envValues),
       // `always` entries self-gate and need no setup, so they are not
       // presented as onboarding steps.
       integrations: await Promise.all(
@@ -379,6 +384,9 @@ export async function handleSetupRoutes(
       ),
     });
   }
+
+  const transcriptionResponse = await handleSetupTranscriptionRoutes(ctx);
+  if (transcriptionResponse) return transcriptionResponse;
 
   // ── PUT /api/setup/integrations/:id — credentials + enable flag ──────────
   const integrationMatch = path.match(/^\/api\/setup\/integrations\/([^/]+)$/);

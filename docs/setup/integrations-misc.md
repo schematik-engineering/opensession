@@ -153,8 +153,10 @@ configured provider in this order:
    `~/tools/whisper.cpp/models/ggml-small-q5_1.bin`), with `ffmpeg` for audio
    conversion. Build whisper.cpp yourself; it is outside the repo.
 
-For a Gemini-only instance, add these values to `~/.opensession.env` and
-restart Open Session:
+For a Gemini-only instance, open **Settings → Integrations → Voice
+transcription**, paste the Gemini API key, and choose Gemini. Settings stores
+the key in `~/.opensession.env` with mode 0600 and applies the change
+immediately. You can configure it manually instead and restart Open Session:
 
 ```sh
 GEMINI_API_KEY=your-key
