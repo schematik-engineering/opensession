@@ -1,15 +1,24 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  truncateSync,
+  writeFileSync,
+} from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import type { UnifiedSession } from "../../server/types";
+import type { DiscordRest } from "../discord/api";
 import {
   claimShippedChangeAnnouncement,
   selectShippedVisualChange,
   settleShippedChangeAnnouncement,
   shippedChangeAnnouncementKey,
+  shippedChangeAnnouncementNonce,
   shippedChangeOneLiner,
   normalizeShippedChangeMessage,
+  shareShippedVisualChange,
   validWalkthroughScreenshot,
   validFeaturedScreenshot,
 } from "./shipped-change-notify";
@@ -143,6 +152,182 @@ describe("shipped change copy", () => {
 
   test("does not announce without a prose explanation", () => {
     expect(shippedChangeOneLiner("## Screenshot only")).toBe("");
+  });
+});
+
+describe("Discord shipped change delivery", () => {
+  test("posts selected screenshots and returns a Discord permalink", async () => {
+    const root = mkdtempSync(join(tmpdir(), "shipped-discord-delivery-"));
+    scratch.push(root);
+    const image = join(root, "after.png");
+    writeFileSync(image, "png");
+    const calls: Array<{
+      channelId: string;
+      content: string;
+      filenames: string[];
+      nonce?: string;
+    }> = [];
+    const discord: Pick<DiscordRest, "sendMessage" | "sendFiles"> = {
+      sendFiles: async (channelId, content, files, nonce) => {
+        calls.push({
+          channelId,
+          content,
+          filenames: files.map((file) => file.filename),
+          nonce,
+        });
+        return { id: "message-1", channel_id: channelId };
+      },
+      sendMessage: async (channelId) => ({
+        id: "message-1",
+        channel_id: channelId,
+      }),
+    };
+
+    const result = await shareShippedVisualChange({
+      session: session("discord", "2026-09-01T10:00:00Z", []),
+      pr: {
+        number: 44,
+        title: "Default shipped updates to Discord",
+        url: "https://github.com/example/repo/pull/44",
+      },
+      repoFullName: "example/repo",
+      channel: {
+        id: "1542925450790305912",
+        name: "general",
+        guildId: "1542925450790305904",
+        guildName: "Schematik",
+      },
+      requestedBy: "Alex",
+      message: "Shipped to Discord.",
+      screenshots: [image],
+      discord,
+      announcementRoot: join(root, "announcements"),
+    });
+
+    if (!("announcementKey" in result))
+      throw new Error("Expected a delivered announcement");
+    expect(calls).toEqual([
+      {
+        channelId: "1542925450790305912",
+        content: "Shipped to Discord.",
+        filenames: ["after.png"],
+        nonce: shippedChangeAnnouncementNonce(result.announcementKey),
+      },
+    ]);
+    expect(result).toMatchObject({
+      status: "shared",
+      messageId: "message-1",
+      requestedBy: "Alex",
+      permalink:
+        "https://discord.com/channels/1542925450790305904/1542925450790305912/message-1",
+    });
+
+    const retry = await shareShippedVisualChange({
+      session: session("discord", "2026-09-01T10:00:00Z", []),
+      pr: {
+        number: 44,
+        title: "Default shipped updates to Discord",
+        url: "https://github.com/example/repo/pull/44",
+      },
+      repoFullName: "example/repo",
+      requestedBy: "Someone else",
+      channel: {
+        id: "1542925450790305912",
+        name: "general",
+        guildId: "1542925450790305904",
+        guildName: "Schematik",
+      },
+      message: "Shipped to Discord.",
+      screenshots: [image],
+      discord,
+      announcementRoot: join(root, "announcements"),
+    });
+    expect(calls).toHaveLength(1);
+    expect(retry).toEqual({
+      ...result,
+      status: "already_shared",
+    });
+  });
+
+  test("uses the deterministic announcement nonce for text-only posts", async () => {
+    const root = mkdtempSync(join(tmpdir(), "shipped-discord-nonce-"));
+    scratch.push(root);
+    let nonce: string | undefined;
+    const discord: Pick<DiscordRest, "sendMessage" | "sendFiles"> = {
+      sendFiles: async () => {
+        throw new Error("Unexpected file upload");
+      },
+      sendMessage: async (channelId, _content, _replyTo, candidate) => {
+        nonce = candidate;
+        return { id: "message-2", channel_id: channelId };
+      },
+    };
+    const result = await shareShippedVisualChange({
+      session: session("text-only", "2026-09-01T10:00:00Z", []),
+      pr: {
+        number: 45,
+        title: "Text-only update",
+        url: "https://github.com/example/repo/pull/45",
+      },
+      repoFullName: "example/repo",
+      channel: {
+        id: "1542925450790305912",
+        name: "general",
+        guildId: "1542925450790305904",
+        guildName: "Schematik",
+      },
+      message: "Shipped without an image.",
+      screenshots: [],
+      discord,
+      announcementRoot: join(root, "announcements"),
+    });
+
+    if (!("announcementKey" in result))
+      throw new Error("Expected a delivered announcement");
+    expect(nonce).toBe(shippedChangeAnnouncementNonce(result.announcementKey));
+    expect(nonce).toHaveLength(25);
+  });
+
+  test("rejects an explicitly selected screenshot above Discord's limit", async () => {
+    const root = mkdtempSync(join(tmpdir(), "shipped-discord-oversized-"));
+    scratch.push(root);
+    const image = join(root, "oversized.png");
+    writeFileSync(image, "png");
+    truncateSync(image, 10 * 1024 * 1024 + 1);
+    let posted = false;
+    const discord: Pick<DiscordRest, "sendMessage" | "sendFiles"> = {
+      sendFiles: async (channelId) => {
+        posted = true;
+        return { id: "unexpected", channel_id: channelId };
+      },
+      sendMessage: async (channelId) => {
+        posted = true;
+        return { id: "unexpected", channel_id: channelId };
+      },
+    };
+
+    await expect(
+      shareShippedVisualChange({
+        session: session("oversized", "2026-09-01T10:00:00Z", []),
+        pr: {
+          number: 46,
+          title: "Oversized screenshot",
+          url: "https://github.com/example/repo/pull/46",
+        },
+        repoFullName: "example/repo",
+        channel: {
+          id: "1542925450790305912",
+          name: "general",
+          guildId: "1542925450790305904",
+          guildName: "Schematik",
+        },
+        message: "This must retain its screenshot.",
+        screenshots: [image],
+        discord,
+        announcementRoot: join(root, "announcements"),
+      }),
+    ).rejects.toThrow("no larger than 10 MB");
+    expect(posted).toBe(false);
   });
 });
 

@@ -181,6 +181,8 @@ export interface UnifiedSession {
   walkthrough?: SessionWalkthrough;
   /** Slack messages a teammate sent from this session. */
   slackShares?: SessionSlackShare[];
+  /** Discord messages a teammate sent from the shipped-change card. */
+  discordShares?: SessionDiscordShare[];
   automation?: string;
   /** Immutable trust provenance for workflow-spawned automation descendants. */
   automationDescendantPolicy?: AutomationDescendantPolicy;
@@ -521,6 +523,20 @@ export interface SessionSlackShare {
   announcementKey?: string;
 }
 
+/** A shipped-change announcement sent through the configured Discord bot. */
+export interface SessionDiscordShare {
+  channelId: string;
+  channelName: string;
+  guildId: string;
+  guildName: string;
+  permalink: string;
+  messageId: string;
+  at: string;
+  by?: string;
+  prNumber?: number;
+  announcementKey?: string;
+}
+
 export interface AutomationDescendantPolicy {
   automationId: string;
   automationName: string;
@@ -549,6 +565,8 @@ export interface NativeSessionFile {
   walkthrough?: SessionWalkthrough;
   /** Slack messages a teammate sent from this session. */
   slackShares?: SessionSlackShare[];
+  /** Discord messages sent from the shipped-change card. */
+  discordShares?: SessionDiscordShare[];
   createdBy: string;
   /** Verified GitHub login of the creator — stamped when GitHub web sign-in
    *  is active (web-auth.ts), and backfilled onto older sessions by the

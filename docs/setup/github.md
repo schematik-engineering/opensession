@@ -210,11 +210,11 @@ or new label commands without webhook delivery.
   `integrations.github.docsSyncChannel` only lets the merge handler find and
   check off a recent Slack message that already links a docs-sync PR; it does
   not post that announcement itself.
-- `integrations.github.shippedChangesChannel` sets the default Slack channel in
-  the post-merge **Share to Slack** composer. It is not an enable switch. A
-  teammate with a personal Slack connection deliberately posts either prose or
-  selected screenshots; channel choices come from
-  `integrations.slack.channelNames`.
+- The post-merge **Send to Discord** composer uses the configured Discord bot.
+  It defaults to `#general`, or the first allowed text channel when `#general`
+  is unavailable. A teammate deliberately posts either prose or selected
+  screenshots; channel choices honor `DISCORD_GUILD_IDS` and
+  `DISCORD_CHANNEL_IDS`.
 - Mention replies are always on while the agent is loaded.
 - The agent itself is off unless enabled: `integrations.github.enabled: true`
   in config, or the `ENABLE_GITHUB_AGENT` env flag (which wins when set; see

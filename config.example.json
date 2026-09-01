@@ -109,8 +109,7 @@
       "oauthClientSecret": "",
       "appSlug": "",
       "installationOwner": "acme",
-      "previewEnvironment": "Preview",
-      "shippedChangesChannel": "C0123456789"
+      "previewEnvironment": "Preview"
     },
     "slack": {
       "enabled": false

@@ -1,7 +1,7 @@
 /**
- * Deliberately share a merged visual change in Slack. A walkthrough's durable
+ * Deliberately share a merged visual change in Discord. A walkthrough's durable
  * `after` screenshot is both the visual-change signal and the attachment; the
- * route calls this only after a teammate clicks Share to Slack.
+ * route calls this only after a teammate clicks Send to Discord.
  */
 import {
   mkdirSync,
@@ -11,22 +11,15 @@ import {
   statSync,
   writeFileSync,
 } from "fs";
-import { dirname, relative, resolve } from "path";
+import { basename, dirname, extname, relative, resolve } from "path";
 import { createHash } from "crypto";
-import { configuredIntegration } from "../../server/config";
 import { audit } from "../../server/audit";
 import { stateDir } from "../../server/paths";
 import { writeJsonAtomic } from "../../server/shared/atomic-write";
 import { UPLOADS_DIR } from "../../server/uploads";
 import { homeDir } from "../../server/paths";
 import type { UnifiedSession } from "../../server/types";
-import {
-  postSlackFiles,
-  sendSlackMessage,
-  slackPermalink,
-  slackUploadTs,
-} from "../slack/slack-api";
-import { shippedChangesChannel } from "./constants";
+import type { DiscordRest, DiscordUpload } from "../discord/api";
 
 export interface ShippedVisualChange {
   sessionId: string;
@@ -37,31 +30,120 @@ export interface ShippedVisualChange {
 export interface ShippedChangeChannel {
   id: string;
   name: string;
+  guildId: string;
+  guildName: string;
 }
 
 const ANNOUNCEMENT_STATE_ROOT = `${stateDir("github")}/shipped-visual-changes`;
-const MAX_SCREENSHOT_BYTES = 20 * 1024 * 1024;
+const MAX_SCREENSHOT_BYTES = 10 * 1024 * 1024;
 const SCREENSHOT_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 
-interface AnnouncementReceipt {
-  status: "pending" | "sent";
-  claimId: string;
+export interface ShippedChangeDelivery {
+  channel: ShippedChangeChannel;
+  permalink: string;
+  messageId: string;
   at: string;
-  sessionId?: string;
+  requestedBy?: string;
+  prNumber: number;
 }
+
+type AnnouncementReceipt =
+  | {
+      status: "pending";
+      claimId: string;
+      at: string;
+    }
+  | {
+      status: "sent";
+      claimId: string;
+      at: string;
+      sessionId?: string;
+      delivery?: ShippedChangeDelivery;
+    };
 
 function announcementReceiptPath(key: string, root: string): string {
   const digest = createHash("sha256").update(key).digest("hex");
   return `${root}/${digest}.json`;
 }
 
+function isShippedChangeChannel(value: unknown): value is ShippedChangeChannel {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    "id" in value &&
+    typeof value.id === "string" &&
+    "name" in value &&
+    typeof value.name === "string" &&
+    "guildId" in value &&
+    typeof value.guildId === "string" &&
+    "guildName" in value &&
+    typeof value.guildName === "string"
+  );
+}
+
+function isShippedChangeDelivery(
+  value: unknown,
+): value is ShippedChangeDelivery {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    "channel" in value &&
+    isShippedChangeChannel(value.channel) &&
+    "permalink" in value &&
+    typeof value.permalink === "string" &&
+    "messageId" in value &&
+    typeof value.messageId === "string" &&
+    "at" in value &&
+    typeof value.at === "string" &&
+    (!("requestedBy" in value) ||
+      value.requestedBy === undefined ||
+      typeof value.requestedBy === "string") &&
+    "prNumber" in value &&
+    typeof value.prNumber === "number"
+  );
+}
+
 function readAnnouncementReceipt(path: string): AnnouncementReceipt | null {
   try {
-    const value = JSON.parse(readFileSync(path, "utf8"));
-    return value && typeof value === "object" ? value : null;
+    const value: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (
+      !value ||
+      typeof value !== "object" ||
+      !("status" in value) ||
+      (value.status !== "pending" && value.status !== "sent") ||
+      !("claimId" in value) ||
+      typeof value.claimId !== "string" ||
+      !("at" in value) ||
+      typeof value.at !== "string"
+    )
+      return null;
+    if (value.status === "pending")
+      return { status: "pending", claimId: value.claimId, at: value.at };
+    const sessionId =
+      "sessionId" in value && typeof value.sessionId === "string"
+        ? value.sessionId
+        : undefined;
+    const delivery = "delivery" in value ? value.delivery : undefined;
+    if (delivery !== undefined && !isShippedChangeDelivery(delivery))
+      return null;
+    return {
+      status: "sent",
+      claimId: value.claimId,
+      at: value.at,
+      ...(sessionId ? { sessionId } : {}),
+      ...(delivery ? { delivery } : {}),
+    };
   } catch {
     return null;
   }
+}
+
+export function shippedChangeAnnouncementDelivery(
+  key: string,
+  root = ANNOUNCEMENT_STATE_ROOT,
+): ShippedChangeDelivery | null {
+  const receipt = readAnnouncementReceipt(announcementReceiptPath(key, root));
+  return receipt?.status === "sent" ? (receipt.delivery ?? null) : null;
 }
 
 export function claimShippedChangeAnnouncement(
@@ -97,6 +179,7 @@ export function settleShippedChangeAnnouncement(
   sent: boolean,
   sessionId?: string,
   root = ANNOUNCEMENT_STATE_ROOT,
+  delivery?: ShippedChangeDelivery,
 ): void {
   const receiptPath = announcementReceiptPath(key, root);
   const receipt = readAnnouncementReceipt(receiptPath);
@@ -107,6 +190,7 @@ export function settleShippedChangeAnnouncement(
       claimId,
       at: new Date().toISOString(),
       sessionId,
+      ...(delivery ? { delivery } : {}),
     });
   } else {
     rmSync(receiptPath, { force: true });
@@ -115,7 +199,7 @@ export function settleShippedChangeAnnouncement(
 
 /**
  * Drop a receipt so the same update can be shared again. Undo removes the
- * message from Slack, so the claim that stopped a second send is stale.
+ * Discord message, so the claim that stopped a second send is stale.
  */
 export function forgetShippedChangeAnnouncement(
   key: string,
@@ -189,7 +273,7 @@ export function selectShippedVisualChange(
   };
 }
 
-/** Collapse the walkthrough's first prose paragraph into Slack-sized copy. */
+/** Collapse the walkthrough's first prose paragraph into share-ready copy. */
 export function shippedChangeOneLiner(markdown: string, max = 280): string {
   const paragraphs = markdown
     .split(/\n\s*\n/)
@@ -212,29 +296,11 @@ export function shippedChangeOneLiner(markdown: string, max = 280): string {
   return `${clipped.slice(0, wordBoundary > max * 0.7 ? wordBoundary : undefined).trimEnd()}…`;
 }
 
-function slackText(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-export function shippedChangeChannels(): ShippedChangeChannel[] {
-  const names = configuredIntegration("slack").channelNames;
-  if (!names || typeof names !== "object" || Array.isArray(names)) return [];
-  return Object.entries(names)
-    .filter(
-      ([id, name]) =>
-        /^C[A-Z0-9]+$/.test(id) && typeof name === "string" && name.trim(),
-    )
-    .map(([id, name]) => ({ id, name: String(name).trim() }));
-}
-
 export function normalizeShippedChangeMessage(value: unknown): string {
   if (typeof value !== "string") return "";
   const message = value.replace(/\s+/g, " ").trim();
   if (message.length > 500)
-    throw new Error("Slack message must be 500 characters or fewer");
+    throw new Error("Discord message must be 500 characters or fewer");
   return message;
 }
 
@@ -245,38 +311,60 @@ export function shippedChangeAnnouncementKey(
   comment: string,
   screenshots: string[],
 ): string {
-  const payload = JSON.stringify({ channel, comment, screenshots });
+  const payload = JSON.stringify({
+    destination: "discord",
+    channel,
+    comment,
+    screenshots,
+  });
   return `${repoFullName}#${prNumber}:${createHash("sha256").update(payload).digest("hex")}`;
 }
+
+/** Discord accepts nonce strings up to 25 characters for message deduplication. */
+export function shippedChangeAnnouncementNonce(key: string): string {
+  return createHash("sha256").update(key).digest("base64url").slice(0, 25);
+}
+
+function screenshotUpload(path: string, title: string): DiscordUpload {
+  const extension = extname(path).toLowerCase();
+  const contentType =
+    extension === ".png"
+      ? "image/png"
+      : extension === ".gif"
+        ? "image/gif"
+        : extension === ".webp"
+          ? "image/webp"
+          : "image/jpeg";
+  return {
+    filename: basename(path),
+    contentType,
+    data: Uint8Array.from(readFileSync(path)).buffer,
+    description: `Screenshot of the shipped visual change: ${title}`,
+  };
+}
+
+export type ShippedVisualChangeResult =
+  | ({
+      status: "shared" | "already_shared";
+      announcementKey: string;
+    } & ShippedChangeDelivery)
+  | { status: "already_shared" };
 
 export async function shareShippedVisualChange(opts: {
   session: UnifiedSession;
   pr: { number: number; title: string; url: string };
   repoFullName: string;
   requestedBy?: string;
-  channel?: string;
+  channel: ShippedChangeChannel;
   message?: string;
-  slackToken?: string;
   screenshots?: string[];
-}): Promise<{
-  status: "shared" | "already_shared";
-  channel?: ShippedChangeChannel;
-  permalink?: string;
-  /** Message timestamp, so the sender can undo the post. */
-  ts?: string;
-  announcementKey?: string;
-}> {
-  const channels = shippedChangeChannels();
-  const channel = opts.channel || shippedChangesChannel();
-  if (!channel) throw new Error("Shipped changes channel is not configured");
-  if (!channels.some((candidate) => candidate.id === channel)) {
-    throw new Error("Choose a configured Slack channel");
-  }
-  if (!opts.slackToken) {
+  discord: Pick<DiscordRest, "sendMessage" | "sendFiles">;
+  announcementRoot?: string;
+}): Promise<ShippedVisualChangeResult> {
+  if (opts.screenshots?.some((path) => !validFeaturedScreenshot(path)))
     throw new Error(
-      "Connect your Slack account in Settings → Account to post as yourself",
+      "Each Discord screenshot must be a PNG, JPEG, GIF, or WebP file no larger than 10 MB",
     );
-  }
   const visual = selectShippedVisualChange(
     opts.session,
     validWalkthroughScreenshot,
@@ -286,74 +374,84 @@ export async function shareShippedVisualChange(opts: {
   const message =
     normalizeShippedChangeMessage(opts.message) ||
     shippedChangeOneLiner(visual?.summary || "");
-  if (!message) throw new Error("Write a short Slack message first");
-  const comment = slackText(message);
+  if (!message) throw new Error("Write a short Discord message first");
   const announcementKey = shippedChangeAnnouncementKey(
     opts.repoFullName,
     opts.pr.number,
-    channel,
-    comment,
+    opts.channel.id,
+    message,
     visual?.screenshots || [],
   );
-  const claimId = claimShippedChangeAnnouncement(announcementKey);
-  if (!claimId) return { status: "already_shared" };
-  let permalink: string | undefined;
-  let ts: string | undefined;
+  const claimId = claimShippedChangeAnnouncement(
+    announcementKey,
+    opts.announcementRoot,
+  );
+  if (!claimId) {
+    const delivery = shippedChangeAnnouncementDelivery(
+      announcementKey,
+      opts.announcementRoot,
+    );
+    return delivery
+      ? { status: "already_shared", ...delivery, announcementKey }
+      : { status: "already_shared" };
+  }
+  const nonce = shippedChangeAnnouncementNonce(announcementKey);
+  let messageId: string;
   try {
-    if (visual) {
-      const completed = await postSlackFiles(
-        channel,
-        visual.screenshots,
-        comment,
-        {
-          title: `${title} · shipped`,
-          altText: `Screenshot of the shipped visual change: ${title}`,
-        },
-        opts.slackToken,
-      );
-      ts = await slackUploadTs(completed, channel, opts.slackToken);
-    } else {
-      const posted = await sendSlackMessage(
-        channel,
-        comment,
-        undefined,
-        opts.slackToken,
-      );
-      if (!posted?.ok)
-        throw new Error(
-          `Slack message failed: ${posted?.error || "invalid response"}`,
+    const posted = visual
+      ? await opts.discord.sendFiles(
+          opts.channel.id,
+          message,
+          visual.screenshots.map((path) => screenshotUpload(path, title)),
+          nonce,
+        )
+      : await opts.discord.sendMessage(
+          opts.channel.id,
+          message,
+          undefined,
+          nonce,
         );
-      ts = typeof posted.ts === "string" ? posted.ts : undefined;
-    }
-    permalink = ts
-      ? await slackPermalink(channel, ts, opts.slackToken)
-      : undefined;
+    messageId = posted.id;
+  } catch (error) {
     settleShippedChangeAnnouncement(
       announcementKey,
       claimId,
-      true,
-      opts.session.id,
+      false,
+      undefined,
+      opts.announcementRoot,
     );
-  } catch (error) {
-    settleShippedChangeAnnouncement(announcementKey, claimId, false);
     throw error;
   }
+  const delivery: ShippedChangeDelivery = {
+    channel: opts.channel,
+    permalink: `https://discord.com/channels/${opts.channel.guildId}/${opts.channel.id}/${messageId}`,
+    messageId,
+    at: new Date().toISOString(),
+    ...(opts.requestedBy ? { requestedBy: opts.requestedBy } : {}),
+    prNumber: opts.pr.number,
+  };
+  settleShippedChangeAnnouncement(
+    announcementKey,
+    claimId,
+    true,
+    opts.session.id,
+    opts.announcementRoot,
+    delivery,
+  );
   audit({
     msg: "github_shipped_visual_change_announced",
     repo: opts.repoFullName,
     pr_number: opts.pr.number,
     session_id: opts.session.id,
-    slack_channel: channel,
+    discord_channel: opts.channel.id,
     requested_by: opts.requestedBy,
   });
   console.log(
-    `[github] Shared merged change ${opts.repoFullName}#${opts.pr.number} in Slack from ${opts.session.id}`,
+    `[github] Shared merged change ${opts.repoFullName}#${opts.pr.number} in Discord from ${opts.session.id}`,
   );
   return {
     status: "shared",
-    channel: channels.find((candidate) => candidate.id === channel),
-    permalink,
-    ts,
+    ...delivery,
     announcementKey,
   };
 }

@@ -27,6 +27,18 @@ export interface DiscordMessageResult {
   content?: string;
 }
 
+export interface DiscordUpload {
+  filename: string;
+  contentType: string;
+  data: ArrayBuffer;
+  description?: string;
+}
+
+export type DiscordFetch = (
+  input: string | URL | Request,
+  init?: RequestInit,
+) => Promise<Response>;
+
 export interface DiscordApplicationCommand {
   name: string;
   description: string;
@@ -40,15 +52,34 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function errorLabel(body: unknown): string {
-  if (!body || typeof body !== "object") return "request rejected";
-  const value = body as Record<string, unknown>;
-  const code = typeof value.code === "number" ? ` code ${value.code}` : "";
+function discordErrorDetail(body: unknown): {
+  message: string;
+  code?: number;
+} {
+  if (!body || typeof body !== "object") return { message: "request rejected" };
+  const code =
+    "code" in body && typeof body.code === "number" ? body.code : undefined;
   const message =
-    typeof value.message === "string"
-      ? value.message.slice(0, 240)
+    "message" in body && typeof body.message === "string"
+      ? body.message.slice(0, 240)
       : "request rejected";
-  return `${message}${code}`;
+  return { message, ...(code === undefined ? {} : { code }) };
+}
+
+export class DiscordApiError extends Error {
+  readonly status: number;
+  readonly code?: number;
+
+  constructor(method: string, status: number, body: unknown) {
+    const detail = discordErrorDetail(body);
+    const codeLabel = detail.code === undefined ? "" : ` code ${detail.code}`;
+    super(
+      `Discord API ${method} failed (${status}): ${detail.message}${codeLabel}`,
+    );
+    this.name = "DiscordApiError";
+    this.status = status;
+    this.code = detail.code;
+  }
 }
 
 function retryableDiscordError(message: string): Error {
@@ -88,7 +119,7 @@ export class DiscordRest {
   constructor(
     private readonly token: string,
     private readonly applicationId: string,
-    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly fetchImpl: DiscordFetch = fetch,
   ) {}
 
   private async request<T>(
@@ -100,16 +131,19 @@ export class DiscordRest {
     for (let attempt = 0; attempt < 4; attempt++) {
       let response: Response;
       try {
+        const multipart = body instanceof FormData;
         response = await this.fetchImpl(`${API_BASE}${path}`, {
           method,
           headers: {
             ...(auth ? { Authorization: `Bot ${this.token}` } : {}),
-            ...(body === undefined
+            ...(body === undefined || multipart
               ? {}
               : { "Content-Type": "application/json" }),
             "User-Agent": "OpenSession-Discord (https://opensession.com, 1)",
           },
-          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          ...(body === undefined
+            ? {}
+            : { body: multipart ? body : JSON.stringify(body) }),
         });
       } catch (error) {
         if (attempt < 3) {
@@ -133,15 +167,15 @@ export class DiscordRest {
       }
       if (!response.ok) {
         const detail = await response.json().catch(() => ({}));
-        const message = `Discord API ${method} failed (${response.status}): ${errorLabel(detail)}`;
+        const error = new DiscordApiError(method, response.status, detail);
         if (response.status >= 500) {
           if (attempt < 3) {
             await delay(250 * 2 ** attempt);
             continue;
           }
-          throw retryableDiscordError(message);
+          throw retryableDiscordError(error.message);
         }
-        throw new Error(message);
+        throw error;
       }
       if (response.status === 204) return undefined as T;
       return (await response.json()) as T;
@@ -232,6 +266,54 @@ export class DiscordRest {
           }
         : {}),
     });
+  }
+
+  sendFiles(
+    channelId: string,
+    content: string,
+    files: readonly DiscordUpload[],
+    nonce?: string,
+  ): Promise<DiscordMessageResult> {
+    const uploads = files.slice(0, 10);
+    const form = new FormData();
+    form.append(
+      "payload_json",
+      JSON.stringify({
+        content: content.slice(0, 2_000),
+        allowed_mentions: { parse: [], replied_user: false },
+        ...(nonce ? { nonce, enforce_nonce: true } : {}),
+        attachments: uploads.map((file, id) => ({
+          id,
+          filename: file.filename,
+          ...(file.description ? { description: file.description } : {}),
+        })),
+      }),
+    );
+    uploads.forEach((file, index) => {
+      form.append(
+        `files[${index}]`,
+        new Blob([file.data], { type: file.contentType }),
+        file.filename,
+      );
+    });
+    return this.request("POST", `/channels/${channelId}/messages`, form);
+  }
+
+  async deleteMessage(channelId: string, messageId: string): Promise<void> {
+    try {
+      await this.request(
+        "DELETE",
+        `/channels/${channelId}/messages/${messageId}`,
+      );
+    } catch (error) {
+      if (
+        error instanceof DiscordApiError &&
+        error.status === 404 &&
+        error.code === 10_008
+      )
+        return;
+      throw error;
+    }
   }
 
   editMessage(

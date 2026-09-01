@@ -55,6 +55,7 @@ enum SlackAPI {
         )
     }
 
+    /// Configured Discord destinations for merged change announcements.
     static func shippedChangeChannels(sessionId: String) async throws -> ChannelsResponse {
         let session = encodePath(sessionId)
         let data = try await request("/api/sessions/\(session)/share-shipped-change")
@@ -72,7 +73,7 @@ enum SlackAPI {
         var request = config.authorizedRequest(url)
         request.httpMethod = "POST"
         request.setValue(image.mediaType, forHTTPHeaderField: "Content-Type")
-        request.setValue("slack-image-\(index).jpg", forHTTPHeaderField: "x-file-name")
+        request.setValue("message-image-\(index).jpg", forHTTPHeaderField: "x-file-name")
         request.httpBody = image.jpegData
         let (data, response) = try await URLSession.shared.data(for: request)
         let body = try? JSONDecoder().decode(UploadResponse.self, from: data)

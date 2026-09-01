@@ -1277,7 +1277,7 @@ a {
 /* The installed phone composer is a native-feeling capsule rather than the
    desktop squircle. Safari already falls back to circular corners because it
    does not support corner-shape; this keeps Chromium PWAs consistent. Its edge,
-   attached flaps, and Slack share card use the desktop ring's 35% strength. */
+   attached flaps, and shipped-change card use the desktop ring's 35% strength. */
 @media (display-mode: standalone) and (max-width: 720px) {
   .app .composer {
     corner-shape: round;

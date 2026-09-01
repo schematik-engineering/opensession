@@ -17,7 +17,7 @@ struct PrSlackShareRequest: Identifiable {
 }
 
 enum ShippedChangeCopy {
-    /// A first draft of the Slack message announcing a merged change, shown
+    /// A first draft of the message announcing a merged change, shown
     /// in the composer for the person to edit before sending.
     /// Repository-neutral: it reads the walkthrough summary when there is one,
     /// and otherwise turns the PR title from an instruction into an outcome.
@@ -135,8 +135,8 @@ enum ShippedChangeMedia {
     }
 }
 
-/// A deliberate Slack post: the description stays editable while the pull
-/// request URL is fixed, so the shared message cannot lose its destination.
+/// A deliberate Discord or Slack post. The description stays editable while
+/// the pull request URL is fixed, so the message cannot lose its destination.
 struct PrSlackShareSheet: View {
     let request: PrSlackShareRequest
 
@@ -176,7 +176,11 @@ struct PrSlackShareSheet: View {
     }
 
     private var requiresReconnect: Bool {
-        !images.isEmpty && !canUploadImages
+        !request.merged && !images.isEmpty && !canUploadImages
+    }
+
+    private var serviceName: String {
+        request.merged ? "Discord" : "Slack"
     }
 
     /// A shipped change and a composer request post a message with pictures;
@@ -225,7 +229,7 @@ struct PrSlackShareSheet: View {
                                 .foregroundStyle(.secondary)
                         }
                     } else if channels.isEmpty {
-                        Text("No Slack channels are configured.")
+                        Text("No \(serviceName) channels are configured.")
                             .foregroundStyle(.secondary)
                     } else {
                         Picker("Send to", selection: $selectedChannel) {
@@ -256,7 +260,7 @@ struct PrSlackShareSheet: View {
             // nothing into the description. On iOS the same modifier puts
             // Paste in the text field's own edit menu.
             .pastesImages(into: $images, maxCount: 10, when: acceptsImages)
-            .navigationTitle("Share to Slack")
+            .navigationTitle(request.merged ? "Send to Discord" : "Share to Slack")
             .inlineTitleBarCompat()
             .toolbar {
                 ToolbarItem(placement: .topLeadingCompat) {

@@ -973,7 +973,10 @@ struct PrPanelView: View {
                                 ?? ShippedChangeMedia.latestScreenshot(in: viewModel.entries)
                         )
                     } label: {
-                        Label("Share to Slack", systemImage: "paperplane")
+                        Label(
+                            pr.state == "MERGED" ? "Send to Discord" : "Share to Slack",
+                            systemImage: "paperplane"
+                        )
                     }
                 }
             }

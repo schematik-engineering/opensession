@@ -72,6 +72,10 @@ specs, transcripts, logs, or command arguments.
 
 ## User surface
 
+- After a pull request merges, the session's **Send to Discord** composer lists
+  allowed text channels and defaults to `#general`, or the first available
+  channel. It posts through the configured bot and supports up to 10 images,
+  each no larger than 10 MiB.
 - The primary interaction is conversational: mention the bot in a guild text
   channel to create a fresh linked public thread and Docker-backed OpenSession.
   A prior `/os ask` link on the parent channel is never reused by a new mention.

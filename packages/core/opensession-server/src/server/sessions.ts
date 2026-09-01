@@ -957,6 +957,7 @@ function nativeSessionRow(data: NativeSessionFile): UnifiedSession {
     previewPath: data.previewPath,
     walkthrough: data.walkthrough,
     slackShares: data.slackShares,
+    discordShares: data.discordShares,
     automation:
       data.automation ||
       (data.createdBy?.endsWith(" (automation)")

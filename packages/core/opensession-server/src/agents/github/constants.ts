@@ -63,14 +63,6 @@ export function docsSyncChannel(): string | undefined {
     : undefined;
 }
 
-/** Slack channel where merged visual changes are shared with their walkthrough screenshot. */
-export function shippedChangesChannel(): string | undefined {
-  const configured = configuredIntegration("github").shippedChangesChannel;
-  return typeof configured === "string" && configured.trim()
-    ? configured.trim()
-    : undefined;
-}
-
 /** PR trigger labels. */
 export const LABEL_REVIEW = "os-review";
 export const LABEL_AUTOFIX = "os-auto-fix";

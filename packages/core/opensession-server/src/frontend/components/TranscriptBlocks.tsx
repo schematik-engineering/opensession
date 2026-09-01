@@ -102,7 +102,7 @@ interface Props {
   /** Team notes (src/server/session-notes.ts) interleaved into the timeline
    *  by timestamp. Agent-invisible; rendered as NoteBubbles. */
   notes?: SessionNote[];
-  slackShare?: ShippedChangeComposerProps & {
+  shippedChangeShare?: ShippedChangeComposerProps & {
     prNumber: number;
   };
   /** The current PR verdict, rendered on the final review loop's own row. */
@@ -324,7 +324,7 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
   sessionId,
   walkthrough,
   notes,
-  slackShare,
+  shippedChangeShare,
   reviewResult,
   reviewLoopsOpen,
   onReviewLoopOpenChange,
@@ -351,9 +351,11 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
     .map(classifyEntry)
     .filter((entry) => entry.turnBoundary || !isRenderlessUserEntry(entry));
   const shareAfterEntryIds = new Set<string>();
-  if (slackShare) {
+  if (shippedChangeShare) {
     for (let i = 0; i < renderedEntries.length; i++) {
-      if (mergedNoticePrNumber(renderedEntries[i]) !== slackShare.prNumber)
+      if (
+        mergedNoticePrNumber(renderedEntries[i]) !== shippedChangeShare.prNumber
+      )
         continue;
       let targetId = renderedEntries[i].id;
       for (let j = i + 1; j < renderedEntries.length; j++) {
@@ -632,8 +634,8 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
         content: (
           <>
             {content}
-            {showShareAction && slackShare && (
-              <ShippedChangeComposer {...slackShare} />
+            {showShareAction && shippedChangeShare && (
+              <ShippedChangeComposer {...shippedChangeShare} />
             )}
           </>
         ),
