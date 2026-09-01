@@ -8,6 +8,7 @@ import { InlineAlert } from "../../ui/state";
 import { IntegrationsList } from "../SetupIntegrations";
 import { SetupRestart } from "../SetupRestart";
 import { AppleMobileIntegration } from "../AppleMobileIntegration";
+import { TranscriptionSettings } from "./TranscriptionSettings";
 
 // Organization → Integrations: credentials used by tools and automation.
 // Workspace authentication lives on its own page beside Members.
@@ -46,6 +47,7 @@ export function IntegrationsPanel() {
       <div className="mt-3">
         <AppleMobileIntegration teamNames={status?.team.names ?? []} />
       </div>
+      {status && <TranscriptionSettings settings={status.transcription} />}
       <SetupRestart setup={setup} />
     </SettingsPanel>
   );

@@ -90,6 +90,19 @@ export interface SetupAccess {
   caddyInstalled: boolean;
 }
 
+export type SetupTranscriptionProvider =
+  | "auto"
+  | "gemini"
+  | "openai"
+  | "groq"
+  | "local";
+
+export interface SetupTranscription {
+  provider: SetupTranscriptionProvider;
+  geminiApiKeyConfigured: boolean;
+  geminiApiKeyMasked?: string;
+}
+
 export interface SetupStatus {
   /** Kept at the top level for tolerant native clients on the shared snapshot. */
   publicBaseUrl: string;
@@ -101,6 +114,8 @@ export interface SetupStatus {
   team: { count: number; names: string[] };
   github: SetupGithub;
   integrations: SetupIntegration[];
+  /** Optional so older servers remain usable during a rolling update. */
+  transcription?: SetupTranscription;
 }
 
 export interface TeamMember {
