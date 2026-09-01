@@ -101,7 +101,7 @@ separate app listener on 3850 serves the private UI and API.
   HTTPS for public callbacks and TLS for live previews), **cloudflared**
   (custom-domain public callbacks, or an externally configured Access-protected
   private tunnel, without inbound ports),
-  `whisper.cpp`/Groq/OpenAI key (voice dictation).
+  `whisper.cpp` or a Gemini/Groq/OpenAI key (voice dictation).
 
 ## Network model
 

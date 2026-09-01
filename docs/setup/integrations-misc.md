@@ -139,19 +139,33 @@ push was first used in the current process.
 
 ## Voice / transcription
 
-`packages/core/opensession-server/src/server/transcribe.ts` tries providers in order, falling through on
-failure:
+Set `OPENSESSION_TRANSCRIPTION_PROVIDER` to `gemini`, `openai`, `groq`, or
+`local` to choose where dictation audio goes. An explicit selection does not
+send audio to another provider when it fails. The default, `auto`, tries each
+configured provider in this order:
 
 1. OpenAI (`OPENAI_API_KEY`; `gpt-4o-mini-transcribe`)
 2. Groq (`GROQ_API_KEY`; `whisper-large-v3-turbo`)
-3. Local whisper.cpp — `WHISPER_CLI` (default
-   `~/tools/whisper.cpp/build/bin/whisper-cli`) + `WHISPER_MODEL` (default
-   `~/tools/whisper.cpp/models/ggml-small-q5_1.bin`), with `ffmpeg` for
-   audio conversion. Build whisper.cpp yourself; it's outside the repo.
+3. Google Gemini (`GEMINI_API_KEY`; `gemini-3.5-transcribe` in Smart
+   transcription mode)
+4. Local whisper.cpp using `WHISPER_CLI` (default
+   `~/tools/whisper.cpp/build/bin/whisper-cli`) and `WHISPER_MODEL` (default
+   `~/tools/whisper.cpp/models/ggml-small-q5_1.bin`), with `ffmpeg` for audio
+   conversion. Build whisper.cpp yourself; it is outside the repo.
 
-The endpoint accepts at most 25 MiB per clip. Providers are optional: if no
-hosted key works and the local binary or model is unavailable, dictation
-returns an error and the rest of the app is unaffected.
+For a Gemini-only instance, add these values to `~/.opensession.env` and
+restart Open Session:
+
+```sh
+GEMINI_API_KEY=your-key
+OPENSESSION_TRANSCRIPTION_PROVIDER=gemini
+```
+
+The Gemini integration uploads each clip through Google's Files API, requests
+its deletion after transcription, and relies on Google's 48-hour automatic
+expiry if that cleanup request fails. The endpoint accepts at most 25 MiB per
+clip. Providers are optional. If none is configured, dictation returns an error
+and the rest of the app is unaffected.
 
 ## AWS-hosted MCP with IAM
 
