@@ -95,6 +95,7 @@ import {
   providerFor,
   resolveModel,
   formatModelList,
+  DEFAULT_CODEX_MODEL,
 } from "../../server/models";
 import {
   isWorktreeChannel,
@@ -1037,6 +1038,13 @@ export async function processMessage(
   }
 
   try {
+    // Slack owns message redelivery across gateway restarts, so this route
+    // remains in-process and uses a Pi execution model. ACP runs need detached
+    // hosts to preserve the loop-specific MCP objects; silently selecting Grok
+    // here would drop Slack's ask/report-back tools in acpMcpServers.
+    const slackModel =
+      toPiModel(session.model || getDefaultModel()) ||
+      `pi/openai/${DEFAULT_CODEX_MODEL}`;
     // Account rotation (meridian pool, sender-personal-first via `user`) and
     // usage-limit model fallback are runAgent's job now. mcpServers stays
     // unset = all configured servers, gated per-user by filterMcpServers
@@ -1050,7 +1058,7 @@ export async function processMessage(
       sessionId: session.claudeSessionId || undefined,
       cwd,
       mode: "code",
-      model: toPiModel(session.model || getDefaultModel()),
+      model: slackModel,
       // Interactive Slack runs are as interactive as the web UI: when the
       // primary model exhausts (e.g. the small Fable weekly bucket), let
       // runAgent's tier graph carry the turn onto Sol/Opus instead of
@@ -1058,7 +1066,7 @@ export async function processMessage(
       // fallback guard in runAgent short-circuits and the comment above is a
       // no-op. onAskUser (below) routes any ask-before-downgrade hop to the
       // Slack question card.
-      fallbackModel: interactiveFallbackModel(session.model),
+      fallbackModel: interactiveFallbackModel(slackModel),
       user: msg.userId,
       author: gitIdentityFor(msg.userId),
       // Interactive Slack runs keep AWS read access via the injected

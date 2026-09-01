@@ -4,7 +4,9 @@ import { runAcp } from "../packages/core/opensession-server/src/server/acp-runne
 
 const provider = process.argv[2];
 if (provider !== "grok" && provider !== "cursor") {
-  console.error("usage: verify-acp-provider.ts <grok|cursor> [model]");
+  console.error(
+    "usage: verify-acp-provider.ts <grok|cursor> [model] [prompt|elicitation]",
+  );
   process.exit(2);
 }
 const model =
@@ -68,8 +70,18 @@ for await (const event of runAcp(
 }
 const terminal = events.at(-1);
 console.log(JSON.stringify({ provider, model, events }));
+const elicitationAccepted = events.some((event) => {
+  if (event.type !== "tool_result") return false;
+  const content = String(event.content || "").replace(/[\\\s]/g, "");
+  return (
+    content.includes('"action":"accept"') &&
+    content.includes('"label":"stable"')
+  );
+});
 const verified =
-  terminal?.type === "done" && String(terminal.result || "").includes(expected);
+  terminal?.type === "done" &&
+  String(terminal.result || "").includes(expected) &&
+  (!elicitation || elicitationAccepted);
 
 // Runtime imports intentionally keep config watchers alive in the server and
 // runner-host. This operator-only one-shot probe must terminate after its
