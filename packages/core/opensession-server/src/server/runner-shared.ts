@@ -309,6 +309,9 @@ export function isCodexUsageLimitError(message: string): boolean {
   );
 }
 
+export const GROK_SEARCH_ONLY_TERMINAL_ERROR =
+  "grok ACP stopped after search_tool without invoking a discovered tool";
+
 /**
  * Infrastructure/transient run failures worth recovering from rather than
  * surfacing as a dead turn: a fresh server/account (the previous runner-runner) or the
@@ -330,6 +333,7 @@ export function isTransientRunError(
   message: string | undefined | null,
 ): boolean {
   if (!message) return false;
+  if (message === GROK_SEARCH_ONLY_TERMINAL_ERROR) return true;
   if (
     isClaudeMalformedTerminalError(message) ||
     isClaudeBridgeLaunchError(message)

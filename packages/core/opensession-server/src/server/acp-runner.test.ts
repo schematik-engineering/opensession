@@ -462,6 +462,59 @@ describe("ACP runner", () => {
     });
   });
 
+  test("continues Grok in the same ACP session after a search-only terminal", async () => {
+    stageAuth();
+    const events = await collect(
+      runAcp(opts("search then tool"), "grok/grok-4.6"),
+    );
+
+    expect(
+      events
+        .filter((event) => event.type === "tool_use")
+        .map((event) => event.toolName),
+    ).toEqual(["search_tool", "opensession-todos__list_todos"]);
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      result: "I found the tool and will call it.finished via discovered tool",
+    });
+    expect(
+      events.find(
+        (event) =>
+          event.type === "tool_result" && event.toolUseId === "discovered-tool",
+      )?.content,
+    ).toContain('"sessionSetups": 1');
+  });
+
+  test("accepts Grok's answer when search_tool found no matching tools", async () => {
+    stageAuth();
+    const events = await collect(
+      runAcp(opts("search no match"), "grok/grok-4.6"),
+    );
+
+    expect(events.filter((event) => event.type === "tool_use")).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      result: "No matching integration tool exists.",
+    });
+  });
+
+  test("fails honestly when Grok repeatedly stops after search_tool", async () => {
+    stageAuth();
+    const events = await collect(
+      runAcp(opts("search forever"), "grok/grok-4.6"),
+    );
+
+    expect(events.filter((event) => event.type === "tool_use")).toHaveLength(3);
+    expect(events.at(-1)).toMatchObject({
+      type: "error",
+      provider: "grok",
+      model: "grok/grok-4.6",
+    });
+    expect(events.at(-1)?.content).toContain(
+      "stopped after search_tool without invoking a discovered tool",
+    );
+  });
+
   test("resets the inactivity watchdog on ACP activity", async () => {
     stageAuth();
     process.env.OPENSESSION_ACP_TURN_TIMEOUT_MS = "50";

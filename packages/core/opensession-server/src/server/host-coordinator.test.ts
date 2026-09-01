@@ -18,6 +18,7 @@ import {
 } from "./host-client";
 import type { StreamEvent } from "./run-events";
 import type { ActiveRunRecord } from "./run-journal";
+import { GROK_SEARCH_ONLY_TERMINAL_ERROR } from "./runner-shared";
 import type { RunHostSpec } from "../runner-host/protocol";
 
 let scratch: string;
@@ -229,6 +230,53 @@ describe("hosted model coordinator", () => {
       {
         fromModel: "grok/grok-4.6",
         toModel: "pi/openai/gpt-5.6-sol",
+      },
+    );
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      result: "fallback complete",
+    });
+  });
+
+  test("falls back from a Grok search-only terminal without poisoning its account", async () => {
+    const accountId = addGrokAccount("search-only");
+    const attempts: HostedRunOpts[] = [];
+    __setHostedPhysicalRunnerForTest(async function* (attempt) {
+      attempts.push(attempt);
+      if (attempt.model === "grok/grok-4.6") {
+        yield {
+          type: "error",
+          content: GROK_SEARCH_ONLY_TERMINAL_ERROR,
+          provider: "grok",
+          model: attempt.model,
+        };
+        return;
+      }
+      yield { type: "done", result: "fallback complete", model: attempt.model };
+    });
+
+    const events = await collect(
+      runAgentHosted(
+        opts({
+          accountId,
+          fallbackModel: "pi/openai/gpt-5.6-sol",
+          journalKind: "automation",
+        }),
+      ),
+    );
+
+    expect(attempts.map((attempt) => attempt.model)).toEqual([
+      "grok/grok-4.6",
+      "pi/openai/gpt-5.6-sol",
+    ]);
+    expect(
+      acpSessionExhaustedAccounts(opts().osSessionId, "grok").has(accountId),
+    ).toBe(false);
+    expect(events.find((event) => event.type === "model_switch")).toMatchObject(
+      {
+        fromModel: "grok/grok-4.6",
+        toModel: "pi/openai/gpt-5.6-sol",
+        temporaryFallback: true,
       },
     );
     expect(events.at(-1)).toMatchObject({

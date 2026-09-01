@@ -3,6 +3,7 @@ import {
   askBashDenyReason,
   declaredRunFailure,
   describeUsageLimitReset,
+  GROK_SEARCH_ONLY_TERMINAL_ERROR,
   hasRunStatusDeclaration,
   isClaudeBridgeLaunchError,
   isClaudeSubscriptionError,
@@ -143,6 +144,10 @@ describe("isTransientRunError", () => {
         "Claude Code native binary at /home/ubuntu/.local/bin/claude exists but failed to launch.",
       ),
     ).toBe(true);
+  });
+
+  test("falls back after Grok exhausts bounded search-only continuations", () => {
+    expect(isTransientRunError(GROK_SEARCH_ONLY_TERMINAL_ERROR)).toBe(true);
   });
 });
 
