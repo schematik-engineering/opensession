@@ -91,6 +91,13 @@ import {
   type AutomationOutput,
 } from "./automation-outputs";
 import { automationIntentAlreadySettled } from "./automation-intent-recovery";
+import {
+  automationWebhookReceiptExists,
+  deleteAutomationWebhookReceipts,
+  parseWebhookIdempotencyKey,
+  persistAutomationWebhookReceipt,
+  webhookIdempotencyHash,
+} from "./automation-webhook-idempotency";
 
 const AUTOMATIONS_DIR = stateDir("automations");
 const SESSIONS_DIR = OPENSESSION_SESSIONS_DIR;
@@ -1074,6 +1081,7 @@ export function deleteAutomation(id: string): boolean {
   unlinkSync(path);
   deleteAutomationInputState(id);
   deleteAutomationOutputState(id);
+  deleteAutomationWebhookReceipts(id);
   return true;
 }
 
@@ -1214,6 +1222,7 @@ type PendingAutomationIntent = {
   modelOverride?: string;
   acceptedAt: string;
   deleteAutomationAfterRun?: boolean;
+  webhookIdempotencyHash?: string;
   terminalAt?: string;
   terminalError?: string;
 };
@@ -1303,7 +1312,9 @@ export function resumePendingAutomationRuns(
         intent.version !== 1 ||
         !intent.automationId ||
         !intent.sessionId ||
-        !["cron", "webhook", "manual", "event"].includes(intent.trigger)
+        !["cron", "webhook", "manual", "event"].includes(intent.trigger) ||
+        (intent.webhookIdempotencyHash !== undefined &&
+          !/^[a-f0-9]{64}$/.test(intent.webhookIdempotencyHash))
       )
         throw new Error("invalid automation intent");
       const automation = getAutomation(intent.automationId);
@@ -1357,6 +1368,7 @@ export function resumePendingAutomationRuns(
         osSessionId: intent.sessionId,
         acceptedAt: intent.acceptedAt,
         deleteAutomationAfterRun: intent.deleteAutomationAfterRun,
+        webhookIdempotencyHash: intent.webhookIdempotencyHash,
       }).finally(() => {
         if (!isShuttingDown()) resumePendingAutomationRuns(onSessionCreated);
       });
@@ -1399,6 +1411,8 @@ export async function runAutomation(
      * model. Callers pass an already-resolved model id.
      */
     modelOverride?: string;
+    /** Hash of the caller's Idempotency-Key, persisted without the raw key. */
+    webhookIdempotencyHash?: string;
   },
 ): Promise<void> {
   const trigger = options?.trigger || "manual";
@@ -1421,7 +1435,16 @@ export async function runAutomation(
     modelOverride: options?.modelOverride,
     acceptedAt,
     deleteAutomationAfterRun: options?.deleteAutomationAfterRun,
+    webhookIdempotencyHash: options?.webhookIdempotencyHash,
   });
+  if (options?.webhookIdempotencyHash) {
+    persistAutomationWebhookReceipt({
+      automationId: automation.id,
+      keyHash: options.webhookIdempotencyHash,
+      sessionId: bksId,
+      acceptedAt,
+    });
+  }
   if (isShuttingDown()) {
     console.log(
       `[automations] "${automation.name}" durably parked during shutdown`,
@@ -2084,6 +2107,15 @@ export function getWebhookRoutes(
       return Response.json({ ok: false, skipped: "disabled" });
     }
     let payload = "";
+    const parsedIdempotencyKey = parseWebhookIdempotencyKey(
+      req.headers.get("idempotency-key"),
+    );
+    if (parsedIdempotencyKey && typeof parsedIdempotencyKey !== "string") {
+      return Response.json(
+        { error: parsedIdempotencyKey.error },
+        { status: 400 },
+      );
+    }
     try {
       payload = await readRequestTextWithinLimit(req, 10_000);
     } catch (error) {
@@ -2094,10 +2126,20 @@ export function getWebhookRoutes(
 
     if (isShuttingDown())
       return Response.json({ error: "Server restarting" }, { status: 503 });
+    const idempotencyHash = parsedIdempotencyKey
+      ? webhookIdempotencyHash(automation.id, parsedIdempotencyKey)
+      : undefined;
+    if (
+      idempotencyHash &&
+      automationWebhookReceiptExists(automation.id, idempotencyHash)
+    ) {
+      return Response.json({ ok: true, deduplicated: true });
+    }
     console.log(`[automations] Webhook trigger: "${automation.name}"`);
     void runAutomation(automation, onSessionCreated, {
       trigger: "webhook",
       eventContext: payload || "(empty body)",
+      webhookIdempotencyHash: idempotencyHash,
     });
 
     return Response.json({ ok: true });
