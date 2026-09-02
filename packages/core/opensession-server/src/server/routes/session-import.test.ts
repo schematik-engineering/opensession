@@ -44,6 +44,27 @@ function codexTranscript(): string {
   ].join("\n");
 }
 
+function paseoTranscript(sequences = [2, 3]): string {
+  return sequences
+    .map((sequence) =>
+      JSON.stringify({
+        type: "paseo_timeline",
+        agentId: "paseo-agent-1",
+        provider: "opencode",
+        timestamp: new Date(
+          Date.parse(timestamp) + sequence * 1000,
+        ).toISOString(),
+        seqStart: sequence,
+        seqEnd: sequence,
+        item:
+          sequence % 2 === 0
+            ? { type: "user_message", text: `Paseo user ${sequence}` }
+            : { type: "assistant_message", text: `Paseo answer ${sequence}` },
+      }),
+    )
+    .join("\n");
+}
+
 function context(
   body: unknown,
   authUser: RouteContext["authUser"] = { login: "ada", name: "Ada Lovelace" },
@@ -98,6 +119,20 @@ describe("session import request parsing", () => {
     expect(parsed).toMatchObject({
       ok: true,
       request: { provider: "claude-code", branch: "feature/import" },
+    });
+  });
+
+  test("accepts Paseo as a normalized timeline provider", () => {
+    expect(
+      parseSessionImportRequest({
+        provider: "paseo",
+        sourceSessionId: "paseo-agent-1",
+        transcript: paseoTranscript(),
+        branch: "feature/paseo",
+      }),
+    ).toMatchObject({
+      ok: true,
+      request: { provider: "paseo", sourceSessionId: "paseo-agent-1" },
     });
   });
 
@@ -207,6 +242,29 @@ describe("POST /api/sessions/import", () => {
     expect(h.imports).toHaveLength(2);
     expect(h.imports[1]?.entries.map((entry) => entry.id)).toEqual(
       h.imports[0]?.entries.map((entry) => entry.id),
+    );
+  });
+
+  test("keeps Paseo row ids stable when older history appears", async () => {
+    const h = harness();
+    const base = {
+      provider: "paseo",
+      sourceSessionId: "paseo-agent-1",
+      branch: "paseo/import",
+    };
+    await handleSessionImportRoutes(
+      context({ ...base, transcript: paseoTranscript([2, 3]) }),
+      h.dependencies,
+    );
+    await handleSessionImportRoutes(
+      context({ ...base, transcript: paseoTranscript([1, 2, 3]) }),
+      h.dependencies,
+    );
+
+    const first = h.imports[0]?.entries ?? [];
+    const second = h.imports[1]?.entries ?? [];
+    expect(second.slice(1).map((entry) => entry.id)).toEqual(
+      first.map((entry) => entry.id),
     );
   });
 

@@ -1,6 +1,8 @@
 # Import external agent sessions
 
-The bundled `upload-session` skill moves a Claude Code or Codex conversation into Open Session. It sends the provider's JSONL transcript, the current git branch, and the origin remote to `POST /api/sessions/import`. Open Session stores the normalized transcript in its owned transcript store and returns a direct session URL. Uploading the same provider session again updates the same Open Session session.
+The bundled `upload-session` skill moves a Claude Code, Codex, or Paseo conversation into Open Session. It sends the transcript, git branch, and origin remote to `POST /api/sessions/import`. Open Session stores the normalized transcript in its owned transcript store and returns a direct session URL. Uploading the same provider session again updates the same Open Session session.
+
+The Open Session Mac app is not required. The helper can upload to a hosted Open Session server and open the result in a browser.
 
 ## Install the skill
 
@@ -11,7 +13,7 @@ Copy `.agents/skills/upload-session` from this repository into the global skill 
 mkdir -p ~/.claude/skills
 cp -R /path/to/opensession/.agents/skills/upload-session ~/.claude/skills/
 
-# Codex
+# Codex and Paseo
 mkdir -p ~/.agents/skills
 cp -R /path/to/opensession/.agents/skills/upload-session ~/.agents/skills/
 ```
@@ -27,7 +29,7 @@ cp -R "$tmp/opensession-main/.agents/skills/upload-session" ~/.claude/skills/
 rm -rf "$tmp"
 ```
 
-Use `~/.agents/skills` instead of `~/.claude/skills` for Codex.
+Use `~/.agents/skills` instead of `~/.claude/skills` for Codex and Paseo.
 
 ## Use it
 
@@ -48,6 +50,8 @@ The successful upload remembers that server in `$XDG_CONFIG_HOME/opensession/ses
 
 When the server requires GitHub sign-in and no valid token is available, the helper starts the same device flow used by the native clients. It stores the resulting Open Session bearer token in the private config file with mode `0600`.
 
+## Claude Code and Codex
+
 Auto-detection checks the invoking Claude Code process metadata, Claude's project transcripts, `CODEX_THREAD_ID`, and recent Codex rollouts for the current checkout. If that is ambiguous, pass an exact transcript instead:
 
 ```sh
@@ -56,6 +60,27 @@ python3 ~/.claude/skills/upload-session/scripts/upload_session.py \
   --provider claude-code
 ```
 
-Use `--provider codex` for a Codex rollout. `--dry-run` prints the selected transcript and branch without uploading. `--no-open` returns the link without launching a browser.
+Use `--provider codex` for a Codex rollout.
 
-The upload includes the full conversation, including tool inputs and results. The endpoint accepts at most 64 MiB per request and requires the same cookie or bearer authentication as other Open Session APIs.
+## Paseo
+
+Paseo injects `PASEO_AGENT_ID` into every agent it launches. When the skill runs inside that agent, the helper uses this exact id and fetches the full normalized timeline from the local Paseo daemon. It does not guess from the working directory or newest session.
+
+The helper connects to the direct daemon configured by `PASEO_HOST`, `$PASEO_HOME/config.json`, or `127.0.0.1:6767`. Set `PASEO_PASSWORD` if the daemon requires a password. Paseo SSH and relay offer URLs are not supported because the skill should run on the daemon machine.
+
+Import a past session by exact id, unique prefix, or exact title:
+
+```sh
+python3 ~/.agents/skills/upload-session/scripts/upload_session.py \
+  --provider paseo \
+  --paseo-agent-id <id> \
+  --server https://sessions.example.com
+```
+
+Paseo keeps transcript history in each underlying provider and hydrates it through the daemon when requested. A past import can fail if that provider history has been removed or its provider is unavailable. Paseo also caps individual tool output in its normalized timeline and keeps provider subagent timelines separate.
+
+## Limits
+
+`--dry-run` prints the selected session and branch without uploading. `--no-open` returns the link without launching a browser.
+
+The upload includes the full available conversation, including tool inputs and results. The endpoint accepts at most 64 MiB per request and requires the same cookie or bearer authentication as other Open Session APIs.

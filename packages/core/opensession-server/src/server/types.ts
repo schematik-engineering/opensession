@@ -545,7 +545,7 @@ export interface NativeSessionFile {
   /** Conversation imported from an external coding-agent client. The source
    * id is the retry key, while the transcript itself lives in the owned store. */
   importedFrom?: {
-    provider: "claude-code" | "codex";
+    provider: "claude-code" | "codex" | "paseo";
     sessionId: string;
     importedAt: string;
     entryCount: number;

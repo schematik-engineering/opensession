@@ -3,6 +3,7 @@ import type { Repo } from "../config";
 import { audit } from "../audit";
 import { configuredRepos } from "../config";
 import { parseCodexLinesAsync, parseJsonlLinesAsync } from "../jsonl-parser";
+import { parsePaseoLinesAsync } from "../paseo-timeline-parser";
 import { importLegacyTranscript } from "../actor-transcript";
 import { updateSessionFile } from "../session-cache";
 import { sessionIdForRequest } from "../session-request-id";
@@ -20,7 +21,7 @@ import { requestUser } from "./context";
 
 export const SESSION_IMPORT_MAX_BODY_BYTES = 64 * 1024 * 1024;
 
-export type SessionImportProvider = "claude-code" | "codex";
+export type SessionImportProvider = "claude-code" | "codex" | "paseo";
 
 type SessionImportRequest = {
   provider: SessionImportProvider;
@@ -102,11 +103,14 @@ export function parseSessionImportRequest(
   const provider =
     value.provider === "claude" || value.provider === "claude-code"
       ? "claude-code"
-      : value.provider === "codex"
-        ? "codex"
+      : value.provider === "codex" || value.provider === "paseo"
+        ? value.provider
         : null;
   if (!provider)
-    return { ok: false, error: "provider must be claude-code or codex" };
+    return {
+      ok: false,
+      error: "provider must be claude-code, codex, or paseo",
+    };
 
   const sourceSessionId = optionalString(
     value.sourceSessionId,
@@ -200,13 +204,14 @@ async function parseImportedTranscript(
   transcript: string,
 ): Promise<TranscriptEntry[]> {
   const lines = transcript.split("\n").filter((line) => line.trim());
-  return provider === "codex"
-    ? parseCodexLinesAsync(lines)
-    : parseJsonlLinesAsync(lines);
+  if (provider === "codex") return parseCodexLinesAsync(lines);
+  if (provider === "paseo") return parsePaseoLinesAsync(lines);
+  return parseJsonlLinesAsync(lines);
 }
 
 function canonicalImportEntries(
   sessionId: string,
+  provider: SessionImportProvider,
   entries: TranscriptEntry[],
   fallbackTimestamp: string,
 ): TranscriptEntry[] {
@@ -216,9 +221,10 @@ function canonicalImportEntries(
     const timestamp = validTimestamp
       ? new Date(timestampMs).toISOString()
       : fallbackTimestamp;
+    const sourceIdentity = provider === "paseo" ? entry.id : String(index);
     const id = new Bun.CryptoHasher("sha256")
       .update(
-        `${sessionId}\0${index}\0${entry.type}\0${validTimestamp ? timestamp : "invalid"}\0${entry.toolUseId ?? ""}`,
+        `${sessionId}\0${sourceIdentity}\0${entry.type}\0${validTimestamp ? timestamp : "invalid"}\0${entry.toolUseId ?? ""}`,
       )
       .digest("hex")
       .slice(0, 40);
@@ -364,6 +370,7 @@ export async function handleSessionImportRoutes(
     const importedAt = new Date().toISOString();
     const entries = canonicalImportEntries(
       sessionId,
+      parsed.request.provider,
       parsedEntries,
       importedAt,
     );
