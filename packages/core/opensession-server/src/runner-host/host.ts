@@ -18,7 +18,7 @@
  * concurrent hosts never read-modify-write the shared active-runs.json.
  */
 
-import { existsSync, unlinkSync, writeFileSync } from "fs";
+import { existsSync, rmSync, unlinkSync, writeFileSync } from "fs";
 import { processIdentity } from "../server/process-identity";
 import { dirname, resolve } from "path";
 
@@ -41,6 +41,9 @@ const cleanupProjectedGithubAuth = () => {
   ) {
     try {
       unlinkSync(projectedGithubAuthPath);
+    } catch {}
+    try {
+      rmSync(`${hostDir}/github-cli`, { recursive: true, force: true });
     } catch {}
   }
 };

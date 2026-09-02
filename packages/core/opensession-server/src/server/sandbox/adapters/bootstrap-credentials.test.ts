@@ -49,14 +49,30 @@ describe("remote engine credential projection", () => {
   test("remote GitHub authority comes from server-owned sandbox state", () => {
     const source = readFileSync(join(import.meta.dir, "bootstrap.ts"), "utf-8");
     const projection = source.slice(
-      source.indexOf("// GitHub credentials are projected"),
+      source.indexOf(
+        "const repoId = readRemoteState(provider, sandboxId)?.repoId",
+      ),
       source.indexOf("const githubAuthPath"),
     );
     expect(projection).toContain(
       "readRemoteState(provider, sandboxId)?.repoId",
     );
     expect(projection).toContain("getRepo(repoId)");
+    expect(projection).toContain("sandboxGithubAuth(");
     expect(projection).not.toContain("git remote get-url origin");
+  });
+
+  test("remote runs project an empty auth file instead of ambient gh config", () => {
+    const source = readFileSync(join(import.meta.dir, "bootstrap.ts"), "utf-8");
+    const projection = source.slice(
+      source.indexOf("const githubAuthPath"),
+      source.indexOf("// Pi policy + provider config"),
+    );
+    expect(projection).toContain(
+      "driver.writeFile(githubAuthPath, JSON.stringify(githubAuth))",
+    );
+    expect(projection).not.toContain("if (githubAuth.GH_TOKEN)");
+    expect(source).toContain("[GITHUB_RUN_AUTH_FILE_ENV]: githubAuthPath");
   });
 
   test("every remote provider delegates launch credential projection to bootstrap", () => {

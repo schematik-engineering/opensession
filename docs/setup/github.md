@@ -229,9 +229,11 @@ needed to point the PR agent at your repos.
 ## Automation PR credentials and review requests
 
 Ordinary `code` automations can edit an isolated worktree, but currently receive
-neither `GH_TOKEN` nor `GITHUB_TOKEN`. Only interactive trusted runs and the
-dedicated `github-*` code workflows receive a user or repository-scoped App
-credential. An ordinary automation therefore cannot push or open a GitHub PR.
+neither `GH_TOKEN` nor `GITHUB_TOKEN`. Interactive trusted runs receive the
+person's credential. Dedicated `github-*` code workflows receive a
+repository-scoped App credential. Headless security scans are report-only and
+receive no GitHub credential. An ordinary automation therefore cannot push or
+open a GitHub PR.
 Its optional `prReviewer` value is validated, preserved across resume, and
 added to unattended run instructions, but it grants no GitHub authority. The
 reviewer is not added to existing PRs or PRs created from human-steered turns.
