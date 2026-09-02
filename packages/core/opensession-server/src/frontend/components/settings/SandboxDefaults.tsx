@@ -4,6 +4,7 @@ import {
   saveSandboxDefault,
   type SandboxStatusInfo,
 } from "../../lib/api";
+import { errorMessage } from "../../lib/error-message";
 import {
   SettingCard,
   SettingsGroupLabel,
@@ -36,18 +37,27 @@ function SandboxDefaultRow({
   const user = getCurrentUser();
   const [status, setStatus] = useState<SandboxStatusInfo | null>(null);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   useEffect(() => {
     fetchSandboxStatus(user)
       .then(setStatus)
-      .catch(() => {});
+      .catch((error: unknown) =>
+        setLoadError(
+          errorMessage(error, "Failed to load available sandbox providers"),
+        ),
+      );
   }, [user]);
 
   if (!status?.defaults) {
     return (
       <SettingRow
         title="Default sandbox"
-        desc="Loading available sandbox providers…"
-        control={<span className="text-supporting text-faint">Loading…</span>}
+        desc={loadError || "Loading available sandbox providers…"}
+        control={
+          <span className="text-supporting text-faint">
+            {loadError ? "Unavailable" : "Loading…"}
+          </span>
+        }
       />
     );
   }
@@ -98,18 +108,15 @@ function SandboxDefaultRow({
         current ? { ...current, defaults: response.defaults } : current,
       );
     })()
-      .catch(async (error) => {
-        toast(
-          error instanceof Error
-            ? error.message
-            : "Failed to save sandbox default",
-          {
-            variant: "error",
-          },
-        );
+      .catch(async (error: unknown) => {
+        toast(errorMessage(error, "Failed to save sandbox default"), {
+          variant: "error",
+        });
         fetchSandboxStatus(user)
           .then(setStatus)
-          .catch(() => {});
+          .catch((_refreshError: unknown) => {
+            // The save error is already visible and the pre-save status remains valid.
+          });
       })
       .finally(async () => {
         setSaving(false);
@@ -121,8 +128,8 @@ function SandboxDefaultRow({
       title="Default sandbox"
       desc={
         scope === "personal"
-          ? "Your environment for new sessions. A per-session choice still overrides it."
-          : "The environment new sessions use unless a person or session chooses another."
+          ? "Your environment for new sessions."
+          : "The environment for new sessions."
       }
       control={
         <div className={saving ? "pointer-events-none opacity-60" : undefined}>
@@ -157,8 +164,7 @@ export function WorkspaceSandboxDefaults({
         <SandboxDefaultRow scope="workspace" canManage={canManage} />
       </SettingCard>
       <SettingsHint>
-        None keeps sessions on this host. Only configured providers that passed
-        the live behavior and warm-restore matrices are offered.
+        None uses this host. Only tested providers appear here.
       </SettingsHint>
     </>
   );

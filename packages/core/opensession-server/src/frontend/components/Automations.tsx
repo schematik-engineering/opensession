@@ -1,5 +1,5 @@
 import { BASE_PATH } from "../lib/base";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useEffect, useEffectEvent, useState } from "react";
 import {
   fetchAutomations,
   createAutomationApi,
@@ -11,7 +11,6 @@ import {
   fetchAutomationTemplates,
   draftAutomationApi,
   fetchConnections,
-  fetchDiscordAutomationChannels,
   fetchProviderAccounts,
   relativeTime,
   type ModelOption,
@@ -20,7 +19,6 @@ import {
   type AutomationInput,
   type AutomationRun,
   type AutomationOutput,
-  type DiscordAutomationChannel,
   type AutomationTemplate,
   type AutomationDraft,
 } from "../lib/api";
@@ -33,12 +31,10 @@ import {
   IconBolt,
   IconChevronLeft,
   IconClock,
-  IconFileText2,
   IconHash,
   IconPlayOutline,
   IconPlug,
   IconPlus,
-  IconTrash,
 } from "./icons";
 import {
   AGENT_NAME,
@@ -57,13 +53,8 @@ import { WorkingPill } from "../ui/status";
 import { Switch } from "../ui/switch";
 import { formatDuration } from "../lib/time";
 import { errorMessage } from "../lib/error-message";
-import {
-  appendMessageOutput,
-  appendReportOutput,
-  automationOutputSummary,
-} from "../lib/automation-output-editor";
-import { BrandMark } from "./BrandMark";
-import { Tooltip } from "../ui/tooltip";
+import { FIELD_LABEL, FORM_ROW } from "../lib/automation-form";
+import { AutomationDataFlowEditor } from "./AutomationDataFlowEditor";
 
 /* The old .automation-form family, as utilities. Two of its rules reached in
    from the form to the fields inside it and have to stay descendant selectors:
@@ -76,14 +67,8 @@ const FORM_FIELDS =
  *  detail drawer, the create dialog) already provides the surface, the padding
  *  and the heading. */
 const FORM_INLINE = `flex flex-col gap-3.5 ${FORM_FIELDS}`;
-/** .automation-form label */
-const FIELD_LABEL =
-  "flex flex-1 flex-col gap-1.5 text-label font-medium text-dim";
-
 /** .automation-form-actions */
 const FORM_ACTIONS = "flex justify-end gap-2.5";
-/** .automation-form-row */
-const FORM_ROW = "flex gap-3.5 phone:flex-col";
 /** .automations-drawer-section-label */
 const SECTION_LABEL = "mb-1.5 text-label font-semibold text-faint";
 /** .automation-session-link */
@@ -124,14 +109,20 @@ const EVENT_OPTIONS: Array<{ key: string; label: string }> = [
 ];
 
 /** Claude and Codex accounts for provider-aware automation pins. */
-function useProviderAccounts(): ProviderAccountOption[] {
+function useProviderAccounts() {
   const [accounts, setAccounts] = useState<ProviderAccountOption[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   useEffect(() => {
-    fetchProviderAccounts()
+    fetchProviderAccounts({
+      onPoolError: (cause) =>
+        setLoadError(errorMessage(cause, "Could not load provider accounts")),
+    })
       .then(setAccounts)
-      .catch(() => {});
+      .catch((cause: unknown) =>
+        setLoadError(errorMessage(cause, "Could not load provider accounts")),
+      );
   }, []);
-  return accounts;
+  return { accounts, loadError, setLoadError };
 }
 
 export function Automations({ onOpenSession, selectedId, onSelect }: Props) {
@@ -141,13 +132,20 @@ export function Automations({ onOpenSession, selectedId, onSelect }: Props) {
   );
   const toggleRequest = React.useRef(0);
   const [defaultModel, setDefaultModel] = useState("");
+  const [modelLoadError, setModelLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const providerAccounts = useProviderAccounts();
+  const {
+    accounts: providerAccounts,
+    loadError: providerAccountsError,
+    setLoadError: setProviderAccountsError,
+  } = useProviderAccounts();
 
   useEffect(() => {
     fetchModels()
       .then((m) => setDefaultModel(m.default))
-      .catch(() => {});
+      .catch((cause: unknown) =>
+        setModelLoadError(errorMessage(cause, "Could not load models")),
+      );
   }, []);
   // The modal is create-only; editing happens inline in the detail drawer.
   const [showModal, setShowModal] = useState(false);
@@ -157,7 +155,7 @@ export function Automations({ onOpenSession, selectedId, onSelect }: Props) {
   // Leaving/changing the selection always drops back to the read view.
   useEffect(() => setEditMode(false), [selectedId]);
 
-  const load = useCallback(async () => {
+  const load = async () => {
     try {
       const next = await fetchAutomations();
       setAutomations(
@@ -169,21 +167,22 @@ export function Automations({ onOpenSession, selectedId, onSelect }: Props) {
         }),
       );
       setLoading(false);
-    } catch (error) {
-      setError(errorMessage(error, "Could not load automations"));
+    } catch (cause: unknown) {
+      setError(errorMessage(cause, "Could not load automations"));
       setLoading(false);
     }
-  }, []);
+  };
+  const loadForEffect = useEffectEvent(() => load());
 
   useEffect(() => {
     document.title = docTitle("Automations");
-    load();
-    const id = setInterval(load, 10000);
+    void loadForEffect();
+    const id = setInterval(() => void loadForEffect(), 10000);
     return () => {
       clearInterval(id);
       document.title = DEFAULT_DOC_TITLE;
     };
-  }, [load]);
+  }, []);
 
   // The routed selection — matched by id, or by name for sidebar deep-links.
   const sel = selectedId
@@ -233,7 +232,7 @@ export function Automations({ onOpenSession, selectedId, onSelect }: Props) {
       if (pendingToggles.current.get(a.id)?.request === request) {
         pendingToggles.current.delete(a.id);
       }
-    } catch (error) {
+    } catch (cause: unknown) {
       if (pendingToggles.current.get(a.id)?.request !== request) return;
       pendingToggles.current.delete(a.id);
       setAutomations((current) =>
@@ -243,7 +242,7 @@ export function Automations({ onOpenSession, selectedId, onSelect }: Props) {
             : automation,
         ),
       );
-      setError(errorMessage(error, "Could not update automation"));
+      setError(errorMessage(cause, "Could not update automation"));
     }
   }
 
@@ -253,8 +252,8 @@ export function Automations({ onOpenSession, selectedId, onSelect }: Props) {
       await deleteAutomationApi(automation.id);
       if (sel?.id === automation.id) onSelect("");
       void load();
-    } catch (error) {
-      setError(errorMessage(error, "Could not delete automation"));
+    } catch (cause: unknown) {
+      setError(errorMessage(cause, "Could not delete automation"));
     }
   }
 
@@ -262,8 +261,8 @@ export function Automations({ onOpenSession, selectedId, onSelect }: Props) {
     try {
       await runAutomationApi(automation.id);
       setTimeout(load, 800);
-    } catch (error) {
-      setError(errorMessage(error, "Could not run automation"));
+    } catch (cause: unknown) {
+      setError(errorMessage(cause, "Could not run automation"));
     }
   }
 
@@ -271,8 +270,8 @@ export function Automations({ onOpenSession, selectedId, onSelect }: Props) {
     try {
       await retriggerAutomationApi(sessionId);
       setTimeout(load, 800);
-    } catch (error) {
-      setError(errorMessage(error, "Could not retrigger automation"));
+    } catch (cause: unknown) {
+      setError(errorMessage(cause, "Could not retrigger automation"));
     }
   }
 
@@ -313,6 +312,16 @@ export function Automations({ onOpenSession, selectedId, onSelect }: Props) {
 
           {error && (
             <InlineAlert onDismiss={() => setError(null)}>{error}</InlineAlert>
+          )}
+          {modelLoadError && (
+            <InlineAlert onDismiss={() => setModelLoadError(null)}>
+              {modelLoadError}
+            </InlineAlert>
+          )}
+          {providerAccountsError && (
+            <InlineAlert onDismiss={() => setProviderAccountsError(null)}>
+              {providerAccountsError}
+            </InlineAlert>
           )}
 
           {loading ? (
@@ -659,7 +668,13 @@ export function Automations({ onOpenSession, selectedId, onSelect }: Props) {
                       <>
                         <DetailKey>Outputs</DetailKey>
                         <span className="text-dim min-w-0">
-                          {sel.outputs.map(automationOutputSummary).join(", ")}
+                          {sel.outputs
+                            .map((output) => {
+                              if (output.type === "report")
+                                return `Reports · ${output.publish || "always"}`;
+                              return `Slack ${output.channel} · ${output.enabled === false ? "disabled" : `${output.minUrgency || "high"}/${output.minConfidence || "high"}`}`;
+                            })
+                            .join(", ")}
                         </span>
                       </>
                     ) : null}
@@ -1166,6 +1181,9 @@ function TypeChooser({
   ) => void;
 }) {
   const [templates, setTemplates] = useState<AutomationTemplate[]>([]);
+  const [templateLoadError, setTemplateLoadError] = useState<string | null>(
+    null,
+  );
   const [description, setDescription] = useState("");
   const [drafting, setDrafting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1173,7 +1191,11 @@ function TypeChooser({
   useEffect(() => {
     fetchAutomationTemplates()
       .then(setTemplates)
-      .catch(() => {});
+      .catch((cause: unknown) =>
+        setTemplateLoadError(
+          errorMessage(cause, "Could not load automation templates"),
+        ),
+      );
   }, []);
 
   async function handleDraft() {
@@ -1182,8 +1204,8 @@ function TypeChooser({
     setError(null);
     try {
       onPick(await draftAutomationApi(description), "classic");
-    } catch (error) {
-      setError(errorMessage(error, "Could not draft automation"));
+    } catch (cause: unknown) {
+      setError(errorMessage(cause, "Could not draft automation"));
       setDrafting(false);
     }
   }
@@ -1209,6 +1231,11 @@ function TypeChooser({
         />
         {error && (
           <InlineAlert onDismiss={() => setError(null)}>{error}</InlineAlert>
+        )}
+        {templateLoadError && (
+          <InlineAlert onDismiss={() => setTemplateLoadError(null)}>
+            {templateLoadError}
+          </InlineAlert>
         )}
         <div className="flex justify-end">
           <Button
@@ -1277,6 +1304,7 @@ function McpPicker({
     Array<{ name: string; status: string }>
   >([]);
   const [search, setSearch] = useState("");
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchConnections()
@@ -1288,7 +1316,9 @@ function McpPicker({
           })),
         ),
       )
-      .catch(() => {});
+      .catch((cause: unknown) =>
+        setLoadError(errorMessage(cause, "Could not load MCP servers")),
+      );
   }, []);
 
   const all = value === undefined;
@@ -1324,6 +1354,11 @@ function McpPicker({
           Manage MCPs
         </a>
       </div>
+      {loadError && (
+        <InlineAlert onDismiss={() => setLoadError(null)}>
+          {loadError}
+        </InlineAlert>
+      )}
       <div className="bg-surface rounded-panel overflow-hidden">
         <div className="flex items-center gap-2 border-b border-divider px-3 py-2">
           {/* Chrome-less on purpose: the picker's own panel is the surface, so
@@ -1385,566 +1420,7 @@ function McpPicker({
 function accountPoolSuffix(m: ModelOption): string {
   if (m.accountProvider === "codex") return " (OpenAI Codex)";
   if (m.accountProvider === "claude") return " (Claude)";
-  if (m.accountProvider === "grok") return " (SuperGrok)";
-  if (m.accountProvider === "cursor") return " (Cursor)";
   return "";
-}
-
-function uniqueFlowId(prefix: string, used: string[]): string {
-  let candidate = prefix;
-  let index = 2;
-  while (used.includes(candidate)) candidate = `${prefix}-${index++}`;
-  return candidate;
-}
-
-type DiscordChannelState =
-  | { status: "loading" }
-  | {
-      status: "ready";
-      channels: DiscordAutomationChannel[];
-      defaultChannel?: string;
-    }
-  | { status: "error" };
-
-function DataFlowEditor({
-  inputs,
-  outputs,
-  onInputsChange,
-  onOutputsChange,
-}: {
-  inputs: AutomationInput[];
-  outputs: AutomationOutput[];
-  onInputsChange: (value: AutomationInput[]) => void;
-  onOutputsChange: (value: AutomationOutput[]) => void;
-}) {
-  const updateInput = (index: number, value: AutomationInput) =>
-    onInputsChange(inputs.map((input, at) => (at === index ? value : input)));
-  const updateOutput = (index: number, value: AutomationOutput) =>
-    onOutputsChange(
-      outputs.map((output, at) => (at === index ? value : output)),
-    );
-  const [discordChannelState, setDiscordChannelState] =
-    useState<DiscordChannelState>({ status: "loading" });
-
-  useEffect(() => {
-    let active = true;
-    fetchDiscordAutomationChannels()
-      .then((result) => {
-        if (active) setDiscordChannelState({ status: "ready", ...result });
-      })
-      .catch(() => {
-        if (active) setDiscordChannelState({ status: "error" });
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const addMessageOutput = (type: "slack" | "discord") => {
-    const channel =
-      type === "discord" && discordChannelState.status === "ready"
-        ? discordChannelState.defaultChannel
-        : undefined;
-    onOutputsChange(appendMessageOutput(outputs, type, channel));
-  };
-
-  return (
-    <div className="flex flex-col gap-2.5">
-      <div>
-        <span className="text-label font-medium text-fg">Data flow</span>
-        <span className="ml-2 text-label text-dim">
-          Gather and flatten inputs before each run, then publish the result
-        </span>
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <div className="flex min-h-10 items-center gap-2">
-          <span className="text-label font-medium text-dim">Inputs</span>
-          <span className="text-supporting text-faint phone:hidden">
-            Each source is bounded and treated as untrusted data
-          </span>
-          <div className="ml-auto flex gap-1.5">
-            <Tooltip label="Add Slack input">
-              <Button
-                size="sm"
-                variant="soft"
-                icon={<BrandMark name="slack" size={16} />}
-                aria-label="Add Slack input"
-                className="phone:min-h-11 phone:w-11"
-                onClick={() =>
-                  onInputsChange([
-                    ...inputs,
-                    {
-                      id: uniqueFlowId(
-                        "slack",
-                        inputs.map((input) => input.id),
-                      ),
-                      label: "Slack channel",
-                      window: {
-                        mode: "since_last_success",
-                        minutes: 120,
-                        overlapMinutes: 10,
-                      },
-                      reduce: {
-                        model: "claude-haiku-4-5",
-                        maxOutputChars: 8000,
-                      },
-                      source: {
-                        type: "slack_channel",
-                        channel: "",
-                        includeThreads: true,
-                        includeBots: false,
-                        limit: 200,
-                      },
-                    },
-                  ])
-                }
-              />
-            </Tooltip>
-            <Tooltip label="Add report input">
-              <Button
-                size="sm"
-                variant="soft"
-                icon={<IconFileText2 size={16} />}
-                aria-label="Add report input"
-                className="phone:min-h-11 phone:w-11"
-                onClick={() =>
-                  onInputsChange([
-                    ...inputs,
-                    {
-                      id: uniqueFlowId(
-                        "reports",
-                        inputs.map((input) => input.id),
-                      ),
-                      label: "Previous reports",
-                      source: {
-                        type: "reports",
-                        automationId: "self",
-                        limit: 3,
-                      },
-                    },
-                  ])
-                }
-              />
-            </Tooltip>
-          </div>
-        </div>
-
-        {inputs.length === 0 ? (
-          <div className="rounded-panel border border-dashed border-line px-3 py-3 text-label text-faint">
-            No collected inputs. The run receives only its instructions and
-            trigger context.
-          </div>
-        ) : (
-          inputs.map((input, index) => {
-            const slack =
-              input.source.type === "slack_channel" ? input.source : null;
-            const reports =
-              input.source.type === "reports" ? input.source : null;
-            return (
-              <div key={input.id} className="rounded-panel bg-surface p-3">
-                <div className="mb-2 flex min-h-10 items-center gap-2 phone:flex-wrap">
-                  <Select
-                    className="max-w-[150px] phone:min-h-11 phone:max-w-none phone:flex-1"
-                    value={input.source.type}
-                    onChange={(e) => {
-                      const source =
-                        e.target.value === "slack_channel"
-                          ? {
-                              type: "slack_channel" as const,
-                              channel: "",
-                              includeThreads: true,
-                              includeBots: false,
-                              limit: 200,
-                            }
-                          : {
-                              type: "reports" as const,
-                              automationId: "self",
-                              limit: 3,
-                            };
-                      updateInput(index, {
-                        id: input.id,
-                        label: input.label,
-                        source,
-                      });
-                    }}
-                  >
-                    <option value="slack_channel">Slack channel</option>
-                    <option value="reports">Report history</option>
-                  </Select>
-                  <Input
-                    className="min-w-0 flex-1 phone:order-3 phone:min-h-11 phone:basis-full"
-                    value={input.label || ""}
-                    onChange={(e) =>
-                      updateInput(index, { ...input, label: e.target.value })
-                    }
-                    placeholder="Label"
-                  />
-                  <Tooltip label="Remove input">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      icon={<IconTrash size={16} />}
-                      aria-label="Remove input"
-                      className="shrink-0 text-dim hover:text-red phone:min-h-11 phone:w-11"
-                      onClick={() =>
-                        onInputsChange(inputs.filter((_, at) => at !== index))
-                      }
-                    />
-                  </Tooltip>
-                </div>
-
-                {slack && (
-                  <>
-                    <div className={FORM_ROW}>
-                      <label className={FIELD_LABEL}>
-                        Channel ID
-                        <Input
-                          className="mono-input"
-                          value={slack.channel}
-                          onChange={(e) =>
-                            updateInput(index, {
-                              ...input,
-                              source: {
-                                ...slack,
-                                channel: e.target.value.toUpperCase(),
-                              },
-                            })
-                          }
-                          placeholder="C0123456789"
-                        />
-                      </label>
-                      <label className={FIELD_LABEL}>
-                        Initial lookback
-                        <Input
-                          type="number"
-                          min={15}
-                          max={10080}
-                          value={input.window?.minutes ?? 120}
-                          onChange={(e) =>
-                            updateInput(index, {
-                              ...input,
-                              window: {
-                                ...input.window,
-                                minutes: Number(e.target.value),
-                              },
-                            })
-                          }
-                        />
-                      </label>
-                      <label className={FIELD_LABEL}>
-                        Reducer model
-                        <Input
-                          value={input.reduce?.model || ""}
-                          onChange={(e) =>
-                            updateInput(index, {
-                              ...input,
-                              reduce: {
-                                ...input.reduce,
-                                model: e.target.value,
-                              },
-                            })
-                          }
-                          placeholder="Default Haiku"
-                        />
-                      </label>
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-label text-dim">
-                      <label className="flex min-h-10 items-center gap-2">
-                        <Checkbox
-                          checked={slack.includeThreads !== false}
-                          onCheckedChange={(checked) =>
-                            updateInput(index, {
-                              ...input,
-                              source: { ...slack, includeThreads: checked },
-                            })
-                          }
-                        />
-                        Include thread replies
-                      </label>
-                      <label className="flex min-h-10 items-center gap-2">
-                        <Checkbox
-                          checked={slack.includeBots === true}
-                          onCheckedChange={(checked) =>
-                            updateInput(index, {
-                              ...input,
-                              source: { ...slack, includeBots: checked },
-                            })
-                          }
-                        />
-                        Include bot messages
-                      </label>
-                    </div>
-                  </>
-                )}
-
-                {reports && (
-                  <div className={FORM_ROW}>
-                    <label className={FIELD_LABEL}>
-                      Automation ID
-                      <Input
-                        className="mono-input"
-                        value={reports.automationId}
-                        onChange={(e) =>
-                          updateInput(index, {
-                            ...input,
-                            source: {
-                              ...reports,
-                              automationId: e.target.value,
-                            },
-                          })
-                        }
-                        placeholder="self"
-                      />
-                    </label>
-                    <label className={FIELD_LABEL}>
-                      Reports to include
-                      <Input
-                        type="number"
-                        min={1}
-                        max={10}
-                        value={reports.limit ?? 3}
-                        onChange={(e) =>
-                          updateInput(index, {
-                            ...input,
-                            source: {
-                              ...reports,
-                              limit: Number(e.target.value),
-                            },
-                          })
-                        }
-                      />
-                    </label>
-                  </div>
-                )}
-              </div>
-            );
-          })
-        )}
-      </div>
-
-      <div className="mt-1 flex flex-col gap-2">
-        <div className="flex min-h-10 items-center gap-2">
-          <span className="text-label font-medium text-dim">Outputs</span>
-          <span className="text-supporting text-faint phone:hidden">
-            Reports are durable; message delivery is optional
-          </span>
-          <div className="ml-auto flex gap-1.5">
-            {!outputs.some((output) => output.type === "report") && (
-              <Tooltip label="Add report output">
-                <Button
-                  size="sm"
-                  variant="soft"
-                  icon={<IconFileText2 size={16} />}
-                  aria-label="Add report output"
-                  className="phone:min-h-11 phone:w-11"
-                  onClick={() => onOutputsChange(appendReportOutput(outputs))}
-                />
-              </Tooltip>
-            )}
-            <Tooltip label="Send reports to Slack">
-              <Button
-                size="sm"
-                variant="soft"
-                icon={<BrandMark name="slack" size={16} />}
-                aria-label="Add Slack output"
-                className="phone:min-h-11 phone:w-11"
-                onClick={() => addMessageOutput("slack")}
-              />
-            </Tooltip>
-            <Tooltip label="Send reports to Discord">
-              <Button
-                size="sm"
-                variant="soft"
-                icon={<BrandMark name="discord" size={16} />}
-                aria-label="Add Discord output"
-                className="phone:min-h-11 phone:w-11"
-                onClick={() => addMessageOutput("discord")}
-              />
-            </Tooltip>
-          </div>
-        </div>
-
-        {outputs.length === 0 ? (
-          <div className="rounded-panel border border-dashed border-line px-3 py-3 text-label text-faint">
-            No required output. The run behaves like a normal automation
-            session.
-          </div>
-        ) : (
-          outputs.map((output, index) => {
-            const name =
-              output.type === "report"
-                ? "Report"
-                : output.type === "slack"
-                  ? "Slack"
-                  : "Discord";
-            const discordChannels =
-              discordChannelState.status === "ready"
-                ? discordChannelState.channels
-                : [];
-            const selectedDiscordChannel =
-              output.type === "discord" ? output.channel : "";
-            const hasSelectedDiscordChannel = discordChannels.some(
-              (channel) => channel.id === selectedDiscordChannel,
-            );
-            return (
-              <div key={output.id} className="rounded-panel bg-surface p-3">
-                <div className="flex min-h-10 items-center gap-2 phone:flex-wrap">
-                  <span className="flex w-[110px] shrink-0 items-center gap-2 text-label font-medium text-fg phone:w-auto phone:flex-1">
-                    {output.type === "report" ? (
-                      <IconFileText2 size={18} className="text-dim" />
-                    ) : (
-                      <BrandMark name={output.type} size={18} />
-                    )}
-                    {name}
-                  </span>
-                  {output.type === "report" ? (
-                    <Select
-                      className="phone:order-3 phone:min-h-11 phone:basis-full"
-                      value={output.publish || "always"}
-                      onChange={(e) =>
-                        updateOutput(index, {
-                          ...output,
-                          publish: e.target.value as "always" | "on_findings",
-                        })
-                      }
-                    >
-                      <option value="always">Publish every run</option>
-                      <option value="on_findings">Only with findings</option>
-                    </Select>
-                  ) : (
-                    <>
-                      {output.type === "discord" &&
-                      discordChannels.length > 0 ? (
-                        <Select
-                          className="min-w-0 flex-1 phone:order-3 phone:min-h-11 phone:basis-full"
-                          aria-label="Discord channel"
-                          value={output.channel}
-                          onChange={(e) =>
-                            updateOutput(index, {
-                              ...output,
-                              channel: e.target.value,
-                            })
-                          }
-                        >
-                          {!hasSelectedDiscordChannel && output.channel && (
-                            <option value={output.channel}>
-                              Channel {output.channel}
-                            </option>
-                          )}
-                          {discordChannels.map((channel) => (
-                            <option key={channel.id} value={channel.id}>
-                              {channel.guildName} / #{channel.name}
-                            </option>
-                          ))}
-                        </Select>
-                      ) : (
-                        <Input
-                          className="mono-input min-w-0 flex-1 phone:order-3 phone:min-h-11 phone:basis-full"
-                          aria-label={`${name} channel ID`}
-                          value={output.channel}
-                          onChange={(e) =>
-                            updateOutput(index, {
-                              ...output,
-                              channel:
-                                output.type === "slack"
-                                  ? e.target.value.toUpperCase()
-                                  : e.target.value,
-                            })
-                          }
-                          placeholder={
-                            output.type === "slack"
-                              ? "C0123456789"
-                              : "Discord channel ID"
-                          }
-                        />
-                      )}
-                      <label className="flex min-h-10 shrink-0 items-center gap-2 text-label text-dim phone:min-h-11">
-                        <Checkbox
-                          checked={output.enabled !== false}
-                          onCheckedChange={(checked) =>
-                            updateOutput(index, { ...output, enabled: checked })
-                          }
-                        />
-                        Send
-                      </label>
-                    </>
-                  )}
-                  <Tooltip label={`Remove ${name.toLowerCase()} output`}>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      icon={<IconTrash size={16} />}
-                      aria-label={`Remove ${name.toLowerCase()} output`}
-                      className="shrink-0 text-dim hover:text-red phone:min-h-11 phone:w-11"
-                      onClick={() =>
-                        onOutputsChange(outputs.filter((_, at) => at !== index))
-                      }
-                    />
-                  </Tooltip>
-                </div>
-                {output.type === "discord" &&
-                  (discordChannelState.status !== "ready" ||
-                    discordChannels.length === 0) && (
-                    <p className="mt-1 text-supporting text-faint">
-                      {discordChannelState.status === "loading"
-                        ? "Loading connected Discord channels…"
-                        : discordChannelState.status === "error"
-                          ? "Enter a channel ID or check the Discord integration setup."
-                          : "No allowed text channels were found. Enter a channel ID."}
-                    </p>
-                  )}
-                {output.type !== "report" && (
-                  <div className="mt-2 grid grid-cols-2 gap-3 phone:grid-cols-1">
-                    <label className={FIELD_LABEL}>
-                      Minimum urgency
-                      <Select
-                        value={output.minUrgency || "high"}
-                        onChange={(e) =>
-                          updateOutput(index, {
-                            ...output,
-                            minUrgency: e.target.value as
-                              | "low"
-                              | "medium"
-                              | "high"
-                              | "critical",
-                          })
-                        }
-                      >
-                        <option value="low">Low</option>
-                        <option value="medium">Medium</option>
-                        <option value="high">High</option>
-                        <option value="critical">Critical</option>
-                      </Select>
-                    </label>
-                    <label className={FIELD_LABEL}>
-                      Minimum confidence
-                      <Select
-                        value={output.minConfidence || "high"}
-                        onChange={(e) =>
-                          updateOutput(index, {
-                            ...output,
-                            minConfidence: e.target.value as
-                              | "low"
-                              | "medium"
-                              | "high",
-                          })
-                        }
-                      >
-                        <option value="low">Low</option>
-                        <option value="medium">Medium</option>
-                        <option value="high">High</option>
-                      </Select>
-                    </label>
-                  </div>
-                )}
-              </div>
-            );
-          })
-        )}
-      </div>
-    </div>
-  );
 }
 
 /** The fields themselves. Both hosts (the detail drawer and the create dialog)
@@ -2023,7 +1499,15 @@ function AutomationForm({
   const sandbox = false;
   const [models, setModels] = useState<ModelOption[]>([]);
   const [defaultModel, setDefaultModel] = useState("");
-  const providerAccounts = useProviderAccounts();
+  const [modelLoadError, setModelLoadError] = useState<string | null>(null);
+  const [workspaceLoadError, setWorkspaceLoadError] = useState<string | null>(
+    null,
+  );
+  const {
+    accounts: providerAccounts,
+    loadError: providerAccountsError,
+    setLoadError: setProviderAccountsError,
+  } = useProviderAccounts();
 
   useEffect(() => {
     fetchModels()
@@ -2031,12 +1515,13 @@ function AutomationForm({
         setModels(m.models);
         setDefaultModel(m.default);
       })
-      .catch(() => {});
-    // Only to name the workspace an automation files under; a failure leaves
-    // the picker on "No workspace" rather than blocking the form.
-    fetchWorkspaces()
-      .then(setWorkspaces)
-      .catch(() => {});
+      .catch((cause: unknown) =>
+        setModelLoadError(errorMessage(cause, "Could not load models")),
+      );
+    fetchWorkspaces({
+      onError: (cause) =>
+        setWorkspaceLoadError(errorMessage(cause, "Could not load workspaces")),
+    }).then(setWorkspaces);
   }, []);
   const effectiveModel = model || defaultModel;
   const accountProvider = models.find(
@@ -2117,8 +1602,8 @@ function AutomationForm({
         });
       }
       onSaved();
-    } catch (error) {
-      setError(errorMessage(error, "Could not save automation"));
+    } catch (cause: unknown) {
+      setError(errorMessage(cause, "Could not save automation"));
       setSaving(false);
     }
   }
@@ -2269,7 +1754,7 @@ function AutomationForm({
       <McpPicker value={mcpServers} onChange={setMcpServers} />
 
       {!isWatch && (
-        <DataFlowEditor
+        <AutomationDataFlowEditor
           inputs={inputs}
           outputs={outputs}
           onInputsChange={setInputs}
@@ -2394,6 +1879,21 @@ function AutomationForm({
 
       {error && (
         <InlineAlert onDismiss={() => setError(null)}>{error}</InlineAlert>
+      )}
+      {modelLoadError && (
+        <InlineAlert onDismiss={() => setModelLoadError(null)}>
+          {modelLoadError}
+        </InlineAlert>
+      )}
+      {workspaceLoadError && (
+        <InlineAlert onDismiss={() => setWorkspaceLoadError(null)}>
+          {workspaceLoadError}
+        </InlineAlert>
+      )}
+      {providerAccountsError && (
+        <InlineAlert onDismiss={() => setProviderAccountsError(null)}>
+          {providerAccountsError}
+        </InlineAlert>
       )}
 
       <div className={FORM_ACTIONS}>

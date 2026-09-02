@@ -54,6 +54,7 @@ describe("Discord config and state", () => {
   test("requires an explicit guild allowlist and a private token file", () => {
     const dir = tempDir();
     const tokenFile = join(dir, "bot-token");
+    process.env.OPENSESSION_CONFIG = join(dir, "missing-config.json");
     writeFileSync(tokenFile, "secret-value\n", { mode: 0o600 });
     process.env.DISCORD_APPLICATION_ID = "1542925450790305903";
     process.env.DISCORD_BOT_TOKEN_FILE = tokenFile;

@@ -3,6 +3,7 @@ import {
   askBashDenyReason,
   declaredRunFailure,
   describeUsageLimitReset,
+  GROK_SEARCH_ONLY_TERMINAL_ERROR,
   hasRunStatusDeclaration,
   isClaudeBridgeLaunchError,
   isClaudeSubscriptionError,
@@ -18,7 +19,7 @@ describe("isClaudeUsageLimitError", () => {
   test("recognizes provider notices before they leak into streamed output", () => {
     expect(
       isClaudeUsageLimitError(
-        "You've reached your Fable 5 limit. Switch to another model to continue.",
+        "You've reached your Fable 5.1 limit. Switch to another model to continue.",
         false,
       ),
     ).toBe(true);
@@ -143,6 +144,10 @@ describe("isTransientRunError", () => {
         "Claude Code native binary at /home/ubuntu/.local/bin/claude exists but failed to launch.",
       ),
     ).toBe(true);
+  });
+
+  test("falls back after Grok exhausts bounded search-only continuations", () => {
+    expect(isTransientRunError(GROK_SEARCH_ONLY_TERMINAL_ERROR)).toBe(true);
   });
 });
 

@@ -32,6 +32,7 @@ import { duration, ease } from "../ui/motion";
 import { useAttachmentUploads } from "../hooks/useAttachmentUploads";
 import { foregroundFileComposerOwns, hasDraggedFiles } from "../lib/file-drag";
 import { FullPageFileDropOverlay } from "./FullPageFileDropOverlay";
+import { errorMessage } from "../lib/error-message";
 
 interface DeskConversationProps {
   sessionId: string;
@@ -243,7 +244,11 @@ export function DeskConversation({
         setModels(m.models);
         setDefaultModel(m.default);
       })
-      .catch(() => {});
+      .catch((error: unknown) => {
+        // The catalog only populates the picker. The Desk keeps its stored
+        // model id and remains usable when this optional lookup fails.
+        console.warn(errorMessage(error, "Could not load models"));
+      });
   }, []);
 
   // Watch the Desk only and tear the socket down on unmount / id change.
@@ -370,9 +375,10 @@ export function DeskConversation({
     });
     return unsubscribe;
   }, [liveTurnStore]);
+  const shouldMaintainEnd = () => followRef.current;
   const relayoutLive = () => {
     const el = bodyRef.current;
-    if (el && followRef.current) el.scrollTop = el.scrollHeight;
+    if (el && shouldMaintainEnd()) el.scrollTop = el.scrollHeight;
   };
 
   // Keep a following reader pinned to the live edge as content lands. With no
@@ -517,7 +523,8 @@ export function DeskConversation({
               live={isRunning}
               sessionId={sessionId}
               liveTurnStore={liveTurnStore}
-              onLiveLayout={relayoutLive}
+              shouldMaintainEnd={shouldMaintainEnd}
+              onLayout={relayoutLive}
               onOpenSubagent={onOpenSubagent}
               // The Desk shows the same failure pill as a session, so it
               // offers the same one press out of it. Gated like handleSend.
@@ -588,41 +595,43 @@ export function DeskConversation({
           }
         >
           <Composer
-            draftKey={`desk:${sessionId}`}
-            onSend={handleSend}
             onTyping={(active) => setTyping(sessionId, active)}
             onDictationActive={handleDictationActive}
-            attachmentShortcutActive={presenceActive}
-            placeholder={
-              connected ? placeholder || "Ask your Desk…" : "Not connected"
-            }
-            disabled={!connected}
-            sendDisabled={(text) =>
-              !text.trim() && images.length === 0 && files.length === 0
-            }
-            busy={isRunning}
-            images={images}
-            onImagesChange={setImages}
-            files={files}
-            onFilesChange={setFiles}
-            staging={dropStaging}
-            onAddAttachments={addDeskAttachments}
-            onRemovePendingImage={uploads.cancelPendingImage}
-            onRemovePendingFile={uploads.cancelPendingFile}
-            prefill={prefill}
-            models={models}
-            defaultModel={defaultModel}
-            model={model}
-            onModelChange={handleModelChange}
-            modelTitle="Model and reasoning effort for your Desk"
-            effort={effort}
-            onEffortChange={setEffort}
-            mentionFetch={(q) => fetchFileMentions(q, sessionId)}
-            paletteFetch={(q) =>
-              fetchMentionSuggestions(q, sessionId, getCurrentUser())
-            }
-            autoFocus={autoFocus}
-            textareaRef={textareaRef}
+            config={{
+              draftKey: `desk:${sessionId}`,
+              attachmentShortcutActive: presenceActive,
+              placeholder: connected
+                ? placeholder || "Ask your Desk…"
+                : "Not connected",
+              disabled: !connected,
+              sendDisabled: (text) =>
+                !text.trim() && images.length === 0 && files.length === 0,
+              busy: isRunning,
+              images,
+              files,
+              staging: dropStaging,
+              prefill,
+              models,
+              defaultModel,
+              model,
+              modelTitle: "Model and reasoning effort for your Desk",
+              effort,
+              autoFocus,
+              textareaRef,
+            }}
+            actions={{
+              onSend: handleSend,
+              onImagesChange: setImages,
+              onFilesChange: setFiles,
+              onAddAttachments: addDeskAttachments,
+              onRemovePendingImage: uploads.cancelPendingImage,
+              onRemovePendingFile: uploads.cancelPendingFile,
+              onModelChange: handleModelChange,
+              onEffortChange: setEffort,
+              mentionFetch: (query) => fetchFileMentions(query, sessionId),
+              paletteFetch: (query) =>
+                fetchMentionSuggestions(query, sessionId, getCurrentUser()),
+            }}
           />
           <FullPageFileDropOverlay active={fileDragActive} />
         </div>

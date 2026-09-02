@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { BASE_PATH } from "../lib/base";
+import { errorMessage } from "../lib/error-message";
 import { Button } from "../ui/button";
 import { cn } from "../ui/cn";
 import { OptionSelect } from "../ui/select";
@@ -27,19 +28,32 @@ export function PlainRouterConfiguration() {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState(0);
 
   useEffect(() => {
     void fetch(`${BASE_PATH}/api/connections/plain-router`)
-      .then((response) => response.json())
+      .then((response) => {
+        if (!response.ok)
+          throw new Error(
+            `Could not load the triage router (${response.status})`,
+          );
+        return response.json();
+      })
       .then((body: RouterConfig) => {
         setConfig(body);
         setDraft(body.prompt);
       })
-      .catch(() => {});
+      .catch((cause: unknown) => {
+        setLoadError(errorMessage(cause, "Could not load the triage router"));
+      });
     void fetch(`${BASE_PATH}/api/models`)
-      .then((response) => response.json())
+      .then((response) => {
+        if (!response.ok)
+          throw new Error(`Could not load models (${response.status})`);
+        return response.json();
+      })
       .then((body) =>
         setModels(
           (body.models || []).filter(
@@ -47,7 +61,9 @@ export function PlainRouterConfiguration() {
           ),
         ),
       )
-      .catch(() => {});
+      .catch((cause: unknown) => {
+        setError(errorMessage(cause, "Could not load models"));
+      });
   }, []);
 
   async function save(patch: { prompt?: string; basicModel?: string }) {
@@ -70,12 +86,8 @@ export function PlainRouterConfiguration() {
       setConfig((current) => (current ? { ...current, ...body } : current));
       if ("prompt" in patch) setDraft(body.prompt);
       setSavedAt(Date.now());
-    })().catch(async (cause) => {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "Could not save the triage router",
-      );
+    })().catch(async (cause: unknown) => {
+      setError(errorMessage(cause, "Could not save the triage router"));
     });
     setSaving(false);
   }
@@ -83,7 +95,11 @@ export function PlainRouterConfiguration() {
   if (!config) {
     return (
       <SettingsSection className="p-4">
-        <LoadingState>Loading triage router</LoadingState>
+        {loadError ? (
+          <InlineAlert>{loadError}</InlineAlert>
+        ) : (
+          <LoadingState>Loading triage router</LoadingState>
+        )}
       </SettingsSection>
     );
   }

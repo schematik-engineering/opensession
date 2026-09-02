@@ -10,7 +10,7 @@ begins.
 
 The Docker runner image pins:
 
-- Grok CLI `1.0.13`, invoked as `grok agent stdio`.
+- Grok CLI `1.0.16`, invoked as `grok agent stdio`.
 - Cursor Agent build `2026.08.25-3e8eec8`, invoked as `cursor-agent acp`.
 
 Host-backed sessions require those same executables on the OpenSession system
@@ -96,12 +96,16 @@ definitions may pin a Grok account; validation rejects unknown accounts and
 accounts owned by another model provider.
 
 Grok's private ACP compatibility methods are handled at the client boundary.
-`ask_user_question` uses OpenSession's durable ask flow, and `exit_plan_mode`
-shows the proposed plan to an interactive user. Explicitly unattended runs
-approve leaving plan mode but do not widen tool, MCP, publication, or credential
-permissions. Human wait time is excluded from the inactivity watchdog. Grok's
-private `prompt_complete` notification can finish a turn when the standard ACP
-prompt request remains open.
+`ask_user_question` uses OpenSession's durable ask flow, `exit_plan_mode` shows
+the proposed plan to an interactive user, and `mcp/elicit` maps MCP form input
+onto the same ask flow. The private elicitation response uses xAI's
+`outcome: accept|decline|cancel` wire contract, while the standard ACP handler
+uses `action: accept|decline|cancel`. Explicitly unattended runs approve leaving
+plan mode but do not widen tool, MCP, publication, or credential permissions.
+Unattended elicitation cancels instead of inventing an answer. Human wait time
+is excluded from the inactivity watchdog. Grok's private `prompt_complete`
+notification can finish a turn when the standard ACP prompt request remains
+open.
 
 ## Verification
 
@@ -109,6 +113,7 @@ From a checkout with the corresponding source credential configured:
 
 ```sh
 bun scripts/verify-acp-provider.ts grok grok/grok-4.6
+bun scripts/verify-acp-provider.ts grok grok/grok-4.6 elicitation
 bun scripts/verify-acp-provider.ts cursor cursor/auto
 ```
 

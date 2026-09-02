@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   applyTranscriptMotionEvent,
+  makeTranscriptHydrationScenario,
   makeTranscriptMotionScenario,
   makeTranscriptStreamPerformanceScenario,
   transcriptMotionFixtureOptions,
@@ -55,6 +56,33 @@ describe("transcript motion scenarios", () => {
     }
   });
 
+  test("builds incremental indexed hydration from a partial opening range", () => {
+    const scenario = makeTranscriptHydrationScenario();
+    expect(scenario.initial.transcriptIndex).toHaveLength(36);
+    expect(scenario.initial.entries.map((entry) => entry.id)).toEqual([
+      "hydration-assistant-15",
+      "hydration-user-16",
+      "hydration-assistant-16",
+      "hydration-user-17",
+      "hydration-assistant-17",
+    ]);
+    expect(scenario.events[0]).toMatchObject({
+      kind: "hydrate-entries",
+      entries: [{ id: "hydration-user-15" }],
+    });
+    expect(scenario.events.at(-1)).toMatchObject({
+      kind: "update-entry",
+      id: "hydration-assistant-17",
+    });
+    let state = scenario.initial;
+    for (const event of scenario.events)
+      state = applyTranscriptMotionEvent(state, event);
+    expect(state.entries).toHaveLength(36);
+    expect(state.entries.map((entry) => entry.seq)).toEqual(
+      Array.from({ length: 36 }, (_, index) => index + 1),
+    );
+  });
+
   test("builds the 10k-entry 100-delta stream workload", () => {
     const scenario = makeTranscriptStreamPerformanceScenario();
     expect(scenario.initial.entries).toHaveLength(10_000);
@@ -100,6 +128,12 @@ describe("transcript motion scenarios", () => {
         "?profile=stream",
       ),
     ).toEqual({ seed: 1, speed: 1, profile: "stream" });
+    expect(
+      transcriptMotionFixtureOptions(
+        "/__fixtures/transcript-motion",
+        "?profile=hydration",
+      ),
+    ).toEqual({ seed: 1, speed: 1, profile: "hydration" });
     expect(transcriptMotionFixtureOptions("/session/example", "")).toBeNull();
   });
 });

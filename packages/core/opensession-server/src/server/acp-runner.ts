@@ -53,7 +53,11 @@ import {
 } from "./acp-accounts";
 import { providerFor } from "./models";
 import { AcpTerminalManager } from "./acp-terminal";
-import { askBashDenyReason, filterMcpServers } from "./runner-shared";
+import {
+  askBashDenyReason,
+  filterMcpServers,
+  GROK_SEARCH_ONLY_TERMINAL_ERROR,
+} from "./runner-shared";
 import { baseJournalKind, isUnattendedKind } from "./run-policy";
 import {
   acpProviderStateDir,
@@ -67,6 +71,10 @@ const DEFAULT_TURN_TIMEOUT_MS = 30 * 60_000;
 const MAX_STDERR_BYTES = 8_192;
 const MAX_TOOL_RESULT_CHARS = 100_000;
 const MAX_PERMISSION_RETRIES = 3;
+const MAX_GROK_SEARCH_CONTINUATIONS = 2;
+const GROK_SEARCH_CONTINUATION =
+  "Continue the same request now. Invoke a tool returned by search_tool. " +
+  "Do not call search_tool again or narrate the next step. If no matching tool exists, say so directly.";
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -81,6 +89,16 @@ function stringRecord(value: unknown): Record<string, string> {
     Object.entries(source)
       .filter(([, item]) => typeof item === "string")
       .map(([key, item]) => [key, item as string]),
+  );
+}
+
+function grokSearchFoundTools(value: unknown): boolean {
+  const output = record(value);
+  return (
+    output?.type === "SearchTool" &&
+    typeof output.result_count === "number" &&
+    Number.isInteger(output.result_count) &&
+    output.result_count > 0
   );
 }
 
@@ -778,6 +796,8 @@ async function* runAcpAttempt(
   const assistantText = new Map<string, string>();
   const thoughtText = new Map<string, string>();
   let finalText = "";
+  let promptToolNames = new Map<string, string>();
+  let promptSearchFoundTools = false;
   const aliases = new Set(
     [
       opts.startToken,
@@ -832,6 +852,7 @@ async function* runAcpAttempt(
     if (kind === "tool_call") {
       const call = update as any;
       const name = String(call.name || call.kind || call.title || "tool");
+      promptToolNames.set(String(call.toolCallId), name);
       queue.push({
         type: "tool_use",
         toolName: name,
@@ -846,6 +867,11 @@ async function* runAcpAttempt(
     if (kind === "tool_call_update") {
       const call = update as any;
       if (call.status !== "completed" && call.status !== "failed") return;
+      if (call.status === "completed") {
+        const name = promptToolNames.get(String(call.toolCallId));
+        if (name === "search_tool" && grokSearchFoundTools(call.rawOutput))
+          promptSearchFoundTools = true;
+      }
       const content =
         toolContentText(call.content) ||
         stringifyToolResult(call.rawOutput ?? "");
@@ -1032,9 +1058,14 @@ async function* runAcpAttempt(
         DEFAULT_TURN_TIMEOUT_MS;
       let response;
       let nextPrompt = prompt;
-      for (let attempt = 0; ; attempt++) {
+      let permissionRetries = 0;
+      let searchContinuations = 0;
+      let searchContinuationExhausted = false;
+      for (;;) {
         permissionDenial = undefined;
         retryWithoutDeniedTool = false;
+        promptToolNames = new Map();
+        promptSearchFoundTools = false;
         const grokPrompt = grokExtension?.beginPrompt(engineSessionId);
         const request = {
           sessionId: engineSessionId,
@@ -1064,24 +1095,49 @@ async function* runAcpAttempt(
           activeWatchdog = undefined;
           grokPrompt?.finish(response);
         }
-        if (
-          response.stopReason !== "cancelled" ||
-          cancelled ||
-          !permissionDenial ||
-          !retryWithoutDeniedTool ||
-          attempt >= MAX_PERMISSION_RETRIES
-        )
+        const canRetryDeniedTool =
+          response.stopReason === "cancelled" &&
+          !cancelled &&
+          !!permissionDenial &&
+          retryWithoutDeniedTool;
+        if (canRetryDeniedTool) {
+          if (permissionRetries >= MAX_PERMISSION_RETRIES) break;
+          permissionRetries++;
+          nextPrompt = [
+            {
+              type: "text" as const,
+              text:
+                `The previous ACP tool request was denied by Open Session: ${permissionDenial}. ` +
+                "Continue the same task without that command. Use only permitted read-only commands and do not retry the denied operation.",
+            },
+          ];
+          continue;
+        }
+        const stoppedAfterSearch =
+          provider === "grok" &&
+          response.stopReason === "end_turn" &&
+          promptSearchFoundTools &&
+          !Array.from(promptToolNames.values()).some(
+            (name) => name !== "search_tool",
+          );
+        if (!stoppedAfterSearch) break;
+        if (searchContinuations >= MAX_GROK_SEARCH_CONTINUATIONS) {
+          searchContinuationExhausted = true;
           break;
+        }
+        searchContinuations++;
         nextPrompt = [
-          {
-            type: "text" as const,
-            text:
-              `The previous ACP tool request was denied by Open Session: ${permissionDenial}. ` +
-              "Continue the same task without that command. Use only permitted read-only commands and do not retry the denied operation.",
-          },
+          { type: "text" as const, text: GROK_SEARCH_CONTINUATION },
         ];
       }
-      if (response.stopReason === "cancelled" || cancelled) {
+      if (searchContinuationExhausted) {
+        queue.push({
+          type: "error",
+          content: GROK_SEARCH_ONLY_TERMINAL_ERROR,
+          provider,
+          model,
+        });
+      } else if (response.stopReason === "cancelled" || cancelled) {
         queue.push({
           type: "error",
           content: `${provider} run cancelled`,

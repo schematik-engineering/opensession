@@ -5,6 +5,7 @@ import {
   updateWarmTemplate,
   type WarmTemplateEntry,
 } from "../../lib/api";
+import { errorMessage } from "../../lib/error-message";
 import { warmAgo } from "../../lib/time";
 import { Button } from "../../ui/button";
 import {
@@ -37,7 +38,11 @@ function WarmPreviewsPanel() {
     let alive = true;
     fetchWarmTemplates()
       .then((r) => alive && setRepos(r.repos))
-      .catch((e) => alive && setError(e.message));
+      .catch(
+        (cause: unknown) =>
+          alive &&
+          setError(errorMessage(cause, "Failed to load dependency caches")),
+      );
     return () => {
       alive = false;
     };
@@ -51,7 +56,10 @@ function WarmPreviewsPanel() {
     const t = setTimeout(() => {
       fetchWarmTemplates()
         .then((r) => alive && setRepos(r.repos))
-        .catch(() => {});
+        .catch((_cause: unknown) => {
+          // The last repo statuses remain valid and visible, so a failed
+          // background refresh poll leaves that stale status in place.
+        });
     }, 5000);
     return () => {
       alive = false;
@@ -60,7 +68,9 @@ function WarmPreviewsPanel() {
   }, [repos]);
 
   function apply(p: Promise<{ repos: WarmTemplateEntry[] }>) {
-    p.then((r) => setRepos(r.repos)).catch((e) => setError(e.message));
+    p.then((r) => setRepos(r.repos)).catch((cause: unknown) =>
+      setError(errorMessage(cause, "Failed to update dependency cache")),
+    );
   }
 
   const label = (

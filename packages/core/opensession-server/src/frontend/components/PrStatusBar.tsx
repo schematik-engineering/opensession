@@ -505,6 +505,9 @@ export function PrStatusBar({
   // create one. SWR keeps the last good value, so this is only true when there
   // is nothing to show at all.
   const prUnavailable = Boolean(prResource.error) && !prResource.data;
+  const prLoadError = prUnavailable
+    ? errorMessage(prResource.error, "Couldn’t load pull request.")
+    : null;
   const { mutate: reloadPr } = prResource;
   const { mutate: reloadGit } = gitResource;
   const mergeKey = deferredMergeKey(pr?.url);
@@ -1127,7 +1130,12 @@ export function PrStatusBar({
             </a>
           </Tooltip>
         ) : (
-          <Tooltip label="Open the Review tab" side="bottom" align="start">
+          <Tooltip
+            label={prLoadError || "Open the Review tab"}
+            side="bottom"
+            align="start"
+            multiline={Boolean(prLoadError)}
+          >
             <button
               type="button"
               className={labelClass}
@@ -1174,6 +1182,14 @@ export function PrStatusBar({
           </ContextMenu.Root>
         ) : (
           <div className={summaryRowClass}>{rowBody}</div>
+        )}
+        {prLoadError && (
+          <p
+            role="alert"
+            className="mx-5 mb-2 mt-1 text-meta leading-snug text-yellow"
+          >
+            {prLoadError}
+          </p>
         )}
         {error && (
           <p
@@ -1294,7 +1310,10 @@ export function PrStatusBar({
         />
       ) : (
         (headline.key !== "no-pr" || statusRows.length > 0) && (
-          <Tooltip label="Open the PR tab">
+          <Tooltip
+            label={prLoadError || "Open the PR tab"}
+            multiline={Boolean(prLoadError)}
+          >
             <button
               className={`${PR_BAR_STATE} ${PR_BAR_STATE_TEXT[headlineTone]}`}
               onClick={() => onOpenPrTab?.()}

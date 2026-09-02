@@ -56,6 +56,7 @@ import {
 import { useTabReorder } from "./session-tabs/useTabReorder";
 import { SessionDraftIndicator } from "./session-tabs/SessionDraftIndicator";
 import { shouldShowTabStrip } from "../lib/split-tabs";
+import type { SessionTabsProps, ViewTab } from "../lib/session-tabs-types";
 
 /**
  * The tab strip is scoped to ONE Workspace: it shows the sibling sessions of the
@@ -80,126 +81,6 @@ import { shouldShowTabStrip } from "../lib/split-tabs";
  * A non-session pane (Review, …) surfaced in the strip. It starts after the session
  * tabs and is draggable from there like any session tab.
  */
-export type NewTabMorphOrigin = {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-};
-
-export type ViewTab = {
-  /** Stable id, e.g. `review:<sessionId>`. */
-  id: string;
-  /** Tab label ("Review"). Also the tooltip/aria label when `icon` is set. */
-  label: string;
-  /** Whether this pane is the foregrounded tab. */
-  active: boolean;
-  /** Optional status-dot class (e.g. PR state) shown before the label. */
-  dotClass?: string | null;
-  /**
-   * Optional glyph shown INSTEAD of the text label — the tab reads as just the
-   * icon (e.g. Staging → a globe). `label` still supplies the tooltip/aria.
-   */
-  icon?: React.ReactNode;
-  /**
-   * Whether the tab carries a ×. Defaults to true; the workspace home sets it
-   * false, because it only exists when it is the strip's last tab and closing
-   * it would leave the workspace with none.
-   */
-  closable?: boolean;
-};
-
-interface Props {
-  /** Sibling sessions in the current workspace, in display order. */
-  tabs: UnifiedSession[];
-  /** Archived (closed) sessions of this workspace, newest activity first. */
-  archived: UnifiedSession[];
-  /** Session id of the active tab. */
-  activeId: string | null;
-  /** Map of session id → swatch key for colored tabs. */
-  colors: Record<string, string>;
-  /**
-   * Teammates currently in each session, by session id — one entry per person,
-   * with your own devices already filtered out (see lib/presence). The sidebar
-   * shows the same faces per WORKSPACE, which says someone is in this strip but
-   * not which tab; this is that second half.
-   */
-  viewers?: Record<string, string[]>;
-  onSelect: (session: UnifiedSession) => void;
-  onSetColor: (key: string, color: string | null) => void;
-  /**
-   * The strip's left-to-right arrangement — session ids and view-tab ids in ONE
-   * list, so a pane (Review, Assets, …) can sit in front of a session. Ids the
-   * list doesn't mention keep their natural place at the end.
-   */
-  tabOrder: string[];
-  /**
-   * Commit a new left-to-right order for this bar's tabs (desktop drag-drop).
-   * Receives the reordered ids — sessions and view tabs alike; the parent splices
-   * them back into the workspace's order and persists it.
-   */
-  onReorderTabs: (orderedIds: string[]) => void;
-  /**
-   * This bar is one column of a split. It renders even when it holds a single
-   * tab (each column keeps its "+" however few tabs it has), and its tabs stay
-   * draggable at any count — the drop target is the other column, so a bar
-   * holding one tab must still be able to hand it over.
-   */
-  inSplit?: boolean;
-  /** Show the archived-sessions menu — only the rightmost bar does. */
-  showHistory?: boolean;
-  /** Dragging below the strip previews a left/right split over the content. */
-  onSplitDrag?: (id: string | null, point?: { x: number; y: number }) => void;
-  /** Return true when the drop created a split instead of committing a reorder. */
-  onSplitDrop?: (id: string, point: { x: number; y: number }) => boolean;
-  /**
-   * Hand a tab to the split's other column (the tab context menu's spelling of
-   * the cross-bar drag). Only set on a bar that is part of a split.
-   */
-  onMoveAcross?: (id: string) => void;
-  /** Where `onMoveAcross` lands — it names the menu item. */
-  moveAcrossSide?: "left" | "right";
-  /**
-   * Non-session "view" tabs (Review, Preview, …), in their natural order — they
-   * follow the session tabs until dragged elsewhere (see `tabOrder`). Each is
-   * bound to a session; selecting one foregrounds that pane, its × dismisses
-   * it. Generalized so more panes (diff, terminal, …) can drop in later.
-   */
-  viewTabs: ViewTab[];
-  /** Foreground a view tab (show its pane). */
-  onSelectView: (id: string) => void;
-  /** Dismiss a view tab from the strip. */
-  onCloseView: (id: string) => void;
-  /**
-   * Start a new session in this workspace. share = reuse the workspace worktree
-   * (the + button's plain-click default), stack = new worktree branched off it,
-   * ask = no worktree.
-   */
-  onNewSession?: (
-    mode: "share" | "stack" | "ask",
-    origin?: NewTabMorphOrigin,
-  ) => void;
-  /** The workspace's reusable empty tab, which morphs from and back into +. */
-  emptySessionId?: string | null;
-  /** Client-minted tab id available in the same optimistic render as the click. */
-  morphingSessionId?: string | null;
-  /** Pointer control rectangle that the opening tab grows from. */
-  morphOrigin?: NewTabMorphOrigin | null;
-  /** Rename a session (double-click the title); empty title resets it. */
-  onRename: (id: string, title: string) => void;
-  /** Close (archive) a session — the × revealed on hover. */
-  onClose: (session: UnifiedSession) => void;
-  /** Permanently delete a session from its tab's context menu. */
-  onDelete?: (
-    session: UnifiedSession,
-    cleanWorktree: boolean,
-  ) => void | Promise<void>;
-  /** Un-archive a session from the history menu, back into the strip. */
-  onRestore: (session: UnifiedSession) => void;
-  /** Report a copy action's outcome ("Link copied", …). */
-  onToast: (message: string) => void;
-}
-
 type TabMember =
   | { kind: "session"; id: string; session: UnifiedSession }
   | { kind: "view"; id: string; view: ViewTab };
@@ -276,34 +157,43 @@ function TabTitle({
 }
 
 export function SessionTabs({
-  tabs,
-  archived,
-  activeId,
-  colors,
-  viewers,
-  onSelect,
-  onSetColor,
-  tabOrder,
-  onReorderTabs,
-  inSplit,
-  showHistory = true,
-  onSplitDrag,
-  onSplitDrop,
-  onMoveAcross,
-  moveAcrossSide,
-  viewTabs,
-  onSelectView,
-  onCloseView,
-  onNewSession,
-  emptySessionId,
-  morphingSessionId,
-  morphOrigin,
-  onRename,
-  onClose,
-  onDelete,
-  onRestore,
-  onToast,
-}: Props) {
+  content,
+  layout = {},
+  actions,
+}: SessionTabsProps) {
+  const {
+    sessions: tabs,
+    archivedSessions: archived,
+    activeSessionId: activeId,
+    colors,
+    viewers,
+    order: tabOrder,
+    views: viewTabs,
+  } = content;
+  const {
+    inSplit,
+    showHistory = true,
+    emptySessionId,
+    morphingSessionId,
+    morphOrigin,
+    moveAcrossSide,
+  } = layout;
+  const {
+    selectSession: onSelect,
+    setColor: onSetColor,
+    reorder: onReorderTabs,
+    previewSplit: onSplitDrag,
+    dropIntoSplit: onSplitDrop,
+    moveAcross: onMoveAcross,
+    selectView: onSelectView,
+    closeView: onCloseView,
+    newSession: onNewSession,
+    rename: onRename,
+    close: onClose,
+    delete: onDelete,
+    restore: onRestore,
+    toast: onToast,
+  } = actions;
   const copyTranscriptLabel = useShortcutLabel("session-copy-transcript");
   const closeLabel = useShortcutLabel("session-close");
   const reducedMotion = useReducedMotion();

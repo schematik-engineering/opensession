@@ -4,7 +4,7 @@ import type { ImageRegion } from "../lib/image-region-comment";
 import {
   openLightbox,
   type ImageRegionAnnotation,
-} from "./media-lightbox-controller";
+} from "../lib/media-lightbox";
 import { IconX } from "./icons";
 
 interface Props {

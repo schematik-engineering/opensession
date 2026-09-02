@@ -2,7 +2,7 @@
 
 ## Context
 
-Open Session's ACP client implements the standard client surface but not Grok's xAI extension requests. Grok 1.0.13 therefore receives JSON-RPC method-not-found for `_x.ai/exit_plan_mode` and reports the misleading client-disconnected error seen in production. The same boundary omits private question, completion, and rate-limit signals.
+Open Session's ACP client implements the standard client surface but not Grok's xAI extension requests. Grok 1.0.13 therefore receives JSON-RPC method-not-found for `_x.ai/exit_plan_mode` and reports the misleading client-disconnected error seen in production. The same boundary omits private question and completion signals. Grok 1.0.13 also rejects MCP form elicitation before it reaches the ACP client; Grok 1.0.16 adds the reverse bridge.
 
 The audit also found adjacent reliability gaps that prevent Grok 4.6 from acting as a main-model peer: Grok 1.0.13 renamed its ACP auth method, detached runs cannot rotate projected Grok accounts in one logical turn, projected quota failures do not update the central pool, follow-up ACP runs can lose Open Session MCP proxies, automation validation rejects ACP account pins, fallback destinations are Pi-only, and committed Ask answers are not acknowledged across the detached-host socket.
 
@@ -39,12 +39,16 @@ Support the installed CLI's observed aliases for:
 
 - `x.ai/ask_user_question` and `_x.ai/ask_user_question`
 - `x.ai/exit_plan_mode` and `_x.ai/exit_plan_mode`
+- `x.ai/mcp/elicit` and `_x.ai/mcp/elicit`
+- `x.ai/mcp/elicit_complete` and `_x.ai/mcp/elicit_complete`
 - `_x.ai/session/prompt_complete`
 - usage-limit errors from the ACP request and stderr boundary
 
 Interactive plan decisions use the existing Ask card with Approve, Request changes, and Abandon choices. The adapter returns Grok's current approved, cancelled-with-feedback, and abandoned outcomes. Grok consumes that response inside the same standard prompt turn.
 
 Duplicate xAI question text is invalid because responses are keyed by question text. Custom answers map to `Other` plus xAI notes annotations. The adapter accepts only bounded, parsed input.
+
+Grok 1.0.16 forwards MCP form elicitation through its private extension. That response is not the standard ACP shape: xAI expects `outcome: accept|decline|cancel`, while standard ACP expects `action: accept|decline|cancel`. Both map onto the existing durable Ask lifecycle. Unattended runs cancel rather than inventing form values.
 
 ## Recovery model
 

@@ -26,6 +26,7 @@ const {
   isOpenSessionAppUrl,
   resumableAccountUrl,
 } = require("./account-navigation");
+const { restoredFullscreenOptions } = require("./window-options");
 const packageConfig = require("../package.json").opensession || {};
 const nativeDictation = new NativeDictation();
 
@@ -921,7 +922,7 @@ function createWindow(initialURL = null, initialAccountID = null) {
     ...cascadeWindowBounds(state.bounds),
     minWidth: MIN_WIDTH,
     minHeight: MIN_HEIGHT,
-    fullscreen: state.fullScreen,
+    ...restoredFullscreenOptions(state.fullScreen),
     // The web app keeps its workspace opaque and reveals this native material
     // only through the sidebar and narrow outer gutter. Unlike the original
     // vibrancy pass, the renderer does not add CSS backdrop filters on top.

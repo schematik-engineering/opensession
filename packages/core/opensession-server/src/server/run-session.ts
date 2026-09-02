@@ -30,7 +30,6 @@ import { syncAgentSessionEngine } from "./agent-session-sync";
 import { cancelAgentWait } from "./agent-waits";
 import { runAgentHosted } from "./host-client";
 import { getRunState, transitionRunState } from "./run-state";
-import { getAutomation } from "./automations";
 import { resolveSessionRunInputs } from "./session-run-inputs";
 import { defaultRepo } from "./config";
 import { isDevInstance } from "./dev-mode";
@@ -39,6 +38,7 @@ import {
   buildEngineSwitchHandoffNote,
 } from "./fork-handoff";
 import { getGitStatus, gitPush } from "./git-status";
+import { duplicateContextSessionIds } from "./session-duplicate";
 import { onSessionIdle as onHumanAsksSessionIdle } from "./human-asks";
 import { parseTranscriptAsync } from "./jsonl-parser";
 import {
@@ -56,8 +56,14 @@ import {
   transcriptLineUser,
 } from "./transcript-persistence";
 import { cacheMissNotice } from "@tellahq/opensession-protocol/notices";
+import { RESTART_QUEUE_NOTICE_MESSAGE } from "@tellahq/opensession-protocol/session";
 import { dropSandboxPreviewRoutes } from "./preview";
-import { wrapContext, stripContext, isContextOnly } from "./prompt-context";
+import {
+  wrapContext,
+  stripContext,
+  isContextOnly,
+  withPromptAttribution,
+} from "./prompt-context";
 import { takeVoiceHandoff } from "./desk-voice";
 import {
   activeRunRecords,
@@ -1373,8 +1379,7 @@ function notifyShutdownPark(sessionId: string): void {
   broadcastToSession(sessionId, {
     type: "notice",
     sessionId,
-    message:
-      "The server is restarting. Your message is queued and will be delivered when it's back.",
+    message: RESTART_QUEUE_NOTICE_MESSAGE,
   });
 }
 
@@ -2491,6 +2496,13 @@ async function runSessionPromptInner(
   // rule in engineSessionPatch, so both live together in sessions.ts.
   const engineSessionId = engineSessionIdFor(session, provider);
 
+  // A teammate sending into someone else's session needs explicit attribution:
+  // bare transcript turns belong to the session owner. Apply it before durable
+  // intake so the sender stays correct even when setup or engine launch fails.
+  // Multi-message queue drains arrive pre-attributed, and context-only turns
+  // are nobody's message; withPromptAttribution leaves both unchanged.
+  let prompt = withPromptAttribution(content, user, session.startedBy);
+
   // Durable intake (2026-07-24, bks-019f93ea): persist the user's message to
   // the transcript store NOW, before the worktree/title/engine-spawn awaits,
   // so a process death anywhere in the run path can no longer lose it. The
@@ -2504,7 +2516,7 @@ async function runSessionPromptInner(
     await storeAppendUserLineEarly(
       sessionId,
       transcriptLineUser(
-        content,
+        prompt,
         durablePromptEntryId,
         undefined,
         images,
@@ -2623,14 +2635,30 @@ async function runSessionPromptInner(
         type: "notice",
         message: `This session's worktree was cleaned up — recreating it from branch ${session.branch}…`,
       });
+      let revived = false;
       try {
         cwd = await reviveWorktree(session.branch, repo.id);
+        revived = true;
       } catch (e) {
         broadcastToSession(sessionId, {
           type: "notice",
           message: `Couldn't recreate the worktree (${e}); running in the main checkout instead.`,
         });
         cwd = repo.repo;
+      }
+      // A branch rename changes reviveWorktree's path. Keep the owning row on
+      // the checkout we just created so activity protection and every later
+      // turn stop targeting the missing pre-rename path.
+      if (
+        revived &&
+        session.source === "opensession" &&
+        cwd !== session.worktreeDir
+      ) {
+        await updateSessionFile(session.id, (data) => ({
+          ...data,
+          worktreeDir: cwd,
+        }));
+        session.worktreeDir = cwd;
       }
     } else {
       broadcastToSession(sessionId, {
@@ -2640,23 +2668,6 @@ async function runSessionPromptInner(
       });
       cwd = repo.repo;
     }
-  }
-  let prompt = content;
-  // A teammate sending into someone else's idle session gets the same
-  // "[Name] " attribution the steer path already applies — without it the
-  // message lands bare in the transcript and the viewer credits it to the
-  // session owner (startedBy). The owner's own turns stay bare (the common
-  // case), automation runs pass no user, and multi-message queue drains
-  // arrive pre-attributed — don't double-prefix those. A prompt that is ONLY
-  // injected context (the auto-continue nudge) is nobody's message: attributing
-  // it left a bare "[auto-continue] " stub as the whole transcript entry.
-  if (
-    user &&
-    user !== session.startedBy &&
-    !isContextOnly(content) &&
-    !content.startsWith(`[${user}] `)
-  ) {
-    prompt = `[${user}] ${prompt}`;
   }
   // Bridge a cross-provider engine switch (computed above) so the incoming
   // engine continues the conversation instead of starting blank. Fenced so the
@@ -2680,7 +2691,10 @@ async function runSessionPromptInner(
   // their prompts are untrusted text.
   const inlinedSessionIds = new Set<string>();
   if (!session.automation) {
-    const attachedIds = [...new Set(contextSessions ?? [])];
+    const attachedIds = duplicateContextSessionIds(
+      session,
+      contextSessions ?? [],
+    );
     const attachedSessions = attachedIds
       .filter((id) => id !== sessionId)
       .map((id) => findSession(id))
@@ -2696,11 +2710,9 @@ async function runSessionPromptInner(
         id: s.id,
         title: s.title,
         model: s.model,
-        // Async: an attached session's transcript can be multi-MB — the
-        // sync parse held the event loop for the whole read.
-        entries: s.transcriptPath
-          ? await parseTranscriptAsync(s.transcriptPath)
-          : [],
+        // Async: an attached session's transcript can be multi-MB. Read the
+        // actor-owned transcript first, with the legacy file fallback.
+        entries: await mergedSessionTranscriptAsync(s),
       });
     }
     for (const c of attachedDigests) inlinedSessionIds.add(c.id);
@@ -2919,8 +2931,8 @@ async function runSessionPromptInner(
   // unavailable; it never absorbs an engine into the gateway's control-plane
   // cgroup. Automation-owned sessions ride it too, with the automation's
   // scoping intact: proxy names come from the same fail-closed automation
-  // set the run-rpc fallback builder serves, the repos note and MCP grant
-  // identity are withheld, and the automation's prReviewer rides the spec.
+  // set the run-rpc fallback builder serves, while the repos note and MCP
+  // grant identity are withheld.
   const hostedRun =
     !runnerRun && !sandboxRun
       ? runAgentHosted({
@@ -2968,13 +2980,6 @@ async function runSessionPromptInner(
           effort: session.effort,
           fastMode: session.fastMode,
           accountId: session.accountId,
-          // A human steering an automation-owned session still opens PRs
-          // under that automation's policy (parity with the in-process
-          // call below).
-          prReviewer:
-            isAutomationSession && session.automationId
-              ? getAutomation(session.automationId)?.prReviewer
-              : undefined,
           trustProfile: isAutomationSession ? "automation" : "interactive",
           journalKind: "prompt",
           onAskUser: makeAskHandler(sessionId),
@@ -3070,13 +3075,6 @@ async function runSessionPromptInner(
       reposNote: isAutomationSession
         ? undefined
         : await buildSessionNote(session, user),
-      // A human steering an automation-owned session still opens PRs under
-      // that automation's policy — keep its reviewer so a resumed turn's PR
-      // surfaces the same way the unattended run's would have.
-      prReviewer:
-        isAutomationSession && session.automationId
-          ? getAutomation(session.automationId)?.prReviewer
-          : undefined,
       deniedTools,
       publicationPolicy: session.automationDescendantPolicy
         ? {

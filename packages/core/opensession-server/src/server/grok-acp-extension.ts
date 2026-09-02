@@ -717,10 +717,14 @@ export function createGrokAcpExtension(
             method,
           );
           validateSession(params.sessionId, options.currentSessionId(), method);
-          return await handleElicitation(
+          const response = await handleElicitation(
             params as CreateElicitationRequest,
             options,
           );
+          if (response.action === "accept") {
+            return { outcome: "accept", content: response.content ?? {} };
+          }
+          return { outcome: response.action };
         }
         default: {
           const exhaustive: never = kind;

@@ -11,7 +11,7 @@ import { OptionSelect } from "../ui/select";
 import { toast } from "../ui/toast";
 import { Tooltip } from "../ui/tooltip";
 import { BrandMark } from "./BrandMark";
-import { openLightbox } from "./media-lightbox-controller";
+import { openLightbox } from "../lib/media-lightbox";
 import { IconPlus, IconUndo, IconX } from "./icons";
 import { Spinner } from "../ui/spinner";
 

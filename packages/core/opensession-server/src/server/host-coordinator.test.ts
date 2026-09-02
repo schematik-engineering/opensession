@@ -18,6 +18,7 @@ import {
 } from "./host-client";
 import type { StreamEvent } from "./run-events";
 import type { ActiveRunRecord } from "./run-journal";
+import { GROK_SEARCH_ONLY_TERMINAL_ERROR } from "./runner-shared";
 import type { RunHostSpec } from "../runner-host/protocol";
 
 let scratch: string;
@@ -237,6 +238,53 @@ describe("hosted model coordinator", () => {
     });
   });
 
+  test("falls back from a Grok search-only terminal without poisoning its account", async () => {
+    const accountId = addGrokAccount("search-only");
+    const attempts: HostedRunOpts[] = [];
+    __setHostedPhysicalRunnerForTest(async function* (attempt) {
+      attempts.push(attempt);
+      if (attempt.model === "grok/grok-4.6") {
+        yield {
+          type: "error",
+          content: GROK_SEARCH_ONLY_TERMINAL_ERROR,
+          provider: "grok",
+          model: attempt.model,
+        };
+        return;
+      }
+      yield { type: "done", result: "fallback complete", model: attempt.model };
+    });
+
+    const events = await collect(
+      runAgentHosted(
+        opts({
+          accountId,
+          fallbackModel: "pi/openai/gpt-5.6-sol",
+          journalKind: "automation",
+        }),
+      ),
+    );
+
+    expect(attempts.map((attempt) => attempt.model)).toEqual([
+      "grok/grok-4.6",
+      "pi/openai/gpt-5.6-sol",
+    ]);
+    expect(
+      acpSessionExhaustedAccounts(opts().osSessionId, "grok").has(accountId),
+    ).toBe(false);
+    expect(events.find((event) => event.type === "model_switch")).toMatchObject(
+      {
+        fromModel: "grok/grok-4.6",
+        toModel: "pi/openai/gpt-5.6-sol",
+        temporaryFallback: true,
+      },
+    );
+    expect(events.at(-1)).toMatchObject({
+      type: "done",
+      result: "fallback complete",
+    });
+  });
+
   test("drains a non-ACP host before reusing its logical run id", async () => {
     const attempts: HostedRunOpts[] = [];
     let firstDrained = false;
@@ -330,6 +378,7 @@ describe("hosted model coordinator", () => {
   test("continues account rotation and model fallback after gateway recovery", async () => {
     const first = addGrokAccount("recovered-a");
     const second = addGrokAccount("recovered-b");
+    const mutableSpecAccount = "recovered-mutated-spec";
     const attempts: HostedRunOpts[] = [];
     __setHostedPhysicalRunnerForTest(async function* (attempt) {
       attempts.push(attempt);
@@ -358,7 +407,7 @@ describe("hosted model coordinator", () => {
       model: "grok/grok-4.6",
       fallbackModel: "none",
       logicalFallbackModel: "pi/openai/gpt-5.6-sol",
-      accountId: second,
+      accountId: mutableSpecAccount,
       accountStrict: true,
       logicalAccountStrict: false,
       mcpServers: [],
@@ -371,6 +420,7 @@ describe("hosted model coordinator", () => {
       cwd: spec.cwd,
       model: spec.model,
       fallbackModel: spec.logicalFallbackModel,
+      accountId: second,
       physicalAccountId: first,
       accountStrict: false,
       startedAt: new Date().toISOString(),
@@ -410,6 +460,11 @@ describe("hosted model coordinator", () => {
     ).toBe(true);
     expect(
       acpSessionExhaustedAccounts(spec.osSessionId, "grok").has(second),
+    ).toBe(true);
+    expect(
+      acpSessionExhaustedAccounts(spec.osSessionId, "grok").has(
+        mutableSpecAccount,
+      ),
     ).toBe(false);
   });
 

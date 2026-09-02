@@ -47,7 +47,7 @@ import { ResponsiveDialog } from "../ui/sheet";
 import { toast } from "../ui/toast";
 import { Tooltip } from "../ui/tooltip";
 import { MarkdownBody } from "./MarkdownBody";
-import { openLightbox } from "./media-lightbox-controller";
+import { openLightbox } from "../lib/media-lightbox";
 import {
   IconArrowDown,
   IconArrowUpRight,

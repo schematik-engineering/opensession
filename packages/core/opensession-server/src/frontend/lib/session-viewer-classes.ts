@@ -553,17 +553,11 @@ export const TRANSCRIPT_PILL_SPINNER =
  * same chrome the transcript clears.
  *
  * SessionViewer shows it only within a screenful of the head of the
- * transcript. As secondary chrome collapses, the pill follows the docked tabs
- * upward and tucks behind the still-pinned navigation bar rather than hanging
- * in the strip's vacated space. A transform rather than a moved `top` composes
- * with the `translate` property doing the centring and costs no layout.
+ * transcript. Its phone position clears the fixed navigation and tab chrome.
  */
 export const TRANSCRIPT_PILL_TOP =
   `pointer-events-none absolute top-3 left-1/2 z-[5] ${PILL_CENTRED} ` +
-  "phone:top-[calc(var(--pane-header-h)+var(--strip-clearance,0px)+8px)] " +
-  "phone:[transition-property:transform] phone:duration-[var(--dur-lg)] " +
-  "phone:ease-[var(--ease)] " +
-  "phone:[body.chrome-collapsed_&]:[transform:translateY(calc(4px-var(--pane-header-h)-var(--strip-clearance,0px)))]";
+  "phone:top-[calc(var(--pane-header-h)+var(--strip-clearance,0px)+8px)]";
 
 /* ── Session info page (phone) ──────────────────────────────────────────────
  *

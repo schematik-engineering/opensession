@@ -17,7 +17,8 @@ export function modelIsCodex(id: string, models: ModelOption[]): boolean {
 // (no models list needed) so it works in the transcript_init weave before the
 // models endpoint has loaded.
 const MODEL_NAMES: Record<string, string> = {
-  "claude-fable-5": "Fable",
+  "claude-fable-5-1": "Fable 5.1",
+  "claude-fable-5": "Fable 5",
   "claude-opus-5": "Opus 5",
   "claude-opus-4-8": "Opus 4.8",
   "claude-sonnet-5": "Sonnet",

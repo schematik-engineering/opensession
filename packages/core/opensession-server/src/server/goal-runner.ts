@@ -10,7 +10,8 @@ import { randomUUIDv7 } from "bun";
 import { existsSync } from "fs";
 import { createHumansMcpServer } from "../agents/slack/humans-tools";
 import { createGoalSelfMcpServer } from "../agents/slack/goal-tools";
-import { runAgent, isAgentSessionBusy } from "./agent-runner";
+import { isAgentSessionBusy } from "./agent-runner";
+import { runAgentHosted } from "./host-client";
 import { defaultRepo, personaName } from "./config";
 import { isDevInstance } from "./dev-mode";
 import { getGoal, listGoals, saveGoal, type Goal } from "./goals";
@@ -31,6 +32,10 @@ import { shouldPersistModelSwitch } from "./run-events";
 import { shellQuoteWord } from "./sandbox/adapters/bootstrap";
 import { newSessionId } from "./paths";
 import { createWebMcpServer } from "./web-mcp";
+import {
+  registerSessionMcpServers,
+  unregisterSessionMcpServers,
+} from "./run-rpc";
 
 const g = globalThis as any;
 
@@ -183,64 +188,72 @@ export async function runGoal(goal: Goal): Promise<void> {
 
     let engineSessionId = goal.engineSessionId || "";
     let errorMsg = "";
-    for await (const event of runAgent({
-      prompt: buildGoalWakePrompt(goal, wake, cwd),
-      sessionId: goal.engineSessionId || undefined,
-      cwd,
-      mode: goal.mode,
-      model: goal.model,
-      mcpServers: goal.mcpServers ?? "all",
-      inProcessMcp: goalMcpServers(bksId, goal.id, createdBy),
-      confirmTools: STRIPE_CONFIRM_TOOLS,
-      aws: true,
-      author: gitIdentityFor(goal.name),
-      // A goal runs on behalf of its creator; gate per-user MCP servers to them.
-      user: createdBy,
-      fallbackModel:
-        goal.fallbackModel === "none"
-          ? undefined
-          : goal.fallbackModel || automaticFallbackModel(goal.model),
-      journal: { osSessionId: bksId, kind: "goal" },
-      // Headless: no onAskUser. Human gates go through opensession-humans ask_human
-      // (async) and hard blocks through opensession-goal-self mark_paused.
-    })) {
-      if (event.type === "init") {
-        engineSessionId = event.sessionId || engineSessionId;
-        if (event.provider) effectiveProvider = event.provider;
-        if (event.model) {
-          effectiveModel = event.model;
-          if (!selectedModel) selectedModel = event.model;
-        }
-        await persistSession(engineSessionId);
-        // A goal wake's transcript file is new each wake — attach anyone
-        // already viewing the goal session so the turn streams live.
-        if (engineSessionId) {
-          attachSessionWatchersToEngineTranscript(
-            bksId,
-            effectiveProvider,
-            cwd,
-            engineSessionId,
-          );
-        }
-      }
-      if (event.type === "model_switch") {
-        const to = event.toModel || "";
-        if (to) {
-          effectiveModel = to;
-          effectiveProvider = providerFor(to);
-          if (shouldPersistModelSwitch(event)) {
-            selectedModel = to;
-            const current = getGoal(goal.id) || goal;
-            saveGoal({ ...current, model: to });
+    const inProcessMcp = goalMcpServers(bksId, goal.id, createdBy);
+    registerSessionMcpServers(bksId, inProcessMcp);
+    try {
+      for await (const event of runAgentHosted({
+        osSessionId: bksId,
+        prompt: buildGoalWakePrompt(goal, wake, cwd),
+        sessionId: goal.engineSessionId || undefined,
+        cwd,
+        mode: goal.mode,
+        model: goal.model,
+        mcpServers: goal.mcpServers ?? "all",
+        proxyMcpServers: Object.keys(inProcessMcp),
+        fallbackInProcessMcp: () => inProcessMcp,
+        confirmTools: STRIPE_CONFIRM_TOOLS,
+        aws: true,
+        author: gitIdentityFor(goal.name),
+        // A goal runs on behalf of its creator; gate per-user MCP servers to them.
+        user: createdBy,
+        fallbackModel:
+          goal.fallbackModel === "none"
+            ? undefined
+            : goal.fallbackModel || automaticFallbackModel(goal.model),
+        journalKind: "goal",
+        // Headless: no onAskUser. Human gates go through opensession-humans ask_human
+        // (async) and hard blocks through opensession-goal-self mark_paused.
+      })) {
+        if (event.type === "init") {
+          engineSessionId = event.sessionId || engineSessionId;
+          if (event.provider) effectiveProvider = event.provider;
+          if (event.model) {
+            effectiveModel = event.model;
+            if (!selectedModel) selectedModel = event.model;
+          }
+          await persistSession(engineSessionId);
+          // A goal wake's transcript file is new each wake — attach anyone
+          // already viewing the goal session so the turn streams live.
+          if (engineSessionId) {
+            attachSessionWatchersToEngineTranscript(
+              bksId,
+              effectiveProvider,
+              cwd,
+              engineSessionId,
+            );
           }
         }
+        if (event.type === "model_switch") {
+          const to = event.toModel || "";
+          if (to) {
+            effectiveModel = to;
+            effectiveProvider = providerFor(to);
+            if (shouldPersistModelSwitch(event)) {
+              selectedModel = to;
+              const current = getGoal(goal.id) || goal;
+              saveGoal({ ...current, model: to });
+            }
+          }
+        }
+        if (event.type === "done") {
+          engineSessionId = event.sessionId || engineSessionId;
+          if (event.provider) effectiveProvider = event.provider;
+          if (event.model) effectiveModel = event.model;
+        }
+        if (event.type === "error") errorMsg = event.content || "Unknown error";
       }
-      if (event.type === "done") {
-        engineSessionId = event.sessionId || engineSessionId;
-        if (event.provider) effectiveProvider = event.provider;
-        if (event.model) effectiveModel = event.model;
-      }
-      if (event.type === "error") errorMsg = event.content || "Unknown error";
+    } finally {
+      unregisterSessionMcpServers(bksId);
     }
     await persistSession(engineSessionId);
 

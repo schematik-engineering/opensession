@@ -13,7 +13,9 @@ const provider = process.argv[2] || "grok";
 let nextRequestId = 10_000;
 const pending = new Map<number, (value: any) => void>();
 const promptRequests = new Map<string, number>();
+const searchScenarioBySession = new Map<string, string>();
 let authFixture = "";
+let newSessionRequests = 0;
 
 function authPath(): string {
   return join(
@@ -142,6 +144,75 @@ async function runPrompt(id: number, params: any): Promise<void> {
     return;
   }
   if (text === "hang") return;
+  if (
+    text === "search then tool" ||
+    text === "search forever" ||
+    text === "search no match"
+  )
+    searchScenarioBySession.set(sessionId, text);
+  const searchScenario = searchScenarioBySession.get(sessionId);
+  if (
+    searchScenario &&
+    (text === searchScenario ||
+      text.startsWith(
+        "Continue the same request now. Invoke a tool returned by search_tool",
+      ))
+  ) {
+    const shouldInvokeDiscoveredTool =
+      searchScenario === "search then tool" && text !== searchScenario;
+    const toolName = shouldInvokeDiscoveredTool
+      ? "opensession-todos__list_todos"
+      : "search_tool";
+    const toolCallId = shouldInvokeDiscoveredTool
+      ? "discovered-tool"
+      : `search-${nextRequestId}`;
+    update(sessionId, {
+      sessionUpdate: "tool_call",
+      toolCallId,
+      title: shouldInvokeDiscoveredTool ? "List todos" : "Find tools",
+      name: toolName,
+      kind: "other",
+      status: "pending",
+      rawInput: shouldInvokeDiscoveredTool ? {} : { query: "list todos" },
+    });
+    update(sessionId, {
+      sessionUpdate: "tool_call_update",
+      toolCallId,
+      status: "completed",
+      rawOutput: shouldInvokeDiscoveredTool
+        ? { todos: [], sessionSetups: newSessionRequests }
+        : {
+            type: "SearchTool",
+            result_count: searchScenario === "search no match" ? 0 : 1,
+            content: JSON.stringify({
+              results:
+                searchScenario === "search no match"
+                  ? []
+                  : [
+                      {
+                        server: "opensession-todos",
+                        tools: [{ tool_name: "opensession-todos__list_todos" }],
+                      },
+                    ],
+            }),
+          },
+    });
+    update(sessionId, {
+      sessionUpdate: "agent_message_chunk",
+      messageId: `search-continuation-${nextRequestId}`,
+      content: {
+        type: "text",
+        text: shouldInvokeDiscoveredTool
+          ? "finished via discovered tool"
+          : searchScenario === "search no match"
+            ? "No matching integration tool exists."
+            : "I found the tool and will call it.",
+      },
+    });
+    promptRequests.delete(sessionId);
+    result(id, { stopReason: "end_turn" });
+    return;
+  }
   if (text === "private plan approval") {
     const decision = await request("_x.ai/exit_plan_mode", {
       sessionId,
@@ -382,6 +453,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       result(id, {});
       break;
     case "session/new": {
+      newSessionRequests++;
       const sessionId = `${provider}-session-new`;
       persistSession(sessionId);
       result(id, {

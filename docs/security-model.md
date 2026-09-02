@@ -46,11 +46,12 @@ configuration for the run.
   replies go in an internal Plain note. Linear (including issue creation) and
   Sentry are internal, so their writes are allowed. That is the "spin off
   work" affordance.
-- Automations run on Pi in detached run hosts. `runAutomation` maps every
-  native or legacy Pi model id onto Pi at dispatch (`automationModel`;
-  unset uses `DEFAULT_PI_AUTOMATION_MODEL` in automations.ts). Deny-sets are
-  enforced before Pi registers MCP tools, and its guarded local tools keep
-  filesystem and environment access contained. `opensession-admin`, the
+- Automations run in detached run hosts. Native and legacy Pi model ids are
+  normalized by `automationModel`; an explicit ACP model such as Grok stays
+  on ACP and receives one server-selected subscription account. Both engines
+  receive the same scoped stdio MCP proxies and deny-sets before model-visible
+  tools are registered. Their guarded local tools keep filesystem and
+  environment access contained. `opensession-admin`, the
   unrestricted `opensession-sessions`, and per-user (`allowedUsers`) servers
   stay out of automation runs. The scoped automation-safe set is documented
   below. Both engine run gates are

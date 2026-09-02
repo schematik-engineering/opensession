@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { shouldDisengageTranscriptFollowing } from "./useSessionScroll";
 
 const source = await Bun.file(
   new URL("./useSessionScroll.ts", import.meta.url),
@@ -19,4 +20,35 @@ test("following readers stay synchronously pinned through large transcript growt
   );
   expect(source).not.toContain("startFollowGlide");
   expect(source).not.toContain("FOLLOW_GLIDE");
+});
+
+test("layout-driven scroll events cannot disengage opening follow", () => {
+  expect(
+    shouldDisengageTranscriptFollowing({
+      atEdge: false,
+      following: true,
+      gestured: false,
+    }),
+  ).toBe(false);
+  expect(
+    shouldDisengageTranscriptFollowing({
+      atEdge: false,
+      following: true,
+      gestured: true,
+    }),
+  ).toBe(true);
+  expect(
+    shouldDisengageTranscriptFollowing({
+      atEdge: true,
+      following: true,
+      gestured: true,
+    }),
+  ).toBe(false);
+  expect(
+    shouldDisengageTranscriptFollowing({
+      atEdge: false,
+      following: false,
+      gestured: true,
+    }),
+  ).toBe(false);
 });

@@ -25,12 +25,13 @@ import { useCurrentUser } from "./UserPicker";
 import { usePeople } from "../lib/people";
 import { UserAvatar } from "./UserAvatar";
 import { presenceState, StatusDot, useTeamPresence } from "./TeamPresence";
-import { EmptyState, ListSkeleton } from "../ui/state";
+import { EmptyState, InlineAlert, ListSkeleton } from "../ui/state";
 import { Button } from "../ui/button";
 import { Menu } from "../ui/menu";
 import { cn } from "../ui/cn";
 import { IconFeed, IconRepo, IconRobot } from "./icons";
 import { PEOPLE_SECTION_LABEL } from "../lib/people-classes";
+import { errorMessage } from "../lib/error-message";
 
 /**
  * What the team has been shipping.
@@ -122,8 +123,10 @@ export function Feed({
 
   const [recentPrs, setRecentPrs] = useState<RecentPr[]>([]);
   const [recentPrsLoading, setRecentPrsLoading] = useState(true);
+  const [recentPrsError, setRecentPrsError] = useState<string | null>(null);
   const [personPrs, setPersonPrs] = useState<RecentPr[]>([]);
   const [personPrsLoading, setPersonPrsLoading] = useState(false);
+  const [personPrsError, setPersonPrsError] = useState<string | null>(null);
 
   // Mark the request in flight before changing scope, rather than waiting for
   // the next effect, so the first filtered paint cannot make the same false
@@ -131,11 +134,13 @@ export function Feed({
   const pick = (next: Scope) => {
     setPersonPrs([]);
     setPersonPrsLoading(next.kind === "person");
+    setPersonPrsError(null);
     setScope(next);
   };
   // Repos that ship without pull requests — Open Session's own — say what
   // they shipped in commits instead, and land in the same list.
   const [commits, setCommits] = useState<RecentCommit[]>([]);
+  const [commitsError, setCommitsError] = useState<string | null>(null);
   // How far back the list currently reaches. "Show more" walks it out, and
   // the server answers with the window it could actually serve, so a step
   // that hits the end of the readable history stops offering another one.
@@ -147,9 +152,15 @@ export function Feed({
   const [widening, setWidening] = useState(true);
   useEffect(() => {
     let active = true;
+    setRecentPrsError(null);
     fetchRecentPrs(undefined, { days })
       .then((prs) => active && setRecentPrs(prs))
-      .catch(() => {})
+      .catch((cause: unknown) => {
+        if (active)
+          setRecentPrsError(
+            errorMessage(cause, "Could not load pull requests"),
+          );
+      })
       .finally(() => active && setRecentPrsLoading(false));
     return () => {
       active = false;
@@ -158,13 +169,17 @@ export function Feed({
   useEffect(() => {
     let active = true;
     setWidening(true);
+    setCommitsError(null);
     fetchRecentCommits(days)
       .then((page) => {
         if (!active) return;
         setCommits(page.commits);
         setHasOlder(page.hasMore);
       })
-      .catch(() => {})
+      .catch((cause: unknown) => {
+        if (active)
+          setCommitsError(errorMessage(cause, "Could not load commits"));
+      })
       .finally(() => active && setWidening(false));
     return () => {
       active = false;
@@ -183,9 +198,15 @@ export function Feed({
     let active = true;
     setPersonPrs([]);
     setPersonPrsLoading(true);
+    setPersonPrsError(null);
     fetchRecentPrs(scopedPerson)
       .then((prs) => active && setPersonPrs(prs))
-      .catch(() => {})
+      .catch((cause: unknown) => {
+        if (active)
+          setPersonPrsError(
+            errorMessage(cause, "Could not load this person's pull requests"),
+          );
+      })
       .finally(() => active && setPersonPrsLoading(false));
     return () => {
       active = false;
@@ -370,6 +391,30 @@ export function Feed({
               {repoOptions.length > 1 && renderRepoPicker("start")}
               {team.length > 0 && renderMemberPicker()}
             </div>
+          )}
+          {recentPrsError && (
+            <InlineAlert
+              className="mb-3"
+              onDismiss={() => setRecentPrsError(null)}
+            >
+              {recentPrsError}
+            </InlineAlert>
+          )}
+          {commitsError && (
+            <InlineAlert
+              className="mb-3"
+              onDismiss={() => setCommitsError(null)}
+            >
+              {commitsError}
+            </InlineAlert>
+          )}
+          {personPrsError && (
+            <InlineAlert
+              className="mb-3"
+              onDismiss={() => setPersonPrsError(null)}
+            >
+              {personPrsError}
+            </InlineAlert>
           )}
           {feedLoading ? (
             <>

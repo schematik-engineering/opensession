@@ -83,6 +83,7 @@ forward command-line build arguments; to override a Dockerfile `ARG`, invoke
 docker build -f deploy/sandbox/Dockerfile \
   --build-arg BUN_VERSION=1.4.0 \
   --build-arg CLAUDE_VERSION=2.1.218 \
+  --build-arg GROK_VERSION=1.0.16 \
   --build-arg NODE_MAJOR=24 \
   -t opensession-runner:latest .
 ```
@@ -91,6 +92,7 @@ docker build -f deploy/sandbox/Dockerfile \
 | ---------------- | ------- | ----------------------- |
 | `BUN_VERSION`    | 1.4.0   | host `bun --version`    |
 | `CLAUDE_VERSION` | 2.1.218 | host `claude --version` |
+| `GROK_VERSION`   | 1.0.16  | host `grok --version`   |
 | `NODE_MAJOR`     | 24      | host Node major         |
 
 There is no `PI_VERSION` build argument; Pi is installed from `bun.lock`.
@@ -380,8 +382,10 @@ clone token, keep it mode `0600`.
   // Remote runner bootstrap. All sandboxable model families run the full
   // runner inside the Sandbox; native Codex is rejected before creation:
   "runnerBundleUrl": null, // tarball of the runner bundle (preferred)
-  "runnerRepoUrl": null, // git URL fallback (default: this checkout's origin)
-  "runnerSha": null, // pinned ref (default: origin default branch)
+  "runnerRepoUrl": null, // git URL fallback (default: this checkout's origin, or
+  // https://github.com/tellahq/opensession.git for a release install)
+  "runnerSha": null, // pinned ref (default: origin default branch, or the
+  // installed release's tag for a release install)
 }
 ```
 

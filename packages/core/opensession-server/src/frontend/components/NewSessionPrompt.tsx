@@ -1,6 +1,6 @@
 import React, {
-  useCallback,
   useEffect,
+  useEffectEvent,
   useImperativeHandle,
   useLayoutEffect,
   useRef,
@@ -13,14 +13,10 @@ import {
 } from "../lib/api";
 import { saveDraft, NEW_SESSION_DRAFT_KEY as DRAFT_KEY } from "../lib/drafts";
 import { appendDictation } from "../lib/dictation";
-import { attachingLabel, type StagingCount } from "../lib/attachments";
-import { imageFilesFromPaste, type FileAttachment } from "../lib/images";
+import { attachingLabel } from "../lib/attachments";
+import { imageFilesFromPaste } from "../lib/images";
 import { insertPastedSessionId } from "../lib/session-url";
-import {
-  insideOpenFence,
-  isSendCombo,
-  type SendKeyPref,
-} from "../lib/send-key";
+import { insideOpenFence, isSendCombo } from "../lib/send-key";
 import {
   COMPOSER_HIGHLIGHT_MAX_CHARS,
   composerHighlightHtml,
@@ -39,10 +35,16 @@ import { noAutofill } from "../lib/composer-autofill";
 import { useSessionNameProjection } from "../hooks/useSessionNameProjection";
 import { useFileMentions } from "./useFileMentions";
 import { ImageThumbs } from "./ImageThumbs";
-import type { ImageRegionAnnotation } from "./MediaLightbox";
+import type { ImageRegionAnnotation } from "../lib/media-lightbox";
 import { FileChips } from "./FileChips";
 import { cn } from "../ui/cn";
 import { getCurrentUser } from "./UserPicker";
+import type {
+  NewSessionPromptActions,
+  NewSessionPromptConfig,
+  NewSessionPromptRefs,
+} from "../lib/new-session-prompt-types";
+import { promptScrollEdges } from "../lib/prompt-scroll";
 
 /** One scroll surface for the prompt and its attachments. Keeping the image in
  *  this flow means it travels with the text instead of pinning over it.
@@ -68,62 +70,6 @@ const SETTLE_MS = 700;
  *  one write instead of one per character. */
 const DRAFT_MS = 300;
 
-export interface NewSessionPromptHandle {
-  /** Replace the draft — the reset after a create. */
-  setText: (next: string) => void;
-  /** Add dictated text to the end of the draft. */
-  appendText: (add: string) => void;
-  /** Throw away a pending draft write. The create paths clear the stored
-   *  draft once the prompt has been consumed, and a debounced write landing
-   *  after that would put the whole thing straight back. */
-  dropPendingDraftWrite: () => void;
-}
-
-interface Props {
-  /** Read once, at mount: the prefill, the deep link, or the restored draft. */
-  initialText: string;
-  /** The field itself. The palette focuses it and hands it to the dialog as
-   *  its initial focus, so the ref is created there and passed down. */
-  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
-  /** The draft, written on every commit. This is what a create reads: the
-   *  palette does not hold the text, so that typing cannot re-render it. */
-  valueRef: React.RefObject<string>;
-  /** Dictation and the post-create reset, which are the palette's to trigger
-   *  and this field's to carry out. */
-  handle: React.RefObject<NewSessionPromptHandle | null>;
-  /** Which repo "@" searches for files in. */
-  repo: string;
-  /** A non-empty selection narrows which connected tools "@" offers. */
-  mcpServers?: string[];
-  placeholder: string;
-  disabled: boolean;
-  images: string[];
-  files: FileAttachment[];
-  /** What is still being written to disk. A pasted screenshot is not attached
-   *  until its upload lands, and during a slow load that is seconds of a card
-   *  that looks like it ignored the paste, so each one holds its place in the
-   *  attachment row as a ghost. */
-  staging: StagingCount;
-  onRemoveImage: (index: number) => void;
-  onRemoveFile: (index: number) => void;
-  onRemovePendingImage?: (index: number) => void;
-  onRemovePendingFile?: (index: number) => void;
-  onAddAttachments: (picked: FileList | File[]) => void;
-  sendKey: SendKeyPref;
-  /** Whether the send key has anything to create, so it can decline the key
-   *  and let the newline land instead. */
-  canCreate: boolean;
-  onCreate: () => void;
-  /** The draft went from empty to holding something, or back. The one thing
-   *  about the text the palette needs on every edit. */
-  onHasTextChange: (hasText: boolean) => void;
-  /** The draft, once it has held still: the branch name is suggested from it.
-   *  One report per typing burst, never per character. */
-  onDraftSettled: (text: string) => void;
-  onEdgesChange: (edges: { top: boolean; bottom: boolean }) => void;
-  onMentionOpenChange: (open: boolean) => void;
-}
-
 /**
  * The new-session palette's prompt: the field, its session-reference mirror,
  * the "@" and "/" pickers, and the attachments that scroll with it.
@@ -138,40 +84,48 @@ interface Props {
  * create is submitted, which it reads from `valueRef`.
  */
 export function NewSessionPrompt({
-  initialText,
-  textareaRef,
-  valueRef,
-  handle,
-  repo,
-  mcpServers,
-  placeholder,
-  disabled,
-  images,
-  files,
-  staging,
-  onRemoveImage,
-  onRemoveFile,
-  onRemovePendingImage,
-  onRemovePendingFile,
-  onAddAttachments,
-  sendKey,
-  canCreate,
-  onCreate,
-  onHasTextChange,
-  onDraftSettled,
-  onEdgesChange,
-  onMentionOpenChange,
-}: Props) {
+  config,
+  refs,
+  actions,
+}: {
+  config: NewSessionPromptConfig;
+  refs: NewSessionPromptRefs;
+  actions: NewSessionPromptActions;
+}) {
+  const {
+    initialText,
+    repo,
+    mcpServers,
+    placeholder,
+    disabled,
+    images,
+    files,
+    staging,
+    sendKey,
+    canCreate,
+  } = config;
+  const { textarea: textareaRef, value: valueRef, handle } = refs;
+  const {
+    removeImage: onRemoveImage,
+    removeFile: onRemoveFile,
+    removePendingImage: onRemovePendingImage,
+    removePendingFile: onRemovePendingFile,
+    addAttachments: onAddAttachments,
+    create: onCreate,
+    changeHasText: onHasTextChange,
+    settleDraft: onDraftSettled,
+    changeEdges: onEdgesChange,
+    changeMentionOpen: onMentionOpenChange,
+  } = actions;
   const [text, setText] = useState(initialText);
-  // The palette re-renders far less often than this field does now, so its
-  // callbacks are held rather than depended on: a repo switch mid-sentence
-  // would otherwise restart the settle timer.
-  const callbacks = useRef({
-    onHasTextChange,
-    onDraftSettled,
-    onEdgesChange,
-    onMentionOpenChange,
-  });
+  // The palette re-renders far less often than this field does now, so Effect
+  // Events read the latest callbacks without making the reporting effects
+  // reactive to them. A repo switch mid-sentence must not restart the settle
+  // timer, and a parent callback change must not rebuild the body observer.
+  const reportHasText = useEffectEvent(onHasTextChange);
+  const reportSettledDraft = useEffectEvent(onDraftSettled);
+  const reportEdges = useEffectEvent(onEdgesChange);
+  const reportMentionOpen = useEffectEvent(onMentionOpenChange);
 
   // The draft store, so a dismissed palette can restore the work. Written on a
   // debounce rather than per character, and flushed by every way out of the
@@ -190,30 +144,11 @@ export function NewSessionPrompt({
   // outside this field. Speculative concurrent renders never leak into refs.
   useLayoutEffect(() => {
     valueRef.current = text;
-    callbacks.current = {
-      onHasTextChange,
-      onDraftSettled,
-      onEdgesChange,
-      onMentionOpenChange,
-    };
     draft.current = { text };
   });
   // Non-null exactly while the store is behind the field, which is what makes
   // "nothing pending" a safe reason for a flush to do nothing.
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Stable identity: only refs and the module-level draft store are touched.
-  const writeDraftNow = useCallback(() => {
-    if (draftTimer.current == null) return;
-    clearTimeout(draftTimer.current);
-    draftTimer.current = null;
-    saveDraft(DRAFT_KEY, draft.current);
-  }, []);
-  const dropPendingDraftWrite = useCallback(() => {
-    if (draftTimer.current == null) return;
-    clearTimeout(draftTimer.current);
-    draftTimer.current = null;
-  }, []);
-
   useEffect(() => {
     if (draftTimer.current != null) clearTimeout(draftTimer.current);
     draftTimer.current = setTimeout(() => {
@@ -232,6 +167,12 @@ export function NewSessionPrompt({
   // page hidden before they fire pagehide, so writing there puts the text in
   // the map in time. pagehide stays as the backstop for the memory copy.
   useEffect(() => {
+    const writeDraftNow = () => {
+      if (draftTimer.current == null) return;
+      clearTimeout(draftTimer.current);
+      draftTimer.current = null;
+      saveDraft(DRAFT_KEY, draft.current);
+    };
     const onHidden = () => {
       if (document.visibilityState === "hidden") writeDraftNow();
     };
@@ -242,7 +183,7 @@ export function NewSessionPrompt({
       document.removeEventListener("visibilitychange", onHidden);
       writeDraftNow();
     };
-  }, [writeDraftNow]);
+  }, []);
 
   useImperativeHandle(
     handle,
@@ -250,9 +191,13 @@ export function NewSessionPrompt({
       setText: (next: string) => setText(next),
       appendText: (add: string) =>
         setText((prev) => appendDictation(prev, add)),
-      dropPendingDraftWrite,
+      dropPendingDraftWrite: () => {
+        if (draftTimer.current == null) return;
+        clearTimeout(draftTimer.current);
+        draftTimer.current = null;
+      },
     }),
-    [dropPendingDraftWrite],
+    [],
   );
 
   // A pasted session link is stored as its id and shown as that session's
@@ -301,19 +246,16 @@ export function NewSessionPrompt({
   // ever asks whether there is anything to create.
   const hasText = /\S/.test(text);
   useLayoutEffect(() => {
-    callbacks.current.onHasTextChange(hasText);
+    reportHasText(hasText);
   }, [hasText]);
 
   useEffect(() => {
-    const timer = setTimeout(
-      () => callbacks.current.onDraftSettled(text),
-      SETTLE_MS,
-    );
+    const timer = setTimeout(() => reportSettledDraft(text), SETTLE_MS);
     return () => clearTimeout(timer);
   }, [text]);
 
   useEffect(() => {
-    callbacks.current.onMentionOpenChange(mentions.open);
+    reportMentionOpen(mentions.open);
   }, [mentions.open]);
 
   const imageComments = parseImageAttachmentComments(text);
@@ -358,15 +300,6 @@ export function NewSessionPrompt({
   // The prompt grows naturally; once the palette reaches its viewport cap the
   // BODY becomes the single scroller, carrying attachments with the text. Each
   // edge's hairline marks content continuing beyond the visible area.
-  function updatePromptFade(el: HTMLDivElement) {
-    // Each hairline earns its place only while content sits beyond that edge:
-    // a short prompt that fits gets a clean, undivided card.
-    const hidden = el.scrollHeight - el.clientHeight;
-    callbacks.current.onEdgesChange({
-      top: el.scrollTop > 1,
-      bottom: hidden > 1 && hidden - el.scrollTop > 1,
-    });
-  }
 
   // Both effects below key on the scroller NODE rather than on a render pass.
   // Base UI mounts the popup's children in a later commit than the one that
@@ -384,7 +317,7 @@ export function NewSessionPrompt({
     if (!textarea || !promptBody) return;
     textarea.style.height = "0px";
     textarea.style.height = `${textarea.scrollHeight}px`;
-    updatePromptFade(promptBody);
+    reportEdges(promptScrollEdges(promptBody));
   }, [
     promptBody,
     sessionNames.displayText,
@@ -395,7 +328,9 @@ export function NewSessionPrompt({
 
   useEffect(() => {
     if (!promptBody) return;
-    const observer = new ResizeObserver(() => updatePromptFade(promptBody));
+    const observer = new ResizeObserver(() =>
+      reportEdges(promptScrollEdges(promptBody)),
+    );
     observer.observe(promptBody);
     return () => observer.disconnect();
   }, [promptBody]);
@@ -421,7 +356,7 @@ export function NewSessionPrompt({
         }
       }}
       onDragOver={(e) => e.preventDefault()}
-      onScroll={(e) => updatePromptFade(e.currentTarget)}
+      onScroll={(e) => onEdgesChange(promptScrollEdges(e.currentTarget))}
       ref={attachPromptBody}
     >
       {mentions.popup}
