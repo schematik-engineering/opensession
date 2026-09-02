@@ -1,4 +1,3 @@
-import { unlinkSync } from "fs";
 import type { RunHostSpec } from "../../runner-host/protocol";
 import { githubServiceCredentialEnv } from "../github-app";
 import { githubAuthEnv } from "../github-auth";
@@ -36,20 +35,20 @@ export async function sandboxGithubAuth(
   return githubRepo ? githubServiceCredentialEnv(githubRepo) : {};
 }
 
-/** Write only this run's token beside its private host spec. runner-host removes
- * the file on every exit path after importing it into the child environment. */
+/** Write this run's selected authority beside its private host spec. An empty
+ * file is deliberate: it tells the runner to ignore ambient gh configuration.
+ * runner-host removes the file on every exit path. */
 export function writeSandboxGithubAuth(
   runDir: string,
   auth: Readonly<Record<string, string>>,
-): string | null {
+): string {
   const path = `${runDir}/github-auth.json`;
   const token = auth.GH_TOKEN || auth.GITHUB_TOKEN;
-  if (!token) {
-    try {
-      unlinkSync(path);
-    } catch {}
-    return null;
-  }
-  writeJsonAtomic(path, { GH_TOKEN: token, GITHUB_TOKEN: token }, false, 0o600);
+  writeJsonAtomic(
+    path,
+    token ? { GH_TOKEN: token, GITHUB_TOKEN: token } : {},
+    false,
+    0o600,
+  );
   return path;
 }

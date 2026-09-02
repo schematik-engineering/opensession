@@ -23,6 +23,7 @@ import {
   githubUserAuthSettings,
   githubUserLoginForRun,
   pollGithubDeviceFlow,
+  projectedGithubRunEnv,
   refreshExpiringGithubTokens,
   removeGithubAccount,
   resolveGithubCredential,
@@ -240,6 +241,19 @@ describe("token lookups + runner env", () => {
     expect(JSON.stringify(githubRunEnv("Alice"))).not.toContain(
       "must-not-be-read",
     );
+  });
+
+  test("projected runs ignore ambient gh config without a selected token", () => {
+    const projected = join(dir, "run-github-auth.json");
+    writeFileSync(projected, "{}");
+    process.env[GITHUB_RUN_AUTH_FILE_ENV] = projected;
+
+    expect(projectedGithubRunEnv()).toMatchObject({
+      GH_TOKEN: "",
+      GITHUB_TOKEN: "",
+      GH_CONFIG_DIR: join(dir, "github-cli"),
+      GIT_TERMINAL_PROMPT: "0",
+    });
   });
 
   test("connectedGithubAccounts never exposes tokens", () => {

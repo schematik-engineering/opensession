@@ -1971,12 +1971,8 @@ function makeRemoteLauncher(
           : registeredRepo?.ghRepo,
       );
       const githubAuthPath = `${dir}/github-auth.json`;
-      if (githubAuth.GH_TOKEN) {
-        await driver.writeFile(githubAuthPath, JSON.stringify(githubAuth));
-        secureFiles.push(githubAuthPath);
-      } else {
-        await driver.exec(`rm -f ${shellQuoteWord(githubAuthPath)}`);
-      }
+      await driver.writeFile(githubAuthPath, JSON.stringify(githubAuth));
+      secureFiles.push(githubAuthPath);
       // Pi policy + provider config, projected at the sandbox boundary.
       // The source CAN contain third-party API keys under providers.*.apiKey;
       // never copy it wholesale. Anthropic/OpenAI/Pi launches receive only the
@@ -2160,9 +2156,7 @@ function makeRemoteLauncher(
           OPENSESSION_RUN_WS_URL: `${base}/run-ws/${hostId}`,
           OPENSESSION_RUN_WS_TOKEN: spec.wsToken,
           OPENSESSION_RPC_WS_URL: `${base}/rpc-ws`,
-          ...(githubAuth.GH_TOKEN
-            ? { [GITHUB_RUN_AUTH_FILE_ENV]: githubAuthPath }
-            : {}),
+          [GITHUB_RUN_AUTH_FILE_ENV]: githubAuthPath,
           ...createWorkloadIdentityEnv({
             sandboxId,
             provider,

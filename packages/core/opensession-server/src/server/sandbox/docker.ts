@@ -1269,9 +1269,7 @@ function makeDockerLauncher(
         ...(projectedAcpAccountId
           ? env(`OPENSESSION_ACP_ACCOUNT_ID=${projectedAcpAccountId}`)
           : []),
-        ...(projectedGithubPath
-          ? env(`${GITHUB_RUN_AUTH_FILE_ENV}=${projectedGithubPath}`)
-          : []),
+        ...env(`${GITHUB_RUN_AUTH_FILE_ENV}=${projectedGithubPath}`),
         ...wsEnv,
         container,
         "sh",
@@ -1281,10 +1279,7 @@ function makeDockerLauncher(
       onDispatching?.();
       const r = await docker(args);
       if (r.exitCode !== 0) {
-        for (const path of [
-          ...projectedAcpPaths,
-          ...(projectedGithubPath ? [projectedGithubPath] : []),
-        ]) {
+        for (const path of [...projectedAcpPaths, projectedGithubPath]) {
           try {
             unlinkSync(path);
           } catch {}
