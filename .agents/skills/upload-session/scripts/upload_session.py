@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Upload the current Claude Code or Codex conversation to Open Session."""
+"""Upload the current Claude Code, Codex, or Paseo conversation to Open Session."""
 
 from __future__ import annotations
 
@@ -15,6 +15,8 @@ import time
 import urllib.error
 import urllib.request
 import webbrowser
+
+from paseo_client import PaseoClient, PaseoError, paseo_export, resolve_paseo_endpoint
 
 DEFAULT_SERVER = "http://127.0.0.1:3850"
 MAX_REQUEST_BYTES = 64 * 1024 * 1024
@@ -250,8 +252,7 @@ def detect_transcript(
             return "claude-code", exact_path
         candidates.extend(("claude-code", path) for path in same_cwd_claude)
         candidates.extend(
-            ("claude-code", path)
-            for path in recent_claude_candidates(cwds)
+            ("claude-code", path) for path in recent_claude_candidates(cwds)
         )
     if provider in ("auto", "codex"):
         candidates.extend(("codex", path) for path in codex_candidates(cwds))
@@ -263,6 +264,12 @@ def detect_transcript(
     return max(candidates, key=lambda item: item[1].stat().st_mtime)
 
 
+def validate_source_session_id(value: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}", value):
+        raise UploadError("Could not derive a valid source session id")
+    return value
+
+
 def source_session_id(provider: str, path: Path, explicit: str | None) -> str:
     if explicit:
         value = explicit
@@ -271,9 +278,20 @@ def source_session_id(provider: str, path: Path, explicit: str | None) -> str:
         value = match.group(1) if match else path.stem
     else:
         value = path.stem
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}", value):
-        raise UploadError("Could not derive a valid source session id")
-    return value
+    return validate_source_session_id(value)
+
+
+def has_transcript_override(args: argparse.Namespace) -> bool:
+    if args.transcript:
+        return True
+    return any(
+        os.environ.get(name)
+        for name in (
+            "OPENSESSION_TRANSCRIPT_PATH",
+            "CLAUDE_TRANSCRIPT_PATH",
+            "CODEX_TRANSCRIPT_PATH",
+        )
+    )
 
 
 def request_json(
@@ -371,18 +389,31 @@ def upload(payload: dict, server: str, token: str | None) -> tuple[dict, str | N
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Upload the current Claude Code or Codex transcript to Open Session"
+        description="Upload the current Claude Code, Codex, or Paseo transcript to Open Session"
     )
-    parser.add_argument("--provider", choices=("auto", "claude", "claude-code", "codex"), default="auto")
+    parser.add_argument(
+        "--provider",
+        choices=("auto", "claude", "claude-code", "codex", "paseo"),
+        default="auto",
+    )
     parser.add_argument("--transcript", help="Exact transcript JSONL path")
     parser.add_argument("--source-session-id", help="Override the source session id")
+    parser.add_argument("--paseo-agent-id", help="Exact Paseo agent id, prefix, or title")
+    parser.add_argument("--paseo-host", help="Direct Paseo daemon host or WebSocket URL")
+    parser.add_argument("--paseo-password", help="Password for the Paseo daemon")
     parser.add_argument("--server", help="Open Session base URL")
     parser.add_argument("--token", help="Open Session bearer token")
     parser.add_argument("--repo", help="Exact registered Open Session repository id")
     parser.add_argument("--title", help="Override the imported session title")
     parser.add_argument("--user", help="Attribution name for a server without sign-in")
-    parser.add_argument("--no-open", action="store_true", help="Print the link without opening a browser")
-    parser.add_argument("--dry-run", action="store_true", help="Show the selected transcript and git metadata only")
+    parser.add_argument(
+        "--no-open", action="store_true", help="Print the link without opening a browser"
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show the selected session and git metadata only",
+    )
     return parser.parse_args()
 
 
@@ -398,25 +429,58 @@ def main() -> int:
     )
     server_config = config.get("servers", {}).get(server, {})
     token = args.token or os.environ.get("OPENSESSION_TOKEN") or server_config.get("token")
-    cwd = Path.cwd().resolve()
-    detected_provider, transcript_path = detect_transcript(
-        cwd, provider, args.transcript
+    invocation_cwd = Path.cwd().resolve()
+    paseo_agent = args.paseo_agent_id or os.environ.get("PASEO_AGENT_ID")
+    use_live_paseo = not has_transcript_override(args) and bool(
+        provider == "paseo"
+        or args.paseo_agent_id
+        or (provider == "auto" and paseo_agent)
     )
-    session_id = source_session_id(
-        detected_provider, transcript_path, args.source_session_id
-    )
-    _, branch, remote = git_context(cwd)
+    if args.paseo_agent_id and provider not in ("auto", "paseo"):
+        raise UploadError("--paseo-agent-id requires --provider paseo or auto")
 
-    print(f"Transcript: {transcript_path}")
+    if use_live_paseo:
+        if not paseo_agent:
+            raise UploadError(
+                "No current Paseo agent. Pass --paseo-agent-id or run this from a Paseo session."
+            )
+        if args.source_session_id:
+            raise UploadError("A Paseo import always uses the Paseo agent id as its source id")
+        endpoint, paseo_password = resolve_paseo_endpoint(
+            args.paseo_host, args.paseo_password
+        )
+        with PaseoClient(endpoint, paseo_password) as client:
+            exported = paseo_export(client, paseo_agent, not args.dry_run)
+        source_cwd = Path(exported["cwd"]).expanduser()
+        _, git_branch, git_remote = git_context(source_cwd)
+        branch = exported["branch"] or git_branch
+        remote = exported["repository"] or git_remote
+        detected_provider = "paseo"
+        session_id = validate_source_session_id(exported["agentId"])
+        transcript = exported["transcript"]
+        title = args.title or exported["title"][:240]
+        print(f"Paseo agent: {session_id}")
+        print(f"Paseo provider: {exported['provider']}")
+    else:
+        detected_provider, transcript_path = detect_transcript(
+            invocation_cwd, provider, args.transcript
+        )
+        session_id = source_session_id(
+            detected_provider, transcript_path, args.source_session_id
+        )
+        _, branch, remote = git_context(invocation_cwd)
+        title = args.title
+        print(f"Transcript: {transcript_path}")
+        try:
+            transcript = transcript_path.read_text(encoding="utf-8", errors="replace")
+        except OSError as error:
+            raise UploadError(f"Could not read transcript: {error}") from error
+
     print(f"Provider: {detected_provider}")
     print(f"Branch: {branch or '(none)'}")
     if args.dry_run:
         return 0
 
-    try:
-        transcript = transcript_path.read_text(encoding="utf-8", errors="replace")
-    except OSError as error:
-        raise UploadError(f"Could not read transcript: {error}") from error
     payload = {
         "provider": detected_provider,
         "sourceSessionId": session_id,
@@ -424,7 +488,7 @@ def main() -> int:
         "branch": branch,
         "repository": remote,
         **({"repo": args.repo} if args.repo else {}),
-        **({"title": args.title} if args.title else {}),
+        **({"title": title} if title else {}),
         **({"user": args.user} if args.user else {}),
     }
     result, signed_in_token = upload(payload, server, token)
@@ -452,6 +516,6 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except UploadError as error:
+    except (UploadError, PaseoError) as error:
         print(f"upload-session: {error}", file=sys.stderr)
         raise SystemExit(1)
