@@ -235,11 +235,25 @@ describe("token lookups + runner env", () => {
     expect(githubRunEnv("Alice")).toMatchObject({
       GH_TOKEN: "ghu_remote123",
       GITHUB_TOKEN: "ghu_remote123",
+      GH_CONFIG_DIR: join(dir, "github-cli"),
       GIT_CONFIG_VALUE_2: "git@github.com:",
     });
     expect(JSON.stringify(githubRunEnv("Alice"))).not.toContain(
       "must-not-be-read",
     );
+  });
+
+  test("projected runs ignore ambient gh config without a selected token", () => {
+    const projected = join(dir, "run-github-auth.json");
+    writeFileSync(projected, "{}");
+    process.env[GITHUB_RUN_AUTH_FILE_ENV] = projected;
+
+    expect(githubRunEnv("Alice")).toMatchObject({
+      GH_TOKEN: "",
+      GITHUB_TOKEN: "",
+      GH_CONFIG_DIR: join(dir, "github-cli"),
+      GIT_TERMINAL_PROMPT: "0",
+    });
   });
 
   test("connectedGithubAccounts never exposes tokens", () => {

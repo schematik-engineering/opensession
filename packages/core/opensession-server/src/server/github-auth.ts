@@ -47,6 +47,7 @@
 import { stateDir } from "./paths";
 import { isDevInstance } from "./dev-mode";
 import { chmodSync, readFileSync, statSync } from "fs";
+import { dirname } from "path";
 import { audit } from "./audit";
 import { configuredIdentity, getConfig } from "./config";
 import { writeJsonAtomic } from "./shared/atomic-write";
@@ -893,17 +894,17 @@ function githubProcessEnv(
 /** Consume only the private run-scoped file projected by a remote launcher.
  * Unlike githubRunEnv(), this can never consult a connected human account. */
 export function projectedGithubRunEnv(): Record<string, string> {
-  return githubProcessEnv(projectedGithubAuthEnv());
+  const env = githubProcessEnv(projectedGithubAuthEnv());
+  const path = process.env[GITHUB_RUN_AUTH_FILE_ENV];
+  return path ? { ...env, GH_CONFIG_DIR: `${dirname(path)}/github-cli` } : env;
 }
 
 /** GitHub environment for one interactive run. Besides the API variables, set
  * a process-local Git credential helper so HTTPS remotes can push without
  * persisting the short-lived user token in .git/config or ~/.config/gh. */
 export function githubRunEnv(user?: string | null): Record<string, string> {
-  const auth = githubAuthEnv(user);
-  return githubProcessEnv(
-    Object.keys(auth).length ? auth : projectedGithubAuthEnv(),
-  );
+  if (process.env[GITHUB_RUN_AUTH_FILE_ENV]) return projectedGithubRunEnv();
+  return githubProcessEnv(githubAuthEnv(user));
 }
 
 export interface GithubCredential {

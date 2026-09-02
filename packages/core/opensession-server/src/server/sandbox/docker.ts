@@ -44,10 +44,10 @@
  *    retries until then.
  *  - ~/.ssh, ~/.gitconfig, ~/.config/gh, mcp-config.json and
  *    ~/.opensession-claude-accounts.json are mounted read-only for git/gh/PR
- *    parity and in-container account-pool selection. Interactive sessions
- *    only — the same ambient trust those runs already have on the host today.
- *    Automations are NOT sandboxed in Phase 1 (the wiring refuses them), so
- *    none of this is reachable from untrusted prompt text.
+ *    parity and in-container account-pool selection. Each run also receives
+ *    only its selected GitHub token through a private file beside the host
+ *    spec. Personal tokens stay interactive-only; approved unattended
+ *    publication paths receive a repository-scoped App token.
  *  - ~/.opensession-audit is mounted rw so in-container runs land in the same
  *    audit log stream as host runs (appendFileSync, O_APPEND).
  *
@@ -167,6 +167,8 @@ import { redactUrl } from "../shared/redact";
 import { createWorkloadIdentityEnv } from "../workload-identity";
 import { loadWorkspaceSeedFiles } from "../workspace-seed-files";
 import { projectAcpRunCredentials } from "../acp-projection";
+import { GITHUB_RUN_AUTH_FILE_ENV } from "../github-auth";
+import { sandboxGithubAuth, writeSandboxGithubAuth } from "./github-projection";
 import {
   REPOS,
   getRepo,
@@ -1219,6 +1221,15 @@ function makeDockerLauncher(
       const projectedAcpPaths = projection.paths;
       const projectedAcpAccountId =
         projection.kind === "ready" ? projection.accountId : undefined;
+      const state = readState(container);
+      const registeredRepo = state?.repoId ? getRepo(state.repoId) : undefined;
+      const githubAuth = await sandboxGithubAuth(
+        spec,
+        registeredRepo?.host === "codestorage"
+          ? undefined
+          : registeredRepo?.ghRepo,
+      );
+      const projectedGithubPath = writeSandboxGithubAuth(dir, githubAuth);
       const workloadIdentityEnv = createWorkloadIdentityEnv({
         sandboxId: container,
         provider: "docker",
@@ -1258,6 +1269,7 @@ function makeDockerLauncher(
         ...(projectedAcpAccountId
           ? env(`OPENSESSION_ACP_ACCOUNT_ID=${projectedAcpAccountId}`)
           : []),
+        ...env(`${GITHUB_RUN_AUTH_FILE_ENV}=${projectedGithubPath}`),
         ...wsEnv,
         container,
         "sh",
@@ -1267,7 +1279,7 @@ function makeDockerLauncher(
       onDispatching?.();
       const r = await docker(args);
       if (r.exitCode !== 0) {
-        for (const path of projectedAcpPaths) {
+        for (const path of [...projectedAcpPaths, projectedGithubPath]) {
           try {
             unlinkSync(path);
           } catch {}
