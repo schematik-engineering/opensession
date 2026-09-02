@@ -98,7 +98,8 @@ import {
   toPiModel,
 } from "../../models";
 import { filterMcpServers } from "../../runner-shared";
-import { GITHUB_RUN_AUTH_FILE_ENV, githubAuthEnv } from "../../github-auth";
+import { GITHUB_RUN_AUTH_FILE_ENV } from "../../github-auth";
+import { sandboxGithubAuth } from "../github-projection";
 import {
   appendTranscriptEntries,
   recordEngineSessionOwner,
@@ -1956,34 +1957,19 @@ function makeRemoteLauncher(
       ]);
       secureFiles.push(claudeAccountsPath, REMOTE_MCP_CONFIG);
 
-      // GitHub credentials are projected through a private, run-scoped file,
-      // never spec.json, argv, or the persisted origin. Interactive runs prefer
-      // their user's token. GitHub code automations and user-less interactive
-      // runs receive a freshly resolved service credential for this one repo;
-      // every other automation stays credential-free.
-      let githubAuth = automationProfile
-        ? {}
-        : githubAuthEnv(spec.user || spec.author?.name);
-      const githubCodeAutomation =
-        automationProfile &&
-        spec.mode === "code" &&
-        (spec.journalKind || "").startsWith("github-");
-      if (
-        !githubAuth.GH_TOKEN &&
-        (!automationProfile || githubCodeAutomation)
-      ) {
-        // The sandbox origin is mutable by repository setup code. Bind service
-        // authority only to the server-owned repo id recorded at ensure time.
-        const repoId = readRemoteState(provider, sandboxId)?.repoId;
-        const registeredRepo = repoId
-          ? (await import("../../worktree")).getRepo(repoId)
-          : undefined;
-        if (registeredRepo?.host !== "codestorage" && registeredRepo?.ghRepo) {
-          const { githubServiceCredentialEnv } =
-            await import("../../github-app");
-          githubAuth = await githubServiceCredentialEnv(registeredRepo.ghRepo);
-        }
-      }
+      // The sandbox origin is mutable by repository setup code. Resolve
+      // service authority only from the server-owned repo id recorded at ensure
+      // time, then project it through a private run-scoped file.
+      const repoId = readRemoteState(provider, sandboxId)?.repoId;
+      const registeredRepo = repoId
+        ? (await import("../../worktree")).getRepo(repoId)
+        : undefined;
+      const githubAuth = await sandboxGithubAuth(
+        spec,
+        registeredRepo?.host === "codestorage"
+          ? undefined
+          : registeredRepo?.ghRepo,
+      );
       const githubAuthPath = `${dir}/github-auth.json`;
       if (githubAuth.GH_TOKEN) {
         await driver.writeFile(githubAuthPath, JSON.stringify(githubAuth));

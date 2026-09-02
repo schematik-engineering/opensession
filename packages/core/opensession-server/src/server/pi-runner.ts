@@ -74,6 +74,7 @@ import {
 } from "./openai-auth";
 import {
   INTERACTIVE_KINDS,
+  isGithubServiceCredentialRun,
   isUnattendedKind,
   baseJournalKind,
   runToolPolicy,
@@ -150,9 +151,10 @@ const g = globalThis as any;
 const PROVIDER = "pi" as const;
 export const PI_MODEL_PREFIX = "pi/";
 
-/** Fresh authority for an unattended GitHub code run. Host recovery resolves
- * the selected service credential from the registered cwd; remote runners can
- * consume only the private run-scoped file projected by their launcher. */
+/** Fresh authority for an approved unattended GitHub publication run. Host
+ * recovery resolves the selected service credential from the registered cwd;
+ * remote runners can consume only the private run-scoped file projected by
+ * their launcher. */
 export async function githubCodeRunEnv(
   cwd: string,
 ): Promise<Record<string, string>> {
@@ -1932,12 +1934,11 @@ async function* runPiAttempt(
     const githubUserLogin = interactiveGithub
       ? githubUserLoginForRun(user || author?.name)
       : null;
-    // Only the dedicated GitHub code workflows may inject a service
-    // credential into an unattended run. Other automations remain credential-
-    // free even if a caller accidentally supplies githubEnv.
-    const githubCodeRun =
-      mode === "code" && baseJournalKind(journal?.kind).startsWith("github-");
-    const githubEnv = githubCodeRun
+    // Dedicated GitHub workflows and security scans publish with the
+    // repository-scoped App credential. Other unattended runs remain
+    // credential-free even if a caller accidentally supplies githubEnv.
+    const githubServiceRun = isGithubServiceCredentialRun(mode, journal?.kind);
+    const githubEnv = githubServiceRun
       ? opts.githubEnv?.GH_TOKEN
         ? opts.githubEnv
         : await githubCodeRunEnv(cwd)

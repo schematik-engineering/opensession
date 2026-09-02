@@ -384,6 +384,17 @@ export async function executeScan(
         // not host logins.
         claudeCliEnv: true,
         codexCliEnv: true,
+        // The App token is scoped to this repository. The command floor also
+        // limits publication to the per-finding branch prefix and refuses
+        // merges or pushes to the protected base branch.
+        publicationPolicy:
+          repo.host === "codestorage"
+            ? undefined
+            : {
+                repo: repo.ghRepo,
+                branch: repo.defaultBranch,
+                headBranch: "deepsec-scan-*",
+              },
         journal: { osSessionId: bksId, kind: "security-scan" },
       })) {
         if (event.type === "init") {

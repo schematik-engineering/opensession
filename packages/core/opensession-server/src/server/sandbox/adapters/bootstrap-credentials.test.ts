@@ -49,13 +49,16 @@ describe("remote engine credential projection", () => {
   test("remote GitHub authority comes from server-owned sandbox state", () => {
     const source = readFileSync(join(import.meta.dir, "bootstrap.ts"), "utf-8");
     const projection = source.slice(
-      source.indexOf("// GitHub credentials are projected"),
+      source.indexOf(
+        "const repoId = readRemoteState(provider, sandboxId)?.repoId",
+      ),
       source.indexOf("const githubAuthPath"),
     );
     expect(projection).toContain(
       "readRemoteState(provider, sandboxId)?.repoId",
     );
     expect(projection).toContain("getRepo(repoId)");
+    expect(projection).toContain("sandboxGithubAuth(");
     expect(projection).not.toContain("git remote get-url origin");
   });
 

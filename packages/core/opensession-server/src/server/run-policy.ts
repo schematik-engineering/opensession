@@ -26,6 +26,17 @@ export function isUnattendedKind(base: string): boolean {
   return UNATTENDED_KINDS.has(base) || base.startsWith("github-");
 }
 
+/** Unattended code paths allowed to mint a repository-scoped GitHub App
+ * credential. Personal user credentials remain interactive-only. */
+export function isGithubServiceCredentialRun(
+  mode: string | undefined,
+  kind: string | undefined,
+): boolean {
+  if (mode !== "code") return false;
+  const base = baseJournalKind(kind);
+  return base === "security-scan" || base.startsWith("github-");
+}
+
 const POOL_WAIT_UNATTENDED_MS = Number(
   process.env.OPENSESSION_POOL_WAIT_MS || 10 * 60_000,
 );
