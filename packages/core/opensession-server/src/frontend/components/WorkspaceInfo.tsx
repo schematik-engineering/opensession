@@ -40,7 +40,7 @@ import type {
   UnifiedSession,
   WSClientMessage,
 } from "../lib/types";
-import { formatPrCommentPrompt } from "./PrPanel";
+import { formatPrCommentPrompt } from "../lib/pr-prompts";
 import { renderMarkdown } from "../lib/markdown";
 import { fullTime } from "../lib/time";
 import { errorMessage } from "../lib/error-message";
@@ -66,7 +66,7 @@ import {
   INFO_LIST_CLASS,
   INFO_SECTION_CLASS,
 } from "../lib/session-viewer-classes";
-import { openLightbox } from "./media-lightbox-controller";
+import { openLightbox } from "../lib/media-lightbox";
 import { SandboxBadge } from "./SandboxBadge";
 import {
   IconBell,

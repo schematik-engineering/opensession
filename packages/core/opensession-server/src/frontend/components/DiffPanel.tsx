@@ -1,11 +1,5 @@
 import { repoLabel } from "../lib/repo-label";
-import React, {
-  useCallback,
-  useEffect,
-  useEffectEvent,
-  useState,
-  useRef,
-} from "react";
+import React, { useEffect, useEffectEvent, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import type {
   CodeFlowResult,
@@ -22,7 +16,8 @@ import {
   fetchWorktreeFile,
   saveWorktreeFile,
 } from "../lib/api";
-import { CommentableDiff, type CommentTarget } from "./CommentableDiff";
+import { CommentableDiff } from "./CommentableDiff";
+import type { CommentTarget } from "../lib/commentable-diff";
 import { getCurrentUser } from "./UserPicker";
 import { Segmented, SegmentedOption } from "../ui/segmented";
 import { SettingRow } from "../ui/setting-row";
@@ -209,7 +204,7 @@ export function DiffPanel({
 
   // Keyed on the semantic inputs (session/repo/diff version), not the
   // per-poll `cur` object, so the flow effect doesn't re-arm every poll.
-  const loadFlow = useCallback(async () => {
+  const loadFlow = useEffectEvent(async () => {
     if (!flowRepo || !flowKey) return;
     const generation = ++flowGeneration.current;
     setFlowLoading(true);
@@ -236,7 +231,7 @@ export function DiffPanel({
       .finally(async () => {
         if (generation === flowGeneration.current) setFlowLoading(false);
       });
-  }, [sessionId, flowRepo, flowKey, patchVersion]);
+  });
 
   const refreshFlow = async () => {
     flowGeneration.current += 1;
@@ -256,7 +251,7 @@ export function DiffPanel({
       return;
     }
     if (!flow) void loadFlow();
-  }, [view, flowKey, flow, flowLoading, flowError, loadFlow]);
+  }, [view, flowKey, flow, flowLoading, flowError]);
 
   useEffect(() => {
     setFlow(null);
@@ -603,47 +598,42 @@ export function DiffPanel({
               <CommentableDiff
                 key={cur.repo}
                 patch={d.rawPatch || ""}
-                defaultExpandedFiles={10}
-                controlsTarget={diffControlsTarget}
-                diffStyle={codeDisplaySettings.diffStyle}
-                wrapLines={codeDisplaySettings.wrapLines}
-                structuralHighlighting={
-                  codeDisplaySettings.structuralHighlighting
-                }
-                showFileStats={codeDisplaySettings.showFileStats}
-                codeTheme={codeDisplaySettings.codeTheme}
-                visibleFileOrder={visibleFileOrder}
-                // The sidebar owns this scrollport. Keep each file's title below its
-                // standing toolbar until the following file pushes it away.
-                stickyFileHeaders={toolbarTarget === undefined}
-                groups={
-                  grouping === "ai" &&
-                  groups?.repo === cur.repo &&
-                  groups.patch === d.rawPatch
-                    ? groups.groups || undefined
-                    : undefined
-                }
-                groupsLoading={grouping === "ai" && groupsLoading}
-                showGroupsStatus={false}
-                submitLabel={`Send to ${AGENT_NAME}`}
-                placeholder={`Leave feedback on these lines. ${AGENT_NAME} picks it up in this session…`}
-                disabled={!canSend}
-                disabledHint={`${AGENT_NAME} is working. You can send feedback once the current run finishes.`}
-                onSubmit={(target, text) =>
-                  handleComment(cur.repo, target, text)
-                }
-                // Discarding edits the worktree — withhold it while the agent is running
-                // to avoid racing its writes.
-                onDiscard={
-                  canSend
+                options={{
+                  defaultExpandedFiles: 10,
+                  controlsTarget: diffControlsTarget,
+                  diffStyle: codeDisplaySettings.diffStyle,
+                  wrapLines: codeDisplaySettings.wrapLines,
+                  structuralHighlighting:
+                    codeDisplaySettings.structuralHighlighting,
+                  showFileStats: codeDisplaySettings.showFileStats,
+                  codeTheme: codeDisplaySettings.codeTheme,
+                  visibleFileOrder,
+                  // The sidebar owns this scrollport. Keep each file's title below its
+                  // standing toolbar until the following file pushes it away.
+                  stickyFileHeaders: toolbarTarget === undefined,
+                  groups:
+                    grouping === "ai" &&
+                    groups?.repo === cur.repo &&
+                    groups.patch === d.rawPatch
+                      ? groups.groups || undefined
+                      : undefined,
+                  groupsLoading: grouping === "ai" && groupsLoading,
+                  showGroupsStatus: false,
+                  submitLabel: `Send to ${AGENT_NAME}`,
+                  placeholder: `Leave feedback on these lines. ${AGENT_NAME} picks it up in this session…`,
+                  disabled: !canSend,
+                  disabledHint: `${AGENT_NAME} is working. You can send feedback once the current run finishes.`,
+                  onSubmit: (target, text) =>
+                    handleComment(cur.repo, target, text),
+                  // Discarding edits the worktree — withhold it while the agent is running
+                  // to avoid racing its writes.
+                  onDiscard: canSend
                     ? (path, oldPath) => handleDiscard(cur.repo, path, oldPath)
-                    : undefined
-                }
-                // In-place edit mode (@pierre/diffs edit): same live-worktree gate as
-                // discard. Load pulls full file contents (the editor can't work from
-                // hunks alone); save writes back and refreshes the diff.
-                editFile={
-                  canSend
+                    : undefined,
+                  // In-place edit mode (@pierre/diffs edit): same live-worktree gate as
+                  // discard. Load pulls full file contents (the editor can't work from
+                  // hunks alone); save writes back and refreshes the diff.
+                  editFile: canSend
                     ? {
                         load: (file, side) =>
                           fetchWorktreeFile(
@@ -665,17 +655,17 @@ export function DiffPanel({
                           await reload();
                         },
                       }
-                    : undefined
-                }
-                // Changed images render as pictures: new side straight from the
-                // worktree, old side from the diff's merge base.
-                imageSrcs={(file) => {
-                  const src = (side: "new" | "base", p: string) =>
-                    `${API_BASE}/sessions/${encodeURIComponent(sessionId)}/worktree-image?repo=${encodeURIComponent(cur.repo)}&side=${side}&path=${encodeURIComponent(p)}`;
-                  return {
-                    oldSrc: src("base", file.prevName || file.name),
-                    newSrc: src("new", file.name),
-                  };
+                    : undefined,
+                  // Changed images render as pictures: new side straight from the
+                  // worktree, old side from the diff's merge base.
+                  imageSrcs: (file) => {
+                    const src = (side: "new" | "base", path: string) =>
+                      `${API_BASE}/sessions/${encodeURIComponent(sessionId)}/worktree-image?repo=${encodeURIComponent(cur.repo)}&side=${side}&path=${encodeURIComponent(path)}`;
+                    return {
+                      oldSrc: src("base", file.prevName || file.name),
+                      newSrc: src("new", file.name),
+                    };
+                  },
                 }}
               />
             </div>

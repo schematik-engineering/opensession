@@ -64,6 +64,8 @@ export interface SessionScroll {
   beginTurn: () => void;
   /** The turn finished; release the spacer so the layout settles. */
   endTurn: () => void;
+  /** Whether transcript measurement may maintain the live edge right now. */
+  shouldMaintainEnd: () => boolean;
   /** Call after each content change (run in a layout effect) to keep things in place. */
   relayout: () => void;
   /** Suspend the live-edge glue for two animation frames so a fold toggle's
@@ -97,6 +99,20 @@ function visibleTop(el: HTMLElement): number {
   const vv = window.visualViewport;
   if (!vv) return rectTop;
   return Math.max(rectTop, vv.offsetTop);
+}
+
+export function shouldDisengageTranscriptFollowing({
+  atEdge,
+  following,
+  gestured,
+}: {
+  atEdge: boolean;
+  following: boolean;
+  gestured: boolean;
+}): boolean {
+  // Native virtual anchoring and browser clamps emit ordinary scroll events
+  // while layout is between heights. Position alone is not reader intent.
+  return following && !atEdge && gestured;
 }
 
 function latestMessageVisible(container: HTMLElement): boolean {
@@ -345,6 +361,17 @@ export function useSessionScroll(initialFollowing = true): SessionScroll {
     disclosureSettleFramesRef.current = [first];
   }, []);
 
+  const shouldMaintainEnd = useCallback(() => {
+    const el = containerRef.current;
+    return Boolean(
+      el &&
+      followingRef.current &&
+      !pinnedRef.current &&
+      !disclosureSettleRef.current &&
+      !selectionWithin(el),
+    );
+  }, []);
+
   // Run from a layout effect after content changes. Two jobs: keep a following
   // reader glued to the live edge, and maintain the pinned-turn spacer.
   const relayout = useCallback(() => {
@@ -395,7 +422,7 @@ export function useSessionScroll(initialFollowing = true): SessionScroll {
     }
     // Stick to the bottom only while following — and never mid-selection, since a
     // selection is the reader actively working with the text (principle 3).
-    if (followingRef.current && !selectionWithin(el)) {
+    if (shouldMaintainEnd()) {
       // Own the scroll while following: browser scroll anchoring compensating
       // for a block mounting above the edge can move the reader by the whole
       // restructure (measured: 1138px at turn end). The glue IS the anchor
@@ -419,7 +446,13 @@ export function useSessionScroll(initialFollowing = true): SessionScroll {
       setNewBelow(true); // content arrived out of view, let the UI announce it
     }
     updateEdges();
-  }, [sizeSpacer, anchorToTop, distanceFromBottom, updateEdges]);
+  }, [
+    sizeSpacer,
+    anchorToTop,
+    shouldMaintainEnd,
+    distanceFromBottom,
+    updateEdges,
+  ]);
 
   // The reader's scroll is the source of truth for following. Reaching the live
   // edge re-engages it; scrolling away disengages it.
@@ -480,7 +513,14 @@ export function useSessionScroll(initialFollowing = true): SessionScroll {
       updateEdges(false);
       return;
     }
-    if (!atEdge && followingRef.current) setFollowing(false);
+    if (
+      shouldDisengageTranscriptFollowing({
+        atEdge,
+        following: followingRef.current,
+        gestured,
+      })
+    )
+      setFollowing(false);
     else if (atEdge && !followingRef.current && gestured) setFollowing(true);
     updateEdges(followingRef.current);
   }, [distanceFromBottom, setFollowing, updateEdges]);
@@ -650,6 +690,7 @@ export function useSessionScroll(initialFollowing = true): SessionScroll {
     anchorToTop,
     beginTurn,
     endTurn,
+    shouldMaintainEnd,
     relayout,
     suspendEndMaintenance,
     onScroll,

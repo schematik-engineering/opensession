@@ -104,8 +104,9 @@ export type PrsFilter = "default" | "all" | "none";
 // (components/sidebar/AutoCreatedMark).
 export type AutoCreatedFilter = "show" | "hide";
 // A registered project with no work in it still draws a band, so a repo you
-// just connected has somewhere to start from (see renderRepoGroups). On an
-// instance with more projects than you work in, that is a screen of empty
+// just connected has somewhere to start from. deriveSidebarProjectBands owns
+// this inclusion rule. On an instance with more projects than you work in,
+// that is a screen of empty
 // headings, and this takes them out. Scoping the list to one project still
 // shows that project's band: asking for it by name is not clutter.
 export type EmptyProjectsFilter = "show" | "hide";

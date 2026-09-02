@@ -95,7 +95,7 @@ import { InlineAlert } from "../ui/state";
 import { duration, ease } from "../ui/motion";
 import { mainSession } from "../lib/landing-session";
 import { sessionCarriesPr } from "../lib/session-prs";
-import type { NewTabMorphOrigin } from "./SessionTabs";
+import type { NewTabMorphOrigin } from "../lib/session-tabs-types";
 import { ArchivedSessionItems } from "./ArchivedSessionItems";
 import {
   workspaceSummaryOpen,
@@ -598,6 +598,8 @@ export function WorkspacePane({
   // session's header does — beside the pane, not across the panel.
   const headerRef = useRef<HTMLDivElement>(null);
   const headerActionsRef = useRef<HTMLDivElement>(null);
+  const [reviewSessionActionTarget, setReviewSessionActionTarget] =
+    useState<HTMLDivElement | null>(null);
   const [headerW, setHeaderW] = useState(0);
   const [reviewSummaryOpen, setReviewSummaryOpen] =
     useState(workspaceSummaryOpen);
@@ -736,6 +738,8 @@ export function WorkspacePane({
     </Menu.Root>
   );
 
+  const showWorkspaceNewSessionAction =
+    !tabStripVisible && onNewSession && !(tab === "review" && reviewTarget);
   const header = !isPhone && (
     <TopBar ref={headerRef} className={VIEWER_HEADER}>
       <TopBarLeading className={VIEWER_TITLE}>
@@ -788,37 +792,42 @@ export function WorkspacePane({
             {workspace.name}
           </OverflowFadeText>
         )}
-        {workspaceMenu}
-        {!tabStripVisible && onNewSession && (
-          <Tooltip label="New tab in this workspace">
-            <Button
-              variant="ghost"
-              size="md"
-              className="-ml-1 flex-none rounded-control"
-              onClick={(event) => {
-                const reduceMotion = window.matchMedia(
-                  "(prefers-reduced-motion: reduce)",
-                ).matches;
-                const rect =
-                  event.detail > 0 && !reduceMotion
-                    ? event.currentTarget.getBoundingClientRect()
-                    : null;
-                onNewSession(
-                  rect
-                    ? {
-                        left: rect.left,
-                        top: rect.top,
-                        width: rect.width,
-                        height: rect.height,
-                      }
-                    : undefined,
-                );
-              }}
-              aria-label="New tab"
-              icon={<IconPlus size={22} />}
-            />
-          </Tooltip>
-        )}
+        <div className="-ml-1 flex flex-none items-center gap-0.5">
+          {workspaceMenu}
+          {tab === "review" && reviewTarget && (
+            <div ref={setReviewSessionActionTarget} className="contents" />
+          )}
+          {showWorkspaceNewSessionAction && (
+            <Tooltip label="New tab in this workspace">
+              <Button
+                variant="ghost"
+                size="md"
+                className="flex-none rounded-control"
+                onClick={(event) => {
+                  const reduceMotion = window.matchMedia(
+                    "(prefers-reduced-motion: reduce)",
+                  ).matches;
+                  const rect =
+                    event.detail > 0 && !reduceMotion
+                      ? event.currentTarget.getBoundingClientRect()
+                      : null;
+                  onNewSession(
+                    rect
+                      ? {
+                          left: rect.left,
+                          top: rect.top,
+                          width: rect.width,
+                          height: rect.height,
+                        }
+                      : undefined,
+                  );
+                }}
+                aria-label="New tab"
+                icon={<IconPlus size={22} />}
+              />
+            </Tooltip>
+          )}
+        </div>
       </TopBarLeading>
       <TopBarActions ref={headerActionsRef} className={VIEWER_HEADER_ACTIONS}>
         {tab === "review" && presentationSession && !panelOpen && (
@@ -834,8 +843,6 @@ export function WorkspacePane({
             onOpenChange={setReviewSummaryOpen}
             tabStripVisible={tabStripVisible}
             reviewMode
-            reviewPage={reviewPage}
-            onReviewPageChange={setReviewPage}
             hasRoom={reviewSummaryHasRoom}
           />
         )}
@@ -883,6 +890,7 @@ export function WorkspacePane({
           addHandler={addHandler}
           sessions={sessions}
           onOpenSessionById={onOpenSession}
+          sessionActionTarget={isPhone ? undefined : reviewSessionActionTarget}
           onOpenSession={
             reviewSession ? () => onOpenSession(reviewSession.id) : undefined
           }
@@ -967,31 +975,34 @@ export function WorkspacePane({
         <Composer
           value={prompt}
           onChange={setPrompt}
-          onSend={handleStart}
-          placeholder={
-            starting ? "Starting…" : "Start a session in this workspace…"
-          }
-          disabled={starting}
-          sendDisabled={
-            starting ||
-            !connected ||
-            isStaging(staging) ||
-            (!prompt.trim() && images.length === 0 && files.length === 0)
-          }
-          sendTitle="Start a session in this workspace (Enter)"
-          models={models}
-          defaultModel={defaultModel}
-          model={model}
-          onModelChange={setModel}
-          modelTitle="Model for this session"
-          images={images}
-          onImagesChange={setImages}
-          files={files}
-          onFilesChange={setFiles}
-          staging={staging}
-          onAddAttachments={addWorkspaceAttachments}
-          onRemovePendingImage={uploads.cancelPendingImage}
-          onRemovePendingFile={uploads.cancelPendingFile}
+          config={{
+            placeholder: starting
+              ? "Starting…"
+              : "Start a session in this workspace…",
+            disabled: starting,
+            sendDisabled:
+              starting ||
+              !connected ||
+              isStaging(staging) ||
+              (!prompt.trim() && images.length === 0 && files.length === 0),
+            sendTitle: "Start a session in this workspace (Enter)",
+            models,
+            defaultModel,
+            model,
+            modelTitle: "Model for this session",
+            images,
+            files,
+            staging,
+          }}
+          actions={{
+            onSend: handleStart,
+            onModelChange: setModel,
+            onImagesChange: setImages,
+            onFilesChange: setFiles,
+            onAddAttachments: addWorkspaceAttachments,
+            onRemovePendingImage: uploads.cancelPendingImage,
+            onRemovePendingFile: uploads.cancelPendingFile,
+          }}
         />
         {startError && (
           <InlineAlert className="mt-2.5">{startError}</InlineAlert>

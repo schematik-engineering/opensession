@@ -1,4 +1,5 @@
 import { stripBasePath } from "./base";
+import type { TranscriptIndexEntry } from "@tellahq/opensession-protocol/session";
 import type { TranscriptEntry } from "./types";
 import type { OptimisticTranscriptEntry } from "./transcript-state";
 import {
@@ -9,6 +10,7 @@ import {
 export type TranscriptMotionScenarioState = {
   entries: TranscriptEntry[];
   optimisticEntries: OptimisticTranscriptEntry[];
+  transcriptIndex?: TranscriptIndexEntry[];
   busy: boolean;
 };
 
@@ -16,6 +18,7 @@ export type TranscriptMotionScenarioEvent =
   | { atMs: number; kind: "begin-turn"; entry: OptimisticTranscriptEntry }
   | { atMs: number; kind: "reconcile-turn"; entry: TranscriptEntry }
   | { atMs: number; kind: "append-entry"; entry: TranscriptEntry }
+  | { atMs: number; kind: "hydrate-entries"; entries: TranscriptEntry[] }
   | {
       atMs: number;
       kind: "update-entry";
@@ -261,6 +264,105 @@ export function makeTranscriptMotionScenario(
   };
 }
 
+export const HYDRATION_TALL_TURN = 9;
+
+/** Grow a loaded entry by a few measured lines, bumping its change sequence
+ * the way a late revision would. Unloaded or unknown entries are unchanged. */
+export function growTranscriptMotionEntry(
+  state: TranscriptMotionScenarioState,
+  entryId: string,
+): TranscriptMotionScenarioState {
+  const entry = state.entries.find((candidate) => candidate.id === entryId);
+  if (!entry) return state;
+  const changeSeq = (entry.changeSeq ?? entry.seq ?? 0) + 1;
+  return applyTranscriptMotionEvent(state, {
+    atMs: 0,
+    kind: "update-entry",
+    id: entryId,
+    content: `${entry.content}\n${growingResult(`growth-${changeSeq}`, 8)}`,
+    changeSeq,
+  });
+}
+
+export function makeTranscriptHydrationScenario(): TranscriptMotionScenario {
+  const allEntries: TranscriptEntry[] = [];
+  for (let turn = 0; turn < 18; turn++) {
+    const userSeq = turn * 2 + 1;
+    const assistantSeq = userSeq + 1;
+    allEntries.push(
+      {
+        id: `hydration-user-${turn}`,
+        type: "user",
+        content: `Incremental request ${turn + 1}`,
+        timestamp: timestamp(userSeq),
+        seq: userSeq,
+        changeSeq: userSeq,
+      },
+      {
+        id: `hydration-assistant-${turn}`,
+        type: "assistant",
+        // One reply taller than a phone viewport: its first measurement
+        // misses the estimate by a screen, the shape behind residual jumps
+        // after a keyed prepend.
+        content: growingResult(
+          `incremental-${turn + 1}`,
+          turn === HYDRATION_TALL_TURN ? 60 : 3 + (turn % 5) * 3,
+        ),
+        timestamp: timestamp(assistantSeq),
+        seq: assistantSeq,
+        changeSeq: assistantSeq,
+      },
+    );
+  }
+  const transcriptIndex: TranscriptIndexEntry[] = allEntries.map((entry) => ({
+    id: entry.id,
+    seq: entry.seq ?? 0,
+    changeSeq: entry.changeSeq ?? entry.seq ?? 0,
+    timestampMs: Date.parse(entry.timestamp),
+    role: entry.type === "user" ? "user" : "assistant",
+    contentLength: entry.content.length,
+  }));
+  const initial = allEntries.slice(-5);
+  const events: TranscriptMotionScenarioEvent[] = [];
+  // First complete the partial opening range by inserting its missing user at
+  // the start of the existing keyed row. Later steps prepend whole keyed rows.
+  const openingPrefix = allEntries[allEntries.length - 6];
+  if (!openingPrefix)
+    throw new Error("hydration fixture has no opening prefix");
+  events.push({
+    atMs: 1,
+    kind: "hydrate-entries",
+    entries: [openingPrefix],
+  });
+  for (let end = allEntries.length - 6; end > 0; end -= 4) {
+    events.push({
+      atMs: events.length + 1,
+      kind: "hydrate-entries",
+      entries: allEntries.slice(Math.max(0, end - 4), end),
+    });
+  }
+  const tail = allEntries.at(-1);
+  if (!tail) throw new Error("hydration fixture has no tail");
+  events.push({
+    atMs: events.length + 1,
+    kind: "update-entry",
+    id: tail.id,
+    content: `${tail.content}\n${growingResult("late-tail-growth", 24)}`,
+    changeSeq: (tail.changeSeq ?? 0) + 1,
+  });
+  return {
+    seed: 0,
+    initial: {
+      entries: initial,
+      optimisticEntries: [],
+      transcriptIndex,
+      busy: false,
+    },
+    events,
+    durationMs: events.length,
+  };
+}
+
 export function makeTranscriptStreamPerformanceScenario(): TranscriptMotionScenario {
   const entries = makeSessionFixture(10_000);
   const deltas = makeStreamDeltas(100, 1);
@@ -301,6 +403,16 @@ export function applyTranscriptMotionEvent(
       };
     case "append-entry":
       return { ...state, entries: [...state.entries, event.entry] };
+    case "hydrate-entries": {
+      const byId = new Map(state.entries.map((entry) => [entry.id, entry]));
+      for (const entry of event.entries) byId.set(entry.id, entry);
+      return {
+        ...state,
+        entries: [...byId.values()].sort(
+          (left, right) => (left.seq ?? 0) - (right.seq ?? 0),
+        ),
+      };
+    }
     case "update-entry":
       return {
         ...state,
@@ -323,7 +435,11 @@ export function applyTranscriptMotionEvent(
 export function transcriptMotionFixtureOptions(
   pathname: string,
   search: string,
-): { seed: number; speed: number; profile: "motion" | "stream" } | null {
+): {
+  seed: number;
+  speed: number;
+  profile: "motion" | "stream" | "hydration";
+} | null {
   if (stripBasePath(pathname) !== "/__fixtures/transcript-motion") return null;
   const params = new URLSearchParams(search);
   const seed = Number(params.get("seed") ?? 1);
@@ -331,6 +447,11 @@ export function transcriptMotionFixtureOptions(
   return {
     seed: Number.isFinite(seed) ? Math.max(1, Math.floor(seed)) : 1,
     speed: Number.isFinite(speed) ? Math.min(20, Math.max(0.1, speed)) : 1,
-    profile: params.get("profile") === "stream" ? "stream" : "motion",
+    profile:
+      params.get("profile") === "stream"
+        ? "stream"
+        : params.get("profile") === "hydration"
+          ? "hydration"
+          : "motion",
   };
 }

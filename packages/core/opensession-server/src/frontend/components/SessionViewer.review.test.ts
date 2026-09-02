@@ -1,11 +1,20 @@
 import { expect, test } from "bun:test";
 
-const source = await Bun.file(
-  new URL("./SessionViewer.tsx", import.meta.url),
+const source = await Promise.all([
+  Bun.file(
+    new URL("./session-viewer/SessionViewerChrome.tsx", import.meta.url),
+  ).text(),
+  Bun.file(new URL("./SessionViewer.tsx", import.meta.url)).text(),
+  Bun.file(
+    new URL("./session-viewer/SessionViewerMainRegion.tsx", import.meta.url),
+  ).text(),
+]).then((parts) => parts.join("\n"));
+const reviewController = await Bun.file(
+  new URL("../hooks/useSessionReviewController.ts", import.meta.url),
 ).text();
 
-test("session Review shares page navigation with its workspace summary", () => {
-  expect(source).toContain(
+test("session Review keeps PR navigation below workspace actions", () => {
+  expect(reviewController).toContain(
     'const [reviewPage, setReviewPage] = useState<PrReviewPage>("files")',
   );
 
@@ -14,8 +23,8 @@ test("session Review shares page navigation with its workspace summary", () => {
   const summary = source.slice(summaryStart, summaryEnd);
   expect(summaryStart).toBeGreaterThan(-1);
   expect(summary).toContain("reviewMode={showReview}");
-  expect(summary).toContain("reviewPage={reviewPage}");
-  expect(summary).toContain("onReviewPageChange={setReviewPage}");
+  expect(summary).not.toContain("reviewPage={reviewPage}");
+  expect(summary).not.toContain("onReviewPageChange={setReviewPage}");
 
   const panelStart = source.lastIndexOf("<PrPanel");
   const panelEnd = source.indexOf("/>", panelStart);
@@ -24,4 +33,7 @@ test("session Review shares page navigation with its workspace summary", () => {
   expect(panel).toContain("page={reviewPage}");
   expect(panel).toContain("onPageChange={setReviewPage}");
   expect(panel).toContain("compactToolbar={summaryVisible}");
+  expect(panel).toContain("sessionActionTarget={");
+  expect(source).toContain("menuTrailing={");
+  expect(source).toContain("ref={setReviewSessionActionTarget}");
 });

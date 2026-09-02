@@ -50,7 +50,9 @@ function IdentityInput({
     await (async () => {
       await onSave(next);
     })()
-      .catch(async () => {
+      .catch(async (_error: unknown) => {
+        // The owning save handler shows the error; this boundary only restores
+        // the last persisted value.
         setDraft(value);
       })
       .finally(async () => {
@@ -95,7 +97,13 @@ export function IdentityRows({
       .then((dto) => {
         if (!cancelled) setIdentity(dto);
       })
-      .catch(() => {});
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          toast(errorMessage(error, "Failed to load identity"), {
+            variant: "error",
+          });
+        }
+      });
     return () => {
       cancelled = true;
     };
@@ -109,7 +117,7 @@ export function IdentityRows({
       toast("Saved. Open tabs update after the next rebuild.", {
         variant: "success",
       });
-    })().catch(async (error) => {
+    })().catch(async (error: unknown) => {
       toast(errorMessage(error, "Failed to save"), { variant: "error" });
       throw error;
     });

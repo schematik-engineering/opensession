@@ -29,7 +29,8 @@ import {
   type AcpProvider,
 } from "./acp-config";
 
-let STORE_PATH = stateDir("acp-accounts.json");
+const DEFAULT_STORE_PATH = stateDir("acp-accounts.json");
+let STORE_PATH = DEFAULT_STORE_PATH;
 let STATE_PATH = stateDir("acp-accounts-state.json");
 let MANAGED_ROOT = stateDir("acp-accounts");
 const DEFAULT_EXHAUST_MS = 60 * 60 * 1000;
@@ -143,6 +144,9 @@ function emailFromGrok(path: string): string | undefined {
 }
 
 function hostAccount(provider: AcpProvider): AcpAccount | null {
+  // Tests point the account store at an isolated fixture. Do not let a real
+  // host login leak into that synthetic pool.
+  if (STORE_PATH !== DEFAULT_STORE_PATH) return null;
   const authPath = acpAuthSource(provider);
   if (!privateFile(authPath)) return null;
   const email = provider === "grok" ? emailFromGrok(authPath) : undefined;

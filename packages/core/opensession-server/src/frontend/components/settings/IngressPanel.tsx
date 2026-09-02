@@ -10,6 +10,7 @@ import {
   type IngressExposure,
   type PublicIngressSettings,
 } from "../../lib/api";
+import { errorMessage } from "../../lib/error-message";
 import {
   configuredAppDomain,
   configuredIngressDrafts,
@@ -635,11 +636,7 @@ export function IngressPanel({
     void fetchPublicIngress()
       .then((next) => applyFromEffect(next))
       .catch((cause: unknown) => {
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : "Couldn’t load public ingress",
-        );
+        setError(errorMessage(cause, "Couldn’t load public ingress"));
       });
   }, []);
 
@@ -658,7 +655,10 @@ export function IngressPanel({
     const timer = window.setInterval(() => {
       void fetchPublicIngress()
         .then((next) => applyFromEffect(next, false))
-        .catch(() => {});
+        .catch((_cause: unknown) => {
+          // The last ingress settings remain valid and visible, so this
+          // background convergence poll is best-effort.
+        });
     }, 5_000);
     return () => window.clearInterval(timer);
   }, [settings?.health, settings?.app.domain.health]);
@@ -687,11 +687,7 @@ export function IngressPanel({
         void onChanged?.();
       })
       .catch((cause: unknown) => {
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : "Public callbacks could not be updated",
-        );
+        setError(errorMessage(cause, "Public callbacks could not be updated"));
       })
       .finally(() => setBusy(null));
   }
@@ -718,9 +714,7 @@ export function IngressPanel({
       })
       .catch((cause: unknown) => {
         setError(
-          cause instanceof Error
-            ? cause.message
-            : "Private app domain could not be updated",
+          errorMessage(cause, "Private app domain could not be updated"),
         );
       })
       .finally(() => {
@@ -748,9 +742,7 @@ export function IngressPanel({
       })
       .catch((cause: unknown) =>
         setError(
-          cause instanceof Error
-            ? cause.message
-            : "Private app domain could not be verified",
+          errorMessage(cause, "Private app domain could not be verified"),
         ),
       )
       .finally(() => {

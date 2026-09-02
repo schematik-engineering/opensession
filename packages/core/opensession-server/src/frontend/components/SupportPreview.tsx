@@ -146,18 +146,22 @@ export function SupportPreview({
         <Composer
           value={prompt}
           onChange={setPrompt}
-          onSend={handleStart}
-          placeholder={
-            starting ? "Starting…" : "Start a session on this ticket…"
-          }
-          disabled={starting}
-          sendDisabled={starting || !connected || !prompt.trim()}
-          sendTitle="Start session on this ticket (Enter)"
-          models={models}
-          defaultModel={defaultModel}
-          model={model}
-          onModelChange={setModel}
-          modelTitle="Model for this session"
+          config={{
+            placeholder: starting
+              ? "Starting…"
+              : "Start a session on this ticket…",
+            disabled: starting,
+            sendDisabled: starting || !connected || !prompt.trim(),
+            sendTitle: "Start session on this ticket (Enter)",
+            models,
+            defaultModel,
+            model,
+            modelTitle: "Model for this session",
+          }}
+          actions={{
+            onSend: handleStart,
+            onModelChange: setModel,
+          }}
         />
         {startError && (
           <InlineAlert className="mt-2.5">{startError}</InlineAlert>

@@ -46,7 +46,7 @@ import { formatDuration, fullTime } from "../lib/time";
 import { Tooltip } from "../ui/tooltip";
 import { Fold } from "../ui/fold";
 import { ExtBadge, fileExt } from "./lang-marks";
-import { openGalleryFrom } from "./media-lightbox-controller";
+import { openGalleryFrom } from "../lib/media-lightbox-gallery";
 import { useOpenAsset, useOpenAssetPaths } from "../lib/open-asset";
 import { assetPathForMediaSrc } from "../lib/asset-preview";
 import { transcriptDisclosureLedger } from "../lib/transcript-disclosures";

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { readBaseCss } from "./base-css-test-support";
 import {
   APP_HEADER_ACTIONS,
   ARCHIVED_SEARCH_HEADER,
@@ -13,15 +14,23 @@ import {
 } from "../lib/app-header-classes";
 import { TAB_ITEM, TAB_STRIP, tabClass } from "../lib/session-tab-classes";
 import { REPORTS_COLUMN_HEADER } from "../lib/reports-classes";
-import { infoTopbarClass } from "../lib/session-viewer-classes";
+import {
+  infoTopbarClass,
+  TRANSCRIPT_PILL_TOP,
+} from "../lib/session-viewer-classes";
 
-const CSS = new URL("./base.css", import.meta.url);
+const sessionViewer = await Bun.file(
+  new URL("../components/SessionViewer.tsx", import.meta.url),
+).text();
 
-test("floating phone navigation stays pinned while chat chrome collapses", () => {
+test("phone transcript chrome never changes the scroll viewport", () => {
   const floatingHeader = appHeader({ detail: true, floating: true });
 
   expect(floatingHeader).toContain("phone:fixed");
   expect(floatingHeader).not.toContain("chrome-collapsed");
+  expect(TAB_STRIP).not.toContain("chrome-collapsed");
+  expect(TRANSCRIPT_PILL_TOP).not.toContain("chrome-collapsed");
+  expect(sessionViewer).not.toContain("chrome-collapsed");
 });
 
 test("phone top-bar actions use neutral ink", () => {
@@ -41,7 +50,7 @@ test("phone top-bar actions use neutral ink", () => {
 });
 
 test("phone navigation chrome has no hard divider bars", async () => {
-  const css = await Bun.file(CSS).text();
+  const css = await readBaseCss();
 
   expect(css).not.toMatch(
     /@media \(display-mode: standalone\)\s*\{\s*\.app\s*\{\s*border-top:/,
@@ -68,7 +77,7 @@ test("archived search focus collapses the phone header without clipping its shad
 });
 
 test("every floating phone header control is made of the same glass", async () => {
-  const css = await Bun.file(CSS).text();
+  const css = await readBaseCss();
 
   // The prefixed spelling is the whole point on iOS Safari and the installed
   // PWA, which still ship backdrop-filter only under `-webkit-`.

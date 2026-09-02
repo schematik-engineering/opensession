@@ -11,7 +11,10 @@ import {
 import { useOpenAssetPaths } from "../lib/open-asset";
 import { cn } from "../ui/cn";
 import { TextShimmer } from "../ui/text-shimmer";
-import { liveReasoningHeading } from "../lib/reasoning-display";
+import {
+  liveReasoningHeading,
+  normalizeFragmentedReasoning,
+} from "../lib/reasoning-display";
 import { MarkdownBody, useMarkdownRepo } from "./MarkdownBody";
 import { TranscriptBlocks } from "./TranscriptBlocks";
 
@@ -20,8 +23,8 @@ type TranscriptBlocksProps = React.ComponentProps<typeof TranscriptBlocks>;
 type SessionTranscriptProps = Omit<TranscriptBlocksProps, "sessionId"> & {
   sessionId: string;
   liveTurnStore: LiveTurnStore;
-  /** Re-measure the host scroll region after the live bubble DOM commits. */
-  onLiveLayout?: () => void;
+  /** Re-measure the host scroll region after transcript geometry commits. */
+  onLayout?: () => void;
 };
 
 /**
@@ -32,16 +35,16 @@ type SessionTranscriptProps = Omit<TranscriptBlocksProps, "sessionId"> & {
 export const SessionTranscript = function SessionTranscript({
   sessionId,
   liveTurnStore,
-  onLiveLayout,
+  onLayout,
   ...blocks
 }: SessionTranscriptProps) {
   return (
     <>
-      <TranscriptBlocks {...blocks} sessionId={sessionId} />
+      <TranscriptBlocks {...blocks} sessionId={sessionId} onLayout={onLayout} />
       <StreamingMessage
         store={liveTurnStore}
         sessionId={sessionId}
-        onLayout={onLiveLayout}
+        onLayout={onLayout}
       />
     </>
   );
@@ -78,7 +81,8 @@ function StreamingMessage({
     );
   }
 
-  const html = renderMarkdown(snapshot.text, { repo, sessionId, assetPaths });
+  const displayText = normalizeFragmentedReasoning(snapshot.text);
+  const html = renderMarkdown(displayText, { repo, sessionId, assetPaths });
   // Always rendered, never raw source: the server cuts frames at block
   // boundaries, so what arrives here is markdown that stands on its own.
   return (

@@ -1,6 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
 import {
+  fetchProviderAccounts,
   fetchRepos,
+  fetchWorkspaces,
   fetchReads,
   fetchSessionsSnapshot,
   fetchWorkspaceArchivedSessions,
@@ -24,6 +26,73 @@ test("read marks load from the current user's API namespace", async () => {
     "bks-1": "2026-08-11T10:00:00.000Z",
   });
   expect(url).toBe("/api/reads?user=Ada%20Lovelace");
+});
+
+test("provider account loading reports a failed pool and keeps the other pool", async () => {
+  const failures: unknown[] = [];
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    if (String(input).endsWith("/claude-accounts")) {
+      return Response.json(
+        { error: "Claude accounts unavailable" },
+        { status: 502 },
+      );
+    }
+    return Response.json({
+      accounts: [
+        {
+          id: "codex-1",
+          name: "Codex account",
+          owner: "Ada",
+          usable: true,
+        },
+      ],
+    });
+  }) as unknown as typeof fetch;
+
+  await expect(
+    fetchProviderAccounts({
+      onPoolError: (cause) => failures.push(cause),
+    }),
+  ).resolves.toEqual([
+    {
+      id: "codex-1",
+      name: "Codex account",
+      provider: "codex",
+      owner: "Ada",
+      usable: true,
+    },
+  ]);
+  expect(failures).toHaveLength(1);
+  expect(failures[0]).toBeInstanceOf(Error);
+});
+
+test("workspace loading reports a failure while preserving its empty fallback", async () => {
+  const failures: unknown[] = [];
+  globalThis.fetch = (async () =>
+    Response.json(
+      { error: "Workspaces unavailable" },
+      { status: 502 },
+    )) as unknown as typeof fetch;
+
+  await expect(
+    fetchWorkspaces({ onError: (cause) => failures.push(cause) }),
+  ).resolves.toEqual([]);
+  expect(failures).toHaveLength(1);
+  expect(failures[0]).toBeInstanceOf(Error);
+});
+
+test("repository loading rejects after transient retries are exhausted", async () => {
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls++;
+    return Response.json(
+      { error: "Repositories unavailable" },
+      { status: 502 },
+    );
+  }) as unknown as typeof fetch;
+
+  await expect(fetchRepos()).rejects.toThrow("Repositories unavailable");
+  expect(calls).toBe(4);
 });
 
 test("repository loading recovers from transient server failures", async () => {
@@ -151,5 +220,13 @@ test("new workspace tabs create an idle sibling session", async () => {
     user: "Kent",
     mode: "share",
     clientSessionId,
+  });
+
+  await newSessionApi("bks-source", "Kent", "share", clientSessionId, true);
+  expect(JSON.parse(String(init?.body))).toEqual({
+    user: "Kent",
+    mode: "share",
+    clientSessionId,
+    duplicate: true,
   });
 });

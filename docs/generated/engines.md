@@ -36,7 +36,8 @@ engine and dispatch id `routeModel()` returns for it.
 
 | Model id | Label | Engine | Dispatched as |
 | --- | --- | --- | --- |
-| `claude-fable-5` | Claude Fable 5 | pi | `pi/anthropic/claude-fable-5` |
+| `claude-fable-5-1` | Claude Fable 5.1 | pi | `pi/anthropic/claude-fable-5-1` |
+| `claude-fable-5` | Claude Fable 5 | pi | `pi/anthropic/claude-fable-5-1` |
 | `claude-opus-5` | Claude Opus 5 | pi | `pi/anthropic/claude-opus-5` |
 | `claude-opus-4-8` | Claude Opus 4.8 | pi | `pi/anthropic/claude-opus-4-8` |
 | `claude-sonnet-5` | Claude Sonnet 5 | pi | `pi/anthropic/claude-sonnet-5` |
@@ -59,12 +60,12 @@ engine and dispatch id `routeModel()` returns for it.
 | `cursor/gpt-5.6-sol` | GPT-5.6-sol · Cursor | cursor | `cursor/gpt-5.6-sol` |
 | `cursor/claude-sonnet-5` | Sonnet 5 · Cursor | cursor | `cursor/claude-sonnet-5` |
 | `cursor/gemini-3.7-flash` | Gemini 3.7-flash · Cursor | cursor | `cursor/gemini-3.7-flash` |
-| `dial/ultra` | Dial · Ultra | pi | `pi/anthropic/claude-fable-5` |
+| `dial/ultra` | Dial · Ultra | pi | `pi/anthropic/claude-fable-5-1` |
 | `dial/high` | Dial · High | pi | `pi/openai/gpt-5.6-sol` |
 | `dial/medium` | Dial · Medium | pi | `pi/openai/gpt-5.6-sol` |
 | `dial/low` | Dial · Low | pi | `pi/openai/gpt-5.6-luna` |
 | `dial/opus-fable` | Opus 5 + Fable oracle | pi | `pi/anthropic/claude-opus-5` |
-| `orchestrator/fable` | Orchestrator · Fable 5 | pi | `pi/anthropic/claude-fable-5` |
+| `orchestrator/fable` | Orchestrator · Fable 5.1 | pi | `pi/anthropic/claude-fable-5-1` |
 | `orchestrator/sol` | Orchestrator · Sol | pi | `pi/openai/gpt-5.6-sol` |
 
 Every accepted id resolves to Pi before dispatch.

@@ -14,7 +14,7 @@ const index = `<!doctype html>
 <link rel="stylesheet" href="/${meta.cssName}">${tailwind}</head>
 <body><div id="root"></div><script type="module" src="/${meta.entryName}"></script></body></html>`;
 
-Bun.serve({
+const server = Bun.serve({
   hostname: "127.0.0.1",
   port,
   async fetch(request) {
@@ -30,4 +30,4 @@ Bun.serve({
       : new Response("Not found", { status: 404 });
   },
 });
-console.log(`Transcript motion fixture ready on http://127.0.0.1:${port}`);
+console.log(`Transcript motion fixture ready on ${server.url.origin}`);

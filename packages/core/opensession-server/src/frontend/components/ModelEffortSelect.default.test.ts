@@ -21,11 +21,12 @@ test("both conversation model-menu triggers persist and reflect the personal def
     source("../hooks/useDefaultModelPreference.ts"),
   ]);
 
-  for (const caller of [composer, infoRow]) {
-    expect(caller).toContain("useDefaultModelPreference()");
-    expect(caller).toContain("preferredDefaultModel={preferredDefaultModel}");
-    expect(caller).toContain("onSetAsDefault={setPreferredDefaultModel}");
-  }
+  expect(composer).toContain("useDefaultModelPreference()");
+  expect(composer).toContain("preferredDefaultModel={preferredDefaultModel}");
+  expect(composer).toContain("onSetAsDefault={setPreferredDefaultModel}");
+  expect(infoRow).toContain("useDefaultModelPreference()");
+  expect(infoRow).toContain("preferredDefaultModel,");
+  expect(infoRow).toContain("setAsDefault: setPreferredDefaultModel");
   expect(preferenceHook).toContain("onDefaultModelPrefChanged");
   expect(preferenceHook).toContain(
     "setPreferredDefaultModel: setDefaultModelPref",

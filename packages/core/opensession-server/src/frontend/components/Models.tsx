@@ -67,13 +67,18 @@ function DefaultModelRow({
 
   useEffect(() => {
     fetch(`${BASE_PATH}/api/models`)
-      .then((r) => (r.ok ? r.json() : null))
+      .then((response) => {
+        if (!response.ok)
+          throw new Error(`Failed to load models (${response.status})`);
+        return response.json();
+      })
       .then((body) => {
-        if (!body) return;
         setModels(body.models);
         setCurrent(body.default);
       })
-      .catch(() => {});
+      .catch((error: unknown) => {
+        setError(errorMessage(error, "Failed to load models"));
+      });
   }, []);
 
   async function handleChange(id: string) {
@@ -90,7 +95,7 @@ function DefaultModelRow({
       if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
       setCurrent(body.default);
       await onChanged?.();
-    })().catch(async (error) => {
+    })().catch(async (error: unknown) => {
       setError(errorMessage(error, "Failed to update the default model"));
     });
     setSaving(false);
@@ -109,7 +114,7 @@ function DefaultModelRow({
   const engineLabel = (m: (typeof primaryModels)[number]) =>
     m.provider === "pi" ? m.label : shortModelLabel(m.id, models || []);
   // The trigger reads the selected model's label from this flat list, so a
-  // closed select shows "Fable 5" rather than pi/anthropic/claude-fable-5.
+  // closed select shows "Fable 5.1" rather than pi/anthropic/claude-fable-5-1.
   const items = [
     ...primaryModels.map((m) => ({ value: m.id, label: engineLabel(m) })),
     ...claudeModels.map((m) => ({ value: m.id, label: m.label })),
@@ -191,9 +196,15 @@ function AutoFallbackRow() {
 
   useEffect(() => {
     fetch(`${BASE_PATH}/api/models`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((body) => body && setAuto(body.autoFallback !== false))
-      .catch(() => {});
+      .then((response) => {
+        if (!response.ok)
+          throw new Error(`Failed to load auto-switching (${response.status})`);
+        return response.json();
+      })
+      .then((body) => setAuto(body.autoFallback !== false))
+      .catch((error: unknown) => {
+        setError(errorMessage(error, "Failed to load auto-switching"));
+      });
   }, []);
 
   async function toggle(next: boolean) {
@@ -211,7 +222,7 @@ function AutoFallbackRow() {
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || `Failed: ${res.status}`);
       setAuto(body.autoFallback);
-    })().catch(async (error) => {
+    })().catch(async (error: unknown) => {
       setError(errorMessage(error, "Failed to update auto-switching"));
       setAuto(prev ?? null);
     });

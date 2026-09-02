@@ -1,13 +1,35 @@
 import { expect, test } from "bun:test";
+import { readBaseCss } from "../styles/base-css-test-support";
 
 const source = await Bun.file(
   new URL("./WorkspacePane.tsx", import.meta.url),
 ).text();
-const viewerSource = await Bun.file(
-  new URL("./SessionViewer.tsx", import.meta.url),
-).text();
+const viewerSource = await Promise.all([
+  Bun.file(new URL("./SessionViewer.tsx", import.meta.url)).text(),
+  Bun.file(
+    new URL("./session-viewer/SessionViewerChrome.tsx", import.meta.url),
+  ).text(),
+  Bun.file(
+    new URL("./session-viewer/SessionViewerSidePanel.tsx", import.meta.url),
+  ).text(),
+  Bun.file(
+    new URL("./session-viewer/SessionViewerMainRegion.tsx", import.meta.url),
+  ).text(),
+  Bun.file(
+    new URL("../hooks/useSessionReviewController.ts", import.meta.url),
+  ).text(),
+]).then((parts) => parts.join("\n"));
 const prPanelSource = await Bun.file(
   new URL("./PrPanel.tsx", import.meta.url),
+).text();
+const prOverviewPageSource = await Bun.file(
+  new URL("./pr/PrOverviewPage.tsx", import.meta.url),
+).text();
+const prFilesPageSource = await Bun.file(
+  new URL("./pr/PrFilesPage.tsx", import.meta.url),
+).text();
+const prDataSource = await Bun.file(
+  new URL("../hooks/usePrData.ts", import.meta.url),
 ).text();
 const diffPanelSource = await Bun.file(
   new URL("./DiffPanel.tsx", import.meta.url),
@@ -18,24 +40,34 @@ const codeDisplaySource = await Bun.file(
 const commentableDiffSource = await Bun.file(
   new URL("./CommentableDiff.tsx", import.meta.url),
 ).text();
+const pendingCommentsSource = await Bun.file(
+  new URL("../hooks/usePendingComments.ts", import.meta.url),
+).text();
 const reviewToolbarSource = await Bun.file(
   new URL("./pr/ReviewToolbar.tsx", import.meta.url),
 ).text();
 const summarySource = await Bun.file(
   new URL("./WorkspaceSummary.tsx", import.meta.url),
 ).text();
+const baseCssSource = await readBaseCss();
 
 test("workspace draft composers accept and persist attachments", () => {
   const composerStart = source.lastIndexOf("<Composer");
   const composerEnd = source.indexOf("/>", composerStart);
   const composer = source.slice(composerStart, composerEnd);
+  const configStart = composer.indexOf("config={{");
+  const configEnd = composer.indexOf("actions={{", configStart);
+  const config = composer.slice(configStart, configEnd);
 
   expect(composerStart).toBeGreaterThan(-1);
-  expect(composer).toContain("images={images}");
-  expect(composer).toContain("onImagesChange={setImages}");
-  expect(composer).toContain("files={files}");
-  expect(composer).toContain("onFilesChange={setFiles}");
-  expect(composer).toContain("onAddAttachments={addWorkspaceAttachments}");
+  expect(configStart).toBeGreaterThan(-1);
+  expect(configEnd).toBeGreaterThan(configStart);
+  expect(config).toContain("images,");
+  expect(config).toContain("files,");
+  expect(composer).toContain("actions={{");
+  expect(composer).toContain("onImagesChange: setImages,");
+  expect(composer).toContain("onFilesChange: setFiles,");
+  expect(composer).toContain("onAddAttachments: addWorkspaceAttachments,");
   expect(source).toContain('window.addEventListener("drop", handleDrop, true)');
   expect(source).toContain(
     "saveDraft(draftKey, { text: prompt, images, files })",
@@ -69,7 +101,7 @@ test("workspace Review keeps the implementation summary beside the PR canvas", (
   expect(source).toContain("walkthrough={presentationSession?.walkthrough}");
 });
 
-test("reviews with and without a PR share the floating toolbar", () => {
+test("reviews with and without a PR share the review toolbar", () => {
   const reviewBar = prPanelSource.slice(
     prPanelSource.indexOf("const reviewBar"),
     prPanelSource.indexOf("const reviewBar") + 500,
@@ -87,12 +119,12 @@ test("reviews with and without a PR share the floating toolbar", () => {
   expect(reviewToolbarSource).toContain("desktop:mb-2");
   expect(reviewToolbarSource).toContain("desktop:overflow-hidden");
   expect(reviewToolbarSource).toContain("desktop:rounded-lg");
-  expect(reviewToolbarSource).toContain("desktop:border desktop:border-line");
-  expect(reviewBar).toContain("h-8");
-  expect(reviewBar).toContain("phone:h-11");
+  expect(reviewToolbarSource).toContain("desktop:smooth-shadow-ring-sm");
+  expect(reviewToolbarSource).not.toContain("desktop:border");
+  expect(reviewBar).toContain("h-11");
   expect(reviewBar).toContain("bg-surface");
-  expect(reviewBar).toContain("desktop:absolute");
-  expect(reviewBar).toContain("desktop:top-[calc(100%+8px)]");
+  expect(reviewBar).toContain("desktop:hidden");
+  expect(reviewBar).not.toContain("desktop:absolute");
   expect(prPanelSource).toContain('["files", "Files",');
   expect(prPanelSource).toContain('label="Code view"');
   expect(prPanelSource).toContain(
@@ -144,36 +176,85 @@ test("sidebar Changes shares Review's code display options", () => {
   expect(prPanelSource).toContain("<DiffSourceSetting");
   expect(diffPanelSource).toContain("<DiffSourceSetting");
   expect(viewerSource).toContain('if (next === "pull-request") openReview?.()');
-  expect(diffPanelSource).toContain("showGroupsStatus={false}");
+  expect(diffPanelSource).toContain("showGroupsStatus: false");
   expect(diffPanelSource).toContain('aria-label="Organizing files"');
-  expect(diffPanelSource).toContain(
-    "diffStyle={codeDisplaySettings.diffStyle}",
-  );
-  expect(diffPanelSource).toContain(
-    "wrapLines={codeDisplaySettings.wrapLines}",
-  );
+  expect(diffPanelSource).toContain("diffStyle: codeDisplaySettings.diffStyle");
+  expect(diffPanelSource).toContain("wrapLines: codeDisplaySettings.wrapLines");
   expect(diffPanelSource).toMatch(
-    /structuralHighlighting=\{\s*codeDisplaySettings\.structuralHighlighting\s*\}/,
+    /structuralHighlighting:\s*codeDisplaySettings\.structuralHighlighting/,
   );
   expect(diffPanelSource).toContain(
-    "showFileStats={codeDisplaySettings.showFileStats}",
+    "showFileStats: codeDisplaySettings.showFileStats",
   );
+  expect(diffPanelSource).toContain("codeTheme: codeDisplaySettings.codeTheme");
   expect(diffPanelSource).toContain(
-    "codeTheme={codeDisplaySettings.codeTheme}",
-  );
-  expect(diffPanelSource).toContain(
-    "stickyFileHeaders={toolbarTarget === undefined}",
+    "stickyFileHeaders: toolbarTarget === undefined",
   );
   expect(diffPanelSource).toContain("--review-file-header-top");
   expect(commentableDiffSource).toContain(
     "top-[calc(var(--review-file-header-top,0px)-1px)]",
   );
   expect(commentableDiffSource).toContain("z-[6] bg-surface");
-  expect(commentableDiffSource).toContain("rounded-t-lg bg-bg");
-  expect(commentableDiffSource).not.toContain('"isolate min-w-0 max-w-full');
+  expect(commentableDiffSource).toContain("rounded-md bg-surface");
+  expect(commentableDiffSource).toContain(
+    ': "w-auto rounded-none bg-[var(--review-file-header-bg)] hover:bg-[var(--review-file-header-hover)]"',
+  );
+  expect(commentableDiffSource).toContain(
+    "mt-1.5 max-w-full overflow-clip rounded-lg",
+  );
+  expect(commentableDiffSource).not.toContain("rounded-lg bg-code-well");
+  expect(commentableDiffSource).toContain(
+    '"mx-2 overflow-clip rounded-lg border border-[var(--review-file-border)]"',
+  );
+  expect(commentableDiffSource).toContain(
+    '!stickyFileHeaders && "mt-0 rounded-none"',
+  );
+  expect(commentableDiffSource).toContain(
+    "style={stickyFileHeaders ? undefined : DIFF_SURFACE_STYLE[theme]}",
+  );
+  expect(commentableDiffSource).toContain(
+    'stickyFileHeaders ? "gap-2.5" : "gap-4"',
+  );
+  expect(commentableDiffSource).toContain(
+    'stickyFileHeaders ? "gap-[7px]" : "gap-4"',
+  );
+  expect(commentableDiffSource).toContain(
+    '"--diffs-bg": "var(--review-code-light)"',
+  );
+  expect(commentableDiffSource).toContain(
+    'backgroundColor: "var(--review-code-light)"',
+  );
+  expect(commentableDiffSource).toContain('"--diffs-bg-separator-override":');
+  expect(commentableDiffSource).toContain(
+    '"color-mix(in srgb, var(--blue) 12%, var(--review-code-light))"',
+  );
+  expect(commentableDiffSource).toContain(
+    '"color-mix(in srgb, var(--review-code-light) 96%, var(--review-code-dark))"',
+  );
+  expect(commentableDiffSource).toContain(
+    '"color-mix(in srgb, var(--review-code-light) 90%, var(--review-code-dark))"',
+  );
+  expect(commentableDiffSource).toContain(
+    '"--diffs-bg": "var(--review-code-dark)"',
+  );
+  expect(commentableDiffSource).toContain(
+    'backgroundColor: "var(--review-code-dark)"',
+  );
+  expect(commentableDiffSource).toContain(
+    '"color-mix(in srgb, var(--blue) 12%, var(--review-code-dark))"',
+  );
+  expect(commentableDiffSource).toContain(
+    '"color-mix(in srgb, var(--review-code-dark) 94%, var(--review-code-light))"',
+  );
+  expect(commentableDiffSource).toContain(
+    '"color-mix(in srgb, var(--review-code-dark) 90%, var(--review-code-light))"',
+  );
+  expect(commentableDiffSource).toContain("style={DIFF_SURFACE_STYLE[theme]}");
+  expect(baseCssSource).toContain("--review-code-light: #ffffff");
+  expect(baseCssSource).toContain("--review-code-dark: #1c1c1c");
+  expect(commentableDiffSource).not.toContain("border border-line bg-bg");
   expect(commentableDiffSource).not.toContain("data-[stuck]:overflow-visible");
   expect(commentableDiffSource).not.toContain("-inset-x-px");
-  expect(commentableDiffSource).toContain("overflow-clip rounded-b-lg");
   expect(viewerSource).toContain("--diff-panel-top");
   expect(codeDisplaySource).toContain('label="Wrap lines"');
   expect(codeDisplaySource).toContain('value="split"');
@@ -181,19 +262,29 @@ test("sidebar Changes shares Review's code display options", () => {
   expect(codeDisplaySource).toContain('value="system"');
 });
 
-test("wide Review keeps its controls stable while page navigation moves", () => {
-  expect(source).toContain("reviewPage={reviewPage}");
-  expect(source).toContain("onReviewPageChange={setReviewPage}");
+test("CommentableDiff delegates pending-comment state behind one options prop", () => {
+  expect(commentableDiffSource).toContain("options: CommentableDiffOptions");
+  expect(commentableDiffSource).toContain("usePendingComments({");
+  expect(pendingCommentsSource).toContain("const [draft, setDraft]");
+  expect(pendingCommentsSource).toContain("const annotationsByFile = new Map");
+});
+
+test("wide Review keeps page navigation in the identity bar", () => {
+  expect(source).toContain("page={reviewPage}");
+  expect(source).not.toContain("onReviewPageChange={setReviewPage}");
   expect(source).toContain("compactToolbar={reviewSummaryVisible}");
-  expect(prPanelSource).toContain("const reviewBar = !compactToolbar");
+  expect(prPanelSource).toContain('label="Pull request pages"');
+  expect(prPanelSource).toContain('className="shrink-0 phone:hidden"');
+  expect(prPanelSource).toContain('className="flex h-11');
+  expect(prPanelSource).toContain("desktop:hidden");
   expect(prPanelSource).toContain("{phoneLayout && fileControls}");
   expect(prPanelSource).toContain(
     "{(compactToolbar || !phoneLayout) && fileControls}",
   );
-  expect(prPanelSource).toContain('"desktop:pt-12"');
-  expect(summarySource).toContain('aria-label="Pull request pages"');
-  expect(summarySource).toContain('onReviewPageChange("overview")');
-  expect(summarySource).toContain('onReviewPageChange("files")');
+  expect(prFilesPageSource).not.toContain("desktop:pt-12");
+  expect(prOverviewPageSource).not.toContain("desktop:pt-12");
+  expect(summarySource).not.toContain('aria-label="Pull request pages"');
+  expect(summarySource).not.toContain("onReviewPageChange");
   expect(prPanelSource).toContain(
     'compactToolbar ? "overflow-x-hidden overflow-y-auto"',
   );
@@ -202,16 +293,34 @@ test("wide Review keeps its controls stable while page navigation moves", () => 
   expect(reviewToolbarSource).toContain("desktop:pb-2");
   expect(reviewToolbarSource).not.toContain("-mb-2.5");
   expect(reviewToolbarSource).toContain("WS_SUMMARY_REVIEW_BAR_CLEARANCE");
-  expect(prPanelSource).toContain("WS_SUMMARY_REVIEW_CANVAS_CLEARANCE");
-  expect(prPanelSource).toContain(
+  expect(prFilesPageSource).toContain("WS_SUMMARY_REVIEW_CANVAS_CLEARANCE");
+  expect(prOverviewPageSource).toContain("WS_SUMMARY_REVIEW_CANVAS_CLEARANCE");
+  expect(prFilesPageSource).toContain(
     "desktop:[--review-file-tree-gap:0px] desktop:[--review-file-tree-top:60px]",
   );
-  expect(prPanelSource).toContain(
+  expect(prFilesPageSource).toContain(
+    'compactToolbar ? "overflow-y-visible" : "overflow-y-auto"',
+  );
+  expect(prOverviewPageSource).toContain(
     'compactToolbar ? "overflow-y-visible" : "overflow-y-auto"',
   );
   expect(prPanelSource).toContain("stickyFileHeaders: false");
   expect(prPanelSource).not.toContain("--review-file-header-top");
-  expect(prPanelSource).toContain('${compactToolbar ? "pt-0" : "pt-2"}');
+  expect(prFilesPageSource).toContain('${compactToolbar ? "pt-0" : "pt-2"}');
+});
+
+test("Review data and pages keep their extracted ownership", () => {
+  expect(prPanelSource).toContain("usePrData({");
+  expect(prPanelSource).toContain("<PrOverviewPage");
+  expect(prPanelSource).toContain("<PrFilesPage");
+  expect(prPanelSource).not.toContain("fetchPrPreviewGuide");
+  expect(prPanelSource).not.toContain("fetchPrPreviewCodeFlow");
+  expect(prDataSource).toContain("activeLoadTargetRef");
+  expect(prDataSource).toContain("loadGenerationRef");
+  expect(prDataSource).toContain("guideGenerationRef");
+  expect(prDataSource).toContain("codeFlowGenerationRef");
+  expect(prOverviewPageSource).toContain("<ConversationView");
+  expect(prFilesPageSource).toContain("<CommentableDiff");
 });
 
 test("Review loading and errors stay centered beside the summary", () => {

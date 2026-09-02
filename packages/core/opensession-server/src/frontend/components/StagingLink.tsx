@@ -11,7 +11,7 @@ import { toast } from "../ui/toast";
 import { CopyCheck, useCopy } from "../ui/copy";
 import { ContextMenu, MENU_ICON } from "../ui/menu";
 import { IconArrowUpRight, IconCheck, IconCopy, IconGlobe } from "./icons";
-import { checkClass, isDeployment } from "./PrPanel";
+import { checkClass, isDeployment } from "../lib/pr-status-derive";
 import { useShortcutLabel } from "../hooks/useShortcutBindings";
 
 // The open-preview chord's handler lives in SessionViewer: this component

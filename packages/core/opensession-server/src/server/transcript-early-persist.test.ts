@@ -66,13 +66,24 @@ describe("intake-time user-line persist", () => {
     expect(workspaceSetup).toBeGreaterThan(promptWrite);
   });
 
-  test("run intake awaits the actor write at its documented durability boundary", async () => {
+  test("run intake persists sender attribution at its durability boundary", async () => {
     const source = await Bun.file(
       new URL("./run-session.ts", import.meta.url),
     ).text();
-    const promptWrite = source.indexOf("storeAppendUserLineEarly(");
-    expect(promptWrite).toBeGreaterThan(-1);
+    const runStart = source.indexOf("async function runSessionPromptInner(");
+    const attribution = source.indexOf(
+      "let prompt = withPromptAttribution(",
+      runStart,
+    );
+    const promptWrite = source.indexOf("storeAppendUserLineEarly(", runStart);
+
+    expect(runStart).toBeGreaterThan(-1);
+    expect(attribution).toBeGreaterThan(runStart);
+    expect(promptWrite).toBeGreaterThan(attribution);
     expect(source.slice(promptWrite - 10, promptWrite)).toContain("await");
+    expect(source.slice(promptWrite, promptWrite + 500)).toContain(
+      "transcriptLineUser(\n        prompt,",
+    );
     expect(source.slice(promptWrite, promptWrite + 500)).toContain(
       "required: true",
     );

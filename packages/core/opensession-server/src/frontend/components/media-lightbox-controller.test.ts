@@ -1,13 +1,13 @@
 import { expect, test } from "bun:test";
 import {
   openLightbox,
-  registerLightboxHost,
+  registerMediaLightboxHost,
   type LightboxRequest,
-} from "./media-lightbox-controller";
+} from "../lib/media-lightbox";
 
 test("openLightbox forwards a render-free request to the mounted host", () => {
   let request: LightboxRequest | undefined;
-  const unregister = registerLightboxHost((next) => {
+  const unregister = registerMediaLightboxHost((next) => {
     request = next;
   });
 
@@ -30,10 +30,10 @@ test("openLightbox forwards a render-free request to the mounted host", () => {
 test("unmounting an old host cannot unregister its replacement", () => {
   let firstCalls = 0;
   let secondCalls = 0;
-  const unregisterFirst = registerLightboxHost(() => {
+  const unregisterFirst = registerMediaLightboxHost(() => {
     firstCalls += 1;
   });
-  const unregisterSecond = registerLightboxHost(() => {
+  const unregisterSecond = registerMediaLightboxHost(() => {
     secondCalls += 1;
   });
 

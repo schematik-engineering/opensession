@@ -8,7 +8,7 @@ import { IconDotsHorizontal, IconPencil, IconTrash } from "./icons";
 import { MentionText } from "./MentionText";
 import { UserAvatar } from "./UserAvatar";
 import { getCurrentUser } from "./UserPicker";
-import { openLightbox } from "./media-lightbox-controller";
+import { openLightbox } from "../lib/media-lightbox";
 import { noAutofill } from "../lib/composer-autofill";
 import { noteSurface } from "../lib/tinted-surface";
 import { errorMessage } from "../lib/error-message";
