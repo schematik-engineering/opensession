@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { UnifiedSession } from "./types";
-import { mineStatus, ownedBy } from "./sidebar-lanes";
+import { mineStatus, ownedBy, prLaneForSessions } from "./sidebar-lanes";
 
 function session(overrides: Partial<UnifiedSession>): UnifiedSession {
   return {
@@ -26,6 +26,25 @@ describe("ownedBy", () => {
         "Kent",
       ),
     ).toBe(false);
+  });
+});
+
+describe("prLaneForSessions", () => {
+  test("does not call a PR ready while reviews are outstanding", () => {
+    const ready = session({
+      prState: "OPEN",
+      prUrl: "https://github.com/tellahq/app/pull/42",
+      prMergeable: "MERGEABLE",
+      prChecks: { total: 1, passed: 1, failed: 0, pending: 0 },
+    });
+
+    expect(
+      prLaneForSessions([{ ...ready, prReviewDecision: "REVIEW_REQUIRED" }]),
+    ).toBeNull();
+    expect(
+      prLaneForSessions([{ ...ready, prReviewRequested: ["sam"] }]),
+    ).toBeNull();
+    expect(prLaneForSessions([ready])).toBe("review");
   });
 });
 

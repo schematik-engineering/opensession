@@ -113,6 +113,14 @@ export function prStatusMark(pr: PrStatusInput): {
       tone: "muted",
       quiet: false,
     };
+  if (decision === "REVIEW_REQUIRED")
+    return {
+      className: "text-yellow",
+      bgClassName: MARK_BG.yellow,
+      label: "PR review required",
+      tone: "yellow",
+      quiet: false,
+    };
   if (decision === "APPROVED")
     return {
       className: "text-green",
@@ -135,6 +143,7 @@ const STATUS_TEXT: Record<string, string> = {
   "PR changes requested": "Changes requested",
   "PR checks failing": "Checks failing",
   "PR checks running": "Checks running",
+  "PR review required": "Review required",
   "Draft PR": "Draft",
 };
 

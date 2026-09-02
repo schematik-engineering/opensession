@@ -10,6 +10,7 @@ export interface PrHeadline {
     | "running"
     | "draft"
     | "changes-requested"
+    | "review-required"
     | "stack-blocked"
     | "ready"
     | "ahead"
@@ -20,6 +21,15 @@ export interface PrHeadline {
     | "clean";
   label: string;
   tone: "green" | "purple" | "red" | "yellow" | "muted";
+}
+
+export function reviewsOutstanding(
+  pr: Pick<PrDetails, "reviewDecision" | "reviewers">,
+): boolean {
+  return (
+    pr.reviewDecision === "REVIEW_REQUIRED" ||
+    (pr.reviewers ?? []).some((reviewer) => reviewer.state === "PENDING")
+  );
 }
 
 export function summarizeChecks(pr: PrDetails | null): {
@@ -102,6 +112,12 @@ export function deriveHeadline(
       return {
         key: "stack-blocked",
         label: `Draft #${draftBelow.number} below it`,
+        tone: "yellow",
+      };
+    if (reviewsOutstanding(pr))
+      return {
+        key: "review-required",
+        label: "Review required",
         tone: "yellow",
       };
     return { key: "ready", label: "Ready to merge", tone: "green" };

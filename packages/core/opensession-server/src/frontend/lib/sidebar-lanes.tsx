@@ -146,7 +146,9 @@ export function prLaneForSessions(
       checks.total === 0 ||
       (checks.failed === 0 && checks.pending === 0)) &&
     session.prMergeable !== "CONFLICTING" &&
-    session.prReviewDecision !== "CHANGES_REQUESTED";
+    session.prReviewDecision !== "CHANGES_REQUESTED" &&
+    session.prReviewDecision !== "REVIEW_REQUIRED" &&
+    (session.prReviewRequested?.length ?? 0) === 0;
   return ready ? "review" : null;
 }
 

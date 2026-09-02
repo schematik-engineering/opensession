@@ -71,6 +71,7 @@ export function refTone(ref: PrStateFacts): PrTone {
     return "red";
   if ((ref.checks?.pending ?? 0) > 0) return "yellow";
   if (ref.isDraft) return "muted";
+  if (ref.reviewDecision === "REVIEW_REQUIRED") return "yellow";
   return "green";
 }
 
@@ -107,6 +108,7 @@ export function refState(ref: PrStateFacts): string {
   const pending = ref.checks?.pending ?? 0;
   if (pending > 0) return `${pending} check${pending === 1 ? "" : "s"} pending`;
   if (ref.isDraft) return "Draft";
+  if (ref.reviewDecision === "REVIEW_REQUIRED") return "Review required";
   if (ref.reviewDecision === "APPROVED") return "Approved";
   return "Open";
 }

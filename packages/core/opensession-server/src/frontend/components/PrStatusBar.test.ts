@@ -23,6 +23,28 @@ function gitStatus(overrides: Partial<GitStatusInfo> = {}): GitStatusInfo {
   };
 }
 
+function pullRequest(overrides: Partial<PrDetails> = {}): PrDetails {
+  return {
+    number: 42,
+    title: "Ready pull request",
+    url: "https://github.com/tellahq/app/pull/42",
+    state: "OPEN",
+    isDraft: false,
+    baseRefName: "main",
+    headRefName: "feature",
+    additions: 1,
+    deletions: 0,
+    changedFiles: 1,
+    reviewDecision: "APPROVED",
+    author: "octocat",
+    body: "",
+    checks: [],
+    mergeable: "MERGEABLE",
+    mergeStateStatus: "CLEAN",
+    ...overrides,
+  };
+}
+
 test("does not offer PR, Pull, or Push status for a shared checkout", () => {
   const shared = gitStatus({ sharedCheckout: true, ahead: 71, behind: 187 });
   expect(deriveHeadline(null, shared)).toEqual({
@@ -71,24 +93,10 @@ test("keeps Pull for an isolated worktree behind its own upstream", () => {
 });
 
 test("offers Merge instead of Pull when a behind PR has no conflicts", () => {
-  const pr: PrDetails = {
-    number: 42,
+  const pr = pullRequest({
     title: "Behind but mergeable",
-    url: "https://github.com/tellahq/app/pull/42",
-    state: "OPEN",
-    isDraft: false,
-    baseRefName: "main",
-    headRefName: "feature",
-    additions: 1,
-    deletions: 0,
-    changedFiles: 1,
-    reviewDecision: "APPROVED",
-    author: "octocat",
-    body: "",
-    checks: [],
-    mergeable: "MERGEABLE",
     mergeStateStatus: "BEHIND",
-  };
+  });
 
   expect(deriveHeadline(pr, gitStatus({ behind: 2, behindBase: 3 }))).toEqual({
     key: "ready",
@@ -101,4 +109,66 @@ test("offers Merge instead of Pull when a behind PR has no conflicts", () => {
       gitStatus({ behind: 2, behindBase: 3 }),
     ),
   ).toEqual({ key: "conflicts", label: "Merge conflicts", tone: "red" });
+});
+
+test("cautions Merge while requested reviews are outstanding", () => {
+  expect(
+    deriveHeadline(
+      pullRequest({
+        reviewDecision: "",
+        reviewers: [{ login: "sam", state: "PENDING" }],
+      }),
+      gitStatus(),
+    ),
+  ).toEqual({
+    key: "review-required",
+    label: "Review required",
+    tone: "yellow",
+  });
+  expect(
+    deriveHeadline(
+      pullRequest({ reviewDecision: "REVIEW_REQUIRED" }),
+      gitStatus(),
+    ),
+  ).toEqual({
+    key: "review-required",
+    label: "Review required",
+    tone: "yellow",
+  });
+});
+
+test("keeps pending checks amber and turns green only when ready", () => {
+  expect(
+    deriveHeadline(
+      pullRequest({
+        checks: [
+          {
+            name: "Test",
+            status: "IN_PROGRESS",
+            conclusion: "",
+          },
+        ],
+      }),
+      gitStatus(),
+    ),
+  ).toEqual({ key: "running", label: "1 check pending…", tone: "yellow" });
+  expect(deriveHeadline(pullRequest(), gitStatus())).toEqual({
+    key: "ready",
+    label: "Ready to merge",
+    tone: "green",
+  });
+  expect(
+    deriveHeadline(
+      pullRequest({ reviewDecision: "", reviewers: [] }),
+      gitStatus(),
+    ),
+  ).toEqual({ key: "ready", label: "Ready to merge", tone: "green" });
+});
+
+test("offers amber Merge for caution states", () => {
+  expect(statusBarSource).toContain('case "review-required":');
+  expect(statusBarSource).toContain('return renderMergeAction("yellow")');
+  expect(statusBarSource).toContain(
+    'case "ready":\n        return renderMergeAction("green")',
+  );
 });
