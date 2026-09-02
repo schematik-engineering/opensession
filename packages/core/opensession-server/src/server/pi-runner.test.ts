@@ -12,6 +12,7 @@ import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -1268,6 +1269,16 @@ describe("local-tool path containment", () => {
       expect(res.content[0]?.text).toMatch(/inside\.txt:1:/);
       expect(res.content[0]?.text).toContain("needle-inside");
     },
+  );
+});
+
+test("unattended runs select the isolated CLI home", () => {
+  const source = readFileSync(
+    new URL("./pi-runner.ts", import.meta.url),
+    "utf8",
+  );
+  expect(source).toContain(
+    "const isolatedHome = policy.unattended || Boolean(opts.publicationPolicy)",
   );
 });
 

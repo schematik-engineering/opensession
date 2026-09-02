@@ -2054,13 +2054,14 @@ async function* runPiAttempt(
     // Minimal bash env, the security invariant this engine hangs on. The
     // server env is NEVER inherited; every entry is explicit.
     const awsEnv = opts.aws ? await ensureAgentAwsCredsFile() : {};
+    const isolatedHome = policy.unattended || Boolean(opts.publicationPolicy);
     const homeEnv = piBashHomeEnv({
       runKey,
       scratchDir: opts.scratchDir,
-      isolated: Boolean(opts.publicationPolicy),
+      isolated: isolatedHome,
       hostHome: process.env.HOME,
     });
-    if (opts.publicationPolicy && homeEnv.HOME)
+    if (isolatedHome && homeEnv.HOME)
       mkdirSync(homeEnv.HOME, { recursive: true, mode: 0o700 });
     const bashEnv: Record<string, string> = {
       ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
