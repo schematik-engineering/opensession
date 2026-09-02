@@ -13,7 +13,7 @@ const repo: Repo = {
 
 describe("security scan publication", () => {
   test("keeps headless GitHub scans report-only", () => {
-    const prompt = buildScanPrompt(repo, null, undefined, "report-only");
+    const prompt = buildScanPrompt(repo);
 
     expect(prompt).toContain(
       "Do not commit, push, open pull requests, or call the GitHub API.",
@@ -24,7 +24,7 @@ describe("security scan publication", () => {
   });
 
   test("leaves interactive GitHub publication available after confirmation", () => {
-    const prompt = buildScanPrompt(repo);
+    const prompt = buildScanPrompt(repo, null, undefined, "pull-request");
 
     expect(prompt).toContain("gh pr create");
     expect(prompt).toContain("One PR per finding");

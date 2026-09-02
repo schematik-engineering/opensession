@@ -23,7 +23,6 @@ import {
   githubUserAuthSettings,
   githubUserLoginForRun,
   pollGithubDeviceFlow,
-  projectedGithubRunEnv,
   refreshExpiringGithubTokens,
   removeGithubAccount,
   resolveGithubCredential,
@@ -236,6 +235,7 @@ describe("token lookups + runner env", () => {
     expect(githubRunEnv("Alice")).toMatchObject({
       GH_TOKEN: "ghu_remote123",
       GITHUB_TOKEN: "ghu_remote123",
+      GH_CONFIG_DIR: join(dir, "github-cli"),
       GIT_CONFIG_VALUE_2: "git@github.com:",
     });
     expect(JSON.stringify(githubRunEnv("Alice"))).not.toContain(
@@ -248,7 +248,7 @@ describe("token lookups + runner env", () => {
     writeFileSync(projected, "{}");
     process.env[GITHUB_RUN_AUTH_FILE_ENV] = projected;
 
-    expect(projectedGithubRunEnv()).toMatchObject({
+    expect(githubRunEnv("Alice")).toMatchObject({
       GH_TOKEN: "",
       GITHUB_TOKEN: "",
       GH_CONFIG_DIR: join(dir, "github-cli"),

@@ -903,10 +903,8 @@ export function projectedGithubRunEnv(): Record<string, string> {
  * a process-local Git credential helper so HTTPS remotes can push without
  * persisting the short-lived user token in .git/config or ~/.config/gh. */
 export function githubRunEnv(user?: string | null): Record<string, string> {
-  const auth = githubAuthEnv(user);
-  return githubProcessEnv(
-    Object.keys(auth).length ? auth : projectedGithubAuthEnv(),
-  );
+  if (process.env[GITHUB_RUN_AUTH_FILE_ENV]) return projectedGithubRunEnv();
+  return githubProcessEnv(githubAuthEnv(user));
 }
 
 export interface GithubCredential {

@@ -215,7 +215,7 @@ export function buildScanPrompt(
   repo: Repo,
   profile?: ScanProfile | null,
   instructions?: string,
-  githubPublication: "pull-request" | "report-only" = "pull-request",
+  githubPublication: "pull-request" | "report-only" = "report-only",
 ): string {
   // Code Storage repos have no gh CLI and no PRs. Findings ship as pushed fix
   // branches instead, where the branch is the change request. Interactive
@@ -297,7 +297,7 @@ Then summarize the agreed threat model back to me for confirmation, and offer to
 
 Once confirmed, run the scan in this session, following the standard procedure below — but adjust it to whatever we agreed in the interview (the interview outcome overrides these defaults):
 
-${buildScanPrompt(repo, profile, instructions).replace(/^You are [^\n]*\n\n/, "")}`;
+${buildScanPrompt(repo, profile, instructions, "pull-request").replace(/^You are [^\n]*\n\n/, "")}`;
 }
 
 // ── Headless scan execution ──────────────────────────────────
