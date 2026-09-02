@@ -10,7 +10,6 @@ import {
   type TranscriptIndexedRange,
 } from "../lib/transcript-index";
 import {
-  shouldAnimateTranscriptEntryPosition,
   transcriptArrivalAliases,
   transcriptEntryMountKey,
   turnMountKey,
@@ -47,12 +46,17 @@ import {
 } from "./ShippedChangeComposer";
 import { SessionContextMessage } from "./SessionContextMessage";
 import {
-  nextBackgroundTranscriptRange,
-  transcriptRangeHasLoadedSuffix,
   transcriptRangesContainPayload,
   visibleTranscriptHydrationDemand,
 } from "./session-viewer/transcript-hydration";
 import { isLegacyReasoningHeading } from "../lib/reasoning-display";
+import {
+  getThinkingMessagesPref,
+  onThinkingMessagesChanged,
+  thinkingMessageIsVisible,
+  thinkingMessageVisibility,
+  type ThinkingMessageVisibility,
+} from "../lib/thinking-messages-pref";
 
 type RenderBlock =
   | { kind: "entry"; entry: TranscriptEntry; reasoning?: boolean }
@@ -82,7 +86,7 @@ interface Props {
   pendingDeliveryIds?: string[];
   /** Whether the conversation is live (last work block shows a spinner / stays open). */
   live?: boolean;
-  /** Assistant messages show a "Fork from here" action when provided. */
+  /** Assistant messages show a "Duplicate from here" action when provided. */
   onFork?: (entryId: string) => void;
   /** Your own sent messages can be reopened in the composer when provided. */
   onEditMessage?: (entry: TranscriptEntry) => void;
@@ -117,10 +121,19 @@ interface Props {
   onLoadTranscriptRanges?: (ranges: TranscriptIndexedRange[]) => void;
   /** Fired once the opening viewport renders from real payload. */
   onVisibleRangesSettled?: () => void;
+  /** Explicit scroll root for transcript surfaces outside SessionViewer. */
+  scrollElement?: HTMLDivElement | null;
+  /** Whether measurement may maintain the live edge in this frame. */
+  shouldMaintainEnd?: () => boolean;
+  /** Reaffirm live-edge following after virtual measurements commit. */
+  onLayout?: () => void;
   /** Indexed range rows reuse this renderer without nesting a virtualizer. */
   virtualize?: boolean;
   /** Stable outer range identity for the one work turn rendered inside it. */
   turnMountScope?: string;
+  /** Resolved once against the full loaded payload, then shared with indexed
+   * range renderers so "Latest" means one row across the whole transcript. */
+  thinkingVisibility?: ThinkingMessageVisibility;
 }
 
 type ReviewBlockRole =
@@ -229,11 +242,6 @@ const TRAILING_MOUNTED_BLOCKS = 24;
 // (after the reader climbs through it) asks for more.
 const TOP_APPROACH_ENTRY_BUDGET = 200;
 
-// Background history stays deliberately slower than reader-driven hydration.
-// One range per settled tick lets large sessions fill in without monopolizing
-// the session actor or repeatedly rebuilding the client transcript.
-const BACKGROUND_HYDRATION_DELAY_MS = 1_500;
-
 function renderBlockEntries(block: RenderBlock): TranscriptEntry[] {
   if (block.kind === "turn") return block.items;
   if (block.kind === "entry" || block.kind === "footer") return [block.entry];
@@ -299,8 +307,21 @@ export const TranscriptBlocks = function TranscriptBlocks(props: Props) {
   const entries = props.optimisticEntries?.length
     ? mergeOptimisticTranscriptEntries(props.entries, props.optimisticEntries)
     : props.entries;
-  const renderedProps =
-    entries === props.entries ? props : { ...props, entries };
+  const [thinkingMessages, setThinkingMessages] = React.useState(
+    getThinkingMessagesPref,
+  );
+  useEffect(
+    () =>
+      onThinkingMessagesChanged(() =>
+        setThinkingMessages(getThinkingMessagesPref()),
+      ),
+    [],
+  );
+  const renderedProps: Props = {
+    ...props,
+    entries,
+    thinkingVisibility: thinkingMessageVisibility(entries, thinkingMessages),
+  };
   return (
     <>
       {props.sessionId && <SessionContextMessage sessionId={props.sessionId} />}
@@ -333,6 +354,10 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
   virtualize = true,
   turnMountScope,
   onVisibleRangesSettled,
+  scrollElement,
+  shouldMaintainEnd,
+  onLayout,
+  thinkingVisibility,
 }: Props) {
   // Top level only (nested per-range instances pass virtualize={false} and are
   // suppressed): without an outline every block renders real content, so the
@@ -349,7 +374,11 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
   const pendingDeliveryEntryIds = new Set(pendingDeliveryIds ?? []);
   const renderedEntries = normalizeLegacyVoiceToolEntries(entries)
     .map(classifyEntry)
-    .filter((entry) => entry.turnBoundary || !isRenderlessUserEntry(entry));
+    .filter(
+      (entry) =>
+        thinkingMessageIsVisible(entry, thinkingVisibility) &&
+        (entry.turnBoundary || !isRenderlessUserEntry(entry)),
+    );
   const shareAfterEntryIds = new Set<string>();
   if (slackShare) {
     for (let i = 0; i < renderedEntries.length; i++) {
@@ -647,6 +676,9 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
       trailingMounted={TRAILING_MOUNTED_BLOCKS}
       enabled={virtualize}
       sizeCacheKey={sessionId}
+      scrollElement={scrollElement}
+      shouldMaintainEnd={shouldMaintainEnd}
+      onLayout={onLayout}
     />
   );
 };
@@ -788,33 +820,6 @@ function IndexedTranscriptBlocks(props: Props) {
   }
   atoms = sortIndexedTimelineAtoms(atoms);
   const timeline = groupIndexedReviewLoops(atoms);
-  const backgroundRanges = timeline.flatMap(indexedItemRanges);
-  const backgroundRange = nextBackgroundTranscriptRange(
-    backgroundRanges,
-    (id) => payloadById.has(id),
-  );
-  const backgroundRangeKey = backgroundRange?.key ?? null;
-  const backgroundHydrationAvailable = Boolean(
-    props.onLoadTranscriptRanges && backgroundRangeKey,
-  );
-  const requestBackgroundHydration = useEffectEvent(() => {
-    const next = nextBackgroundTranscriptRange(backgroundRanges, (id) =>
-      payloadById.has(id),
-    );
-    if (next) props.onLoadTranscriptRanges?.([next]);
-  });
-  useEffect(() => {
-    if (!backgroundHydrationAvailable) return;
-    const timer = window.setTimeout(
-      requestBackgroundHydration,
-      BACKGROUND_HYDRATION_DELAY_MS,
-    );
-    return () => window.clearTimeout(timer);
-  }, [
-    backgroundHydrationAvailable,
-    backgroundRangeKey,
-    props.transcriptRangeRetryGeneration,
-  ]);
   // Only payload-backed rows occupy scroll space. Unloaded history contributes
   // no estimated placeholders: the scrollable area starts at the loaded tail
   // and grows upward as older ranges hydrate (handleTopApproach below), so
@@ -822,6 +827,12 @@ function IndexedTranscriptBlocks(props: Props) {
   const renderedTimeline = timeline
     .map((item, index) => ({ item, index }))
     .filter(({ item }) => {
+      if (
+        item.kind === "entry" &&
+        !thinkingMessageIsVisible(item.entry, props.thinkingVisibility)
+      ) {
+        return false;
+      }
       const itemRanges = indexedItemRanges(item);
       return (
         itemRanges.length === 0 ||
@@ -851,16 +862,6 @@ function IndexedTranscriptBlocks(props: Props) {
   const firstRenderedRangeKey = firstRenderedRange
     ? indexedItemKey(firstRenderedRange.item, firstRenderedRange.index)
     : null;
-  const firstRenderedRangeIds = firstRenderedRange
-    ? indexedItemEntryIds(firstRenderedRange.item)
-    : [];
-  const firstRenderedRangeLoaded = firstRenderedRangeIds.filter((id) =>
-    payloadById.has(id),
-  ).length;
-  const firstRenderedRangeIsPartialSuffix = transcriptRangeHasLoadedSuffix(
-    firstRenderedRangeIds,
-    (id) => payloadById.has(id),
-  );
   // Fired when the reader nears the top of the mounted window: collect the
   // next batch of missing ranges walking backwards from the window's head.
   // Start AT the head because the bounded opening payload can begin partway
@@ -944,9 +945,6 @@ function IndexedTranscriptBlocks(props: Props) {
         // it must not slide settled work or runner notices below it. Loose
         // entries are the live/optimistic atoms outside those durable ranges.
         animateArrival: item.kind === "entry",
-        animatePositionChanges:
-          item.kind === "entry" &&
-          shouldAnimateTranscriptEntryPosition(item.entry),
         estimateSize,
         measure: true,
         content:
@@ -1001,12 +999,11 @@ function IndexedTranscriptBlocks(props: Props) {
       items={items}
       trailingMounted={TRAILING_MOUNTED_BLOCKS}
       sizeCacheKey={props.sessionId}
+      scrollElement={props.scrollElement}
+      shouldMaintainEnd={props.shouldMaintainEnd}
+      onLayout={props.onLayout}
       onTopApproach={handleTopApproach}
       topApproachGeneration={props.transcriptRangeRetryGeneration}
-      topGrowthKey={firstRenderedRangeKey}
-      topGrowthVersion={
-        firstRenderedRangeIsPartialSuffix ? firstRenderedRangeLoaded : undefined
-      }
       onVisibleItems={(visible) => {
         const wanted = visibleTranscriptHydrationDemand(
           hydrationOutline,

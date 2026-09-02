@@ -50,7 +50,7 @@ import {
   lanePickerLabel,
   type LanePickerValue,
 } from "./MobileSheetPages";
-import { openLightbox } from "../media-lightbox-controller";
+import { openLightbox } from "../../lib/media-lightbox";
 import { sessionPrTone } from "../../lib/pr-refs";
 import {
   CardFooter,

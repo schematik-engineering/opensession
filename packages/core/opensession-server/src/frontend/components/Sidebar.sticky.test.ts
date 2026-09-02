@@ -4,7 +4,18 @@ import {
   SIDEBAR_STUCK_BACKING,
 } from "../lib/sidebar-classes";
 
-const source = await Bun.file(new URL("./Sidebar.tsx", import.meta.url)).text();
+const sidebarSource = await Bun.file(
+  new URL("./Sidebar.tsx", import.meta.url),
+).text();
+const source = await Bun.file(
+  new URL("../hooks/useSidebarStickyHeadings.ts", import.meta.url),
+).text();
+const workspaceRenderersSource = await Bun.file(
+  new URL("./sidebar/sidebar-workspace-renderers.tsx", import.meta.url),
+).text();
+const projectBandsSource = await Bun.file(
+  new URL("./sidebar/ProjectBands.tsx", import.meta.url),
+).text();
 
 describe("sidebar sticky headings", () => {
   test("keeps the stuck marker across React className updates", () => {
@@ -25,19 +36,28 @@ describe("sidebar sticky headings", () => {
   });
 
   test("reveals keyboard-selected rows below the sticky caption", () => {
-    expect(source).toContain('"desktop:scroll-pt-[var(--sidebar-cap-h)]"');
+    expect(sidebarSource).toContain(
+      '"desktop:scroll-pt-[var(--sidebar-cap-h)]"',
+    );
   });
 
   test("does not treat the loose scratch namespace as a nested repo lane", () => {
-    const activeStart = source.indexOf("function renderActiveSection");
-    const activeEnd = source.indexOf(
+    const activeStart = workspaceRenderersSource.indexOf(
+      "function renderActiveSection",
+    );
+    const activeEnd = workspaceRenderersSource.indexOf(
       "function renderWorkspaceGrouping",
       activeStart,
     );
-    const activeSection = source.slice(activeStart, activeEnd);
+    const activeSection = workspaceRenderersSource.slice(
+      activeStart,
+      activeEnd,
+    );
     expect(activeSection).toContain("nested && SIDEBAR_STICKY_LANE_NESTED");
     expect(activeSection).not.toContain("ns && SIDEBAR_STICKY_LANE_NESTED");
-    expect(source).toContain("const nested = !!laneRepo;");
-    expect(source).toContain('scratchRows,\n              "scratch::"');
+    expect(workspaceRenderersSource).toContain("const nested = !!laneRepo;");
+    expect(projectBandsSource).toContain(
+      'projects.scratchRows,\n            "scratch::",',
+    );
   });
 });

@@ -17,7 +17,11 @@ import {
 import type { SessionSocketSend } from "./useSessionSocket";
 
 const TRANSCRIPT_RANGE_CONCURRENCY = 6;
-const INDEX_ANCHOR_SETTLE_MS = 15_000;
+// The custom hold only bridges the bounded-tail → full-index identity handoff.
+// Once the entry exists under its new structural key, native virtual anchoring
+// owns every later insertion and measurement. Keeping both active double-moves
+// the viewport when range payload lands.
+const INDEX_ANCHOR_BRIDGE_MS = 0;
 const RANGE_REQUEST_TIMEOUT_MS = 15_000;
 const LIVE_EDGE_THRESHOLD = 90;
 
@@ -325,7 +329,7 @@ export function useTranscript({
             if (indexAnchorHoldCancelRef.current === cancelIndexHold)
               indexAnchorHoldCancelRef.current = null;
           },
-          INDEX_ANCHOR_SETTLE_MS,
+          INDEX_ANCHOR_BRIDGE_MS,
         );
         indexAnchorHoldCancelRef.current = cancelIndexHold;
       }
@@ -347,9 +351,8 @@ export function useTranscript({
   }) => {
     if (!outlineReady) return;
     onSettled();
-    // Keep the pre-refresh anchor through the final row measurements. The
-    // identity check prevents this delayed retirement from cancelling a newer
-    // index replacement's hold.
+    // Retire a bridge still waiting for its replacement identity. The identity
+    // check prevents this delayed cleanup from cancelling a newer handoff.
     const settledHold = indexAnchorHoldCancelRef.current;
     if (settledHold) {
       requestAnimationFrame(() =>

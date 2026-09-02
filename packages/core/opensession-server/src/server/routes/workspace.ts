@@ -43,6 +43,7 @@ import {
   workspaceOwningWorktree,
 } from "../session-repos";
 import { getOpenPrs, getTranscriptPath } from "../sessions";
+import { duplicateSessionTranscript } from "../session-duplicate";
 import {
   configuredIdentity,
   configuredRepos,
@@ -717,6 +718,8 @@ export async function handleWorkspaceRoutes(
        *  the sandbox capability matrix and stamped on the session; unset =
        *  the default model, like every other create. */
       model?: string;
+      /** Copy the source chat into this idle sibling. */
+      duplicate?: boolean;
     };
     // share (default): reuse the workspace's worktree/branch (parallel sessions,
     // one branch). stack: a new worktree branched off it (stacked PRs). ask:
@@ -744,15 +747,17 @@ export async function handleWorkspaceRoutes(
     if (existing) return Response.json({ id: bksId, session: existing });
     // One reusable empty tab per workspace. This server-side check closes the
     // multi-window race that hiding the + in one browser cannot prevent.
-    const reusable = src.workspaceId
-      ? (await getCachedSessionsAsync("exclude")).find(
-          (session) =>
-            session.workspaceId === src.workspaceId &&
-            isReusableEmptySession(session),
-        )
-      : isReusableEmptySession(src)
-        ? src
-        : undefined;
+    const reusable = body.duplicate
+      ? undefined
+      : src.workspaceId
+        ? (await getCachedSessionsAsync("exclude")).find(
+            (session) =>
+              session.workspaceId === src.workspaceId &&
+              isReusableEmptySession(session),
+          )
+        : isReusableEmptySession(src)
+          ? src
+          : undefined;
     if (reusable) return Response.json({ id: reusable.id, session: reusable });
     let branch = src.branch || "";
     let worktreeDir = src.worktreeDir || "";
@@ -898,6 +903,7 @@ export async function handleWorkspaceRoutes(
       (workspaceId ? getWorkspace(workspaceId)?.externalRefs : undefined);
     const data: NativeSessionFile = {
       id: bksId,
+      ...(body.duplicate ? { duplicatedFromSessionId: src.id } : {}),
       claudeSessionId: "",
       branch,
       worktreeDir,
@@ -912,7 +918,7 @@ export async function handleWorkspaceRoutes(
       createdBy: requestUser(ctx, body.user) || "Anonymous",
       createdAt: new Date().toISOString(),
       lastActivity: new Date().toISOString(),
-      title: "New session",
+      title: body.duplicate ? src.title : "New session",
       mode,
       // Stamp the validated model so the sibling actually runs what the
       // sandbox check vetted (validating one model and running another
@@ -931,6 +937,7 @@ export async function handleWorkspaceRoutes(
         : {}),
     };
     await updateSessionFile(bksId, () => data);
+    if (body.duplicate) await duplicateSessionTranscript(src, bksId);
     // Also return the full unified session so the client can drop it into
     // its session list and render the new session instantly, instead of
     // flashing a loading screen until the next sessions poll lands.

@@ -70,7 +70,9 @@ export function defaultWorkspaceModelSettings():
   return defaultModelSettings;
 }
 
-export async function fetchWorkspaces(): Promise<Workspace[]> {
+export async function fetchWorkspaces(options?: {
+  onError?: (cause: unknown) => void;
+}): Promise<Workspace[]> {
   try {
     const data = await request<{
       workspaces?: Workspace[];
@@ -92,8 +94,9 @@ export async function fetchWorkspaces(): Promise<Workspace[]> {
     workspaceSnapshot = snapshot;
     stableWorkspaces = next;
     return next;
-  } catch (e) {
-    console.warn("fetchWorkspaces failed:", e);
+  } catch (cause: unknown) {
+    options?.onError?.(cause);
+    console.warn("fetchWorkspaces failed:", cause);
     return [];
   }
 }

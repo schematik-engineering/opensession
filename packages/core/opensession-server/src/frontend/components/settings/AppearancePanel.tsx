@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { IconCheck } from "../icons";
 import { fetchFeeds, type RepoInfo } from "../../lib/api";
+import { errorMessage } from "../../lib/error-message";
 import {
   ACCENT_THEME_OPTIONS,
   getAccentTheme,
@@ -51,6 +52,11 @@ import {
   type WsTimePref,
 } from "../../lib/workspace-time";
 import {
+  getSidebarSubagentsPref,
+  onSidebarSubagentsChanged,
+  setSidebarSubagentsPref,
+} from "../../lib/sidebar-subagents-pref";
+import {
   PLAIN_ID,
   SUPPORT_SURFACE_OPTIONS,
   setSupportSurface,
@@ -64,6 +70,7 @@ import {
   SettingsSection,
 } from "../../ui/settings";
 import { Segmented, SegmentedOption } from "../../ui/segmented";
+import { InlineAlert } from "../../ui/state";
 import { Switch } from "../../ui/switch";
 import { usePeople } from "../../lib/people";
 import { useCurrentUser } from "../UserPicker";
@@ -328,6 +335,14 @@ export function SidebarDisplayRows({ repos }: { repos: RepoInfo[] }) {
   );
   const [wsTime, setWsTime] = useState<WsTimePref>(getWsTimePref);
   useEffect(() => onWsTimeChanged(() => setWsTime(getWsTimePref())), []);
+  const [showSubagents, setShowSubagents] = useState(getSidebarSubagentsPref);
+  useEffect(
+    () =>
+      onSidebarSubagentsChanged(() =>
+        setShowSubagents(getSidebarSubagentsPref()),
+      ),
+    [],
+  );
 
   return (
     <>
@@ -416,6 +431,17 @@ export function SidebarDisplayRows({ repos }: { repos: RepoInfo[] }) {
           }
         />
         <SettingRow
+          title="Show sub-agents"
+          desc="Nest worker sessions under their workspace."
+          control={
+            <Switch
+              aria-label="Show sub-agents"
+              checked={showSubagents}
+              onCheckedChange={setSidebarSubagentsPref}
+            />
+          }
+        />
+        <SettingRow
           title="Hide empty projects"
           control={
             <Switch
@@ -471,6 +497,9 @@ export function SidebarItemsSection() {
     readHiddenSidebarTools,
   );
   const [sidebarFeeds, setSidebarFeeds] = useState<FeedDescriptor[]>([]);
+  const [sidebarFeedsError, setSidebarFeedsError] = useState<string | null>(
+    null,
+  );
   const [hiddenSidebarFeeds, setHiddenSidebarFeeds] = useState(
     readHiddenSidebarFeeds,
   );
@@ -480,7 +509,12 @@ export function SidebarItemsSection() {
       .then((feeds) => {
         if (alive) setSidebarFeeds(feeds);
       })
-      .catch(() => {});
+      .catch((error: unknown) => {
+        if (alive)
+          setSidebarFeedsError(
+            errorMessage(error, "Failed to load sidebar sources"),
+          );
+      });
     return () => {
       alive = false;
     };
@@ -503,6 +537,7 @@ export function SidebarItemsSection() {
   return (
     <>
       <SettingsGroupLabel>Show in sidebar</SettingsGroupLabel>
+      {sidebarFeedsError && <InlineAlert>{sidebarFeedsError}</InlineAlert>}
       <SettingCard>
         {/* Support is one decision, not two switches. Its tool and its
 				    sidebar band are the same queue reached two ways, so they are
@@ -512,7 +547,7 @@ export function SidebarItemsSection() {
         {sidebarFeeds.some((feed) => feed.id === PLAIN_ID) && (
           <SettingRow
             title="Support tickets"
-            desc="Choose where Plain tickets live: in a full workspace from the sidebar, or beside the queue without chat."
+            desc="Choose where tickets appear."
             control={
               <Select
                 label="Where support tickets live"
@@ -549,7 +584,7 @@ export function SidebarItemsSection() {
             <SettingRow
               key={feed.id}
               title={feed.title}
-              desc="Hidden sources stop refreshing until shown again."
+              desc="Hidden sources stop refreshing."
               control={
                 <Switch
                   aria-label={`Show ${feed.title} in sidebar`}

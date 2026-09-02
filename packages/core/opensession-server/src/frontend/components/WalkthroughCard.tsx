@@ -13,7 +13,7 @@ import { cn } from "../ui/cn";
 import { ease } from "../ui/motion";
 import { IconChevronDown, IconPlay, IconPlayRectangle } from "./icons";
 import { MarkdownBody, useMarkdownRepo } from "./MarkdownBody";
-import { openLightbox, type LightboxItem } from "./media-lightbox-controller";
+import { openLightbox, type LightboxItem } from "../lib/media-lightbox";
 
 /** Stream server-side media (staged under the uploads dir) through the
  *  existing scoped media route — same URL shape MessageBubble uses. */

@@ -33,6 +33,7 @@ import { join } from "path";
 import {
   MAX_PI_SDK_SESSIONS,
   PI_PASSTHROUGH_BLOCK_REASON,
+  PI_SDK_MAX_TURNS,
   buildPiAnthropicModels,
   buildPiAnthropicProvider,
   IMAGE_ONLY_PROMPT,
@@ -44,6 +45,7 @@ import {
   sdkPromptContent,
   turnImages,
   rememberSdkTurn,
+  recoverCappedSdkStopReason,
   shouldDeferClaudeText,
   usageFromSdkResult,
   type PiCatalogModel,
@@ -627,6 +629,17 @@ describe("images survive the turn", () => {
 });
 
 describe("Pi passthrough durable checkpoint", () => {
+  test("caps ordinary passthrough at the durable tool boundary", () => {
+    expect(PI_SDK_MAX_TURNS).toBe(1);
+  });
+
+  test("recovers capped tool handoffs and reports content-only caps as truncated", () => {
+    expect(recoverCappedSdkStopReason("error_max_turns", 1, 0)).toBe("toolUse");
+    expect(recoverCappedSdkStopReason("error_max_turns", 0, 1)).toBe("length");
+    expect(recoverCappedSdkStopReason("error_max_turns", 0, 0)).toBeUndefined();
+    expect(recoverCappedSdkStopReason("success", 1, 1)).toBeUndefined();
+  });
+
   test("uses Meridian's explicit model-facing stop instruction", () => {
     expect(PI_PASSTHROUGH_BLOCK_REASON).toContain(
       "This tool call has been forwarded to the client for execution.",
@@ -777,7 +790,7 @@ describe("Claude account notice probe", () => {
     ).toBe(true);
     expect(
       shouldDeferClaudeText(
-        "You're out of usage credits. Run /usage-credits to keep using Fable 5 or /model to switch models.",
+        "You're out of usage credits. Run /usage-credits to keep using Fable 5.1 or /model to switch models.",
       ),
     ).toBe(true);
     expect(
@@ -1133,5 +1146,37 @@ describe("pickBridgeAccount pool mode (no designation — picks like pi)", () =>
     expect((bob as any).id).toBe("pool-shared");
     const anonymous = pickBridgeAccount("claude-sonnet-5");
     expect((anonymous as any).id).toBe("pool-shared");
+  });
+
+  test("a sticky account beats the least-used round-robin while usable", () => {
+    designate([]);
+    seedAccounts(["pool-sticky-a", "pool-sticky-b", "pool-sticky-c"]);
+    for (const id of ["pool-sticky-a", "pool-sticky-b", "pool-sticky-c"])
+      accounts.__setUsageCacheForTest(id, freshUsage);
+    // Consume the round-robin turn on the sticky account so the plain pick
+    // would move elsewhere; the sticky preference must hold it in place.
+    expect((pickBridgeAccount("claude-sonnet-5") as any).id).toBe(
+      "pool-sticky-a",
+    );
+    expect(
+      (
+        pickBridgeAccount("claude-sonnet-5", {
+          stickyId: "pool-sticky-a",
+        }) as any
+      ).id,
+    ).toBe("pool-sticky-a");
+    // Burned this turn: the walk moves on instead of retrying the sticky one.
+    const walked = pickBridgeAccount("claude-sonnet-5", {
+      stickyId: "pool-sticky-a",
+      excludeIds: ["pool-sticky-a"],
+    });
+    expect((walked as any).id).not.toBe("pool-sticky-a");
+    // Exhausted: falls through to the least-used pick.
+    accounts.__setUsageCacheForTest("pool-sticky-a", maxedUsage);
+    const moved = pickBridgeAccount("claude-sonnet-5", {
+      stickyId: "pool-sticky-a",
+    });
+    expect((moved as any).id).not.toBe("pool-sticky-a");
+    expect("error" in moved).toBe(false);
   });
 });

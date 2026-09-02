@@ -1,10 +1,4 @@
-import React, {
-  startTransition,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import React, { startTransition, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { parsePatchFiles } from "@pierre/diffs";
 import { EditProvider, FileDiff } from "@pierre/diffs/react";
@@ -16,8 +10,17 @@ import type {
   FileDiffLoadedFiles,
 } from "@pierre/diffs";
 import type { Editor, EditorOptions } from "@pierre/diffs/edit";
-import type { DiffFileGroup } from "../lib/types";
 import type { PrReviewThread } from "../lib/api/prs";
+import type {
+  CommentableDiffOptions,
+  DiffImageSrcs,
+  PendingComment,
+} from "../lib/commentable-diff";
+import {
+  usePendingComments,
+  type CommentDraftTextStore,
+  type PendingCommentMetadata,
+} from "../hooks/usePendingComments";
 import { renderPrCommentMarkdown } from "../lib/markdown";
 import { stripHtmlComments } from "../lib/pr-prompts";
 import {
@@ -49,32 +52,61 @@ import { errorMessage } from "../lib/error-message";
 import { useStickyEdges } from "../hooks/useStickyEdges";
 import { UserAvatar } from "./UserAvatar";
 import { ExtBadge, fileExt } from "./lang-marks";
+import { cn } from "../ui/cn";
 
 /* The +/− counts. DiffPanel's summary strip carries the same pair, and the two
    must read alike. */
 const DIFF_ADD = "font-semibold text-green";
 const DIFF_DEL = "font-semibold text-red";
 
-/* One collapsible file. The header is the hover group for the edit and discard
-   actions revealed inside editable worktree diffs. Do not isolate this stacking
-   context: the sticky header's z-index must clear ReviewToolbar's code mask,
-   while the body stays beneath it. */
-const FILE_ROW =
-  "min-w-0 max-w-full overflow-clip rounded-lg border border-line bg-bg";
+/* Review joins each filename and its code in one inset well. Sidebar Changes
+   keeps its sticky filename and code as separate surfaces. */
+const FILE_ROW = "min-w-0 max-w-full";
 const FILE_HEADER =
-  "group relative flex min-h-9 w-full min-w-0 items-center gap-1.5 overflow-clip px-2 text-left text-fg hover:bg-hover phone:min-h-11 phone:px-2.5";
-// Clip the scrolling diff at its own lower corners. The parent keeps sticky
-// headers working with `overflow-clip`, but a positioned body needs to own the
-// bottom radius so its painted code surface can never square off the file row.
-const FILE_BODY = "relative z-0 max-w-full overflow-clip rounded-b-lg";
-// The outer row owns the rounded frame. The square sticky layer masks code
-// below the header's curved corners with the surrounding surface, while the
-// inner surface draws the actual rounded top bar. Overlap the scroll edge by a
-// pixel so code cannot peek above either layer.
+  "group relative flex min-h-9 w-full min-w-0 items-center gap-1.5 overflow-clip rounded-md px-2 text-left text-fg hover:bg-hover phone:min-h-11 phone:px-2.5";
+const FILE_BODY = "relative z-0 mt-1.5 max-w-full overflow-clip rounded-lg";
+// Sidebar Changes still pins filenames. Its canvas fill masks passing code;
+// the filename row draws its own edge only while pinned.
 const STICKY_FILE_HEADER =
   "sticky top-[calc(var(--review-file-header-top,0px)-1px)] z-[6] bg-surface";
 const STICKY_FILE_HEADER_SURFACE =
-  "rounded-t-lg bg-bg group-data-[stuck]:shadow-[inset_0_0_0_1px_var(--border),inset_0_-1px_0_var(--divider)]";
+  "rounded-md bg-surface group-data-[stuck]:shadow-[inset_0_0_0_1px_var(--border),inset_0_-1px_0_var(--divider)]";
+
+/* Review headers stay neutral while Pierre's omitted-context rows carry the
+   blue cue. Both follow the selected code theme, not the app theme. */
+type DiffSurfaceStyle = React.CSSProperties & {
+  "--diffs-bg": string;
+  "--diffs-bg-separator-override": string;
+  "--review-file-border": string;
+  "--review-file-header-bg": string;
+  "--review-file-header-hover": string;
+};
+const DIFF_SURFACE_STYLE: Record<"light" | "dark", DiffSurfaceStyle> = {
+  light: {
+    "--diffs-bg": "var(--review-code-light)",
+    "--diffs-bg-separator-override":
+      "color-mix(in srgb, var(--blue) 12%, var(--review-code-light))",
+    "--review-file-border":
+      "color-mix(in srgb, var(--review-code-light) 90%, var(--review-code-dark))",
+    "--review-file-header-bg":
+      "color-mix(in srgb, var(--review-code-light) 96%, var(--review-code-dark))",
+    "--review-file-header-hover":
+      "color-mix(in srgb, var(--review-code-light) 92%, var(--review-code-dark))",
+    backgroundColor: "var(--review-code-light)",
+  },
+  dark: {
+    "--diffs-bg": "var(--review-code-dark)",
+    "--diffs-bg-separator-override":
+      "color-mix(in srgb, var(--blue) 12%, var(--review-code-dark))",
+    "--review-file-border":
+      "color-mix(in srgb, var(--review-code-dark) 90%, var(--review-code-light))",
+    "--review-file-header-bg":
+      "color-mix(in srgb, var(--review-code-dark) 94%, var(--review-code-light))",
+    "--review-file-header-hover":
+      "color-mix(in srgb, var(--review-code-dark) 90%, var(--review-code-light))",
+    backgroundColor: "var(--review-code-dark)",
+  },
+};
 const FILE_TOGGLE =
   "focus-ring flex min-w-0 cursor-pointer items-center gap-2 self-stretch border-none bg-transparent p-0 text-left text-fg";
 
@@ -111,19 +143,6 @@ const IMAGE =
   "block max-h-[360px] max-w-full rounded-md border border-line bg-[repeating-conic-gradient(rgba(128,128,128,0.18)_0%_25%,transparent_0%_50%)] bg-[length:16px_16px]";
 const IMAGE_CAPTION = "mt-1 text-meta text-dim";
 
-class CommentDraftText {
-  private value = "";
-  read() {
-    return this.value;
-  }
-  write(value: string) {
-    this.value = value;
-  }
-  clear() {
-    this.value = "";
-  }
-}
-
 let editModulePromise: Promise<typeof import("@pierre/diffs/edit")> | null =
   null;
 function loadEditModule() {
@@ -131,122 +150,12 @@ function loadEditModule() {
   return editModulePromise;
 }
 
-export interface CommentTarget {
-  path: string;
-  startLine: number;
-  endLine: number;
-  side: "additions" | "deletions";
-}
-
-export interface PendingComment extends CommentTarget {
-  id: string;
-  text: string;
-}
-
-/** URLs for a changed image's two sides (either may be absent). */
-export interface DiffImageSrcs {
-  oldSrc?: string;
-  newSrc?: string;
-}
-
 interface Props {
   patch: string;
-  submitLabel: string;
-  placeholder: string;
-  disabled?: boolean;
-  disabledHint?: string;
-  /** Expand this many leading files on first render. */
-  defaultExpandedFiles?: number;
-  /** Omit the global expander when mounting every file would exhaust the tab. */
-  allowExpandAll?: boolean;
-  /** Move the global file controls into a parent toolbar. Omit to keep them inline. */
-  controlsTarget?: Element | null;
-  /** Show the aggregate viewed-file count beside the global controls. */
-  showViewedProgress?: boolean;
-  onSubmit: (target: CommentTarget, text: string) => Promise<void>;
-  /**
-   * When provided, changed image files render the actual pictures (before/after)
-   * instead of an empty binary diff. The callback maps a file to the URLs of its
-   * two sides — the host knows where the bytes live (worktree endpoint, PR blob
-   * endpoint). Non-image files are unaffected.
-   */
-  imageSrcs?: (file: FileDiffMetadata) => DiffImageSrcs | null;
-  /** AI-generated logical categories. Omitted while generation is pending or
-   *  unavailable, preserving the ordinary flat file list. */
-  groups?: DiffFileGroup[];
-  groupsLoading?: boolean;
-  /** Hide grouping status when the host presents it elsewhere. */
-  showGroupsStatus?: boolean;
-  /** PR review canvases use GitHub's side-by-side presentation; workspace diffs stay unified. */
-  diffStyle?: "unified" | "split";
-  /** Soft-wrap long lines instead of scrolling each file horizontally. */
-  wrapLines?: boolean;
-  /** Highlight the changed words within added and removed lines. */
-  structuralHighlighting?: boolean;
-  /** Show per-file addition and deletion totals in file and group headers. */
-  showFileStats?: boolean;
-  /** Follow the app theme, or pin the code surface light or dark. */
-  codeTheme?: "system" | "light" | "dark";
-  /** Optional review-canvas ordering, with paths absent from the list hidden. */
-  visibleFileOrder?: readonly string[];
-  /** Review-only file actions supplied by the PR host. */
-  fileActions?: {
-    providerName: string;
-    url: (file: FileDiffMetadata) => string | null;
-    loadContents?: (file: FileDiffMetadata) => Promise<string | null>;
-  };
-  /** Keep each filename visible while its expanded file scrolls through a review canvas. */
-  stickyFileHeaders?: boolean;
-  /**
-   * Review-batching mode: when provided, already-added comments render inline as
-   * pending cards (the parent owns the list and submits them as one review).
-   * Without it the component stays single-shot (e.g. session feedback).
-   */
-  pendingComments?: PendingComment[];
-  onRemovePending?: (id: string) => void;
-  /** Provider-native resolved conversations, grouped beneath their file and
-   * collapsed until the reader opens one. */
-  reviewThreads?: PrReviewThread[];
-  /** Repository context for qualified links inside review comments. */
-  commentRepo?: string;
-  /**
-   * When provided, each file row gets a hover-revealed "Discard" action that
-   * resets the file to its base state (removing it from the diff). Only wired
-   * where the diff maps to a live, editable worktree (the session Changes tab),
-   * never in read-only PR previews. `oldPath` is set for renames.
-   */
-  onDiscard?: (path: string, oldPath?: string) => Promise<void>;
-  /**
-   * GitHub-style per-file "Viewed" checkboxes, backed by GitHub's own
-   * per-viewer viewed state (markFileAsViewed). The parent owns the set —
-   * `undefined` means still loading (checkboxes hidden); marking a file
-   * viewed collapses it. GitHub handles staleness: a file changed after
-   * being viewed comes back DIRTY, which the server treats as not viewed.
-   */
-  viewedFiles?: ReadonlySet<string>;
-  onToggleViewed?: (path: string, viewed: boolean) => void;
-  /**
-   * @pierre/diffs edit mode: makes files editable in place. Only wired where
-   * the diff maps to a live worktree (the session Changes tab). `load` fetches
-   * one side's full contents (the editor needs whole files, not hunks); `save`
-   * writes the edited text back.
-   */
-  editFile?: {
-    load: (
-      file: FileDiffMetadata,
-      side: "new" | "base",
-    ) => Promise<string | null>;
-    save: (path: string, content: string) => Promise<void>;
-  };
+  options: CommentableDiffOptions;
 }
 
-interface Draft {
-  fileIndex: number;
-  path: string;
-  range: SelectedLineRange;
-}
-
-type Meta = { kind: "draft" } | { kind: "pending"; comment: PendingComment };
+type Meta = { kind: "draft" } | PendingCommentMetadata;
 
 // `theme`/`themeType` are applied per-row from the app's resolved appearance
 // (see FileDiffRow) so the diff isn't pinned dark in light mode.
@@ -326,39 +235,38 @@ function countViewed(
  */
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)$/i;
 
-export function CommentableDiff({
-  patch,
-  defaultExpandedFiles = 0,
-  allowExpandAll = true,
-  controlsTarget,
-  showViewedProgress = true,
-  submitLabel,
-  placeholder,
-  disabled,
-  disabledHint,
-  onSubmit,
-  pendingComments,
-  onRemovePending,
-  reviewThreads,
-  commentRepo,
-  onDiscard,
-  imageSrcs,
-  groups,
-  groupsLoading,
-  showGroupsStatus = true,
-  diffStyle = "unified",
-  wrapLines = false,
-  structuralHighlighting = true,
-  showFileStats = true,
-  codeTheme = "system",
-  visibleFileOrder,
-  fileActions,
-  stickyFileHeaders = false,
-  viewedFiles,
-  onToggleViewed,
-  editFile,
-}: Props) {
-  const reviewMode = pendingComments !== undefined;
+export function CommentableDiff({ patch, options }: Props) {
+  const {
+    defaultExpandedFiles = 0,
+    allowExpandAll = true,
+    controlsTarget,
+    showViewedProgress = true,
+    submitLabel,
+    placeholder,
+    disabled,
+    disabledHint,
+    onSubmit,
+    pendingComments,
+    onRemovePending,
+    reviewThreads,
+    commentRepo,
+    onDiscard,
+    imageSrcs,
+    groups,
+    groupsLoading,
+    showGroupsStatus = true,
+    diffStyle = "unified",
+    wrapLines = false,
+    structuralHighlighting = true,
+    showFileStats = true,
+    codeTheme = "system",
+    visibleFileOrder,
+    fileActions,
+    stickyFileHeaders = false,
+    viewedFiles,
+    onToggleViewed,
+    editFile,
+  } = options;
   const resolvedTheme = useResolvedTheme();
   const theme = codeTheme === "system" ? resolvedTheme : codeTheme;
   const files = parseFileDiffs(patch, visibleFileOrder);
@@ -618,53 +526,21 @@ export function CommentableDiff({
     } as FileDiffLoadedFiles;
   };
 
-  const [draft, setDraft] = useState<Draft | null>(null);
-  const [confirmation, setConfirmation] = useState<string | null>(null);
-  const draftRef = useRef<Draft | null>(null);
-  useLayoutEffect(() => {
-    draftRef.current = draft;
+  const {
+    annotationsByFile: pendingByFile,
+    closeDraft,
+    confirmation,
+    draft,
+    draftRef,
+    draftText,
+    handleSelect,
+    reviewMode,
+    submitDraft,
+  } = usePendingComments({
+    comments: pendingComments,
+    submitLabel,
+    onSubmit,
   });
-  // Kept outside React render state so text survives a range-change remount
-  // without making the full diff tree rerender on every textarea keystroke.
-  const [draftText] = useState(() => new CommentDraftText());
-
-  const handleSelect = (
-    fileIndex: number,
-    path: string,
-    range: SelectedLineRange | null,
-  ) => {
-    if (!range) return; // keep the draft on stray deselects; Cancel closes it
-    setConfirmation(null);
-    setDraft({ fileIndex, path, range });
-  };
-
-  const closeDraft = () => {
-    draftText.clear();
-    setDraft(null);
-  };
-
-  const submitDraft = async (body: string) => {
-    const d = draftRef.current;
-    if (!d) return;
-    const side: "additions" | "deletions" =
-      d.range.side === "deletions" ? "deletions" : "additions";
-    await onSubmit(
-      {
-        path: d.path,
-        startLine: Math.min(d.range.start, d.range.end),
-        endLine: Math.max(d.range.start, d.range.end),
-        side,
-      },
-      body,
-    );
-    draftText.clear();
-    setDraft(null);
-    // In review mode the pending card is the confirmation; skip the toast.
-    if (!reviewMode) {
-      setConfirmation(`${submitLabel} ✓`);
-      setTimeout(() => setConfirmation(null), 4000);
-    }
-  };
 
   const renderPending = (comment: PendingComment): React.ReactNode => {
     const lineLabel =
@@ -726,20 +602,6 @@ export function CommentableDiff({
       />
     );
   };
-
-  // Group pending comments by file once per change, so unaffected files reuse a
-  // stable annotations array reference (and their memoized row bails out).
-  const m = new Map<string, DiffLineAnnotation<Meta>[]>();
-  for (const c of pendingComments || []) {
-    const arr = m.get(c.path) || [];
-    arr.push({
-      side: c.side === "deletions" ? "deletions" : "additions",
-      lineNumber: c.endLine,
-      metadata: { kind: "pending", comment: c },
-    });
-    m.set(c.path, arr);
-  }
-  const pendingByFile = m;
 
   const resolvedByFile = (() => {
     const byPath = new Map<string, PrReviewThread[]>();
@@ -816,9 +678,14 @@ export function CommentableDiff({
 
     return (
       <div
-        className={FILE_ROW}
+        className={cn(
+          FILE_ROW,
+          !stickyFileHeaders &&
+            "mx-2 overflow-clip rounded-lg border border-[var(--review-file-border)]",
+        )}
         key={`${file.name}-${i}`}
         data-diff-file={file.name}
+        style={stickyFileHeaders ? undefined : DIFF_SURFACE_STYLE[theme]}
       >
         <div
           className={`group ${stickyFileHeaders ? STICKY_FILE_HEADER : ""}`}
@@ -828,7 +695,12 @@ export function CommentableDiff({
             // `diff-file-header` is a DOM hook, not styling — no rule reaches it
             // any more: PrPanel's Files card finds this row by that class to
             // scroll to and expand a file (`el.querySelector(".diff-file-header")`).
-            className={`${FILE_HEADER} ${stickyFileHeaders ? STICKY_FILE_HEADER_SURFACE : "bg-transparent"}`}
+            className={cn(
+              FILE_HEADER,
+              stickyFileHeaders
+                ? STICKY_FILE_HEADER_SURFACE
+                : "w-auto rounded-none bg-[var(--review-file-header-bg)] hover:bg-[var(--review-file-header-hover)]",
+            )}
           >
             <button
               type="button"
@@ -1059,7 +931,10 @@ export function CommentableDiff({
           </div>
         </div>
         {(isOpen || resolved.length > 0) && (
-          <div className={FILE_BODY}>
+          <div
+            className={cn(FILE_BODY, !stickyFileHeaders && "mt-0 rounded-none")}
+            style={DIFF_SURFACE_STYLE[theme]}
+          >
             {isOpen &&
               (imageSrcs && IMAGE_EXT.test(file.name) ? (
                 <ImageDiffRow file={file} srcs={imageSrcs(file)} />
@@ -1143,7 +1018,10 @@ export function CommentableDiff({
   );
 
   return (
-    <div ref={setStickyRoot} className="flex flex-col gap-2.5">
+    <div
+      ref={setStickyRoot}
+      className={cn("flex flex-col", stickyFileHeaders ? "gap-2.5" : "gap-4")}
+    >
       {confirmation && (
         <div className="rounded-md bg-green-soft px-3 py-1.5 text-label font-semibold text-green">
           {confirmation}
@@ -1210,7 +1088,12 @@ export function CommentableDiff({
                   )}
                 </button>
                 {!collapsed && (
-                  <div className="flex flex-col gap-[7px] border-l border-line pl-3">
+                  <div
+                    className={cn(
+                      "flex flex-col border-l border-line pl-3",
+                      stickyFileHeaders ? "gap-[7px]" : "gap-4",
+                    )}
+                  >
                     {group.indices.map((index) =>
                       renderFile(files[index], index),
                     )}
@@ -1380,7 +1263,7 @@ const CommentForm = function CommentForm({
   disabledHint?: string;
   placeholder: string;
   submitLabel: string;
-  textStore: CommentDraftText;
+  textStore: CommentDraftTextStore;
   onCancel: () => void;
   onSubmit: (body: string) => Promise<void>;
 }) {
@@ -1519,6 +1402,7 @@ const FileDiffRow = function FileDiffRow({
       lineAnnotations={annotations}
       selectedLines={selectedLines}
       renderAnnotation={renderAnnotation}
+      style={DIFF_SURFACE_STYLE[theme]}
       // Not the lever it looks like: the prop only decides whether to pass the
       // pool down from @pierre/diffs' WorkerPoolContext, and nothing in this
       // app mounts that provider, so highlighting is on the main thread either

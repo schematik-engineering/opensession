@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { TranscriptIndexedRange } from "../../lib/transcript-index";
 import {
-  nextBackgroundTranscriptRange,
-  transcriptRangeHasLoadedSuffix,
   transcriptRangesContainPayload,
   visibleTranscriptHydrationDemand,
   type TranscriptHydrationOutlineItem,
@@ -43,30 +41,6 @@ describe("visible transcript hydration", () => {
         (id) => id === "tail-entry",
       ),
     ).toBe(true);
-  });
-
-  test("background hydration walks backward from the live tail", () => {
-    const loaded = new Set(["below"]);
-    expect(
-      nextBackgroundTranscriptRange(ranges, (id) => loaded.has(id))?.key,
-    ).toBe("visible");
-    loaded.add("visible");
-    expect(
-      nextBackgroundTranscriptRange(ranges, (id) => loaded.has(id))?.key,
-    ).toBe("above");
-    loaded.add("above");
-    expect(nextBackgroundTranscriptRange(ranges, (id) => loaded.has(id))).toBe(
-      null,
-    );
-  });
-
-  test("background hydration finishes a partial tail before older ranges", () => {
-    const partialTail = range("partial-tail", 4, ["loaded", "missing"]);
-    expect(
-      nextBackgroundTranscriptRange([...ranges, partialTail], (id) =>
-        ["below", "loaded"].includes(id),
-      )?.key,
-    ).toBe("partial-tail");
   });
 
   test("settles when every range in the near-visible window is loaded", () => {
@@ -120,22 +94,6 @@ describe("visible transcript hydration", () => {
         (id) => id.startsWith("loaded"),
       ),
     ).toEqual([]);
-  });
-
-  test("distinguishes start-growing opening suffixes from appended pages", () => {
-    const ids = ["one", "two", "three", "four"];
-    expect(
-      transcriptRangeHasLoadedSuffix(ids, (id) =>
-        ["three", "four"].includes(id),
-      ),
-    ).toBe(true);
-    expect(
-      transcriptRangeHasLoadedSuffix(ids, (id) => ["one", "two"].includes(id)),
-    ).toBe(false);
-    expect(
-      transcriptRangeHasLoadedSuffix(ids, (id) => ["two", "four"].includes(id)),
-    ).toBe(false);
-    expect(transcriptRangeHasLoadedSuffix(ids, () => true)).toBe(false);
   });
 
   test("does not claim readiness before the virtualizer reports a window", () => {

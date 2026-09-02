@@ -17,6 +17,7 @@ import {
   testSandboxConnection,
   updateSandboxConnection,
 } from "../../lib/api/sandboxes";
+import { errorMessage } from "../../lib/error-message";
 import { Button } from "../../ui/button";
 import { cn } from "../../ui/cn";
 import { Field, Input, Select } from "../../ui/input";
@@ -29,6 +30,7 @@ import {
   SettingsHint,
   SettingsPanel,
 } from "../../ui/settings";
+import { InlineAlert } from "../../ui/state";
 import { Switch } from "../../ui/switch";
 import { toast } from "../../ui/toast";
 import { IconCheck, IconPlus } from "../icons";
@@ -290,15 +292,10 @@ function ConnectDialog({
         variant: "success",
       });
     })()
-      .catch(async (error) => {
-        toast(
-          error instanceof Error
-            ? error.message
-            : `Failed to connect ${provider.label}`,
-          {
-            variant: "error",
-          },
-        );
+      .catch(async (error: unknown) => {
+        toast(errorMessage(error, `Failed to connect ${provider.label}`), {
+          variant: "error",
+        });
       })
       .finally(async () => {
         setSaving(false);
@@ -313,15 +310,10 @@ function ConnectDialog({
       onOpenChange(false);
       toast(`${provider.label} disconnected`, { variant: "success" });
     })()
-      .catch(async (error) => {
-        toast(
-          error instanceof Error
-            ? error.message
-            : `Failed to disconnect ${provider.label}`,
-          {
-            variant: "error",
-          },
-        );
+      .catch(async (error: unknown) => {
+        toast(errorMessage(error, `Failed to disconnect ${provider.label}`), {
+          variant: "error",
+        });
       })
       .finally(async () => {
         setSaving(false);
@@ -562,15 +554,10 @@ function ConnectionCard({
     await (async () => {
       onChanged(await testSandboxConnection(connection.provider));
     })()
-      .catch(async (error) => {
-        toast(
-          error instanceof Error
-            ? error.message
-            : `Failed to test ${provider.label}`,
-          {
-            variant: "error",
-          },
-        );
+      .catch(async (error: unknown) => {
+        toast(errorMessage(error, `Failed to test ${provider.label}`), {
+          variant: "error",
+        });
       })
       .finally(async () => {
         setBusy(false);
@@ -584,15 +571,10 @@ function ConnectionCard({
         await updateSandboxConnection(connection.provider, { enabled }),
       );
     })()
-      .catch(async (error) => {
-        toast(
-          error instanceof Error
-            ? error.message
-            : `Failed to update ${provider.label}`,
-          {
-            variant: "error",
-          },
-        );
+      .catch(async (error: unknown) => {
+        toast(errorMessage(error, `Failed to update ${provider.label}`), {
+          variant: "error",
+        });
       })
       .finally(async () => {
         setBusy(false);
@@ -804,15 +786,10 @@ function ProjectEnvironmentDialog({
         },
       );
     })()
-      .catch(async (error) => {
-        toast(
-          error instanceof Error
-            ? error.message
-            : "Failed to build project snapshot",
-          {
-            variant: "error",
-          },
-        );
+      .catch(async (error: unknown) => {
+        toast(errorMessage(error, "Failed to build project snapshot"), {
+          variant: "error",
+        });
       })
       .finally(async () => {
         setSaving(false);
@@ -929,6 +906,10 @@ export function SandboxesPanel() {
   );
   const [canManage, setCanManage] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [connectionsError, setConnectionsError] = useState<string | null>(null);
+  const [environmentsError, setEnvironmentsError] = useState<string | null>(
+    null,
+  );
   const [environmentDialogOpen, setEnvironmentDialogOpen] = useState(false);
   const [environmentTarget, setEnvironmentTarget] =
     useState<SandboxEnvironmentInfo>();
@@ -946,15 +927,32 @@ export function SandboxesPanel() {
     let active = true;
     const load = () => {
       void fetchSandboxEnvironments()
-        .then((response) => active && setEnvironments(response.environments))
-        .catch(() => {});
+        .then((response) => {
+          if (!active) return;
+          setEnvironments(response.environments);
+          setEnvironmentsError(null);
+        })
+        .catch((error: unknown) => {
+          if (active) {
+            setEnvironmentsError(
+              errorMessage(error, "Failed to load sandbox environments"),
+            );
+          }
+        });
       return fetchSandboxConnections().then(
         (response) => {
           if (!active) return;
           apply(response);
+          setConnectionsError(null);
           setLoading(false);
         },
-        () => active && setLoading(false),
+        (error: unknown) => {
+          if (!active) return;
+          setConnectionsError(
+            errorMessage(error, "Failed to load sandbox connections"),
+          );
+          setLoading(false);
+        },
       );
     };
     void load();
@@ -1011,6 +1009,8 @@ export function SandboxesPanel() {
         description="Connect compute you already pay for. Each session gets an isolated sandbox; project snapshots make new sandboxes start faster."
       />
       <WorkspaceSandboxDefaults canManage={canManage} />
+      {connectionsError && <InlineAlert>{connectionsError}</InlineAlert>}
+      {environmentsError && <InlineAlert>{environmentsError}</InlineAlert>}
       <SettingsGroupLabel>Connections</SettingsGroupLabel>
       {!canManage && (
         <SettingsHint>

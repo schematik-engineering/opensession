@@ -68,8 +68,14 @@ describe("Pi-only model routing", () => {
     expect(toPiModel("gpt-5.6-sol")).toBe("pi/openai/gpt-5.6-sol");
   });
 
-  test("preserves explicit Pi ids", () => {
+  test("preserves explicit Pi ids and case-sensitive model suffixes", () => {
     expect(toPiModel("pi/wafer/glm-5.2")).toBe("pi/wafer/glm-5.2");
+    expect(toPiModel(" pi/My-Gateway/Qwen/Qwen3-Coder ")).toBe(
+      "pi/my-gateway/Qwen/Qwen3-Coder",
+    );
+    expect(resolveModel("pi/My-Gateway/Qwen/Qwen3-Coder")?.id).toBe(
+      "pi/my-gateway/Qwen/Qwen3-Coder",
+    );
     expect(explicitEngineFor("pi/openai/gpt-5.6-sol")).toBe("pi");
   });
 
@@ -81,10 +87,20 @@ describe("Pi-only model routing", () => {
     expect(resolveModel("pi/openai/gpt-5.5")?.id).toBe("pi/openai/gpt-5.6-sol");
   });
 
+  test("upgrades retired Fable 5 ids to Fable 5.1", () => {
+    expect(resolveModel("claude-fable-5")?.id).toBe("claude-fable-5-1");
+    expect(toPiModel("anthropic/claude-fable-5")).toBe(
+      "pi/anthropic/claude-fable-5-1",
+    );
+    expect(toPiModel("pi/anthropic/claude-fable-5")).toBe(
+      "pi/anthropic/claude-fable-5-1",
+    );
+  });
+
   test("routes every accepted id to Pi", () => {
-    expect(routeModel("claude-fable-5")).toEqual({
+    expect(routeModel("claude-fable-5-1")).toEqual({
       engine: "pi",
-      model: "pi/anthropic/claude-fable-5",
+      model: "pi/anthropic/claude-fable-5-1",
     });
     expect(routeModel("openai/gpt-5.6-sol")).toEqual({
       engine: "pi",
@@ -156,13 +172,13 @@ describe("Pi-only model routing", () => {
 
   test("builds a Pi-only fallback chain", () => {
     const first = nextFallbackModel(
-      "pi/anthropic/claude-fable-5",
+      "pi/anthropic/claude-fable-5-1",
       new Set(),
       "pi/openai/gpt-5.6-sol",
     );
     expect(first?.id.startsWith("pi/")).toBe(true);
     expect(
-      fallbackPlan("pi/anthropic/claude-fable-5", "pi/openai/gpt-5.6-sol"),
+      fallbackPlan("pi/anthropic/claude-fable-5-1", "pi/openai/gpt-5.6-sol"),
     ).toSatisfy((hops) => hops.every((hop) => hop.id.startsWith("pi/")));
   });
 
@@ -235,7 +251,7 @@ describe("Pi-only model routing", () => {
       (model) => model.provider === "pi",
     ).map((model) => model.id);
     expect(pickerIds).toContain("pi/openai/gpt-5.6-sol");
-    expect(pickerIds).toContain("pi/anthropic/claude-fable-5");
+    expect(pickerIds).toContain("pi/anthropic/claude-fable-5-1");
   });
 
   test("deduplicates retired pickerModels after routing", () => {

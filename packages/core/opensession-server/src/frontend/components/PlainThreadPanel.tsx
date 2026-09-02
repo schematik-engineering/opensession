@@ -134,8 +134,12 @@ export function PlainThreadPanel({ sessionId, threadId, plainUrl }: Props) {
           setThread(t);
           setError(null);
         })
-        .catch((e) => {
-          if (aliveRef.current) setError(e?.message || "Failed to load");
+        .catch((error: unknown) => {
+          if (aliveRef.current) {
+            // Record every failure so a later successful poll can clear it.
+            // The error renders only when no valid thread is available.
+            setError(errorMessage(error, "Failed to load Plain thread"));
+          }
         })
         .finally(() => {
           if (aliveRef.current) setLoading(false);
@@ -302,21 +306,38 @@ export function PlainThreadActions({
   const currentUser = useCurrentUser();
 
   // Assign/Labels menu data — server-cached (~5 min), so fetching per mount
-  // is cheap. Errors just leave the menus empty/hidden.
+  // is cheap. Each menu owns its loader error so mutation feedback keeps the
+  // action row's existing error slot.
   const [users, setUsers] = useState<PlainWorkspaceUser[] | null>(null);
+  const [usersLoadError, setUsersLoadError] = useState<string | null>(null);
   const [labelTypes, setLabelTypes] = useState<PlainLabelType[] | null>(null);
+  const [labelTypesLoadError, setLabelTypesLoadError] = useState<string | null>(
+    null,
+  );
   useEffect(() => {
     let alive = true;
     fetchPlainUsersApi()
       .then((u) => {
-        if (alive) setUsers(u);
+        if (!alive) return;
+        setUsers(u);
+        setUsersLoadError(null);
       })
-      .catch(() => {});
+      .catch((error: unknown) => {
+        if (alive)
+          setUsersLoadError(errorMessage(error, "Failed to load Plain users"));
+      });
     fetchPlainLabelTypesApi()
       .then((lt) => {
-        if (alive) setLabelTypes(lt);
+        if (!alive) return;
+        setLabelTypes(lt);
+        setLabelTypesLoadError(null);
       })
-      .catch(() => {});
+      .catch((error: unknown) => {
+        if (alive)
+          setLabelTypesLoadError(
+            errorMessage(error, "Failed to load Plain labels"),
+          );
+      });
     return () => {
       alive = false;
     };
@@ -330,7 +351,7 @@ export function PlainThreadActions({
       await fn();
       onChanged();
     })()
-      .catch(async (error) => {
+      .catch(async (error: unknown) => {
         setError(errorMessage(error, "Plain update failed"));
       })
       .finally(async () => {
@@ -526,14 +547,27 @@ export function PlainThreadActions({
                 icon={<IconPerson size={20} />}
                 caret
                 disabled={busy}
-                title="Assign this thread to a teammate in Plain"
+                title={
+                  usersLoadError ?? "Assign this thread to a teammate in Plain"
+                }
               >
-                {thread.assignee ? thread.assignee.name : "Assign"}
+                {usersLoadError
+                  ? "Assign unavailable"
+                  : thread.assignee
+                    ? thread.assignee.name
+                    : "Assign"}
               </Button>
             }
           />
           <Menu.Popup align="start">
-            {users === null ? (
+            {usersLoadError ? (
+              <div
+                role="alert"
+                className="max-w-[240px] px-2.5 py-1.5 text-label leading-snug text-red"
+              >
+                {usersLoadError}
+              </div>
+            ) : users === null ? (
               <div className="px-2.5 py-1.5 text-label text-faint">
                 Loading…
               </div>
@@ -569,7 +603,7 @@ export function PlainThreadActions({
             )}
           </Menu.Popup>
         </Menu.Root>
-        {(labelTypes?.length || 0) > 0 && (
+        {(labelTypesLoadError || (labelTypes?.length || 0) > 0) && (
           <Menu.Root>
             <Menu.Trigger
               render={
@@ -579,45 +613,58 @@ export function PlainThreadActions({
                   icon={<IconTag size={20} />}
                   caret
                   disabled={busy}
-                  title="Labels on this thread in Plain"
+                  title={
+                    labelTypesLoadError ?? "Labels on this thread in Plain"
+                  }
                 >
-                  {(thread.labels?.length || 0) > 0
-                    ? `${thread.labels![0].name}${
-                        thread.labels!.length > 1
-                          ? ` +${thread.labels!.length - 1}`
-                          : ""
-                      }`
-                    : "Labels"}
+                  {labelTypesLoadError
+                    ? "Labels unavailable"
+                    : (thread.labels?.length || 0) > 0
+                      ? `${thread.labels![0].name}${
+                          thread.labels!.length > 1
+                            ? ` +${thread.labels!.length - 1}`
+                            : ""
+                        }`
+                      : "Labels"}
                 </Button>
               }
             />
             <Menu.Popup align="start">
-              {labelTypes!.map((lt) => {
-                const existing = (thread.labels || []).find(
-                  (l) => l.labelTypeId === lt.id,
-                );
-                return (
-                  <Menu.CheckboxItem
-                    key={lt.id}
-                    checked={!!existing}
-                    closeOnClick={false}
-                    onClick={() =>
-                      run(() =>
-                        changePlainThreadLabelsApi(
-                          threadId,
-                          existing
-                            ? { removeLabelIds: [existing.id] }
-                            : { addLabelTypeIds: [lt.id] },
-                          currentUser,
-                        ),
-                      )
-                    }
-                  >
-                    <span className="min-w-0 flex-1">{lt.name}</span>
-                    <MenuTick on={!!existing} />
-                  </Menu.CheckboxItem>
-                );
-              })}
+              {labelTypesLoadError ? (
+                <div
+                  role="alert"
+                  className="max-w-[240px] px-2.5 py-1.5 text-label leading-snug text-red"
+                >
+                  {labelTypesLoadError}
+                </div>
+              ) : (
+                labelTypes!.map((lt) => {
+                  const existing = (thread.labels || []).find(
+                    (l) => l.labelTypeId === lt.id,
+                  );
+                  return (
+                    <Menu.CheckboxItem
+                      key={lt.id}
+                      checked={!!existing}
+                      closeOnClick={false}
+                      onClick={() =>
+                        run(() =>
+                          changePlainThreadLabelsApi(
+                            threadId,
+                            existing
+                              ? { removeLabelIds: [existing.id] }
+                              : { addLabelTypeIds: [lt.id] },
+                            currentUser,
+                          ),
+                        )
+                      }
+                    >
+                      <span className="min-w-0 flex-1">{lt.name}</span>
+                      <MenuTick on={!!existing} />
+                    </Menu.CheckboxItem>
+                  );
+                })
+              )}
             </Menu.Popup>
           </Menu.Root>
         )}
@@ -776,7 +823,7 @@ export function PlainReplyBox({
       sentTimer.current = setTimeout(() => setSent(false), 3000);
       onSent?.();
     })()
-      .catch(async (error) => {
+      .catch(async (error: unknown) => {
         setError(errorMessage(error, "Failed to send"));
       })
       .finally(async () => {

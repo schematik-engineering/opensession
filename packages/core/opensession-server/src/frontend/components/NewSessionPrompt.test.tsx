@@ -1,39 +1,50 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import {
-  NewSessionPrompt,
-  type NewSessionPromptHandle,
-} from "./NewSessionPrompt";
+import { NewSessionPrompt } from "./NewSessionPrompt";
+import type {
+  NewSessionPromptConfig,
+  NewSessionPromptHandle,
+} from "../lib/new-session-prompt-types";
 
-function field(
-  overrides: Partial<Parameters<typeof NewSessionPrompt>[0]> = {},
-) {
-  const props: Parameters<typeof NewSessionPrompt>[0] = {
+function field(overrides: Partial<NewSessionPromptConfig> = {}) {
+  const handle: { current: NewSessionPromptHandle | null } = { current: null };
+  const config: NewSessionPromptConfig = {
     initialText: "",
-    textareaRef: { current: null },
-    valueRef: { current: "" },
-    handle: { current: null as NewSessionPromptHandle | null },
     repo: "opensession",
     placeholder: "What do you want to work on?",
     disabled: false,
     images: [],
     files: [],
     staging: { images: 0, files: 0 },
-    onRemoveImage: () => {},
-    onRemoveFile: () => {},
-    onRemovePendingImage: () => {},
-    onRemovePendingFile: () => {},
-    onAddAttachments: () => {},
     sendKey: "enter",
     canCreate: false,
-    onCreate: () => {},
-    onHasTextChange: () => {},
-    onDraftSettled: () => {},
-    onEdgesChange: () => {},
-    onMentionOpenChange: () => {},
     ...overrides,
   };
-  return { props, html: renderToStaticMarkup(<NewSessionPrompt {...props} />) };
+  const value = { current: "" };
+  const props: Parameters<typeof NewSessionPrompt>[0] = {
+    config,
+    refs: {
+      textarea: { current: null },
+      value,
+      handle,
+    },
+    actions: {
+      removeImage: () => {},
+      removeFile: () => {},
+      removePendingImage: () => {},
+      removePendingFile: () => {},
+      addAttachments: () => {},
+      create: () => {},
+      changeHasText: () => {},
+      settleDraft: () => {},
+      changeEdges: () => {},
+      changeMentionOpen: () => {},
+    },
+  };
+  return {
+    value,
+    html: renderToStaticMarkup(<NewSessionPrompt {...props} />),
+  };
 }
 
 test("the restored draft is what the field shows", () => {
@@ -47,10 +58,9 @@ test("the restored draft is what the field shows", () => {
 // Rendering can be abandoned under concurrent React, so the external ref is
 // updated by a layout effect only after the draft commits.
 test("a server render does not publish an uncommitted draft", () => {
-  const valueRef = { current: "" };
-  field({ initialText: "Ship the palette split", valueRef });
+  const { value } = field({ initialText: "Ship the palette split" });
 
-  expect(valueRef.current).toBe("");
+  expect(value.current).toBe("");
 });
 
 test("attachments share the prompt's scroller", () => {

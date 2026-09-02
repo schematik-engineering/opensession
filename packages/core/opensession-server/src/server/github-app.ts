@@ -57,6 +57,11 @@ const g = globalThis as {
   __ghAppTokenWarned?: boolean;
   __ghAppLastMintOk?: boolean;
   __ghAppLastMintIdentity?: string;
+  __ghAppInstallationsCache?: {
+    clientId: string;
+    at: number;
+    installations: GithubAppInstallation[];
+  } | null;
 };
 
 // READ_PERMISSIONS / WRITE_PERMISSIONS are the canonical sets imported at the
@@ -146,15 +151,8 @@ export async function githubAppInstallationToken(
           ? matchingWrite.installationOwner
           : undefined;
     if (!installationId) {
-      const res = await fetch("https://api.github.com/app/installations", {
-        headers,
-      });
-      const installs = (await res.json()) as Array<{
-        id: number;
-        account?: { login?: string };
-      }>;
-      if (!Array.isArray(installs) || !installs.length)
-        throw new Error("no installations");
+      const installs = await githubAppInstallations(clientId, headers);
+      if (!installs.length) throw new Error("no installations");
       // Prefer an explicit installation owner, then the org captured at setup
       // (appOrg) — the same precedence setup-team.ts uses. An org App installed
       // on more than one account must be selected explicitly.
@@ -245,6 +243,95 @@ export function githubConfiguredCredential(): boolean {
   const github = configuredIntegration("github");
   const owner = github.installationOwner || github.appOrg;
   return githubAppConfigured() && !!githubAppIdentity().slug && !!owner;
+}
+
+/** The account pinned as the App's installation selection, from config
+ * (installationOwner, with the setup-era appOrg as fallback). Empty when
+ * nothing is pinned yet. */
+export function configuredGithubInstallationOwner(): string {
+  const github = configuredIntegration("github");
+  return String(github.installationOwner || github.appOrg || "").trim();
+}
+
+interface GithubAppInstallation {
+  id: number;
+  account?: { login?: string; type?: string };
+}
+
+export interface GithubAppInstallationAccount {
+  /** Account login, e.g. "my-organization". */
+  login: string;
+  /** GitHub account type: "User" or "Organization". */
+  type: string;
+}
+
+async function githubAppInstallations(
+  clientId: string,
+  headers: Record<string, string>,
+): Promise<GithubAppInstallation[]> {
+  const cached = g.__ghAppInstallationsCache;
+  if (
+    cached &&
+    cached.clientId === clientId &&
+    Date.now() - cached.at < 60_000
+  ) {
+    return cached.installations;
+  }
+
+  const installations: GithubAppInstallation[] = [];
+  let url: string | null =
+    "https://api.github.com/app/installations?per_page=100";
+  while (url) {
+    const res: Response = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(15_000),
+    });
+    const page = (await res.json().catch(() => null)) as unknown;
+    if (!res.ok || !Array.isArray(page)) {
+      throw new Error(`cannot list GitHub App installations (${res.status})`);
+    }
+    for (const installation of page) {
+      if (
+        installation &&
+        typeof installation === "object" &&
+        typeof installation.id === "number"
+      ) {
+        installations.push(installation as GithubAppInstallation);
+      }
+    }
+    const next: RegExpMatchArray | null | undefined = res.headers
+      .get("link")
+      ?.match(/<([^>]+)>;\s*rel="next"/i);
+    url = next?.[1] || null;
+  }
+
+  g.__ghAppInstallationsCache = { clientId, at: Date.now(), installations };
+  return installations;
+}
+
+/** Every account the App is installed on, listed with the App JWT alone (no
+ * installation token involved, so this answers even when the pinned owner
+ * matches no installation). Null when the App identity or key is missing or
+ * GitHub cannot answer: "unknown", never "none". Briefly cached because the
+ * setup picker refetches each time it opens. */
+export async function listGithubAppInstallations(): Promise<
+  GithubAppInstallationAccount[] | null
+> {
+  const { clientId } = githubUserAuthSettings();
+  if (!clientId || !existsSync(keyPath())) return null;
+  try {
+    const key = await Bun.file(keyPath()).text();
+    const installations = await githubAppInstallations(clientId, {
+      Authorization: `Bearer ${appJwt(clientId, key)}`,
+      Accept: "application/vnd.github+json",
+    });
+    return installations.flatMap((installation) => {
+      const login = installation.account?.login;
+      return login ? [{ login, type: installation.account?.type || "" }] : [];
+    });
+  } catch {
+    return null;
+  }
 }
 
 /** Last observed App availability for synchronous health snapshots. Startup and

@@ -9,7 +9,7 @@ import {
 import { AGENT_NAME } from "./brand";
 import type { AutomationOverviewByName } from "./automation-overview";
 import type { FilterState } from "./sidebar-filter";
-import { sessionRepo } from "./sidebar-filter";
+import { includesEmptyRepoBands, sessionRepo } from "./sidebar-filter";
 import { mergeRepoOrder, normalizeRepoOrder } from "./repo-order";
 import { ownerKeyOf, sessionOwners } from "./session-owner";
 import { personNameForKey } from "./people";
@@ -556,4 +556,197 @@ export function sortSidebarSessions(
   return [...sessions].sort(
     (a, b) => new Date(b[key]).getTime() - new Date(a[key]).getTime(),
   );
+}
+
+export interface SidebarProjectBand {
+  repo: string;
+  rows: WsRow[];
+  snoozedRows: WsRow[];
+  needsReviewRows: WsRow[];
+  approvedRows: WsRow[];
+  awaitingReviewRows: WsRow[];
+  prs: ReviewQueueItem[];
+  requestedPrs: ReviewQueueItem[];
+  urgent: number;
+}
+
+export interface SidebarProjectBands {
+  scratchRows: WsRow[];
+  scratchSnoozedRows: WsRow[];
+  bands: SidebarProjectBand[];
+  order: string[];
+  fullOrder: string[];
+  canReorder: boolean;
+}
+
+interface DeriveSidebarProjectBandsInput {
+  activeRows: WsRow[];
+  snoozedRows: WsRow[];
+  needsReviewRows: WsRow[];
+  approvedRows: WsRow[];
+  awaitingReviewRows: WsRow[];
+  lanePrItems: ReviewQueueItem[];
+  requestedPrItems: ReviewQueueItem[];
+  registeredRepos: string[];
+  repos: string[];
+  savedRepoOrder: string[];
+  filter: FilterState;
+  search: string;
+  isPhone: boolean;
+  askBand: string;
+  rowIsFeedOnly: (row: WsRow) => boolean;
+  rowIsScratch: (row: WsRow) => boolean;
+  rowIsAsk: (row: WsRow) => boolean;
+  workspaceRepo: (row: WsRow) => string;
+}
+
+/** Build the rows for each project band without deciding how a row renders. */
+export function deriveSidebarProjectBands({
+  activeRows,
+  snoozedRows,
+  needsReviewRows,
+  approvedRows,
+  awaitingReviewRows,
+  lanePrItems,
+  requestedPrItems,
+  registeredRepos,
+  repos,
+  savedRepoOrder,
+  filter,
+  search,
+  isPhone,
+  askBand,
+  rowIsFeedOnly,
+  rowIsScratch,
+  rowIsAsk,
+  workspaceRepo,
+}: DeriveSidebarProjectBandsInput): SidebarProjectBands {
+  const byRepo = new Map<string, WsRow[]>();
+  const snoozedByRepo = new Map<string, WsRow[]>();
+  // Scratch workspaces stay in one unlabelled group above the project bands.
+  // They have no project, even when an older workspace record carries a stale
+  // repo.
+  const scratchRows = activeRows.filter(
+    (row) => !rowIsFeedOnly(row) && rowIsScratch(row),
+  );
+  const scratchSnoozedRows = snoozedRows.filter(
+    (row) => !rowIsFeedOnly(row) && rowIsScratch(row),
+  );
+  const bucket = <T>(map: Map<string, T[]>, repo: string): T[] => {
+    const existing = map.get(repo);
+    if (existing) return existing;
+    const items: T[] = [];
+    map.set(repo, items);
+    return items;
+  };
+  // Feed workspaces are represented by their feed band's item rows, so they
+  // must not also mint a pseudo-repo band. Repo-less Ask rows bucket under the
+  // dedicated Ask band before the workspace-repo fallback can file them under
+  // the default project.
+  const bandOf = (row: WsRow) => (rowIsAsk(row) ? askBand : workspaceRepo(row));
+  const nestsInProject = (row: WsRow) =>
+    !rowIsFeedOnly(row) && !rowIsScratch(row);
+
+  for (const row of activeRows) {
+    if (nestsInProject(row)) bucket(byRepo, bandOf(row)).push(row);
+  }
+  // Each project's snoozed rows stay in that project's own band, as a Snoozed
+  // group beside its other lanes. A global group would strand them away from
+  // the project they belong to.
+  for (const row of snoozedRows) {
+    if (nestsInProject(row)) bucket(snoozedByRepo, bandOf(row)).push(row);
+  }
+
+  // Session-less PR rows file into their project's status lanes. Requests
+  // pointed at you are excluded because they ride Needs review instead.
+  const prByRepo = new Map<string, ReviewQueueItem[]>();
+  for (const item of lanePrItems) bucket(prByRepo, item.pr.repo).push(item);
+
+  // Review rows are absent from the status rows, so bucket them separately.
+  // A project whose only work is a review still earns a band.
+  const reviewByRepo = (source: WsRow[]) => {
+    const map = new Map<string, WsRow[]>();
+    for (const row of source) {
+      if (nestsInProject(row)) bucket(map, bandOf(row)).push(row);
+    }
+    return map;
+  };
+  const needsReviewByRepo = reviewByRepo(needsReviewRows);
+  const approvedByRepo = reviewByRepo(approvedRows);
+  const awaitingReviewByRepo = reviewByRepo(awaitingReviewRows);
+  // GitHub requests pointed at you ride the Needs review lane, keyed by the
+  // PR's own project. They stay out of prByRepo's status lanes.
+  const requestedPrByRepo = new Map<string, ReviewQueueItem[]>();
+  for (const item of requestedPrItems) {
+    bucket(requestedPrByRepo, item.pr.repo).push(item);
+  }
+
+  const present = new Set([
+    ...byRepo.keys(),
+    ...snoozedByRepo.keys(),
+    ...needsReviewByRepo.keys(),
+    ...approvedByRepo.keys(),
+    ...awaitingReviewByRepo.keys(),
+    ...prByRepo.keys(),
+    ...requestedPrByRepo.keys(),
+  ]);
+  // A fresh registered repo still earns a project band in the default lens.
+  // Search and teammate lenses stay result-driven, as does a list configured
+  // to hide empty projects. A single-project filter still shows its empty band
+  // because that band is what the person explicitly asked for.
+  if (includesEmptyRepoBands(filter, search)) {
+    for (const repo of registeredRepos) {
+      if (filter.repo === "all" || filter.repo === repo) present.add(repo);
+    }
+  }
+
+  // Repositories follow the shared preference, with newly seen repositories
+  // appended in discovery order. The renderer surfaces selected rows from a
+  // collapsed band so the open session never disappears.
+  const order = [
+    ...repos.filter((repo) => present.has(repo)),
+    ...Array.from(present).filter(
+      (repo) => !repos.includes(repo) && repo !== askBand,
+    ),
+  ];
+  // Ask is pinned above every project and takes no part in reorder or storage.
+  // fullOrder stays sentinel-free while order describes the rendered layout.
+  const fullOrder = normalizeRepoOrder([
+    ...normalizeRepoOrder(savedRepoOrder),
+    ...repos.filter((repo) => !savedRepoOrder.includes(repo)),
+    ...order.filter((repo) => !repos.includes(repo)),
+  ]);
+  if (present.has(askBand)) order.unshift(askBand);
+
+  const bands = order.map((repo) => {
+    const rows = byRepo.get(repo) ?? [];
+    const bandNeedsReviewRows = needsReviewByRepo.get(repo) ?? [];
+    const requestedPrs = requestedPrByRepo.get(repo) ?? [];
+    return {
+      repo,
+      rows,
+      snoozedRows: snoozedByRepo.get(repo) ?? [],
+      needsReviewRows: bandNeedsReviewRows,
+      approvedRows: approvedByRepo.get(repo) ?? [],
+      awaitingReviewRows: awaitingReviewByRepo.get(repo) ?? [],
+      prs: prByRepo.get(repo) ?? [],
+      requestedPrs,
+      urgent:
+        rows.filter((row) => row.status === "needsinput").length +
+        bandNeedsReviewRows.length +
+        requestedPrs.length,
+    };
+  });
+
+  return {
+    scratchRows,
+    scratchSnoozedRows,
+    bands,
+    order,
+    fullOrder,
+    canReorder:
+      !isPhone &&
+      filter.repo === "all" &&
+      order.filter((repo) => repo !== askBand).length > 1,
+  };
 }
