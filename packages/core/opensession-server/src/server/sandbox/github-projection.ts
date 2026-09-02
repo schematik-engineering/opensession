@@ -31,8 +31,7 @@ export async function sandboxGithubAuth(
   const mode = sandboxGithubCredentialMode(spec);
   if (mode === "none") return {};
   if (mode === "interactive") {
-    const userAuth = githubAuthEnv(spec.user || spec.author?.name);
-    if (userAuth.GH_TOKEN) return userAuth;
+    return githubAuthEnv(spec.user || spec.author?.name);
   }
   return githubRepo ? githubServiceCredentialEnv(githubRepo) : {};
 }

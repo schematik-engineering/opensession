@@ -1934,9 +1934,9 @@ async function* runPiAttempt(
     const githubUserLogin = interactiveGithub
       ? githubUserLoginForRun(user || author?.name)
       : null;
-    // Dedicated GitHub workflows and security scans publish with the
-    // repository-scoped App credential. Other unattended runs remain
-    // credential-free even if a caller accidentally supplies githubEnv.
+    // Dedicated GitHub workflows publish with the repository-scoped App
+    // credential. Other unattended runs remain credential-free even if a
+    // caller accidentally supplies githubEnv.
     const githubServiceRun = isGithubServiceCredentialRun(mode, journal?.kind);
     const githubEnv = githubServiceRun
       ? opts.githubEnv?.GH_TOKEN

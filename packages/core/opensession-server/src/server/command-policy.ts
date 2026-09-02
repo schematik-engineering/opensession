@@ -179,19 +179,7 @@ function unquoteBareWord(inner: string): string | undefined {
 export interface PublicationPolicy {
   repo: string;
   branch: string;
-  /** Exact owned branch, or a trailing-* prefix for workflows that create one
-   * bounded branch per result. */
   headBranch: string;
-}
-
-function ownsPublicationBranch(
-  candidate: string,
-  policy: PublicationPolicy,
-): boolean {
-  if (!candidate) return false;
-  return policy.headBranch.endsWith("*")
-    ? candidate.startsWith(policy.headBranch.slice(0, -1))
-    : candidate === policy.headBranch;
 }
 
 /** Server-side floor for automation descendants. It permits publishing the
@@ -237,7 +225,7 @@ export function publicationPolicyDenyReason(
         if (
           normalizedDestinations.length === 0 ||
           normalizedDestinations.some(
-            (destination) => !ownsPublicationBranch(destination, policy),
+            (destination) => destination !== policy.headBranch,
           )
         )
           return `automation descendants may only push their owned branch ${policy.headBranch}`;
@@ -270,11 +258,12 @@ export function publicationPolicyDenyReason(
   if (/\bgit\s+push\s+(?:https?:\/\/|git@|ssh:\/\/)/i.test(scan))
     return "automation descendants cannot push to an external repository URL";
   if (/\bgit\s+push\b/i.test(scan)) {
-    const prefix = policy.headBranch.endsWith("*");
-    const head = prefix ? policy.headBranch.slice(0, -1) : policy.headBranch;
-    const escapedHead = head.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const escapedHead = policy.headBranch.replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&",
+    );
     const ownsDestination = new RegExp(
-      `(?:HEAD:)?(?:refs/heads/)?${escapedHead}${prefix ? "[^\\s]*" : ""}(?:\\s|$)`,
+      `(?:HEAD:)?(?:refs/heads/)?${escapedHead}(?:\\s|$)`,
     ).test(scan);
     if (!ownsDestination)
       return `automation descendants may only push their owned branch ${policy.headBranch}`;

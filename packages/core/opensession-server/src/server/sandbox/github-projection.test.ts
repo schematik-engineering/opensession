@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
+  sandboxGithubAuth,
   sandboxGithubCredentialMode,
   writeSandboxGithubAuth,
 } from "./github-projection";
@@ -29,7 +30,21 @@ describe("sandbox GitHub credential projection", () => {
         journalKind: "security-scan",
         trustProfile: "automation",
       }),
-    ).toBe("service");
+    ).toBe("none");
+  });
+
+  test("does not replace missing personal auth with service auth", async () => {
+    expect(
+      await sandboxGithubAuth(
+        {
+          mode: "code",
+          journalKind: "prompt",
+          trustProfile: "interactive",
+          user: "missing-github-user",
+        },
+        "schematik-engineering/opensession",
+      ),
+    ).toEqual({});
   });
 
   test("local Docker projects the private file before host dispatch", () => {

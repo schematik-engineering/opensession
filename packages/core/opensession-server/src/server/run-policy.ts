@@ -33,8 +33,7 @@ export function isGithubServiceCredentialRun(
   kind: string | undefined,
 ): boolean {
   if (mode !== "code") return false;
-  const base = baseJournalKind(kind);
-  return base === "security-scan" || base.startsWith("github-");
+  return baseJournalKind(kind).startsWith("github-");
 }
 
 const POOL_WAIT_UNATTENDED_MS = Number(

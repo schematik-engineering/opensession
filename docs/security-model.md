@@ -65,10 +65,11 @@ configuration for the run.
   checkout. Sandboxed ask runs use the sandbox workspace. Code gets an
   isolated writable workspace/worktree and can edit and commit. Ordinary
   automations currently receive no GitHub credential, so they cannot push or
-  open a GitHub PR. Trusted `github-*` code workflows and security scans have a
-  separate, repository-scoped App credential path. Every other scope still
-  applies: MCP allowlist, denied writes, IMDS blocking, and the explicit
-  environment.
+  open a GitHub PR. Headless GitHub security scans follow that report-only
+  rule.
+  Trusted `github-*` code workflows have a separate, repository-scoped App
+  credential path. Every other scope still applies: MCP allowlist, denied
+  writes, IMDS blocking, and the explicit environment.
 - When adding an automation, scope it: pick ask mode unless it must write, and
   name only the MCP servers it uses.
 - A code automation's `prReviewer` is preserved and added to its instructions,

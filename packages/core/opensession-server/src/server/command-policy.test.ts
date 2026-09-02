@@ -459,29 +459,6 @@ describe("automation descendant publication policy", () => {
     ).toBeUndefined();
   });
 
-  test("allows a bounded branch prefix for per-result publication", () => {
-    const scanPolicy = {
-      repo: "schematik-engineering/biss-client",
-      branch: "main",
-      headBranch: "deepsec-scan-*",
-    };
-    expect(
-      publicationPolicyDenyReason(
-        "git push -u origin deepsec-scan-og-token-collision",
-        scanPolicy,
-      ),
-    ).toBeUndefined();
-    expect(
-      publicationPolicyDenyReason(
-        "git push origin deepsec-other-prefix",
-        scanPolicy,
-      ),
-    ).toContain("deepsec-scan-*");
-    expect(
-      publicationPolicyDenyReason("git push origin HEAD:main", scanPolicy),
-    ).toContain("protected base");
-  });
-
   test("denies merge, protected-base push, and external repository writes", () => {
     expect(
       publicationPolicyDenyReason("gh pr merge 12 --squash", policy),
