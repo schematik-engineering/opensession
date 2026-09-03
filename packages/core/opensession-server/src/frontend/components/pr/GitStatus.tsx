@@ -98,8 +98,14 @@ export function GitStatusRows({
             <button
               className={gitActionClass(mergeTone)}
               onClick={onMerge}
-              disabled={merging}
-              title="Squash and merge this pull request"
+              disabled={merging || mergeTone !== "green"}
+              title={
+                mergeTone === "green"
+                  ? "Squash and merge this pull request"
+                  : status.key === "running"
+                    ? "Merge is unavailable until checks finish"
+                    : "Merge is unavailable until requested reviews finish"
+              }
             >
               {merging ? "Merging…" : "Merge"}
             </button>

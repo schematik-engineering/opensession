@@ -755,7 +755,10 @@ export function PrStatusBar({
   // session header it sizes up to the header's other bordered controls, so the
   // chip and the action read as a matched pair.
   const actionBtn = variant === "header" ? PR_HEAD_BTN : "";
-  function renderMergeAction(tone: "green" | "yellow"): React.ReactNode {
+  function renderMergeAction(
+    tone: "green" | "yellow",
+    disabledReason?: string,
+  ): React.ReactNode {
     const mergeScheduled = mergePhase === "scheduled";
     const merging = mergePhase === "running" || busy === "merge";
     if (mergeScheduled)
@@ -770,16 +773,17 @@ export function PrStatusBar({
         className={actionBtn}
         tone={tone}
         icon={!merging ? <IconGitMerge size={18} /> : undefined}
-        disabled={!!busy || merging}
+        disabled={Boolean(disabledReason) || !!busy || merging}
         onClick={handleMerge}
         title={
-          stackMerge
+          disabledReason ||
+          (stackMerge
             ? `Squash and merge ${stackMerge.layers
                 .map((l) => `#${l.number}`)
                 .join(
                   ", ",
                 )} into ${pr?.stack?.baseRefName || "the base branch"}, all or nothing`
-            : "Squash and merge this PR into its base branch"
+            : "Squash and merge this PR into its base branch")
         }
       >
         {merging
@@ -938,7 +942,12 @@ export function PrStatusBar({
         ) : null;
       case "running":
       case "review-required":
-        return renderMergeAction("yellow");
+        return renderMergeAction(
+          "yellow",
+          headline.key === "running"
+            ? "Merge is unavailable until checks finish"
+            : "Merge is unavailable until requested reviews finish",
+        );
       // "Checks failed" is the affordance: hovering the headline shows the
       // checks, and clicking it opens Review's Checks tab.
       case "failing":

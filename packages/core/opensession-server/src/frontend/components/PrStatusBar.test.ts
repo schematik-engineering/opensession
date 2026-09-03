@@ -165,9 +165,15 @@ test("keeps pending checks amber and turns green only when ready", () => {
   ).toEqual({ key: "ready", label: "Ready to merge", tone: "green" });
 });
 
-test("offers amber Merge for caution states", () => {
+test("shows disabled amber Merge for caution states", () => {
   expect(statusBarSource).toContain('case "review-required":');
-  expect(statusBarSource).toContain('return renderMergeAction("yellow")');
+  expect(statusBarSource).toContain(
+    "disabled={Boolean(disabledReason) || !!busy || merging}",
+  );
+  expect(statusBarSource).toContain("Merge is unavailable until checks finish");
+  expect(statusBarSource).toContain(
+    "Merge is unavailable until requested reviews finish",
+  );
   expect(statusBarSource).toContain(
     'case "ready":\n        return renderMergeAction("green")',
   );

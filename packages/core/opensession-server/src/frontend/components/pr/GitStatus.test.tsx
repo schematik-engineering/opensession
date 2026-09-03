@@ -37,7 +37,7 @@ function render(pr: PrDetails): string {
 }
 
 describe("GitStatusRows merge action", () => {
-  test("uses an amber action while reviews are outstanding", () => {
+  test("disables the amber action while reviews are outstanding", () => {
     const html = render(
       pullRequest({
         reviewers: [{ login: "sam", state: "PENDING" }],
@@ -47,14 +47,33 @@ describe("GitStatusRows merge action", () => {
     expect(html).toContain("Review required");
     expect(html).toContain(">Merge</button>");
     expect(html).toContain("text-yellow");
+    expect(html).toContain('disabled=""');
+    expect(html).toContain(
+      "Merge is unavailable until requested reviews finish",
+    );
   });
 
-  test("uses a green action when the PR is ready", () => {
+  test("disables the amber action while checks are pending", () => {
+    const html = render(
+      pullRequest({
+        checks: [{ name: "Test", status: "IN_PROGRESS", conclusion: "" }],
+      }),
+    );
+
+    expect(html).toContain("Checks running");
+    expect(html).toContain(">Merge</button>");
+    expect(html).toContain("text-yellow");
+    expect(html).toContain('disabled=""');
+    expect(html).toContain("Merge is unavailable until checks finish");
+  });
+
+  test("uses an enabled green action when the PR is ready", () => {
     const html = render(pullRequest());
 
     expect(html).toContain("Ready to merge");
     expect(html).toContain(">Merge</button>");
     expect(html).toContain("text-green");
+    expect(html).not.toContain('disabled=""');
   });
 
   test("does not offer Merge for failed checks", () => {
