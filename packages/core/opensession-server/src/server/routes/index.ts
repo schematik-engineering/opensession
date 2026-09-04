@@ -25,6 +25,7 @@ import { handleMentionPaletteRoutes } from "./mention-palette";
 import { handleSandboxRoutes } from "./sandbox";
 import { handleSandboxesRoutes } from "./sandboxes";
 import { handleSessionsRoutes } from "./sessions";
+import { handleSessionImportRoutes } from "./session-import";
 import { handleShippedChangeRoutes } from "./shipped-changes";
 import { handlePrRoutes } from "./pr";
 import { handleSessionGitRoutes } from "./session-git";
@@ -88,6 +89,7 @@ export const routeHandlers: RouteHandler[] = [
   handleSandboxesRoutes,
   handleSandboxRoutes,
   handleShippedChangeRoutes,
+  handleSessionImportRoutes,
   handleSessionsRoutes,
   handlePrRoutes,
   handleSessionGitRoutes,

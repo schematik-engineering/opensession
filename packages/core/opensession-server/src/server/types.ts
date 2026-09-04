@@ -542,6 +542,14 @@ export interface NativeSessionFile {
   claudeSessionId: string;
   branch: string;
   worktreeDir: string;
+  /** Conversation imported from an external coding-agent client. The source
+   * id is the retry key, while the transcript itself lives in the owned store. */
+  importedFrom?: {
+    provider: "claude-code" | "codex";
+    sessionId: string;
+    importedAt: string;
+    entryCount: number;
+  };
   /** Secondary repos this session also works in (cross-repo sessions). */
   attachedRepos?: AttachedRepo[];
   /** PRs manually linked to this session (beyond branch/attached-repo ones). */
