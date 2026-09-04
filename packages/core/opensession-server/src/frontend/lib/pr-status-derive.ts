@@ -1,3 +1,4 @@
+import { reviewsOutstanding } from "./pr-headline";
 import type { PrCheck, PrDetails } from "./types";
 
 /** One-line derived status: the state label + a tone + an optional qualifier. */
@@ -44,7 +45,7 @@ export function deriveStatus(pr: PrDetails): StatusLine {
       qualifier: "Checks running",
       tone: "yellow",
     };
-  if (pr.reviewDecision === "REVIEW_REQUIRED")
+  if (reviewsOutstanding(pr))
     return {
       key: "review",
       label: "Open",

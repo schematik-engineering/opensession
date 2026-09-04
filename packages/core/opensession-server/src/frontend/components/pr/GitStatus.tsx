@@ -9,6 +9,7 @@ import {
 import { deriveStatus } from "../../lib/pr-status-derive";
 import {
   GIT_ACTION,
+  gitActionClass,
   GIT_DOT,
   GIT_DOT_BG,
   GIT_LABEL,
@@ -73,21 +74,38 @@ export function GitStatusRows({
           {conflicts.action}
         </button>
       ) : undefined;
+    const mergeTone =
+      status.key === "ready"
+        ? "green"
+        : status.key === "running" || status.key === "review"
+          ? "yellow"
+          : null;
+    const canShowMerge =
+      pr.state === "OPEN" &&
+      !pr.isDraft &&
+      onMerge !== undefined &&
+      mergeTone !== null;
     rows.push({
       key: "pr-status",
       label: status.qualifier || status.label,
       tone: status.tone,
       action:
         resolveAction ||
-        (pr.state === "OPEN" && !pr.isDraft && onMerge ? (
+        (canShowMerge ? (
           mergeScheduled ? (
             <MergeUndoControl compact onUndo={onMerge} />
           ) : (
             <button
-              className={GIT_ACTION}
+              className={gitActionClass(mergeTone)}
               onClick={onMerge}
-              disabled={merging}
-              title="Squash and merge this pull request"
+              disabled={merging || mergeTone !== "green"}
+              title={
+                mergeTone === "green"
+                  ? "Squash and merge this pull request"
+                  : status.key === "running"
+                    ? "Merge is unavailable until checks finish"
+                    : "Merge is unavailable until requested reviews finish"
+              }
             >
               {merging ? "Merging…" : "Merge"}
             </button>

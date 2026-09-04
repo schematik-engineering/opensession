@@ -175,6 +175,7 @@ interface Props {
 interface PrBarButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   tone:
     | "green"
+    | "yellow"
     | "purple"
     | "red"
     | "status-red"
@@ -195,6 +196,8 @@ function PrBarButton({
   const tones = {
     green:
       "bg-[var(--green)] border-[color-mix(in_srgb,var(--green)_78%,black)] text-white",
+    yellow:
+      "bg-[var(--yellow)] border-[color-mix(in_srgb,var(--yellow)_78%,black)] text-[var(--on-yellow)]",
     purple:
       "bg-[var(--purple)] border-[color-mix(in_srgb,var(--purple)_78%,black)] text-white",
     red: "bg-[var(--red)] border-[color-mix(in_srgb,var(--red)_78%,black)] text-white",
@@ -752,6 +755,52 @@ export function PrStatusBar({
   // session header it sizes up to the header's other bordered controls, so the
   // chip and the action read as a matched pair.
   const actionBtn = variant === "header" ? PR_HEAD_BTN : "";
+  function renderMergeAction(
+    tone: "green" | "yellow",
+    disabledReason?: string,
+  ): React.ReactNode {
+    const mergeScheduled = mergePhase === "scheduled";
+    const merging = mergePhase === "running" || busy === "merge";
+    if (mergeScheduled)
+      return (
+        <MergeUndoControl
+          className={variant === "header" ? "min-h-[32px]" : undefined}
+          onUndo={handleMerge}
+        />
+      );
+    return (
+      <PrBarButton
+        className={actionBtn}
+        tone={tone}
+        icon={!merging ? <IconGitMerge size={18} /> : undefined}
+        disabled={Boolean(disabledReason) || !!busy || merging}
+        onClick={handleMerge}
+        title={
+          disabledReason ||
+          (stackMerge
+            ? `Squash and merge ${stackMerge.layers
+                .map((l) => `#${l.number}`)
+                .join(
+                  ", ",
+                )} into ${pr?.stack?.baseRefName || "the base branch"}, all or nothing`
+            : "Squash and merge this PR into its base branch")
+        }
+      >
+        {merging
+          ? stackMerge
+            ? "Merging stack…"
+            : "Merging…"
+          : stackMerge
+            ? "Merge stack"
+            : "Merge"}
+        {stackMerge && !merging && (
+          <span className="ml-1.5 rounded-full bg-white/20 px-1.5 tabular-nums">
+            {stackMerge.layers.length}
+          </span>
+        )}
+      </PrBarButton>
+    );
+  }
   function renderAction(): React.ReactNode {
     if (prompted) {
       const tone: PrBarButtonProps["tone"] =
@@ -891,11 +940,16 @@ export function PrStatusBar({
             Resolve
           </PrBarButton>
         ) : null;
-      // "N checks pending…" / "Checks failed" IS the affordance: hovering the
-      // headline shows the checks, clicking it opens Review's Checks tab. A
-      // View checks button beside it would be the same action twice.
       case "running":
-        return null;
+      case "review-required":
+        return renderMergeAction(
+          "yellow",
+          headline.key === "running"
+            ? "Merge is unavailable until checks finish"
+            : "Merge is unavailable until requested reviews finish",
+        );
+      // "Checks failed" is the affordance: hovering the headline shows the
+      // checks, and clicking it opens Review's Checks tab.
       case "failing":
         return send ? (
           <PrBarButton
@@ -954,48 +1008,8 @@ export function PrStatusBar({
             Create PR
           </PrBarButton>
         ) : null;
-      case "ready": {
-        const mergeScheduled = mergePhase === "scheduled";
-        const merging = mergePhase === "running" || busy === "merge";
-        if (mergeScheduled)
-          return (
-            <MergeUndoControl
-              className={variant === "header" ? "min-h-[32px]" : undefined}
-              onUndo={handleMerge}
-            />
-          );
-        return (
-          <PrBarButton
-            className={actionBtn}
-            tone="green"
-            icon={!merging ? <IconGitMerge size={18} /> : undefined}
-            disabled={!!busy || merging}
-            onClick={handleMerge}
-            title={
-              stackMerge
-                ? `Squash and merge ${stackMerge.layers
-                    .map((l) => `#${l.number}`)
-                    .join(
-                      ", ",
-                    )} into ${pr?.stack?.baseRefName || "the base branch"}, all or nothing`
-                : "Squash and merge this PR into its base branch"
-            }
-          >
-            {merging
-              ? stackMerge
-                ? "Merging stack…"
-                : "Merging…"
-              : stackMerge
-                ? "Merge stack"
-                : "Merge"}
-            {stackMerge && !merging && (
-              <span className="ml-1.5 rounded-full bg-white/20 px-1.5 tabular-nums">
-                {stackMerge.layers.length}
-              </span>
-            )}
-          </PrBarButton>
-        );
-      }
+      case "ready":
+        return renderMergeAction("green");
       default:
         return null;
     }

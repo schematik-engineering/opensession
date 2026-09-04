@@ -1,14 +1,64 @@
 import { describe, expect, test } from "bun:test";
-import { isDeployment } from "./pr-status-derive";
-import type { PrCheck } from "./types";
+import { deriveStatus, isDeployment } from "./pr-status-derive";
+import type { PrCheck, PrDetails } from "./types";
 
-const check = (name: string, workflowName?: string): PrCheck =>
-  ({
-    name,
-    status: "COMPLETED",
-    conclusion: "SUCCESS",
-    workflowName,
-  }) as PrCheck;
+const check = (name: string, workflowName?: string): PrCheck => ({
+  name,
+  status: "COMPLETED",
+  conclusion: "SUCCESS",
+  workflowName,
+});
+
+function pullRequest(overrides: Partial<PrDetails> = {}): PrDetails {
+  return {
+    number: 42,
+    title: "Pull request",
+    url: "https://github.com/tellahq/app/pull/42",
+    state: "OPEN",
+    isDraft: false,
+    baseRefName: "main",
+    headRefName: "feature",
+    additions: 1,
+    deletions: 0,
+    changedFiles: 1,
+    reviewDecision: "",
+    author: "octocat",
+    body: "",
+    checks: [],
+    mergeable: "MERGEABLE",
+    ...overrides,
+  };
+}
+
+describe("deriveStatus", () => {
+  test("treats requested reviewers as an outstanding review", () => {
+    const expected = {
+      key: "review",
+      label: "Open",
+      qualifier: "Review required",
+      tone: "yellow",
+    } satisfies ReturnType<typeof deriveStatus>;
+    expect(
+      deriveStatus(
+        pullRequest({
+          reviewers: [{ login: "sam", state: "PENDING" }],
+        }),
+      ),
+    ).toEqual(expected);
+    expect(
+      deriveStatus(pullRequest({ reviewDecision: "REVIEW_REQUIRED" })),
+    ).toEqual(expected);
+  });
+
+  test("keeps ready PRs green when nobody was asked to review", () => {
+    expect(deriveStatus(pullRequest())).toEqual({
+      key: "ready",
+      label: "Open",
+      qualifier: "Ready to merge",
+      tone: "green",
+    });
+  });
+});
 
 describe("isDeployment", () => {
   test("matches Vercel's own status contexts", () => {

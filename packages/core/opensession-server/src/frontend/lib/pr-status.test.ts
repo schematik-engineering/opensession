@@ -8,6 +8,16 @@ describe("prStatusDisplay", () => {
     ).toEqual({ label: "Conflicts", state: "conflicts", tone: "red" });
   });
 
+  test("marks required reviews as pending", () => {
+    expect(
+      prStatusDisplay({ state: "OPEN", reviewDecision: "REVIEW_REQUIRED" }),
+    ).toEqual({
+      label: "Review required",
+      state: "review-required",
+      tone: "yellow",
+    });
+  });
+
   test("keeps terminal lifecycle states authoritative", () => {
     expect(prStatusDisplay({ state: "MERGED" })).toEqual({
       label: "Merged",

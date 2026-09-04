@@ -74,6 +74,7 @@ describe("refTone", () => {
     expect(
       refTone(ref({ checks: { total: 2, passed: 1, failed: 0, pending: 1 } })),
     ).toBe("yellow");
+    expect(refTone(ref({ reviewDecision: "REVIEW_REQUIRED" }))).toBe("yellow");
     expect(refTone(ref({ isDraft: true }))).toBe("muted");
     expect(refTone(ref())).toBe("green");
   });
@@ -109,6 +110,9 @@ describe("refState", () => {
       "Changes requested",
     );
     expect(refState(ref({ isDraft: true }))).toBe("Draft");
+    expect(refState(ref({ reviewDecision: "REVIEW_REQUIRED" }))).toBe(
+      "Review required",
+    );
     expect(refState(ref({ reviewDecision: "APPROVED" }))).toBe("Approved");
     expect(refState(ref())).toBe("Open");
   });
