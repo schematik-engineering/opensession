@@ -70,8 +70,16 @@ configuration for the run.
   Trusted `github-*` code workflows have a separate, repository-scoped App
   credential path. Every other scope still applies: MCP allowlist, denied
   writes, IMDS blocking, and the explicit environment.
+- A sandboxed automation runs in a fresh disposable Daytona Executor. Open
 - When adding an automation, scope it: pick ask mode unless it must write, and
   name only the MCP servers it uses.
+- Interactive sessions may publish an existing workspace file through
+  `opensession-assets` `write_asset.sourcePath`. The server resolves the path
+  inside that session's host, runner, or Sandbox workspace, rejects absolute
+  paths, traversal, control characters, and symlinks escaping the workspace,
+  checks the 4 MiB limit before reading, then writes through the configured
+  asset store. Agents do not need direct access to the asset storage directory,
+  and successful publication sends the normal `assets_changed` event.
 - A code automation's `prReviewer` is preserved and added to its instructions,
   but it grants no GitHub authority. It matters only when the run already has
   an authorized publication path. See
@@ -202,12 +210,14 @@ authority.
 ## GitHub credential scoping (out-of-org writes fail server-side)
 
 The "repositories outside your org require confirmation" rule in AGENTS.md is
-enforced with credential scope, not just prompts. The selected GitHub App
-installation belongs to `integrations.github.installationOwner`; server reads
-and writes use short-lived installation tokens, while trusted repository code
-runs receive a token narrowed to the owner-verified `owner/repo`. Teammate
-device-flow tokens are limited by both that App installation and the person's
-own GitHub access. Out-of-installation writes therefore fail at GitHub's side.
+enforced with credential scope, not just prompts. One GitHub App may have
+installations on several accounts. Server reads and writes resolve the
+installation from the repository owner and use a short-lived token for that
+installation. Trusted repository code runs receive a token narrowed further to
+the owner-verified `owner/repo`. `integrations.github.installationOwner` is only
+the default for calls that do not name a repository. Teammate device-flow
+tokens are limited by both the App's installations and the person's own GitHub
+access. Out-of-installation writes therefore fail at GitHub's side.
 
 The App is a fail-closed boundary: token-mint failure never consults ambient
 `gh` hosts.yml accounts, SSH credentials, or a connected human. Process-local
@@ -248,6 +258,10 @@ Enabling `userPrAuth` activates both halves below:
   lease-gated token endpoints; and machine WebSocket transports authenticated
   by their own transport credentials. Page and static-asset loads remain open
   so sign-in can render, while published `/d` applications are authenticated.
+  Portal ports are forward-authenticated through `/api/portal-auth/<port>`;
+  a browser navigation without a session is redirected to the app's own
+  origin with a same-host `return` URL and sent back after sign-in
+  (portal-sign-in.ts), never to another host.
   Only logins on identity.team may sign in. The verified identity OVERRIDES
   client-claimed `user` on every WS message and stamps `createdByLogin` on
   new sessions; a one-time boot migration backfills `createdByLogin` onto

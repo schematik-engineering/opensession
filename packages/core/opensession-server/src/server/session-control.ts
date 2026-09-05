@@ -74,16 +74,7 @@ export type ReparentSessionResult =
  * request against this instance's providers and fails the create with its own
  * message, so every create path enforces the same rules.
  */
-export type SandboxRequest =
-  | boolean
-  | "local"
-  | "docker"
-  | "daytona"
-  | "e2b"
-  | "box"
-  | "modal"
-  | "microvm"
-  | "lambda-microvm";
+export type SandboxRequest = boolean | "local" | "docker" | "daytona" | "box";
 
 export interface CreateSessionOpts {
   prompt: string;
@@ -93,6 +84,8 @@ export interface CreateSessionOpts {
   requestId?: string;
   /** Verified actor scope used by the create command owner. */
   requestScope?: string;
+  /** Server-authenticated creator login. Never accept this from agent input. */
+  createdByLogin?: string;
   /** Branch for a code-mode worktree session. Ignored for ask mode. */
   branch?: string;
   /** Committed ref the new isolated branch starts from. Internal callers must
@@ -117,6 +110,8 @@ export interface CreateSessionOpts {
   images?: string[];
   /** Raw composer file references, already staged through `/api/upload`. */
   files?: unknown;
+  /** Large pastes, folded after the opening prompt (protocol pasted-text.ts). */
+  pastedTexts?: string[];
   /** Optional MCP allowlist for the opening run. Empty array means no MCP servers. */
   mcpServers?: string[];
   /** Authorized persistent Runner id for a new code workspace. */

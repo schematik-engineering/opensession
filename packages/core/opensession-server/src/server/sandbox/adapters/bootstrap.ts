@@ -54,6 +54,7 @@
 
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -61,7 +62,7 @@ import {
   rmSync,
   unlinkSync,
 } from "fs";
-import { dirname, resolve } from "path";
+import { dirname, isAbsolute, relative, resolve } from "path";
 import { OPENSESSION_SESSIONS_DIR, homeDir, stateDir } from "../../paths";
 import {
   journalSet,
@@ -91,6 +92,8 @@ import {
   maskOpenaiAccount,
   openaiSeedAuthPath,
 } from "../../openai-auth";
+import { buildXaiRemoteUpload, maskXaiAccount } from "../../xai-accounts";
+import { XAI_OAUTH_PROVIDER } from "../../xai-provider-id";
 import {
   fallbackPlan,
   modelSupportsSteer,
@@ -98,8 +101,7 @@ import {
   toPiModel,
 } from "../../models";
 import { filterMcpServers } from "../../runner-shared";
-import { GITHUB_RUN_AUTH_FILE_ENV } from "../../github-auth";
-import { sandboxGithubAuth } from "../github-projection";
+import { GITHUB_RUN_AUTH_FILE_ENV, githubAuthEnv } from "../../github-auth";
 import {
   appendTranscriptEntries,
   recordEngineSessionOwner,
@@ -117,10 +119,6 @@ import {
   runWsConnector,
 } from "../../run-ws";
 import { writeJsonAtomic } from "../../shared/atomic-write";
-import {
-  loadWorkspaceSeedFiles,
-  type WorkspaceSeedFile,
-} from "../../workspace-seed-files";
 import {
   createWorkloadIdentityEnv,
   type WorkloadIdentityContext,
@@ -313,6 +311,16 @@ export function remoteRunNeedsAnthropic(
   );
 }
 
+export function remoteRunNeedsXai(
+  model: string | undefined,
+  fallbackModel?: string,
+): boolean {
+  const prefix = `pi/${XAI_OAUTH_PROVIDER}/`;
+  return remoteReachableModels(model, fallbackModel).some((candidate) =>
+    candidate.startsWith(prefix),
+  );
+}
+
 function remoteSettingsProviderIds(
   model: string | undefined,
   fallbackModel?: string,
@@ -381,6 +389,7 @@ export function projectRemoteModelProviderConfig(
     if (trustProfile === "automation" && pinnedAccountId) {
       projectedBridge.accounts = [pinnedAccountId];
       projectedBridge.openaiAccounts = [pinnedAccountId];
+      projectedBridge.xaiAccounts = [pinnedAccountId];
     } else {
       if (Array.isArray(bridge.accounts))
         projectedBridge.accounts = bridge.accounts.filter(
@@ -388,6 +397,10 @@ export function projectRemoteModelProviderConfig(
         );
       if (Array.isArray(bridge.openaiAccounts))
         projectedBridge.openaiAccounts = bridge.openaiAccounts.filter(
+          (value): value is string => typeof value === "string",
+        );
+      if (Array.isArray(bridge.xaiAccounts))
+        projectedBridge.xaiAccounts = bridge.xaiAccounts.filter(
           (value): value is string => typeof value === "string",
         );
     }
@@ -786,6 +799,8 @@ export interface RunnerPayloadInputs {
   runnerSha?: string;
   /** `git remote get-url origin` of the host source tree, "" when none. */
   origin: string;
+  /** `git rev-parse HEAD` of the host source tree, undefined when unknown. */
+  head?: string;
   /** `release.json` of a release install, null for a source checkout. */
   release: { version?: string; commit?: string } | null;
 }
@@ -822,7 +837,14 @@ export function resolveRunnerPayload(
   }
   const origin = input.origin && toHttpsUrl(input.origin);
   if (origin) {
-    return { repoUrl: credentialFreeHttpsUrl(origin), pin, source: "origin" };
+    // A source install runs its sandboxes at the commit it runs itself, so
+    // every deploy carries the runner along. An explicit runnerSha still
+    // wins for a deliberate hold or rollback.
+    return {
+      repoUrl: credentialFreeHttpsUrl(origin),
+      pin: pin || input.head || undefined,
+      source: "origin",
+    };
   }
   if (input.release) {
     const tag = pin ? undefined : releaseTag(input.release.version);
@@ -851,7 +873,11 @@ function installRoot(): string {
 }
 
 let hostRunnerSourceCache:
-  | { origin: string; release: RunnerPayloadInputs["release"] }
+  | {
+      origin: string;
+      head?: string;
+      release: RunnerPayloadInputs["release"];
+    }
   | undefined;
 
 /** Origin and release manifest of the host install. Neither changes while
@@ -859,6 +885,7 @@ let hostRunnerSourceCache:
  *  not something the server edits), so read once. */
 function hostRunnerSource(): {
   origin: string;
+  head?: string;
   release: RunnerPayloadInputs["release"];
 } {
   if (hostRunnerSourceCache) return hostRunnerSourceCache;
@@ -876,15 +903,22 @@ function hostRunnerSource(): {
     }
   } catch {}
   let origin = "";
+  let head: string | undefined;
   if (!isCompiledBinary()) {
-    const proc = Bun.spawnSync({
-      cmd: ["git", "-C", REPO_ROOT, "remote", "get-url", "origin"],
-      stdout: "pipe",
-      stderr: "ignore",
-    });
-    origin = proc.exitCode === 0 ? proc.stdout.toString().trim() : "";
+    const git = (...args: string[]) => {
+      const proc = Bun.spawnSync({
+        cmd: ["git", "-C", REPO_ROOT, ...args],
+        stdout: "pipe",
+        stderr: "ignore",
+      });
+      return proc.exitCode === 0 ? proc.stdout.toString().trim() : "";
+    };
+    origin = git("remote", "get-url", "origin");
+    head = /^[0-9a-f]{40}$/.test(git("rev-parse", "HEAD"))
+      ? git("rev-parse", "HEAD")
+      : undefined;
   }
-  hostRunnerSourceCache = { origin, release };
+  hostRunnerSourceCache = { origin, head, release };
   return hostRunnerSourceCache;
 }
 
@@ -1392,8 +1426,139 @@ export async function bootstrapRemoteSandbox(
  *  them (warmRemoteWorkspace → setupRemoteWorkspace's mv). */
 const REMOTE_WARM_BASE = `${REMOTE_HOME}/.bks-warm`;
 
-export type RemoteWorkspaceSeedFile = WorkspaceSeedFile;
-export const loadRemoteWorkspaceSeedFiles = loadWorkspaceSeedFiles;
+const REMOTE_SEED_MANIFEST = ".agents/environment.json";
+const MAX_REMOTE_SEED_FILE_BYTES = 1024 * 1024;
+const MAX_REMOTE_SEED_TOTAL_BYTES = 4 * 1024 * 1024;
+
+export interface RemoteWorkspaceSeedFile {
+  path: string;
+  content: string;
+}
+
+/**
+ * Load the repo-owned list of private workspace files that should accompany a
+ * remote clone. The manifest is read from the registered, operator-controlled
+ * checkout (not the agent's branch), and every source must be a regular,
+ * gitignored file below that checkout. This prevents a branch from requesting
+ * arbitrary host files while keeping the zero-copy-path convention simple:
+ *
+ *   { "seedFiles": ["packages/web/.env.local"] }
+ */
+export function loadRemoteWorkspaceSeedFiles(repo: {
+  id: string;
+  repo: string;
+  defaultBranch?: string;
+}): RemoteWorkspaceSeedFile[] {
+  // Registered checkouts can legitimately be parked on another session's
+  // branch. Prefer the trusted remote-tracking default branch so a freshly
+  // merged environment manifest applies immediately and an old branch cannot
+  // keep requesting seed files that default has removed.
+  let manifestText: string | null = null;
+  if (repo.defaultBranch) {
+    const ref = `refs/remotes/origin/${repo.defaultBranch}`;
+    const refExists = Bun.spawnSync({
+      cmd: [
+        "git",
+        "-C",
+        repo.repo,
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        `${ref}^{commit}`,
+      ],
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    if (refExists.exitCode === 0) {
+      const shown = Bun.spawnSync({
+        cmd: ["git", "-C", repo.repo, "show", `${ref}:${REMOTE_SEED_MANIFEST}`],
+        stdout: "pipe",
+        stderr: "ignore",
+      });
+      if (shown.exitCode !== 0) return [];
+      manifestText = shown.stdout.toString("utf-8");
+    }
+  }
+  if (manifestText == null) {
+    const manifestPath = resolve(repo.repo, REMOTE_SEED_MANIFEST);
+    if (!existsSync(manifestPath)) return [];
+    manifestText = readFileSync(manifestPath, "utf-8");
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(manifestText);
+  } catch (error) {
+    throw new Error(
+      `${repo.id} ${REMOTE_SEED_MANIFEST} is invalid JSON: ${(error as Error).message}`,
+    );
+  }
+  const seedFiles = (raw as { seedFiles?: unknown })?.seedFiles;
+  if (
+    !Array.isArray(seedFiles) ||
+    !seedFiles.every((file) => typeof file === "string")
+  ) {
+    throw new Error(
+      `${repo.id} ${REMOTE_SEED_MANIFEST} must contain a string[] seedFiles`,
+    );
+  }
+
+  const seen = new Set<string>();
+  const loaded: RemoteWorkspaceSeedFile[] = [];
+  let total = 0;
+  for (const path of seedFiles) {
+    if (
+      !path ||
+      isAbsolute(path) ||
+      path.includes("\\") ||
+      path.split("/").some((part) => !part || part === "." || part === "..")
+    ) {
+      throw new Error(
+        `${repo.id} ${REMOTE_SEED_MANIFEST} has unsafe path ${JSON.stringify(path)}`,
+      );
+    }
+    if (seen.has(path)) continue;
+    seen.add(path);
+    const source = resolve(repo.repo, path);
+    const within = relative(repo.repo, source);
+    if (!within || within.startsWith("..") || isAbsolute(within)) {
+      throw new Error(`${repo.id} seed file escapes the checkout: ${path}`);
+    }
+    if (!existsSync(source)) {
+      throw new Error(
+        `${repo.id} requires local seed file ${path}; create it in ${repo.repo} before preparing a sandbox`,
+      );
+    }
+    const stat = lstatSync(source);
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      throw new Error(
+        `${repo.id} seed file must be a regular file, not a symlink: ${path}`,
+      );
+    }
+    const ignored = Bun.spawnSync({
+      cmd: ["git", "-C", repo.repo, "check-ignore", "-q", "--", path],
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    if (ignored.exitCode !== 0) {
+      throw new Error(
+        `${repo.id} seed file must be gitignored before upload: ${path}`,
+      );
+    }
+    if (stat.size > MAX_REMOTE_SEED_FILE_BYTES) {
+      throw new Error(`${repo.id} seed file exceeds 1 MiB: ${path}`);
+    }
+    total += stat.size;
+    if (total > MAX_REMOTE_SEED_TOTAL_BYTES) {
+      throw new Error(`${repo.id} seed files exceed the 4 MiB workspace limit`);
+    }
+    const content = readFileSync(source, "utf-8");
+    if (content.includes("\0")) {
+      throw new Error(`${repo.id} seed file must be text: ${path}`);
+    }
+    loaded.push({ path, content });
+  }
+  return loaded;
+}
 
 async function materializeRemoteWorkspaceSeedFiles(
   driver: RemoteDriver,
@@ -1818,6 +1983,47 @@ export async function runRemoteLifecycleHook(
   return { ran: true, log };
 }
 
+/**
+ * `.agents/resume` on every real wake. A sandbox that slept keeps its disk but
+ * loses every process, so the repository gets one idempotent chance to repair
+ * what a fresh boot needs (caches, daemons, generated files) before the agent
+ * or a Portal restart runs. Never fails the wake: the log is surfaced in the
+ * Sandbox badge instead.
+ */
+export async function runResumeHook(
+  driver: RemoteDriver,
+  providerId: SandboxProviderId,
+  sandboxId: string,
+  state: {
+    cwd: string;
+    sessionId: string;
+    repoId?: string;
+    trustProfile?: "interactive" | "automation";
+  },
+): Promise<void> {
+  try {
+    await runRemoteLifecycleHook(
+      driver,
+      state.cwd,
+      "resume",
+      "resume",
+      state.repoId,
+      {
+        sandboxId,
+        provider: providerId,
+        sessionId: state.sessionId,
+        repoId: state.repoId || "",
+        trustProfile: state.trustProfile || "interactive",
+      },
+    );
+  } catch (error) {
+    console.warn(
+      `[sandbox:${providerId}] ${sandboxId}: .agents/resume failed:`,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
 // ── Run launching (WS transport only — there is no socket option remotely) ───
 
 function sessionRunsDir(sessionId: string): string {
@@ -1942,7 +2148,6 @@ function makeRemoteLauncher(
         spec.mcpServers ?? "all",
         spec.user,
         [spec.mcpGrantUser, spec.user],
-        { allowManagedUserAuth: !!spec.mcpGrantUser },
       );
       const claudeAccountsPath = `${REMOTE_HOME}/.opensession-claude-accounts.json`;
       await Promise.all([
@@ -1957,22 +2162,41 @@ function makeRemoteLauncher(
       ]);
       secureFiles.push(claudeAccountsPath, REMOTE_MCP_CONFIG);
 
-      // The sandbox origin is mutable by repository setup code. Resolve
-      // service authority only from the server-owned repo id recorded at ensure
-      // time, then project it through a private run-scoped file.
-      const repoId = readRemoteState(provider, sandboxId)?.repoId;
-      const registeredRepo = repoId
-        ? (await import("../../worktree")).getRepo(repoId)
-        : undefined;
-      const githubAuth = await sandboxGithubAuth(
-        spec,
-        registeredRepo?.host === "codestorage"
-          ? undefined
-          : registeredRepo?.ghRepo,
-      );
+      // GitHub credentials are projected through a private, run-scoped file,
+      // never spec.json, argv, or the persisted origin. Interactive runs prefer
+      // their user's token. GitHub code automations and user-less interactive
+      // runs receive a freshly resolved service credential for this one repo;
+      // every other automation stays credential-free.
+      let githubAuth = automationProfile
+        ? {}
+        : githubAuthEnv(spec.user || spec.author?.name);
+      const githubCodeAutomation =
+        automationProfile &&
+        spec.mode === "code" &&
+        (spec.journalKind || "").startsWith("github-");
+      if (
+        !githubAuth.GH_TOKEN &&
+        (!automationProfile || githubCodeAutomation)
+      ) {
+        // The sandbox origin is mutable by repository setup code. Bind service
+        // authority only to the server-owned repo id recorded at ensure time.
+        const repoId = readRemoteState(provider, sandboxId)?.repoId;
+        const registeredRepo = repoId
+          ? (await import("../../worktree")).getRepo(repoId)
+          : undefined;
+        if (registeredRepo?.host !== "codestorage" && registeredRepo?.ghRepo) {
+          const { githubServiceCredentialEnv } =
+            await import("../../github-app");
+          githubAuth = await githubServiceCredentialEnv(registeredRepo.ghRepo);
+        }
+      }
       const githubAuthPath = `${dir}/github-auth.json`;
-      await driver.writeFile(githubAuthPath, JSON.stringify(githubAuth));
-      secureFiles.push(githubAuthPath);
+      if (githubAuth.GH_TOKEN) {
+        await driver.writeFile(githubAuthPath, JSON.stringify(githubAuth));
+        secureFiles.push(githubAuthPath);
+      } else {
+        await driver.exec(`rm -f ${shellQuoteWord(githubAuthPath)}`);
+      }
       // Pi policy + provider config, projected at the sandbox boundary.
       // The source CAN contain third-party API keys under providers.*.apiKey;
       // never copy it wholesale. Anthropic/OpenAI/Pi launches receive only the
@@ -2114,6 +2338,54 @@ function makeRemoteLauncher(
           `rm -f ${codexStorePath} && rm -rf ${shellQuoteWord(REMOTE_OPENAI_SEED_DIR)}`,
         );
       }
+      // SuperGrok material for pi/xai-oauth/* dispatched IN-SANDBOX: a scoped
+      // store whose records carry a freshly refreshed access token and the
+      // placeholder refresh (buildXaiRemoteUpload). The guest picks with the
+      // same pool rules and refuses to refresh, so the host's grant is never
+      // rotated from inside a sandbox. Uploaded only when the reachable walk
+      // can enter the pool; rewritten or removed every launch.
+      const usesXai = remoteRunNeedsXai(spec.model, spec.fallbackModel);
+      const xaiUpload = usesXai
+        ? await buildXaiRemoteUpload({
+            user: spec.user,
+            accountId: spec.accountId,
+            restrictIds: readModelProviderConfig()?.xaiAccounts,
+          })
+        : { accounts: [], skipped: [] };
+      if (
+        automationProfile &&
+        usesXai &&
+        !xaiUpload.accounts.some((account) => account.id === spec.accountId)
+      ) {
+        throw new Error(
+          "the pinned automation account is not an eligible SuperGrok account",
+        );
+      }
+      for (const { account, reason } of xaiUpload.skipped) {
+        console.warn(
+          `[sandbox-remote] xai upload for ${maskXaiAccount(account)} skipped: ${reason}`,
+        );
+      }
+      const xaiStorePath = `${REMOTE_HOME}/.opensession-xai-accounts.json`;
+      if (xaiUpload.accounts.length) {
+        await driver.writeFile(
+          xaiStorePath,
+          JSON.stringify({ accounts: xaiUpload.accounts }, null, 2) + "\n",
+        );
+        secureFiles.push(xaiStorePath);
+        audit({
+          msg: "sandbox_xai_seed_upload",
+          host_id: spec.hostId,
+          session_id: spec.osSessionId,
+          mechanism: "scoped-xai-account-remote",
+          accounts: xaiUpload.accounts.map((a) => maskXaiAccount(a)),
+          skipped: xaiUpload.skipped.map(
+            (s) => `${maskXaiAccount(s.account)}: ${s.reason}`,
+          ),
+        });
+      } else {
+        await driver.exec(`rm -f ${shellQuoteWord(xaiStorePath)}`);
+      }
       const secured = await driver.exec(
         [
           secureDirectories.length
@@ -2144,6 +2416,9 @@ function makeRemoteLauncher(
           NODE_ENV: "production",
           OPENSESSION_MCP_CONFIG: REMOTE_MCP_CONFIG,
           OPENSESSION_RUN_JOURNAL: `${dir}/journal.json`,
+          // Lets the engine tell the model it is inside a Sandbox
+          // (run-instructions.ts): one boolean, never a per-session fact.
+          OPENSESSION_SANDBOX: "1",
           // Where bindOpenaiAccount finds the uploaded rotation-proof openai
           // seeds (only set when something was uploaded this launch).
           ...(openaiUpload.seeds.length
@@ -2156,7 +2431,9 @@ function makeRemoteLauncher(
           OPENSESSION_RUN_WS_URL: `${base}/run-ws/${hostId}`,
           OPENSESSION_RUN_WS_TOKEN: spec.wsToken,
           OPENSESSION_RPC_WS_URL: `${base}/rpc-ws`,
-          [GITHUB_RUN_AUTH_FILE_ENV]: githubAuthPath,
+          ...(githubAuth.GH_TOKEN
+            ? { [GITHUB_RUN_AUTH_FILE_ENV]: githubAuthPath }
+            : {}),
           ...createWorkloadIdentityEnv({
             sandboxId,
             provider,

@@ -18,6 +18,13 @@ import {
 } from "./model-providers";
 import { stateDir } from "./paths";
 import { piEngineEnabled, piPickerModels } from "./pi-config";
+import {
+  hasXaiAccounts,
+  xaiSubscriptionModelEfforts,
+  xaiSubscriptionModelName,
+  xaiSubscriptionPickerModels,
+} from "./xai-accounts";
+import { XAI_OAUTH_PROVIDER } from "./xai-provider-id";
 // Workspace ("Custom") presets live in the workspace store, so the one thing
 // this module needs from them — a preset's lead model — has to be read there.
 // The import cycle back into this module is inert: workspace-model-presets
@@ -102,7 +109,11 @@ export function modelEfforts(
       : id.slice(0, slash);
   const slug = slash === -1 ? id : id.slice(slash + 1);
 
-  if (provider === "openai" && /^gpt-5\./.test(slug)) return OPENAI_EFFORTS;
+  if (
+    provider === "openai" &&
+    (/^gpt-5\./.test(slug) || slug === "gpt-6-astra")
+  )
+    return OPENAI_EFFORTS;
   if (provider === "anthropic") {
     if (slug.startsWith("claude-haiku-4-5")) return ["high", "max"];
     if (/^claude-(?:fable|opus|sonnet)-/.test(slug)) return CLAUDE_EFFORTS;
@@ -119,6 +130,8 @@ export function modelEfforts(
     if (efforts.length) return [...efforts];
   }
   if (provider === "meta" && slug === "muse-spark-1.1") return OPENAI_EFFORTS;
+  // SuperGrok: the subscription catalog says which models take an effort.
+  if (provider === XAI_OAUTH_PROVIDER) return xaiSubscriptionModelEfforts(slug);
   // An operator's catalog row names the levels its gateway accepts.
   const configured = provider
     ? configuredCatalogModel(provider, slug, providers)
@@ -158,6 +171,7 @@ export const DEFAULT_BRIDGE_PICKER_MODELS = [
   "claude-opus-5",
   "claude-sonnet-5",
   "claude-haiku-4-5",
+  "gpt-6-astra",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",
@@ -218,6 +232,12 @@ export const KNOWN_MODELS: ModelInfo[] = [
     provider: "codex",
     label: "Best available (Codex)",
     aliases: ["best", "best-available", "best-codex"],
+  },
+  {
+    id: "gpt-6-astra",
+    provider: "codex",
+    label: "GPT-6 Astra",
+    aliases: ["astra", "gpt6"],
   },
   {
     id: "gpt-5.6-sol",
@@ -493,15 +513,11 @@ export function dialPreset(model?: string | null): DialPreset | undefined {
 
 // ── The Orchestrator ──────────────────────────────────────────────────────
 //
-// The Dial reversed (Cursor's agent-swarm economics: "few moments in a large
-// task genuinely require frontier intelligence" — workers burn most tokens,
-// so the cheap seats go to execution): a frontier MAIN model leads — plans,
-// decides, reviews, integrates — and delegates well-scoped execution subtasks
-// to cheaper WORKER models wired in as Pi subagents. Same mechanics as
-// the dial throughout: the session stores `orchestrator/<name>` as its model,
-// everything resolves at dispatch, and only orchestrator runs are told the
-// workers exist. Opt-in via orchestratorEnabled() — the presets stay
-// out of the picker by default.
+// The Dial reversed: a frontier main model plans, decides, reviews, and
+// integrates, while focused worker sessions handle implementation. A preset
+// stores `orchestrator/<name>` on the session and resolves its lead and workers
+// at dispatch. Only orchestrator runs are told the workers exist. The global
+// presets remain opt-in via orchestratorEnabled().
 
 export interface OrchestratorPreset {
   /** Stored as the session's model id, e.g. "orchestrator/fable". */
@@ -518,15 +534,11 @@ export interface OrchestratorPreset {
 }
 
 /**
- * The worker subagents, keyed by Pi agent name. Like the oracles they're
- * defined STATICALLY in every engine server config (stable agent set ⇒ stable
- * config hash ⇒ server reuse) and invisible in practice to non-orchestrator
- * runs — only orchestrator runs get the instructions block naming them.
- *
- * Worker NAMES are role-based, not model-based. Each name has a same-bridge
- * fallback, while configured third-party providers can supply a universal
- * backing: `worker-fast` prefers Cerebras GPT OSS when its key is available.
- * The orchestrator's prompts and task tool list stay identical either way.
+ * Worker roles are stable while their backing model may follow the lead's
+ * provider. Pi delegates them through Open Session worker sessions, so an
+ * explicit cross-provider role such as `worker-sol` can deliberately stay on
+ * OpenAI while Fable leads on Anthropic. Only orchestrator runs receive the
+ * instructions that name these workers.
  */
 export const ORCHESTRATOR_WORKER_AGENTS: Record<
   string,
@@ -588,6 +600,24 @@ export const ORCHESTRATOR_WORKER_AGENTS: Record<
       },
     },
   },
+  "worker-sol": {
+    label: "Implementation worker",
+    description:
+      "Implementation worker: GPT-5.6 Sol at high effort executes one well-scoped " +
+      "implementation task end to end. Give it exact files, constraints, and acceptance criteria.",
+    bridges: {
+      anthropic: {
+        model: "openai/gpt-5.6-sol",
+        variant: "high",
+        label: "GPT-5.6 Sol",
+      },
+      openai: {
+        model: "openai/gpt-5.6-sol",
+        variant: "high",
+        label: "GPT-5.6 Sol",
+      },
+    },
+  },
 };
 
 /** The backing (model/variant/label) a worker NAME resolves to. A configured
@@ -596,7 +626,7 @@ export const ORCHESTRATOR_WORKER_AGENTS: Record<
 export function orchestratorWorkerForBridge(
   name: string,
   mainProviderID: string,
-  availableProviderIDs = new Set(
+  availableProviderIDs: ReadonlySet<string> = new Set(
     Object.entries(modelProviders())
       .filter(([, config]) => !!config.apiKey)
       .map(([id]) => id),
@@ -609,6 +639,23 @@ export function orchestratorWorkerForBridge(
   return w.bridges[mainProviderID] ?? w.bridges.anthropic;
 }
 
+export function orchestratorWorkerModels(
+  preset: OrchestratorPreset,
+  availableProviderIDs?: ReadonlySet<string>,
+): string[] {
+  const mainProviderID = preset.model.startsWith("claude-")
+    ? "anthropic"
+    : "openai";
+  return preset.workerAgents.flatMap((name) => {
+    const worker = orchestratorWorkerForBridge(
+      name,
+      mainProviderID,
+      availableProviderIDs,
+    );
+    return worker ? [worker.model] : [];
+  });
+}
+
 export const ORCHESTRATOR_PRESETS: OrchestratorPreset[] = [
   {
     id: "orchestrator/fable",
@@ -617,6 +664,15 @@ export const ORCHESTRATOR_PRESETS: OrchestratorPreset[] = [
     model: "claude-fable-5-1",
     effort: "high",
     workerAgents: ["worker", "worker-fast"],
+  },
+  {
+    id: "orchestrator/fable-sol",
+    label: "Orchestrator · Fable + Sol",
+    description:
+      "Fable 5.1 high leads planning, review, and integration; Sol high implements",
+    model: "claude-fable-5-1",
+    effort: "high",
+    workerAgents: ["worker-sol"],
   },
   {
     id: "orchestrator/sol",
@@ -635,8 +691,8 @@ function orchestratorPickerDescription(preset: OrchestratorPreset): string {
   const workers = preset.workerAgents.flatMap((name) => {
     const backing = orchestratorWorkerForBridge(name, mainProviderID);
     if (!backing) return [];
-    const role = name === "worker-fast" ? "fast worker" : "worker";
-    return [`${role}: ${backing.label} ${backing.variant}`];
+    const role = ORCHESTRATOR_WORKER_AGENTS[name]?.label || name;
+    return [`${role.toLowerCase()}: ${backing.label} ${backing.variant}`];
   });
   return `${preset.description}; delegates to ${workers.join(" and ")}`;
 }
@@ -722,6 +778,10 @@ export function piModelLabel(
       ? configuredCatalogModel(provider, rest.join("/"), providers)
       : undefined;
   if (configured?.name) return configured.name;
+  if (provider === XAI_OAUTH_PROVIDER) {
+    const name = xaiSubscriptionModelName(rest.join("/"));
+    if (name) return name;
+  }
   const native = KNOWN_MODELS.find((m) => m.provider !== "pi" && m.id === tail);
   return (native?.label || prettifyModelSlug(tail))
     .replace(/^Claude\s+/i, "")
@@ -758,9 +818,14 @@ export function refreshPickerModels(): void {
         .filter(([, provider]) => !!provider.apiKey)
         .map(([id]) => id),
     );
+    const subscriptionXai = hasXaiAccounts();
     const usable = (id: string) => {
       const provider = id.split("/")[1] || "";
-      return BRIDGE_PROVIDER_IDS.has(provider) || keyed.has(provider);
+      return (
+        BRIDGE_PROVIDER_IDS.has(provider) ||
+        keyed.has(provider) ||
+        (provider === XAI_OAUTH_PROVIDER && subscriptionXai)
+      );
     };
     // Subscription-backed models are the normal catalog, not legacy direct-SDK
     // entries. Surface their Pi ids whenever Pi is enabled; the models route
@@ -768,6 +833,7 @@ export function refreshPickerModels(): void {
     const bridgeModels = piEngineEnabled() ? DEFAULT_BRIDGE_PICKER_MODELS : [];
     const configuredModels = [
       ...bridgeModels,
+      ...(piEngineEnabled() ? xaiSubscriptionPickerModels() : []),
       ...piPickerModels(),
       ...configuredPickerModels(),
     ];
@@ -810,6 +876,7 @@ const CODEX_MODEL_ORDER = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
  */
 const FALLBACK_TIER: Record<string, number> = {
   "claude-fable-5-1": 3,
+  "gpt-6-astra": 3,
   "gpt-5.6-sol": 3,
   "claude-opus-5": 3,
   "gpt-5.6-terra": 3,
@@ -1208,7 +1275,7 @@ export function routeModel(
   };
 }
 
-export type AccountProvider = "claude" | "codex" | "grok" | "cursor";
+export type AccountProvider = "claude" | "codex" | "grok" | "cursor" | "xai";
 
 /** Account pool used by a model after resolving presets and legacy ids. */
 export function accountProviderForModel(
@@ -1231,6 +1298,7 @@ export function accountProviderForModel(
   ) {
     return "codex";
   }
+  if (upstream === XAI_OAUTH_PROVIDER) return "xai";
   return undefined;
 }
 

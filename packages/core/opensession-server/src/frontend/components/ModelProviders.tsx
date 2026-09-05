@@ -25,6 +25,7 @@ import { Checkbox } from "../ui/checkbox";
 import { IconTile } from "./BrandTile";
 import { IconDotsHorizontal, IconPlus, IconSearch, IconTrash } from "./icons";
 import { errorMessage } from "../lib/error-message";
+import { modelProviderSettingsPayload } from "../lib/model-provider-settings";
 
 // Settings → Model providers: third-party Pi providers (xai, openrouter,
 // groq, …) — API key + optional baseURL, stored server-side (0600, returned
@@ -64,11 +65,13 @@ const COMMON_PROVIDER_IDS = [
   "together",
 ];
 
-const PROVIDER_MODEL_DEFAULTS: Record<string, string> = {
-  cerebras: "gpt-oss-120b, gemma-4-31b, zai-glm-4.7",
-  wafer:
+const PROVIDER_MODEL_DEFAULTS = new Map([
+  ["cerebras", "gpt-oss-120b, gemma-4-31b, zai-glm-4.7"],
+  [
+    "wafer",
     "deepseek-v4-flash-0731-fast, glm-5.2, glm5.2-fast, glm-5.1, kimi-k3, kimi-k3-fast, kimi-k2.6",
-};
+  ],
+]);
 
 export function ModelProvidersPanel() {
   const [providers, setProviders] = useState<ProviderInfo[] | null>(null);
@@ -281,15 +284,16 @@ function AddProviderForm({
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            // Strip all whitespace — pasted keys often carry newlines.
-            ...(apiKey.trim() ? { apiKey: apiKey.replace(/\s+/g, "") } : {}),
-            ...(baseURL.trim() ? { baseURL: baseURL.trim() } : {}),
-            ...(modelIds.length ? { models: modelIds } : {}),
-            api: custom ? "openai-completions" : "",
-            ...(name.trim() ? { name: name.trim() } : {}),
-            discoverModels: discover,
-          }),
+          body: JSON.stringify(
+            modelProviderSettingsPayload({
+              apiKey,
+              baseURL,
+              models: modelIds,
+              custom,
+              name,
+              discoverModels: discover,
+            }),
+          ),
         },
       );
       const body = await res.json();
@@ -364,7 +368,7 @@ function AddProviderForm({
             value={models}
             onChange={(e) => setModels(e.target.value)}
             placeholder={
-              PROVIDER_MODEL_DEFAULTS[cleanId] || "grok-4, grok-4-mini"
+              PROVIDER_MODEL_DEFAULTS.get(cleanId) || "grok-4, grok-4-mini"
             }
           />
         </SettingsField>

@@ -7,7 +7,7 @@
  */
 
 import { requestUser, type RouteContext } from "./context";
-import { handleSessionsRoutes } from "./sessions";
+import { handleSessionsRoutes, sessionDetail } from "./sessions";
 import { searchRepoEntries } from "../file-index";
 import {
   RepoAppearanceError,
@@ -168,10 +168,6 @@ function findNativeSessionForFileMentions(
   }
 }
 
-export function worktreeRepoQuery(value: string | null): string | undefined {
-  return value && value !== "all" ? value : undefined;
-}
-
 export async function handleWorkspaceRoutes(
   ctx: RouteContext,
 ): Promise<Response | undefined> {
@@ -179,15 +175,9 @@ export async function handleWorkspaceRoutes(
 
   // List worktrees (optionally for a specific repo)
   if (path === "/api/worktrees" && req.method === "GET") {
-    const repo = worktreeRepoQuery(url.searchParams.get("repo"));
-    try {
-      return Response.json(await listWorktrees(repo));
-    } catch (error) {
-      if (error instanceof Error && error.message.startsWith("Unknown repo")) {
-        return Response.json({ error: error.message }, { status: 400 });
-      }
-      throw error;
-    }
+    return Response.json(
+      await listWorktrees(url.searchParams.get("repo") || undefined),
+    );
   }
 
   // File/folder-mention autocomplete ("@" in the composer). Searches the
@@ -744,7 +734,11 @@ export async function handleWorkspaceRoutes(
       );
     const bksId = requestedId || newSessionId();
     const existing = await findSessionAsync(bksId);
-    if (existing) return Response.json({ id: bksId, session: existing });
+    if (existing)
+      return Response.json({
+        id: bksId,
+        session: await sessionDetail(existing),
+      });
     // One reusable empty tab per workspace. This server-side check closes the
     // multi-window race that hiding the + in one browser cannot prevent.
     const reusable = body.duplicate
@@ -758,7 +752,11 @@ export async function handleWorkspaceRoutes(
         : isReusableEmptySession(src)
           ? src
           : undefined;
-    if (reusable) return Response.json({ id: reusable.id, session: reusable });
+    if (reusable)
+      return Response.json({
+        id: reusable.id,
+        session: await sessionDetail(reusable),
+      });
     let branch = src.branch || "";
     let worktreeDir = src.worktreeDir || "";
     let mode: "ask" | "code" | "scratch" = src.mode || "code";
@@ -940,10 +938,13 @@ export async function handleWorkspaceRoutes(
     if (body.duplicate) await duplicateSessionTranscript(src, bksId);
     // Also return the full unified session so the client can drop it into
     // its session list and render the new session instantly, instead of
-    // flashing a loading screen until the next sessions poll lands.
+    // flashing a loading screen until the next sessions poll lands. The
+    // workspace's PRs ride along: the PR belongs to the workspace, so a new
+    // tab must not open without it.
+    const created = await findSessionAsync(bksId);
     return Response.json({
       id: bksId,
-      session: (await findSessionAsync(bksId)) ?? null,
+      session: created ? await sessionDetail(created) : null,
     });
   }
 

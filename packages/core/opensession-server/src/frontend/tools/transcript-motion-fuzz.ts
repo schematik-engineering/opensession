@@ -116,30 +116,132 @@ type Result = {
   passed: boolean;
 };
 
+type MotionProgress = {
+  state?: string;
+  event?: number;
+};
+
+type ViewportAnchor = {
+  anchor: number;
+  bottom: number;
+};
+
+type RowPositions = Record<string, number>;
+
+type LayoutShift = {
+  input: boolean;
+  value: number;
+  sources: string[];
+};
+
+type MotionSnapshot = {
+  errors: string[];
+  shifts: LayoutShift[];
+  maxSampledJump: number;
+  maxContentJump: number;
+  maxFrameMs: number;
+  maxLongTaskMs: number;
+  longTaskCount: number;
+  longTasks: Result["longTasks"];
+  perf: {
+    counters?: {
+      stream_frames_received?: number;
+      stream_paints?: number;
+    };
+    metrics?: {
+      react_transcript_commit_ms?: { p95?: number };
+    };
+  } | null;
+  horizontalOverflow: number;
+  settledOverlap: number;
+  positions: RowPositions;
+  distanceFromBottom: number;
+  virtualCount: number;
+  mountedRows: number;
+  streamingRows: number;
+};
+
+type CdpTarget = { id: string; webSocketDebuggerUrl: string };
+
+async function openTarget(port: number) {
+  const target: CdpTarget = await fetch(
+    `http://127.0.0.1:${port}/json/new?url=about:blank`,
+    { method: "PUT" },
+  ).then((response) => response.json());
+  const socket = new WebSocket(target.webSocketDebuggerUrl);
+  await new Promise<void>((resolve, reject) => {
+    socket.onopen = () => resolve();
+    socket.onerror = () => reject(new Error("CDP connection failed"));
+  });
+  return { target, socket };
+}
+
+async function setAuthCookie(send: ReturnType<typeof cdpSender>) {
+  const token = localAutomationToken();
+  if (token)
+    await send("Network.setCookie", {
+      name: "opensession_auth",
+      value: token,
+      url: APP,
+      path: "/",
+    });
+}
+
+/**
+ * Load the fixture once before anything is measured. The first page a fresh
+ * browser opens pays for compiling the bundle, loading fonts and bringing up
+ * the GPU process, and on a shared CI runner that surfaced as a 500ms long
+ * task inside seed 1 while every later seed stayed under 200ms. The budgets
+ * describe the transcript in steady state, so the cold start is spent here,
+ * unrecorded. Nothing here can fail the run: a page that never settles just
+ * hands the deadline back to the seeds.
+ */
+async function warmUp(port: number) {
+  const { target, socket } = await openTarget(port);
+  const send = cdpSender(socket);
+  try {
+    await send("Page.enable");
+    await send("Runtime.enable");
+    await setAuthCookie(send);
+    await send("Page.navigate", {
+      url: `${APP}/__fixtures/transcript-motion?seed=1&speed=20&profile=${PROFILE}`,
+    });
+    const deadline = performance.now() + 30_000;
+    while (performance.now() < deadline) {
+      const response = await send("Runtime.evaluate", {
+        expression: `document.querySelector("[data-transcript-motion-state]")?.dataset.transcriptMotionState || ""`,
+        returnByValue: true,
+      });
+      if (response.result.value === "done") break;
+      await Bun.sleep(40);
+    }
+  } catch (error) {
+    console.error(
+      `warm-up skipped: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  } finally {
+    socket.close();
+    await closeCdpTarget(port, target.id);
+  }
+}
+
 const lease = await acquireCdpBrowser();
 const results: Result[] = [];
 try {
+  await warmUp(lease.port);
   for (let seed = 1; seed <= SEEDS; seed++) {
     const width = [390, 720, 1_440][(seed - 1) % 3] ?? 390;
     const height = width <= 720 ? 844 : 900;
     const reducedMotion = seed % 5 === 0;
     const cpuRate = seed % 4 === 0 ? 6 : 1;
-    const target = await fetch(
-      `http://127.0.0.1:${lease.port}/json/new?url=about:blank`,
-      { method: "PUT" },
-    ).then((response) => response.json());
-    const socket = new WebSocket(target.webSocketDebuggerUrl);
-    await new Promise<void>((resolve, reject) => {
-      socket.onopen = () => resolve();
-      socket.onerror = () => reject(new Error("CDP connection failed"));
-    });
+    const { target, socket } = await openTarget(lease.port);
     const apiRequests: string[] = [];
-    socket.addEventListener("message", (event) => {
-      const message = JSON.parse(String((event as MessageEvent).data));
+    socket.onmessage = (event) => {
+      const message = JSON.parse(String(event.data));
       if (message.method !== "Network.requestWillBeSent") return;
       const url = String(message.params?.request?.url ?? "");
       if (url.includes("/api/")) apiRequests.push(url);
-    });
+    };
     const send = cdpSender(socket);
     const startedAt = performance.now();
     try {
@@ -161,14 +263,7 @@ try {
           },
         ],
       });
-      const token = localAutomationToken();
-      if (token)
-        await send("Network.setCookie", {
-          name: "opensession_auth",
-          value: token,
-          url: APP,
-          path: "/",
-        });
+      await setAuthCookie(send);
       await send("Page.addScriptToEvaluateOnNewDocument", { source: INIT });
       await send("Page.navigate", {
         url: `${APP}/__fixtures/transcript-motion?seed=${seed}&speed=${SPEED}&profile=${PROFILE}`,
@@ -186,10 +281,7 @@ try {
 				}))()`,
           returnByValue: true,
         });
-        const progress = response.result.value as {
-          state?: string;
-          event?: number;
-        };
+        const progress: MotionProgress = response.result.value;
         state = String(progress.state ?? "");
         if (
           PROFILE === "motion" &&
@@ -230,14 +322,8 @@ try {
             expression: `(() => { const scroller = document.querySelector("[data-transcript-motion-scroller]"); const prompt = [...document.querySelectorAll(".msg-user")].at(-1); if (!scroller || !prompt) return null; const box = scroller.getBoundingClientRect(); return { anchor: prompt.getBoundingClientRect().top - box.top, bottom: Math.max(0, scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight) }; })()`,
             returnByValue: true,
           });
-          const before = beforeResize.result.value as {
-            anchor: number;
-            bottom: number;
-          } | null;
-          const after = afterResize.result.value as {
-            anchor: number;
-            bottom: number;
-          } | null;
+          const before: ViewportAnchor | null = beforeResize.result.value;
+          const after: ViewportAnchor | null = afterResize.result.value;
           keyboardAnchorDrift =
             before && after
               ? Math.abs(after.anchor - before.anchor)
@@ -258,7 +344,7 @@ try {
           expression: `(() => { const root = document.querySelector("[data-virtual-transcript]"); return Object.fromEntries(root ? [...root.children].filter(node => node.matches("[data-index]")).map(node => [Number(node.dataset.index), node.getBoundingClientRect().top]) : []); })()`,
           returnByValue: true,
         });
-        const current = positions.result.value as Record<string, number>;
+        const current: RowPositions = positions.result.value;
         const drift = Math.max(
           0,
           ...Object.entries(current).map(([index, top]) =>
@@ -302,20 +388,17 @@ try {
         })()`,
         returnByValue: true,
       });
-      const value = snapshot.result.value;
+      const value: MotionSnapshot = snapshot.result.value;
       await Bun.sleep(50);
       const settledAgain = await send("Runtime.evaluate", {
         expression: `(() => { const root = document.querySelector("[data-virtual-transcript]"); return Object.fromEntries(root ? [...root.children].filter(node => node.matches("[data-index]")).map(node => [Number(node.dataset.index), node.getBoundingClientRect().top]) : []); })()`,
         returnByValue: true,
       });
-      const laterPositions = settledAgain.result.value as Record<
-        string,
-        number
-      >;
+      const laterPositions: RowPositions = settledAgain.result.value;
       const settledDrift = Math.max(
         0,
-        ...Object.entries(value.positions as Record<string, number>).map(
-          ([index, top]) => Math.abs((laterPositions[index] ?? top) - top),
+        ...Object.entries(value.positions).map(([index, top]) =>
+          Math.abs((laterPositions[index] ?? top) - top),
         ),
       );
       const resizeObserverWarnings = value.errors.filter((error: string) =>
@@ -324,13 +407,7 @@ try {
       const errors = value.errors.filter(
         (error: string) => !error.startsWith("ResizeObserver loop completed"),
       );
-      const shifts = (
-        value.shifts as Array<{
-          input: boolean;
-          value: number;
-          sources: string[];
-        }>
-      ).filter((shift) => !shift.input);
+      const shifts = value.shifts.filter((shift) => !shift.input);
       const cls = shifts.reduce(
         (total: number, shift: { value: number }) => total + shift.value,
         0,

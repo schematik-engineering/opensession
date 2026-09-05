@@ -1,25 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   repoSelectionHint,
-  specificRepoSelection,
   toggleRepoSelection,
+  type RepoSelection,
 } from "./repo-selection";
-
-describe("specificRepoSelection", () => {
-  test("drops aggregate and retired picker sentinels", () => {
-    expect(specificRepoSelection("all")).toBe("");
-    expect(specificRepoSelection("auto")).toBe("");
-  });
-
-  test("preserves real repositories and the repo-less selection", () => {
-    expect(specificRepoSelection("biss-client")).toBe("biss-client");
-    expect(specificRepoSelection("none")).toBe("none");
-  });
-});
 
 describe("toggleRepoSelection", () => {
   test("adds a repo beside the session's own, in pick order", () => {
-    let selection = { repo: "tella-fusion", extras: [] as string[] };
+    let selection: RepoSelection = { repo: "tella-fusion", extras: [] };
     selection = toggleRepoSelection(selection, "gitops");
     selection = toggleRepoSelection(selection, "infra");
     expect(selection).toEqual({
@@ -47,7 +35,7 @@ describe("toggleRepoSelection", () => {
   });
 
   test("refuses to leave nothing picked", () => {
-    const only = { repo: "tella-fusion", extras: [] as string[] };
+    const only: RepoSelection = { repo: "tella-fusion", extras: [] };
     expect(toggleRepoSelection(only, "tella-fusion")).toBe(only);
   });
 });

@@ -49,6 +49,7 @@ export type ContextSource =
   | "steer-note"
   | "uploads-note"
   | "pinned-goal"
+  | "session"
   | "unknown";
 
 const SOURCES = new Set<string>([
@@ -65,6 +66,7 @@ const SOURCES = new Set<string>([
   "steer-note",
   "uploads-note",
   "pinned-goal",
+  "session",
   "unknown",
 ]);
 

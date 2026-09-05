@@ -313,8 +313,10 @@ describe("race-free transcript watch", () => {
     const messages = sent.filter(
       (e) => e.type === "user" || e.type === "assistant",
     );
+    const userMessages = sent.filter((e) => e.type === "user");
     expect(sent.length).toBeGreaterThan(132);
     expect(messages.length).toBeGreaterThanOrEqual(100);
+    expect(userMessages.length).toBeGreaterThanOrEqual(50);
     expect(sent.some((e) => e.id === "current-user")).toBe(true);
     expect(sent.at(-1)?.id).toBe("current-answer");
     expect(state.frames[0].truncated).toBe(true);

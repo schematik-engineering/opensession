@@ -14,11 +14,29 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { readMcpConfig } from "./connections";
-import { mcpAuthHeader } from "./mcp-oauth";
+import { mcpAuthHeader, mcpUserGrantHeader } from "./mcp-oauth";
 import { ensureAwsMcpIamAuth, isAwsMcpIamServer } from "./aws-mcp-auth";
 import { githubMcpAuthHeader } from "./github-mcp-auth";
 
 export class McpToolError extends Error {}
+
+export interface McpToolCallOptions {
+  /** Require this user's own OAuth grant. Never fall back to shared or static credentials. */
+  requireUserGrant?: boolean;
+}
+
+export function selectMcpAuthorization(input: {
+  personal?: string;
+  standard?: string;
+  staticAuthorization?: string;
+  requireUserGrant: boolean;
+}): string | undefined {
+  if (!input.requireUserGrant)
+    return input.standard ?? input.staticAuthorization;
+  if (!input.personal)
+    throw new McpToolError("A personal OAuth grant is required");
+  return input.personal;
+}
 
 /** List a server's tool catalog (name + description) — powers the New
  *  project flow's tool picker. */
@@ -70,6 +88,7 @@ export async function callMcpTool<T = unknown>(
   tool: string,
   args: Record<string, unknown>,
   user?: string,
+  options: McpToolCallOptions = {},
 ): Promise<T> {
   const cfg = readMcpConfig().mcpServers[serverName] as
     | { url?: string; headers?: Record<string, string> }
@@ -78,12 +97,19 @@ export async function callMcpTool<T = unknown>(
   const managed = isAwsMcpIamServer(cfg.url)
     ? await ensureAwsMcpIamAuth(cfg.url)
     : undefined;
-  const oauth = managed ? undefined : mcpAuthHeader(serverName, user);
   const auth =
     managed ||
-    oauth ||
     githubMcpAuthHeader(cfg.url, user) ||
-    cfg.headers?.Authorization;
+    selectMcpAuthorization({
+      personal: options.requireUserGrant
+        ? mcpUserGrantHeader(serverName, user)
+        : undefined,
+      standard: options.requireUserGrant
+        ? undefined
+        : mcpAuthHeader(serverName, user),
+      staticAuthorization: cfg.headers?.Authorization,
+      requireUserGrant: options.requireUserGrant === true,
+    });
   const transport = new StreamableHTTPClientTransport(new URL(cfg.url), {
     requestInit: {
       headers: {

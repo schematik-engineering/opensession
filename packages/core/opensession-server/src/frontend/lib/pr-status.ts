@@ -35,7 +35,7 @@ const MARK_BG = {
   green: "bg-green-soft",
 } as const;
 
-export function prStatusMark(pr: PrStatusInput): {
+export interface PrStatusMark {
   className: string;
   bgClassName: string;
   label: string;
@@ -49,7 +49,9 @@ export function prStatusMark(pr: PrStatusInput): {
    * showing one PR the green is welcome, so this is a hint, not a colour.
    */
   quiet: boolean;
-} {
+}
+
+export function prStatusMark(pr: PrStatusInput): PrStatusMark {
   if (pr.state === "MERGED")
     return {
       className: "text-purple",
@@ -113,20 +115,20 @@ export function prStatusMark(pr: PrStatusInput): {
       tone: "muted",
       quiet: false,
     };
-  if (decision === "REVIEW_REQUIRED")
-    return {
-      className: "text-yellow",
-      bgClassName: MARK_BG.yellow,
-      label: "PR review required",
-      tone: "yellow",
-      quiet: false,
-    };
   if (decision === "APPROVED")
     return {
       className: "text-green",
       bgClassName: MARK_BG.green,
       label: "PR approved",
       tone: "green",
+      quiet: false,
+    };
+  if (decision === "REVIEW_REQUIRED")
+    return {
+      className: "text-yellow",
+      bgClassName: MARK_BG.yellow,
+      label: "Review required",
+      tone: "yellow",
       quiet: false,
     };
   return {
@@ -138,26 +140,28 @@ export function prStatusMark(pr: PrStatusInput): {
   };
 }
 
-const STATUS_TEXT: Record<string, string> = {
-  "PR has conflicts": "Conflicts",
-  "PR changes requested": "Changes requested",
-  "PR checks failing": "Checks failing",
-  "PR checks running": "Checks running",
-  "PR review required": "Review required",
-  "Draft PR": "Draft",
-};
+const STATUS_TEXT = new Map([
+  ["PR has conflicts", "Conflicts"],
+  ["PR changes requested", "Changes requested"],
+  ["PR checks failing", "Checks failing"],
+  ["PR checks running", "Checks running"],
+  ["Draft PR", "Draft"],
+  ["Review required", "Review required"],
+]);
 
-/** Short status copy shared by compact PR references and their hover cards. */
-export function prStatusDisplay(pr: PrStatusInput): {
+export interface PrStatusDisplay {
   label: string;
   state: string;
   tone: PrTone;
-} {
+}
+
+/** Short status copy shared by compact PR references and their hover cards. */
+export function prStatusDisplay(pr: PrStatusInput): PrStatusDisplay {
   const mark = prStatusMark(pr);
   const label =
     mark.label === "PR open" && pr.mergeable === "MERGEABLE"
       ? "Mergeable"
-      : (STATUS_TEXT[mark.label] ??
+      : (STATUS_TEXT.get(mark.label) ??
         mark.label.replace(/^PR /, "").replace(/^./, (c) => c.toUpperCase()));
   return {
     label,

@@ -98,13 +98,9 @@ export const GLM_5_3_MODEL_ID = "z-ai/glm-5.3";
 
 /** Canonicalize picker ids retained from GLM-5.3's pre-release alias. */
 export function canonicalProviderPickerModelId(id: string): string {
-  if (id === "pi/openrouter/stealth/ox-alpha")
-    return `pi/openrouter/${GLM_5_3_MODEL_ID}`;
-  // Vercel renamed the route exposed by the Pi bridge. Preferences and
-  // sessions created before that rename resume through the current provider.
-  if (id.startsWith("pi/vercel/"))
-    return `pi/vercel-ai-gateway/${id.slice("pi/vercel/".length)}`;
-  return id;
+  return id === "pi/openrouter/stealth/ox-alpha"
+    ? `pi/openrouter/${GLM_5_3_MODEL_ID}`
+    : id;
 }
 
 /** The reasoning levels Wafer's `reasoning_effort` accepts (docs.wafer.ai
@@ -325,6 +321,10 @@ export interface ModelProviderSettings {
    *  only gates the Anthropic bridge); model provider/openai auth keys off the codex
    *  accounts pool, not this file — see model provider-openai-auth.ts. */
   openaiAccounts?: string[];
+  /** The SuperGrok sibling: which xai-accounts.ts ids serve
+   *  pi/xai-oauth/* runs, in preference order (read from bridge.xaiAccounts).
+   *  Absent = the normal SuperGrok pool pick. */
+  xaiAccounts?: string[];
   /** Third-party providers (id → apiKey/baseURL), injected into model provider
    *  config as provider.<id>.options. Independent of `enabled` (that flag only
    *  gates the Anthropic bridge). anthropic/openai never live here. */
@@ -574,6 +574,7 @@ export function normalizeModelProviderConfig(
         ? r.bridgeMaxRequestsPerHour
         : undefined,
     openaiAccounts: stringArray(bridge?.openaiAccounts),
+    xaiAccounts: stringArray(bridge?.xaiAccounts),
     providers: providerMap(r.providers, loadCatalogFile),
     orchestrator: r.orchestrator === true,
   };

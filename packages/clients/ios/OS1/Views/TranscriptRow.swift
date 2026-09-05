@@ -437,6 +437,9 @@ struct UserBubble: View {
                             TimestampLabel(date: entry.timestampDate)
                         }
                 }
+                if let pastedTexts = entry.pastedTexts, !pastedTexts.isEmpty {
+                    PastedTextCards(texts: pastedTexts)
+                }
                 if let item = outboxItem, let outbox {
                     OutboxMessageStatus(
                         item: item,

@@ -53,6 +53,7 @@ touches an in-process tool:
 | [`opensession-memory`](#opensession-memory) | 9 | interactive | Needs a session id. |
 | [`opensession-web`](#opensession-web) | 3 | interactive, goal wake | Needs a session id. |
 | [`opensession-portals`](#opensession-portals) | 7 | interactive | Needs a session id. |
+| [`opensession-desktop`](#opensession-desktop) | 8 | interactive | Needs a sandboxed session. |
 | [`opensession-walkthrough`](#opensession-walkthrough) | 2 | interactive | Needs a session id. |
 | [`opensession-slack`](#opensession-slack) | 1 | interactive | Needs a session id. |
 | [`opensession-ask`](#opensession-ask) | 1 | interactive, Slack loop | Needs a session id. |
@@ -69,7 +70,7 @@ touches an in-process tool:
 | [`opensession-github`](#opensession-github) | 4 | Slack loop | – |
 | [`opensession-goal-self`](#opensession-goal-self) | 6 | goal wake | Only on a session that carries a goalId. |
 
-28 servers, 121 tools.
+29 servers, 129 tools.
 
 ## opensession-sessions
 
@@ -143,7 +144,7 @@ Change a native Open Session session's parent/orchestrator link, or detach it by
 
 ### `create_session`
 
-`mcp__opensession-sessions__create_session` · input: `prompt` (string, required), `repo` (string), `mode` ("ask" | "code"), `branch` (string), `model` (string), `mcpServers` (string[]), `parentSessionId` (string), `reportBack` (boolean), `standalone` (boolean), `isolatedWorktree` (boolean), `sandbox` (boolean | "docker" | "daytona" | "e2b" | "box" | "modal" | "microvm" | "lambda-microvm"), `accountId` (string), `forkFrom` (object)
+`mcp__opensession-sessions__create_session` · input: `prompt` (string, required), `repo` (string), `mode` ("ask" | "code"), `branch` (string), `model` (string), `mcpServers` (string[]), `parentSessionId` (string), `reportBack` (boolean), `standalone` (boolean), `isolatedWorktree` (boolean), `sandbox` (boolean | "daytona" | "box"), `accountId` (string), `forkFrom` (object)
 
 Spin up a visible Open Session session and start it on a prompt. Use this as the sub-session primitive: workers can delegate focused tasks and report back to this parent session. mode 'ask' (default) runs read-only on the selected repo checkout; mode 'code' can edit files / open PRs (never merges). A worker targeting one of the parent's repos shares that exact primary or attached worktree, so reviewers see current/uncommitted work; pass repo explicitly for attached-repo tasks. Pass isolatedWorktree true to instead give the worker its own worktree and branch (child/report-back linkage is kept) — use it when fanning work out across separate workspaces. `branch` is only used when there is nothing to share — a standalone worker, or a worker targeting a repo the parent does not carry — and is generated from the prompt when omitted. Repo defaults to the parent session's repo (example when standalone); pass another registered repo id to override. For workers that only need filesystem/code access, pass mcpServers: [] to avoid unrelated MCP startup cost/failures. When called from a session, the worker defaults to the same workspace and is instructed to report back here; set standalone true or reportBack false to opt out. When a HUMAN asks for "a new session" ("create a new session for X", "spin one up on Y"), this tool is what they mean — a detached session that appears in their sidebar and outlives the current run — never an in-process subagent or task agent; reply with the new session's URL.
 
@@ -155,7 +156,7 @@ Migrate an existing session onto the Pi engine by flipping its model to a pi/* i
 
 ### `spawn_task`
 
-`mcp__opensession-sessions__spawn_task` · input: `prompt` (string, required), `repo` (string), `branch` (string), `isolatedWorktree` (boolean), `model` (string), `mode` ("ask" | "code" | "scratch"), `sandbox` (boolean | "docker" | "daytona" | "e2b" | "box" | "modal" | "microvm" | "lambda-microvm")
+`mcp__opensession-sessions__spawn_task` · input: `prompt` (string, required), `repo` (string), `branch` (string), `isolatedWorktree` (boolean), `model` (string), `mode` ("ask" | "code" | "scratch"), `sandbox` (boolean | "daytona" | "box")
 
 Delegate a self-contained task to a child session and return IMMEDIATELY with {taskId, url} — the lightweight alternative to create_session + send_to_session choreography when you just want work done and a handle to poll. The child is created through the same code path as create_session (it shares this session's worktree in code mode when repos match, inherits your user, is linked as a child, and is told to report back here); poll it with task_status and stop it with cancel_task. Mode defaults to 'code' (pass a branch, or isolatedWorktree true for a generated one, unless the child can share this session's code worktree); use 'ask' for read-only investigation. Loop guard: spawned children may delegate one further level, then spawn_task refuses (depth ≥ 2). Not available from automation sessions.
 
@@ -210,13 +211,13 @@ List all of Assistant's automations (routines): scheduled, event- and webhook-tr
 
 ### `create_automation`
 
-`mcp__opensession-admin__create_automation` · input: `name` (string, required), `prompt` (string, required), `schedule` (string), `mode` ("ask" | "code"), `repo` (string), `mcpServers` (string[]), `model` (string), `accountId` (string), `accountStrict` (boolean), `usageCredits` (boolean), `prReviewer` (string), `owner` (string), `workspaceId` (string)
+`mcp__opensession-admin__create_automation` · input: `name` (string, required), `prompt` (string, required), `schedule` (string), `mode` ("ask" | "code"), `repo` (string), `mcpServers` (string[]), `sandbox` (boolean), `model` (string), `accountId` (string), `accountStrict` (boolean), `usageCredits` (boolean), `prReviewer` (string), `owner` (string), `workspaceId` (string)
 
-Create a new automation (routine). Provide a clear prompt describing the task. Set `repo` to the repository it works in, or it runs against the instance default. Use a 5-field UTC cron `schedule` for recurring jobs (omit for manual/webhook only). Pick mode 'ask' for read-only or 'code' if it must edit and commit files. Ordinary automations receive no GitHub credential, so code mode alone cannot push or open a GitHub PR. Optionally restrict tools with mcpServers and set a model.
+Create a new automation (routine). Provide a clear prompt describing the task. Set `repo` to the repository it works in, or it runs against the instance default. Use a 5-field UTC cron `schedule` for recurring jobs (omit for manual/webhook only). Pick mode 'ask' for read-only or 'code' if it must edit and commit files. Ordinary automations receive no GitHub credential, so code mode alone cannot push or open a GitHub PR. Set sandbox true to use a fresh disposable Executor. Sandboxed automations require an explicit mcpServers list, a pinned accountId, a supported model, and a configured qualified provider.
 
 ### `update_automation`
 
-`mcp__opensession-admin__update_automation` · input: `id` (string, required), `name` (string), `prompt` (string), `schedule` (string), `mode` ("ask" | "code"), `enabled` (boolean), `repo` (string), `mcpServers` (string[]), `model` (string), `accountId` (string), `accountStrict` (boolean), `usageCredits` (boolean), `prReviewer` (string), `owner` (string), `workspaceId` (string)
+`mcp__opensession-admin__update_automation` · input: `id` (string, required), `name` (string), `prompt` (string), `schedule` (string), `mode` ("ask" | "code"), `enabled` (boolean), `repo` (string), `mcpServers` (string[]), `sandbox` (boolean), `model` (string), `fallbackModel` (string), `accountId` (string), `accountStrict` (boolean), `usageCredits` (boolean), `prReviewer` (string), `owner` (string), `workspaceId` (string)
 
 Update an existing automation by id. Only provided fields change. Use enabled to pause/resume.
 
@@ -650,15 +651,72 @@ Restart one supervised Portal using its registered command and port. Repository-
 
 ### `set_editor_preview_path`
 
-`mcp__opensession-portals__set_editor_preview_path` · input: `path` (string, required), `exclusiveKey` (string, required), `durationSeconds` (number, required), `clipCount` (integer, required), `transcriptWordCount` (integer, required), `leaseMinutes` (integer)
+`mcp__opensession-portals__set_editor_preview_path` · input: `fixtureLeaseId` (string, required)
 
-Set and exclusively reserve the staging route for an editor feature. Call this only after verifying the staging record is at least 60 seconds long, has multiple clips, and has a ready non-empty transcript.
+Verify a Tella editor fixture lease server-side, then set and exclusively reserve its authoritative editor route. Invented, expired, mismatched, or inaccessible fixtures are rejected.
 
 ### `set_portal_path`
 
 `mcp__opensession-portals__set_portal_path` · input: `name` (string), `path` (string, required)
 
 Set the root-relative route a Portal should open by default. Omit name to set the session's default testing route.
+
+## opensession-desktop
+
+See and drive the Sandbox desktop: screenshot, click, type, keys, windows.
+
+- **Source** `packages/core/opensession-server/src/server/desktop-mcp.ts`
+- **Wired in** `packages/core/opensession-server/src/server/interactive-mcp.ts`
+- **Runs** interactive
+- **Condition** Needs a sandboxed session.
+
+### `screenshot`
+
+`mcp__opensession-desktop__screenshot` · input: `scale` (number), `format` ("png" | "jpeg")
+
+Capture the Sandbox desktop. Coordinates for every other desktop tool are pixels of the full desktop, whose size the result states; the image itself may be scaled down. Take one before acting and after anything that should have changed the screen.
+
+### `click`
+
+`mcp__opensession-desktop__click` · input: `x` (number, required), `y` (number, required), `button` ("left" | "middle" | "right"), `double` (boolean)
+
+Click at a desktop pixel. Double-click with double: true.
+
+### `move`
+
+`mcp__opensession-desktop__move` · input: `x` (number, required), `y` (number, required)
+
+Move the pointer without clicking, for hover states.
+
+### `drag`
+
+`mcp__opensession-desktop__drag` · input: `fromX` (number, required), `fromY` (number, required), `toX` (number, required), `toY` (number, required), `button` ("left" | "middle" | "right")
+
+Press at one point, move to another, release.
+
+### `scroll`
+
+`mcp__opensession-desktop__scroll` · input: `x` (number, required), `y` (number, required), `direction` ("up" | "down", required), `amount` (integer)
+
+Scroll the wheel over a point. amount is wheel clicks, default 3.
+
+### `type`
+
+`mcp__opensession-desktop__type` · input: `text` (string, required)
+
+Type literal text into whatever has keyboard focus. Click a field first. Use key for Enter, Tab and shortcuts.
+
+### `key`
+
+`mcp__opensession-desktop__key` · input: `chord` (string, required)
+
+Press one key or chord: Return, Escape, Tab, ctrl+l, ctrl+shift+t, alt+F4, cmd+a (cmd maps to the super key on Linux).
+
+### `windows`
+
+`mcp__opensession-desktop__windows` · input: none
+
+List the desktop size and visible windows with their positions, so you can find an app or bring one to the front by clicking it.
 
 ## opensession-walkthrough
 
@@ -677,9 +735,9 @@ Publish a walkthrough of this session's change: a demo video, before/after scree
 
 ### `comment_on_pr_with_images`
 
-`mcp__opensession-walkthrough__comment_on_pr_with_images` · input: `comment` (string, required), `images` (object[], required), `repo` (string), `pr_number` (number)
+`mcp__opensession-walkthrough__comment_on_pr_with_images` · input: `comment` (string, required), `media` (object[]), `images` (object[]), `repo` (string), `pr_number` (number)
 
-Post a comment on this session's PR (or an explicit PR) with screenshots that RENDER INLINE on GitHub. Images are copied to durable storage and served from unguessable URLs on the configured public media origin. This requires a GitHub-reachable HTTPS origin configured through OPENSESSION_PR_IMAGES_BASE, integrations.media.publicBaseUrl, or server.publicBaseUrl; loopback, private-network, and tailnet URLs will not render. The URLs are capability links: anyone holding one can fetch the image, so don't attach anything that must stay strictly repo-member-only. Place images in the markdown with {{image:1}}, {{image:2}}, … (1-based); images you don't reference are appended at the end.
+Post a comment on this session's PR (or an explicit PR) with images or videos that render inline on GitHub. Files become repository-scoped GitHub user attachments, so private-repo media stays private and no public Open Session media origin is required. Place files with {{media:1}}, {{media:2}}, and so on. Put video placeholders on their own line so GitHub renders a player. Unreferenced files are appended in order. The old images input and {{image:N}} placeholders remain accepted for existing callers.
 
 ## opensession-slack
 
@@ -780,9 +838,9 @@ Per-session scratch assets, previewed in the Assets tab.
 
 ### `write_asset`
 
-`mcp__opensession-assets__write_asset` · input: `path` (string, required), `content` (string, required), `description` (string), `encoding` ("utf8" | "base64")
+`mcp__opensession-assets__write_asset` · input: `path` (string, required), `content` (string), `sourcePath` (string), `description` (string), `encoding` ("utf8" | "base64")
 
-Save a file into this session's asset storage for preview in the Assets tab or a direct link in chat: interactive HTML/JS visualizations, generated reports, diagrams, and sample data. Add a short description so the viewer explains what the asset shows. Assets are outside every repo and never committed. HTML previews live in the UI and relative references resolve, so multi-file pages work. Overwrites silently. Works in read-only Ask sessions too.
+Save a file into this session's asset storage for preview in the Assets tab or a direct link in chat. Provide content for authored text/base64 data, or sourcePath to publish an existing workspace file such as a DOCX, PDF, or ZIP without re-encoding it yourself. sourcePath is binary-safe, workspace-contained, and works with sandbox-only workspaces. Use exactly one of content or sourcePath. Assets are outside every repo and never committed. Overwrites silently. Works in read-only Ask sessions too.
 
 ### `list_assets`
 

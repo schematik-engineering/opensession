@@ -24,6 +24,17 @@ function uniqueFlowId(prefix: string, used: string[]): string {
   return candidate;
 }
 
+function messageUrgency(value: string): "low" | "medium" | "high" | "critical" {
+  if (value === "low" || value === "medium" || value === "critical")
+    return value;
+  return "high";
+}
+
+function messageConfidence(value: string): "low" | "medium" | "high" {
+  if (value === "low" || value === "medium") return value;
+  return "high";
+}
+
 type DiscordChannelState =
   | { status: "loading" }
   | {
@@ -432,7 +443,10 @@ export function AutomationDataFlowEditor({
                       onChange={(e) =>
                         updateOutput(index, {
                           ...output,
-                          publish: e.target.value as "always" | "on_findings",
+                          publish:
+                            e.target.value === "on_findings"
+                              ? "on_findings"
+                              : "always",
                         })
                       }
                     >
@@ -530,11 +544,7 @@ export function AutomationDataFlowEditor({
                         onChange={(e) =>
                           updateOutput(index, {
                             ...output,
-                            minUrgency: e.target.value as
-                              | "low"
-                              | "medium"
-                              | "high"
-                              | "critical",
+                            minUrgency: messageUrgency(e.target.value),
                           })
                         }
                       >
@@ -551,10 +561,7 @@ export function AutomationDataFlowEditor({
                         onChange={(e) =>
                           updateOutput(index, {
                             ...output,
-                            minConfidence: e.target.value as
-                              | "low"
-                              | "medium"
-                              | "high",
+                            minConfidence: messageConfidence(e.target.value),
                           })
                         }
                       >

@@ -8,14 +8,16 @@ const models = [
     provider: "pi",
     label: "Opus 5 + Fable oracle",
     aliases: [],
+    efforts: [],
   },
   {
     id: "pi/anthropic/claude-sonnet-5",
     provider: "pi",
     label: "Claude Sonnet 5",
     aliases: [],
+    efforts: [],
   },
-] as unknown as ModelOption[];
+] satisfies ModelOption[];
 
 describe("workspace preset labels", () => {
   it("names the preset in its own workspace", () => {
@@ -47,6 +49,12 @@ describe("workspace preset labels", () => {
     ).toBeNull();
     expect(shortModelLabel("pi/anthropic/claude-sonnet-5", models)).toBe(
       "Sonnet 5",
+    );
+  });
+
+  it("capitalizes named GPT variants", () => {
+    expect(shortModelLabel("pi/openai/gpt-6-astra", models)).toBe(
+      "GPT-6 Astra",
     );
   });
 

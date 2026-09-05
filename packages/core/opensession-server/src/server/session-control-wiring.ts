@@ -33,6 +33,7 @@ import {
   liftUserStop,
   promoteQueuedPrompt,
 } from "./queue-state";
+import { withPastedTexts } from "@tellahq/opensession-protocol/pasted-text";
 import { prepareAndSteerQueuedPrompt } from "./queued-steer";
 import {
   storeAppendUserLineEarly,
@@ -65,7 +66,7 @@ import {
   getCachedSessions,
   getCachedSessionsAsync,
   getSessionListSnapshotAsync,
-  invalidateSessionsCache,
+  publishSessionChange,
   touchNativeSession,
   touchNativeSessionStrict,
 } from "./session-cache";
@@ -81,6 +82,7 @@ import {
 import {
   type ResolvedCreate,
   actorCreationSetupPlan,
+  actorWorktreeMaterializer,
   forkHandoffContext,
   runOpeningCreateOnce,
   resolveForkContext,
@@ -113,8 +115,6 @@ import { randomUUIDv7 } from "bun";
 import {
   patchCreationSetupPlan,
   requestCreationAttachment,
-  requestCreationBranch,
-  requestCreationCredential,
   requestCreationWorkspace,
   sessionAsk,
   sessionDelivery,
@@ -236,16 +236,24 @@ function listSessionSummaries(): SessionSummary[] {
 }
 
 // --- Session control surface (powers the opensession-sessions MCP) ---
-// Wire the Slack thread index (thread replies → owning session). Re-run on
-// every hot reload (cheap) so the index stays fresh.
-void getSessionListSnapshotAsync()
-  .then((sessions) => {
-    rebuildIndex(sessions);
-    // rebuildIndex() clears the index, so replay the links the session files
-    // don't hold: a human-ask DM thread belongs to the session that raised it.
-    relinkAskThreads();
-  })
-  .catch((error) => console.warn("[slack-links] index rebuild failed:", error));
+/**
+ * Wire the Slack thread index (thread replies → owning session). Boot calls
+ * this after the session actor is up, so the list snapshot it needs comes
+ * from the primed list index (or the metadata catalog) rather than a
+ * pre-actor scan of every session file. Cheap to re-run on a hot reload.
+ */
+export function ensureSlackLinkIndex(): Promise<void> {
+  return getSessionListSnapshotAsync()
+    .then((sessions) => {
+      rebuildIndex(sessions);
+      // rebuildIndex() clears the index, so replay the links the session files
+      // don't hold: a human-ask DM thread belongs to the session that raised it.
+      relinkAskThreads();
+    })
+    .catch((error) =>
+      console.warn("[slack-links] index rebuild failed:", error),
+    );
+}
 
 // Wires the MCP's tools into the same in-process state and helpers the
 // WebSocket handlers use, so a management session steers/answers/creates the
@@ -384,7 +392,7 @@ registerSessionControl({
         user,
       );
       if (notice !== null) {
-        invalidateSessionsCache();
+        publishSessionChange(session.id);
         return { status: "handled" as const, message: notice, deliveryId };
       }
 
@@ -692,6 +700,7 @@ registerSessionControl({
       fastMode: fastModeInput,
       images: imageUrls,
       files: rawFiles,
+      pastedTexts,
       mcpServers,
       runner: runnerInput,
       automationDescendantPolicy,
@@ -703,6 +712,7 @@ registerSessionControl({
       spawnedBy: spawnedByInput,
       reportBack,
       user,
+      createdByLogin,
       sandbox,
       forkFrom,
       accountId: accountIdInput,
@@ -1005,28 +1015,16 @@ registerSessionControl({
           wtPath = worktreePathFor(sessionBranch, repo.id, worktreeOptions);
           const plannedBranch = sessionBranch;
           const plannedWorktreePath = wtPath;
-          const credentialPrincipal = githubCredential?.principal;
-          materializeWorktree = async () => {
-            if (credentialPrincipal) {
-              await requestCreationCredential({
-                sessionId: bksId,
-                identity: createIdentity,
-                principal: credentialPrincipal,
-                scope: `git:${repo.id}`,
-              });
-            }
-            await requestCreationBranch({
-              sessionId: bksId,
-              identity: createIdentity,
-              project: repo.id,
-              branch: plannedBranch,
-              worktreePath: plannedWorktreePath,
-              baseBranch: baseRef || repo.defaultBranch,
-              isolated: isolatedWorktree === true,
-              credentialPrincipal,
-            });
-            return plannedWorktreePath;
-          };
+          materializeWorktree = actorWorktreeMaterializer({
+            sessionId: bksId,
+            identity: createIdentity,
+            project: repo.id,
+            branch: plannedBranch,
+            worktreePath: plannedWorktreePath,
+            baseBranch: baseRef,
+            isolated: isolatedWorktree === true,
+            credentialPrincipal: githubCredential?.principal,
+          });
         }
       }
     }
@@ -1043,9 +1041,15 @@ registerSessionControl({
       !isScratch &&
       ownedWorktree(wtPath)
     ) {
+      // A PR workspace's branch is the PR head; a session on the derived
+      // <head>-os-review checkout never renames it (see session-pr-target).
+      const workspaceBranch =
+        joinedWorkspace.prNumber != null && joinedWorkspace.branch
+          ? joinedWorkspace.branch
+          : sessionBranch;
       updateWorkspace(joinedWorkspace.id, {
         worktreeDir: wtPath,
-        ...(sessionBranch ? { branch: sessionBranch } : {}),
+        ...(workspaceBranch ? { branch: workspaceBranch } : {}),
       });
     }
 
@@ -1182,8 +1186,10 @@ registerSessionControl({
         identity: createIdentity,
         ...attachment,
       });
+    // Pasted blocks follow the message; the uploads note follows them, so the
+    // parser's end-anchored note regex still finds it.
     let openingPrompt = withUploadsNote(
-      prompt,
+      withPastedTexts(prompt, pastedTexts),
       attachmentSources.map((attachment) => ({
         name: attachment.name,
         path: creationAttachmentPath(
@@ -1248,6 +1254,7 @@ ${createMentionsNote}`;
       openingPrompt,
       user,
       createdBy: sessionCreatedBy,
+      createdByLogin,
       createdAt: sessionCreatedAt,
       mode: isScratch
         ? ("scratch" as const)
@@ -1348,31 +1355,17 @@ ${createMentionsNote}`;
       typeof restoredSpec.wtPath === "string" &&
       typeof restoredSpec.branch === "string" &&
       typeof restoredSpec.repoId === "string"
-        ? async () => {
-            const credentialPrincipal = restoredSpec.gitPrincipal;
-            if (credentialPrincipal) {
-              await requestCreationCredential({
-                sessionId: bksId,
-                identity: createIdentity,
-                principal: credentialPrincipal,
-                scope: `git:${restoredSpec.repoId!}`,
-              });
-            }
-            await requestCreationBranch({
-              sessionId: bksId,
-              identity: createIdentity,
-              project: restoredSpec.repoId!,
-              branch: restoredSpec.branch!,
-              worktreePath: restoredSpec.wtPath!,
-              baseBranch:
-                restoredSpec.worktreeBaseRef ||
-                restoredSpec.stackedOn?.branch ||
-                getRepo(restoredSpec.repoId!).defaultBranch,
-              isolated: restoredSpec.worktreeIsolated === true,
-              credentialPrincipal,
-            });
-            return restoredSpec.wtPath!;
-          }
+        ? actorWorktreeMaterializer({
+            sessionId: bksId,
+            identity: createIdentity,
+            project: restoredSpec.repoId,
+            branch: restoredSpec.branch,
+            worktreePath: restoredSpec.wtPath,
+            baseBranch:
+              restoredSpec.worktreeBaseRef || restoredSpec.stackedOn?.branch,
+            isolated: restoredSpec.worktreeIsolated === true,
+            credentialPrincipal: restoredSpec.gitPrincipal,
+          })
         : undefined;
     const spec: ResolvedCreate = restoredSpec
       ? {

@@ -182,14 +182,34 @@ function pullRequests(session: UnifiedSession) {
 }
 
 /**
+ * The PRs a new tab carries before the server has projected its workspace.
+ * A PR belongs to the workspace, not to the tab that opened it, so the local
+ * shell inherits every actual PR of its source tab the same way the server
+ * shares sibling PRs: as discovered refs. The create response then settles
+ * which of them this tab owns outright.
+ */
+export function siblingTabPrRefs(source: UnifiedSession): SessionPrRef[] {
+  return pullRequests(source)
+    .filter((ref) => ref.number != null || Boolean(ref.url))
+    .map(({ updatedAt: _updatedAt, author: _author, ...ref }) => ({
+      ...ref,
+      source: "discovered" as const,
+    }));
+}
+
+/**
  * Pick the PR that owns the normal single-PR surface. A branch-derived PR is
  * always primary; when there is no such PR, a sole linked/discovered PR fills
  * that role instead of rendering as a one-item multi-PR stack.
  */
-export function sessionPrPresentation(prs?: SessionPrRef[]): {
+export interface SessionPrPresentation {
   primary?: SessionPrRef;
   additional: SessionPrRef[];
-} {
+}
+
+export function sessionPrPresentation(
+  prs?: SessionPrRef[],
+): SessionPrPresentation {
   const actual = (prs || []).filter((ref) => ref.number != null);
   const primary = actual.find((ref) => ref.source === "primary");
   if (primary)

@@ -5,6 +5,7 @@
  * run-ws.ts before any of this runs.
  */
 
+import { parseSidebarSessionScope } from "./sidebar-session-scope";
 import type { WebSocketHandler } from "bun";
 import type { WSClientData } from "./ws-hub";
 import { sessionRunningWithHolds } from "./session-state-events";
@@ -58,7 +59,12 @@ import {
   takeQueuedPrompt,
   takeSteeredPrompt,
   updateQueuedPrompt,
+  queueItemForClient,
 } from "./queue-state";
+import {
+  pastedTextsFromWire,
+  withPastedTexts,
+} from "@tellahq/opensession-protocol/pasted-text";
 import { prepareAndSteerQueuedPrompt } from "./queued-steer";
 
 import {
@@ -85,7 +91,7 @@ import {
 import { type Sandbox } from "./sandbox";
 import {
   findSessionAsync,
-  invalidateSessionsCache,
+  publishSessionChange,
   maybePersistEffort,
   maybePersistFastMode,
 } from "./session-cache";
@@ -946,6 +952,21 @@ export const websocketHandlers: WebSocketHandler<WSClientData> = {
           break;
         }
 
+        case "sessions_subscribe": {
+          // The sidebar query this socket renders. Row frames are evaluated
+          // against it (session-row-events) so a write reaches only the
+          // sockets whose lens can show the row. A non-sidebar query still
+          // subscribes, unscoped, and hears about every live row.
+          const raw = typeof msg.query === "string" ? msg.query : "";
+          const params = new URLSearchParams(
+            raw.startsWith("?") ? raw.slice(1, 2049) : raw.slice(0, 2048),
+          );
+          const user =
+            ws.data.authUser || ws.data.user || params.get("user") || "";
+          ws.data.sidebarScope = parseSidebarSessionScope(params, user);
+          break;
+        }
+
         case "typing": {
           if (typeof msg.sessionId !== "string") break;
           setClientTyping(ws, msg.sessionId, msg.typing === true);
@@ -1300,8 +1321,13 @@ export const websocketHandlers: WebSocketHandler<WSClientData> = {
           const { sessionId, user } = msg;
           // Non-string content (a client bug — e.g. `text` instead of
           // `content`) used to flow all the way into the run path and crash
-          // the process. Coerce, and reject a send with nothing in it.
-          const content = typeof msg.content === "string" ? msg.content : "";
+          // the process. Coerce, and reject a send with nothing in it. Pasted
+          // blocks fold in here, at intake, so the queue, the steer channel,
+          // persistence and the model all see one string.
+          const content = withPastedTexts(
+            typeof msg.content === "string" ? msg.content : "",
+            pastedTextsFromWire(msg.pastedTexts),
+          );
           const images = parseImageDataUrls(msg.images);
           const imageUrls = asDataUrlList(msg.images);
           const rawContextSessions = Array.isArray(msg.contextSessions)
@@ -1346,7 +1372,7 @@ export const websocketHandlers: WebSocketHandler<WSClientData> = {
           );
           if (notice !== null) {
             ws.send(JSON.stringify({ type: "notice", message: notice }));
-            invalidateSessionsCache();
+            publishSessionChange(session.id);
             break;
           }
 
@@ -1526,7 +1552,11 @@ export const websocketHandlers: WebSocketHandler<WSClientData> = {
         }
 
         case "interrupt_prompt": {
-          const { sessionId, content, user } = msg;
+          const { sessionId, user } = msg;
+          const content = withPastedTexts(
+            typeof msg.content === "string" ? msg.content : "",
+            pastedTextsFromWire(msg.pastedTexts),
+          );
           const images = parseImageDataUrls(msg.images);
           const imageUrls = asDataUrlList(msg.images);
           const session = await findSessionAsync(sessionId);
@@ -1592,7 +1622,7 @@ export const websocketHandlers: WebSocketHandler<WSClientData> = {
             sessionId,
             queueId,
             ...(item
-              ? { item }
+              ? { item: queueItemForClient(item) }
               : { message: "That queued message could not be edited." }),
           };
           if (typeof msg.__sessionKernelToken === "string")
@@ -1622,7 +1652,7 @@ export const websocketHandlers: WebSocketHandler<WSClientData> = {
             sessionId,
             queueId,
             ...(item
-              ? { item }
+              ? { item: queueItemForClient(item) }
               : { message: "That steering message has already been sent." }),
           };
           if (typeof msg.__sessionKernelToken === "string")

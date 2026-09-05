@@ -1,8 +1,10 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { use, useCallback, useEffect, useState } from "react";
+import { NavigationContext } from "../hooks/useNavigation";
 import { Popover } from "../ui/popover";
 import { cn } from "../ui/cn";
 import {
   fetchSessionSandbox,
+  openSandboxDesktop,
   sandboxAction,
   type SessionSandboxStatus,
 } from "../lib/api/sandboxes";
@@ -39,6 +41,9 @@ export function SandboxBadge({
   runner?: RunnerRef;
 }) {
   const [open, setOpen] = useState(false);
+  // Null outside the app shell (a bare badge in a test); then the desktop
+  // falls back to a browser tab.
+  const navigation = use(NavigationContext);
   const [status, setStatus] = useState<SessionSandboxStatus | null>(null);
   const [working, setWorking] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -161,12 +166,43 @@ export function SandboxBadge({
       });
   }
 
+  async function openDesktop() {
+    // Inside the app the desktop is a view tab next to Review and Terminal.
+    if (navigation) {
+      setOpen(false);
+      navigation.openDesktop();
+      return;
+    }
+    // Without a workspace to host the tab, open the desktop in a browser tab
+    // inside the click so popup blockers allow it, then point it at the
+    // minted URL once the provider answers.
+    const tab = window.open("", "_blank");
+    setWorking("desktop");
+    setError(null);
+    await (async () => {
+      const desktop = await openSandboxDesktop(sessionId);
+      if (tab) {
+        tab.opener = null;
+        tab.location.href = desktop.url;
+      } else {
+        window.location.assign(desktop.url);
+      }
+    })()
+      .catch(async (cause) => {
+        tab?.close();
+        setError(errorMessage(cause, "Could not open the desktop"));
+      })
+      .finally(async () => {
+        setWorking(null);
+      });
+  }
+
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger
         className="flex min-h-10 flex-none items-center gap-1.5 rounded-md border border-line bg-surface px-2 text-meta font-medium text-dim outline-none transition-[color,background-color,border-color,scale] hover:border-line-strong hover:text-fg focus-visible:border-line-strong active:scale-[0.96]"
         data-testid="sandbox-badge"
-        aria-label={`Sandbox · ${lifecycleLabel}`}
+        aria-label={`Sandbox · ${lifecycleLabel[lifecycle]}`}
       >
         <span className={cn("size-2 rounded-full", dot)} aria-hidden="true" />
         <IconBox size={20} className="text-faint" />
@@ -185,7 +221,7 @@ export function SandboxBadge({
             <span className="ml-auto font-medium text-faint">Runtime</span>
           </div>
           <div className="mt-1 text-meta text-dim">
-            {sandbox.provider} · session workspace
+            Its own machine · sleeps between turns
           </div>
           {status?.cwd ? (
             <div
@@ -196,6 +232,15 @@ export function SandboxBadge({
             </div>
           ) : null}
         </div>
+        {lifecycle === "awake" && status?.canDesktop ? (
+          <button
+            className={actionClass}
+            disabled={Boolean(working)}
+            onClick={() => void openDesktop()}
+          >
+            {working === "desktop" ? "Opening desktop…" : "Open desktop"}
+          </button>
+        ) : null}
         {lifecycle === "awake" && status?.canPause ? (
           <button
             className={actionClass}
@@ -215,13 +260,17 @@ export function SandboxBadge({
             {working === "resume" ? "Waking…" : "Wake sandbox"}
           </button>
         ) : null}
-        <button
-          className={cn(actionClass, "text-red hover:text-red")}
-          disabled={Boolean(working || status?.busy)}
-          onClick={() => void act("recreate")}
-        >
-          {working === "recreate" ? "Recreating…" : "Recreate from clean image"}
-        </button>
+        {status?.materialized !== false || state !== "gone" ? (
+          <button
+            className={cn(actionClass, "text-red hover:text-red")}
+            disabled={Boolean(working || status?.busy)}
+            onClick={() => void act("recreate")}
+          >
+            {working === "recreate"
+              ? "Recreating…"
+              : "Recreate from clean image"}
+          </button>
+        ) : null}
         {status?.logs?.setup || status?.logs?.resume ? (
           <details className="mt-1 rounded-md bg-surface px-2.5 py-2 text-meta text-dim">
             <summary className="cursor-pointer font-semibold text-fg">

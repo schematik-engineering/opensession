@@ -16,6 +16,7 @@
     "packages/clients/website",
     "packages/core/opensession-server",
     "packages/core/protocol",
+    "packages/core/subscription-gateway",
     "packages/integrations/apple-mobile"
   ],
   "scripts": {
@@ -31,7 +32,7 @@
     "test": "bun test packages/core/opensession-server/src scripts",
     "test:snapshots": "OPENSESSION_EXECUTOR=0 OPENSESSION_TEST_IN_PROCESS_RUNS=1 OPENSESSION_SNAPSHOT_STRICT=1 bun test packages/core/opensession-server/src/server/zz-snapshot-runs.test.ts",
     "test:transcript-scroll": "bun packages/core/opensession-server/src/frontend/tools/transcript-scroll-regression.ts",
-    "lint": "bun run check:compiler && oxlint packages/core/opensession-server/src/frontend",
+    "lint": "bun run check:compiler && bun ./node_modules/oxlint/bin/oxlint packages/core/opensession-server/src/frontend",
     "check:compiler": "bun scripts/check-react-compiler.ts",
     "typecheck": "tsc --noEmit",
     "website:build": "bun --cwd packages/clients/website build",
@@ -80,6 +81,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@oxlint/plugins": "1.80.0",
     "@tailwindcss/cli": "^4.3.2",
     "@types/bun": "latest",
     "@types/react": "^19.0.0",

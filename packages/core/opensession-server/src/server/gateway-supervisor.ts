@@ -3,7 +3,6 @@
 import {
   chmodSync,
   existsSync,
-  mkdirSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -11,26 +10,34 @@ import {
   unlinkSync,
   writeFileSync,
 } from "fs";
-import { dirname, join, resolve } from "path";
+import { join, resolve } from "path";
 import {
   createGatewayTcpProxyMetrics,
   startGatewayTcpProxy,
   type GatewayTcpProxyMetrics,
 } from "./gateway-tcp-proxy";
 import { createStableFrontendResponder } from "./stable-frontend";
-import { isCompiledBinary } from "../runner-host/exe";
 import { publishGatewayBackendPort } from "./gateway-routing";
 
-const GATEWAY_ENTRY = "packages/core/opensession-server/opensession.ts";
+/**
+ * Where the supervisor listens for handoff commands. systemd hands a unit
+ * with `RuntimeDirectory=` its directory through RUNTIME_DIRECTORY:
+ * /run/opensession-gateway for the system service, and
+ * $XDG_RUNTIME_DIR/opensession-gateway for a rootless user install. The fixed
+ * /run path exists only on the former, so a user service that assumed it died
+ * at boot with ENOENT and the installer reported a server that never came up.
+ */
+export function gatewayControlSocketPath(
+  env: Record<string, string | undefined> = process.env,
+): string {
+  if (env.OPENSESSION_GATEWAY_CONTROL_SOCKET)
+    return env.OPENSESSION_GATEWAY_CONTROL_SOCKET;
+  // Several RuntimeDirectory= entries arrive colon-separated; ours is one.
+  const runtimeDir = env.RUNTIME_DIRECTORY?.split(":")[0];
+  return `${runtimeDir || "/run/opensession-gateway"}/control.sock`;
+}
 
-export const GATEWAY_CONTROL_SOCKET =
-  process.env.OPENSESSION_GATEWAY_CONTROL_SOCKET ||
-  join(
-    process.env.RUNTIME_DIRECTORY ||
-      process.env.OPENSESSION_DEPLOY_STATE ||
-      join(process.env.HOME || "", ".opensession/deploy"),
-    "control.sock",
-  );
+export const GATEWAY_CONTROL_SOCKET = gatewayControlSocketPath();
 
 const PUBLIC_HOST = process.env.HOST || "127.0.0.1";
 const PUBLIC_PORT = Number(process.env.PORT || 3850);
@@ -834,47 +841,41 @@ export function spawnGateway(
   nonce?: string,
   peerGenerations?: PeerGenerations,
   precheckPeers = false,
-  entry = GATEWAY_ENTRY,
+  entry = "packages/core/opensession-server/opensession.ts",
 ): ManagedGateway {
   const preloaded = deferred();
   const backendPort = allocateBackendPort();
   const generation = releaseGeneration(releaseRoot);
   let expectedNonce = nonce;
-  const child = Bun.spawn(
-    isCompiledBinary() && entry === GATEWAY_ENTRY
-      ? [process.execPath, "server"]
-      : [process.execPath, "run", entry],
-    {
-      cwd: releaseRoot,
-      env: {
-        ...process.env,
-        OPENSESSION_GATEWAY_ROLE: role,
-        PORT: String(PUBLIC_PORT),
-        OPENSESSION_GATEWAY_BACKEND_HOST: BACKEND_HOST,
-        OPENSESSION_GATEWAY_BACKEND_PORT: String(backendPort),
-        OPENSESSION_RELEASE_GENERATION: generation,
-        OPENSESSION_KERNEL_GENERATION: peerGenerations?.kernel ?? generation,
-        OPENSESSION_EXECUTOR_GENERATION:
-          peerGenerations?.executor ?? generation,
-        OPENSESSION_GATEWAY_PRECHECK_PEERS: precheckPeers ? "1" : "0",
-        ...(nonce ? { OPENSESSION_GATEWAY_NONCE: nonce } : {}),
-      },
-      stdin: "ignore",
-      stdout: "inherit",
-      stderr: "inherit",
-      ipc(message) {
-        const value = message as GatewayIpcMessage;
-        if (
-          role === "standby" &&
-          value?.type === "opensession_gateway_preloaded" &&
-          value.nonce === expectedNonce &&
-          value.pid === child.pid
-        ) {
-          preloaded.resolve();
-        }
-      },
+  const child = Bun.spawn([process.execPath, "run", entry], {
+    cwd: releaseRoot,
+    env: {
+      ...process.env,
+      OPENSESSION_GATEWAY_ROLE: role,
+      PORT: String(PUBLIC_PORT),
+      OPENSESSION_GATEWAY_BACKEND_HOST: BACKEND_HOST,
+      OPENSESSION_GATEWAY_BACKEND_PORT: String(backendPort),
+      OPENSESSION_RELEASE_GENERATION: generation,
+      OPENSESSION_KERNEL_GENERATION: peerGenerations?.kernel ?? generation,
+      OPENSESSION_EXECUTOR_GENERATION: peerGenerations?.executor ?? generation,
+      OPENSESSION_GATEWAY_PRECHECK_PEERS: precheckPeers ? "1" : "0",
+      ...(nonce ? { OPENSESSION_GATEWAY_NONCE: nonce } : {}),
     },
-  );
+    stdin: "ignore",
+    stdout: "inherit",
+    stderr: "inherit",
+    ipc(message) {
+      const value = message as GatewayIpcMessage;
+      if (
+        role === "standby" &&
+        value?.type === "opensession_gateway_preloaded" &&
+        value.nonce === expectedNonce &&
+        value.pid === child.pid
+      ) {
+        preloaded.resolve();
+      }
+    },
+  });
   const exited = child.exited.then((code) => {
     if (role === "standby") {
       preloaded.reject(
@@ -1009,14 +1010,6 @@ function deployStateRoot(): string {
   );
 }
 
-export function currentReleaseRoot(
-  state = deployStateRoot(),
-  fallback = process.cwd(),
-): string {
-  const current = join(state, "current");
-  return realpathSync(existsSync(current) ? current : fallback);
-}
-
 export function resolveInitialReleaseRoot(
   state = deployStateRoot(),
   sourceRoot = process.cwd(),
@@ -1069,7 +1062,6 @@ export function readGatewayHandoffTransaction(
 function serveControl(
   supervisor: GatewaySupervisor,
 ): ReturnType<typeof Bun.listen> {
-  mkdirSync(dirname(GATEWAY_CONTROL_SOCKET), { recursive: true, mode: 0o700 });
   if (existsSync(GATEWAY_CONTROL_SOCKET)) unlinkSync(GATEWAY_CONTROL_SOCKET);
   const listener = Bun.listen({
     unix: GATEWAY_CONTROL_SOCKET,
@@ -1187,13 +1179,9 @@ async function runSupervisor(): Promise<void> {
   // Peer generations can intentionally differ after a selective rollout. Never
   // guess from `current`: a guessed generation caused a two-minute crash loop
   // after an executor was correctly retained on its previous release. Source
-  // installs and simple mode have no separate executor generation, so both
-  // peers use the selected gateway generation instead.
-  const generation = releaseGeneration(releaseRoot);
-  const peerGenerations =
-    process.env.OPENSESSION_EXECUTOR === "0"
-      ? { kernel: generation, executor: generation }
-      : await resolveInitialPeerGenerations(releaseRoot);
+  // installs have no immutable marker or separate executor, so both peers use
+  // the development generation instead.
+  const peerGenerations = await resolveInitialPeerGenerations(releaseRoot);
   const active = spawnGateway(
     releaseRoot,
     "active",

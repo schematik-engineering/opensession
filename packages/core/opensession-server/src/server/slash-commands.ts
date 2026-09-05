@@ -10,6 +10,7 @@ import { isPstackCommand, pstackCommandInput } from "./pstack-mode";
 import { listAccountsPublic } from "./claude-accounts";
 import { listCodexAccountsPublic } from "./codex-accounts";
 import { listAcpAccountsPublic } from "./acp-accounts";
+import { listXaiAccountsPublic } from "./xai-accounts";
 import {
   accountProviderForModel,
   formatModelList,
@@ -221,7 +222,9 @@ export function handleSlashCommand(
         ? "SuperGrok"
         : accountProvider === "cursor"
           ? "Cursor"
-          : "Claude";
+          : accountProvider === "xai"
+            ? "SuperGrok"
+            : "Claude";
   const accounts: Array<{
     id: string;
     name: string;
@@ -231,11 +234,13 @@ export function handleSlashCommand(
   }> = (
     accountProvider === "codex"
       ? listCodexAccountsPublic()
-      : accountProvider === "claude"
-        ? listAccountsPublic()
-        : listAcpAccountsPublic().filter(
-            (account) => account.provider === accountProvider,
-          )
+      : accountProvider === "xai"
+        ? listXaiAccountsPublic()
+        : accountProvider === "claude"
+          ? listAccountsPublic()
+          : listAcpAccountsPublic().filter(
+              (account) => account.provider === accountProvider,
+            )
   ).filter(
     (account) =>
       !account.owner || (!!user && userMatchesAny(user, [account.owner])),

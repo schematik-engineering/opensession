@@ -10,17 +10,24 @@ import {
   engineSessionIdFor,
   getAllSessions,
   getAllSessionsAsync,
+  nativeSessionDetailFromData,
+  nativeSessionRow,
   readNativeSession,
-  readLinearSession,
   readNativeSessionListRow,
   readSlackSession,
   type SessionArchiveSlice,
 } from "./sessions";
 import {
+  indexedActiveWorkspaceIds,
+  indexedLiveSessionsByBranch,
   indexedSessions,
+  indexedWorkspaceMembers,
   upsertIndexedSession,
   upsertIndexedSessions,
 } from "./session-list-store";
+import { publishSessionRow } from "./session-row-events";
+import { workspacePrHead } from "./session-pr-target";
+import { getWorkspace } from "./workspaces";
 import { activeRunRecords } from "./run-journal";
 import {
   getRunState,
@@ -46,16 +53,20 @@ import {
   sessionDeliveryProjectionCached,
   quarantineSessionForSafety,
   releaseSessionQuarantine,
-  sessionGatewayCommand,
   sessionKernel,
   sessionKernelActorActive,
+  sessionMetadata,
   sessionQuarantines,
   sessionRunStateProjections,
   sessionTurn,
 } from "./session-kernel";
 import { withSessionMutationLock } from "./session-mutation-lock";
 import { broadcastToAll } from "./ws-hub";
-import { hasSessionRunningHold } from "./session-state-events";
+import {
+  hasPendingOpening,
+  hasSessionRunningHold,
+} from "./session-state-events";
+import { advanceSessionListResponseRevision } from "./session-list-response-revision";
 
 export const SESSIONS_DIR = OPENSESSION_SESSIONS_DIR;
 
@@ -98,10 +109,67 @@ const CACHE_TTL = 10_000;
  * a routine session write cannot make unrelated HTTP requests wait for a scan
  * of every historical session. */
 export function invalidateSessionsCache(): void {
+  markSessionListStale();
+  // Publish only after every cache layer is stale, so a client reacting
+  // immediately cannot race ahead of the invalidation it was told about.
+  // Older and native clients safely ignore unknown server frames.
+  broadcastToAll({ type: "sessions_invalidated" });
+}
+
+/**
+ * One session changed outside the metadata facade: an override (title,
+ * status, review), the archive registry, a PR link, a generated title. Refresh
+ * its index row from the current document and overlays, mark the list caches
+ * stale and publish the row. Nothing tells every client to refetch.
+ */
+export function publishSessionChange(sessionId: string): void {
+  const indexed = readNativeSessionListRow(sessionId);
+  if (indexed) {
+    enrichSessionRuntime([indexed]);
+    upsertIndexedSession(indexed);
+  }
+  markSessionListStale();
+  publishSessionRow(sessionId);
+}
+
+/**
+ * PR state for `branch` changed (merge, close, review, a webhook). The rows
+ * that surface it are the live sessions on that branch, on its review
+ * checkout, and in a PR workspace whose head it is. Publish exactly those;
+ * every other client's list is unaffected. Falls back to the whole-list
+ * invalidation only while the live index has no coverage to query.
+ */
+export function publishSessionRowsForBranch(branch: string): void {
+  if (!branch) return;
+  const rows = indexedLiveSessionsByBranch([branch, `${branch}-os-review`]);
+  if (rows === null) {
+    invalidateSessionsCache();
+    return;
+  }
+  const ids = new Set(rows.map((session) => session.id));
+  for (const workspaceId of indexedActiveWorkspaceIds() ?? []) {
+    const workspace = getWorkspace(workspaceId);
+    if (!workspace || workspacePrHead(workspace) !== branch) continue;
+    for (const member of indexedWorkspaceMembers(workspaceId))
+      if (!member.archived) ids.add(member.id);
+  }
+  if (ids.size === 0) return;
+  markSessionListStale();
+  for (const id of ids) publishSessionRow(id);
+}
+
+/** Mark every list cache stale without telling clients to refetch. Row-level
+ * writes publish their own `session_row` frame instead (session-row-events),
+ * so the whole-list broadcast stays reserved for mutations that have no row
+ * to send yet. */
+export function markSessionListStale(): void {
   for (const slice of CACHE_SLICES) {
     sessionsCacheGenerations[slice]++;
     if (sessionsCaches[slice]) sessionsCaches[slice]!.invalidated = true;
   }
+  // Fence a response build already reading the previous projection. The
+  // response layer retries it before releasing every request coalesced there.
+  advanceSessionListResponseRevision();
   // The list route caches its serialized response on top of this cache. Mark
   // those snapshots stale so ordinary slices rebuild on their next request;
   // the bounded live slice deliberately serves the stale body while it does
@@ -111,10 +179,6 @@ export function invalidateSessionsCache(): void {
     | Map<string, { expiresAt: number }>
     | undefined;
   for (const snapshot of responses?.values() || []) snapshot.expiresAt = 0;
-  // Publish only after every cache layer is stale, so a client reacting
-  // immediately cannot race ahead of the invalidation it was told about.
-  // Older and native clients safely ignore unknown server frames.
-  broadcastToAll({ type: "sessions_invalidated" });
 }
 
 export interface SessionRuntimeSnapshot {
@@ -182,11 +246,14 @@ export function enrichSessionRuntime(
     // an earlier write. Runtime state is authoritative in both directions:
     // promote a newly active run and demote a finished one so the sidebar can
     // leave In progress on its next poll.
+    // A create persisted before its opening turn took admission is busy
+    // preparing its workspace, not idle with an unanswered prompt.
     s.isRunning =
       engineBusy ||
       recoveryBusy ||
       isRunStateUnsettled(rs) ||
-      hasSessionRunningHold(s.id);
+      hasSessionRunningHold(s.id) ||
+      hasPendingOpening(s.id);
     if (s.isRunning) {
       s.runStartedAt =
         runStarts.get(s.id) ||
@@ -279,7 +346,10 @@ export async function getCachedSessionsAsync(
   if (!sessionsRefreshes[slice]) {
     const generation = ++sessionsCacheGenerations[slice];
     const startingCache = sessionsCaches[slice];
-    sessionsRefreshes[slice] = getAllSessionsAsync(slice)
+    sessionsRefreshes[slice] = getAllSessionsAsync(
+      slice,
+      catalogNativeSessionRows,
+    )
       .then((data) => {
         upsertIndexedSessions(data, slice);
         const current = sessionsCaches[slice];
@@ -523,26 +593,51 @@ export function findSession(sessionId: string): UnifiedSession | undefined {
   // Native ids map directly to the one session file we own. Detail and run
   // paths should not depend on a materialized list snapshot having observed a
   // newly created session, and they should never scan the list to open one.
-  const direct =
-    readNativeSession(sessionId) ??
-    readSlackSession(sessionId) ??
-    readLinearSession(sessionId);
+  const direct = readNativeSession(sessionId) ?? readSlackSession(sessionId);
   if (direct) return enrichSessionRuntime([direct])[0];
   return getCachedSessions().find(
     (s) => s.id === sessionId || s.aliasIds?.includes(sessionId),
   );
 }
 
+/**
+ * Detail read for one native session. With the actor up, the committed
+ * document comes from the central catalog (`metadata catalog_get`): one
+ * indexed lookup in one database, written in the same lane pass as the commit
+ * so it is never behind the derived file, and never opening the session's
+ * actor. The file remains the fallback for a session the catalog has not
+ * seen, and the source for the synchronous readers.
+ */
+export async function readNativeSessionAsync(
+  sessionId: string,
+): Promise<UnifiedSession | undefined> {
+  if (!/^[A-Za-z0-9_-]{1,160}$/.test(sessionId)) return undefined;
+  if (sessionKernelActorActive() || process.env.NODE_ENV === "test") {
+    try {
+      const stored = await sessionMetadata({ op: "catalog_get", sessionId });
+      if (stored) {
+        const data = JSON.parse(stored.doc) as NativeSessionFile;
+        if (data?.id === sessionId) return nativeSessionDetailFromData(data);
+      }
+    } catch (error) {
+      console.warn(
+        `[session-metadata] catalog read failed for ${sessionId}; reading the file:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+  return readNativeSession(sessionId);
+}
+
 export async function findSessionAsync(
   sessionId: string,
 ): Promise<UnifiedSession | undefined> {
-  // Native ids and exact Slack deep links map one-to-one to files. Reading that
-  // file lets a newly announced conversation open before the materialized list
-  // projection has observed it. Historical aliases still need the merged list.
+  // Native ids come from the metadata catalog, exact Slack deep links map
+  // one-to-one to files. Either lets a newly announced conversation open
+  // before the materialized list projection has observed it. Historical
+  // aliases still need the merged list.
   const direct =
-    readNativeSession(sessionId) ??
-    readSlackSession(sessionId) ??
-    readLinearSession(sessionId);
+    (await readNativeSessionAsync(sessionId)) ?? readSlackSession(sessionId);
   if (direct) return enrichSessionRuntime([direct])[0];
   return (await getCachedSessionsAsync()).find(
     (s) => s.id === sessionId || s.aliasIds?.includes(sessionId),
@@ -574,71 +669,231 @@ export async function sessionIdsForAsync(sessionId: string): Promise<string[]> {
     : [sessionId];
 }
 
-// ── Serialized session-file writes ────────────────────────────────────────────
-// Every session-file writer goes through updateSessionFile: fresh read →
-// field-scoped mutator → atomic write, serialized per session id by a
-// promise-chain mutex (parked on globalThis so hot reloads keep in-flight
-// chains). This replaces the blind full-object rebuilds that let concurrent
-// writers clobber each other's fields (docs/transcripts.md §6).
-// Each write bumps a `rev` counter on the file — readers ignore it; it exists
-// so lost updates are observable.
+// ── Serialized session metadata writes ────────────────────────────────────────
+// Every session metadata writer goes through updateSessionFile: read the
+// actor-owned document → field-scoped mutator → compare-and-set put in the
+// session's actor → derived `<id>.json` export. The per-session promise-chain
+// mutex (parked on globalThis so hot reloads keep in-flight chains) keeps one
+// gateway from racing itself; the actor's `rev` check is the authority when
+// anything else wrote in between. This replaces the blind full-object rebuilds
+// that let concurrent writers clobber each other's fields
+// (docs/transcripts.md §6).
+//
+// The file is an export for out-of-process readers (agents, scripts, run
+// hosts) and for this process's synchronous detail reads until every session
+// has been seeded into the catalog. The catalog remembers which revision
+// reached the file; reconcileSessionMetadataExports repairs the gap at boot.
 
 /** Receives the fresh on-disk session file ({} as the type when the file
  *  doesn't exist yet — create-if-absent) and returns the object to write.
  *  Sites overlay ONLY the fields they own; unknown/foreign fields survive. */
 export type SessionFileMutator = (data: NativeSessionFile) => NativeSessionFile;
 
+const SESSION_METADATA_PUT_ATTEMPTS = 3;
+
+function sessionFileRev(data: NativeSessionFile): number {
+  const rev = (data as { rev?: unknown }).rev;
+  return typeof rev === "number" && Number.isInteger(rev) && rev >= 0 ? rev : 0;
+}
+
+function sessionActivityMs(data: NativeSessionFile): number {
+  const value = Date.parse(data.lastActivity || data.createdAt || "");
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
 export function updateSessionFile(
   sessionId: string,
   mutator: SessionFileMutator,
 ): Promise<void> {
   return withSessionMutationLock(sessionId, async () => {
-    const requestId = `session-file:${crypto.randomUUID()}`;
-    const plan = await sessionGatewayCommand({
-      op: "request",
-      sessionId,
-      requestId,
-      operation: "session_file_updated",
-    });
-    if (plan.status !== "execute")
-      throw new Error("Unexpected duplicate session-file command");
-    let physicalFinished = false;
-    try {
-      const path = `${SESSIONS_DIR}/${sessionId}.json`;
-      const current: NativeSessionFile = existsSync(path)
-        ? JSON.parse(readFileSync(path, "utf-8"))
-        : ({} as NativeSessionFile);
+    const path = `${SESSIONS_DIR}/${sessionId}.json`;
+    let stored = await sessionMetadata({ op: "get", sessionId });
+    for (let attempt = 1; ; attempt++) {
+      // A session written before the actor owned its metadata seeds from its
+      // file on the first write. From then on the file is derived.
+      const current: NativeSessionFile = stored
+        ? JSON.parse(stored.doc)
+        : existsSync(path)
+          ? JSON.parse(readFileSync(path, "utf-8"))
+          : ({} as NativeSessionFile);
       const next = mutator(current) ?? current;
-      const rev = (current as { rev?: unknown }).rev;
-      (next as { rev?: number }).rev = (typeof rev === "number" ? rev : 0) + 1;
-      writeJsonAtomic(path, next);
-      const indexed = readNativeSessionListRow(sessionId);
-      if (indexed) {
-        enrichSessionRuntime([indexed]);
-        upsertIndexedSession(indexed);
-      }
-      invalidateSessionsCache();
-      physicalFinished = true;
-      await sessionGatewayCommand({
-        op: "complete",
+      const rev = (stored ? stored.rev : sessionFileRev(current)) + 1;
+      (next as { rev?: number }).rev = rev;
+      const result = await sessionMetadata({
+        op: "put",
         sessionId,
-        requestId,
-        operation: "session_file_updated",
-        result: null,
+        requestId: `session-metadata:${crypto.randomUUID()}`,
+        expectedRev: stored ? stored.rev : null,
+        rev,
+        doc: JSON.stringify(next),
+        archived: !!next.archived,
+        lastActivityMs: sessionActivityMs(next),
       });
-    } catch (error) {
-      if (!physicalFinished)
-        await sessionGatewayCommand({
-          op: "fail",
-          sessionId,
-          requestId,
-          operation: "session_file_updated",
-          error: error instanceof Error ? error.message : String(error),
-          retryable: false,
-        });
-      throw error;
+      if (result.status === "conflict") {
+        // Another writer committed between our read and put. Re-apply the
+        // mutator on the committed truth; the lock makes this rare.
+        if (attempt >= SESSION_METADATA_PUT_ATTEMPTS)
+          throw new Error(
+            `Session ${sessionId} metadata changed under a serialized write`,
+          );
+        stored = result.current;
+        continue;
+      }
+      writeJsonAtomic(path, next);
+      void afterSessionMetadataExport(sessionId, result.rev).catch((error) =>
+        console.warn(
+          `[session-metadata] export receipt failed for ${sessionId}:`,
+          error instanceof Error ? error.message : error,
+        ),
+      );
+      return;
     }
   });
+}
+
+/** The file changed: refresh the list projection, publish the row, and tell
+ * the catalog which revision the export now carries. */
+function afterSessionMetadataExport(
+  sessionId: string,
+  rev: number,
+): Promise<void> {
+  const indexed = readNativeSessionListRow(sessionId);
+  if (indexed) {
+    enrichSessionRuntime([indexed]);
+    upsertIndexedSession(indexed);
+  }
+  markSessionListStale();
+  publishSessionRow(sessionId);
+  return sessionMetadata({ op: "exported", sessionId, rev });
+}
+
+const SESSION_METADATA_CATALOG_PAGE = 500;
+
+// Monotonic: once an operator marked the catalog complete it stays complete,
+// so the flag is asked once per process and then remembered.
+let metadataCatalogComplete = false;
+
+/**
+ * Native rows for a cold list rebuild. Once every historical session file has
+ * been seeded (scripts/seed-session-metadata-catalog.ts) the central catalog
+ * is the source: pages of committed documents from one database instead of a
+ * readdir and parse over every session file. Until then, or if the catalog
+ * cannot be read, the caller falls back to the directory scan.
+ */
+async function catalogNativeSessionRows(): Promise<
+  UnifiedSession[] | undefined
+> {
+  // Before the actor is up the facade cannot answer; scan instead of logging
+  // a failure. Tests run the facade on the in-process compatibility store.
+  if (!sessionKernelActorActive() && process.env.NODE_ENV !== "test")
+    return undefined;
+  try {
+    if (!metadataCatalogComplete) {
+      metadataCatalogComplete = await sessionMetadata({
+        op: "catalog_complete",
+      });
+      if (!metadataCatalogComplete) return undefined;
+      console.log(
+        "[session-metadata] catalog is complete; list rebuilds page it instead of scanning session files",
+      );
+    }
+    const rows: UnifiedSession[] = [];
+    let afterSessionId = "";
+    for (;;) {
+      const page = await sessionMetadata({
+        op: "catalog_page",
+        afterSessionId,
+        limit: SESSION_METADATA_CATALOG_PAGE,
+      });
+      for (const row of page) {
+        let data: NativeSessionFile | null = null;
+        try {
+          data = JSON.parse(row.doc);
+        } catch {
+          continue;
+        }
+        if (data?.id === row.sessionId) rows.push(nativeSessionRow(data));
+      }
+      if (page.length < SESSION_METADATA_CATALOG_PAGE) break;
+      afterSessionId = page[page.length - 1]!.sessionId;
+      // Let request traffic through between pages, as the file scan does.
+      await Bun.sleep(0);
+    }
+    return rows;
+  } catch (error) {
+    console.warn(
+      "[session-metadata] catalog read failed; scanning session files instead:",
+      error instanceof Error ? error.message : error,
+    );
+    return undefined;
+  }
+}
+
+/**
+ * Boot: make sure the list index has coverage before any boot step or route
+ * reads the session list. Called right after the session actor starts, so
+ * an index that is missing (first boot, operator rebuild) fills from the
+ * metadata catalog when it is complete. Without this the first synchronous
+ * `getCachedSessions()` reader would fill it by reading every session file.
+ */
+export async function primeSessionListIndex(): Promise<void> {
+  if (indexedSessions("include")) return;
+  const startedAt = performance.now();
+  const sessions = await getAllSessionsAsync(
+    "include",
+    catalogNativeSessionRows,
+  );
+  upsertIndexedSessions(sessions, "include");
+  enrichCachedSessions("include", sessions);
+  console.log(
+    `[session-cache] primed the list index with ${sessions.length} session(s) in ${Math.round(performance.now() - startedAt)}ms`,
+  );
+}
+
+export const SESSION_METADATA_EXPORT_REPAIR_LIMIT = 500;
+
+/**
+ * Boot repair for the derived session files. A crash between an actor commit
+ * and the file write leaves the catalog's `exported_rev` behind `rev`; that
+ * bounded work index names exactly the sessions to re-export, so boot never
+ * scans the sessions directory or opens every actor.
+ */
+export async function reconcileSessionMetadataExports(
+  limit = SESSION_METADATA_EXPORT_REPAIR_LIMIT,
+): Promise<number> {
+  if (!sessionKernelActorActive()) return 0;
+  let repaired = 0;
+  const pageSize = Math.min(100, Math.max(1, limit));
+  while (repaired < limit) {
+    const pending = await sessionMetadata({
+      op: "pending_exports",
+      limit: pageSize,
+    });
+    if (pending.length === 0) break;
+    for (const item of pending) {
+      await withSessionMutationLock(item.sessionId, async () => {
+        const stored = await sessionMetadata({
+          op: "get",
+          sessionId: item.sessionId,
+        });
+        // The catalog can trail a clear or delete; a missing document has no
+        // file to write and the next settle drops the row.
+        if (!stored) return;
+        writeJsonAtomic(
+          `${SESSIONS_DIR}/${item.sessionId}.json`,
+          JSON.parse(stored.doc),
+        );
+        await afterSessionMetadataExport(item.sessionId, stored.rev);
+      });
+      repaired++;
+    }
+    if (pending.length < pageSize) break;
+  }
+  if (repaired > 0)
+    console.log(
+      `[session-metadata] re-exported ${repaired} session file(s) from the catalog`,
+    );
+  return repaired;
 }
 
 export function touchNativeSessionStrict(

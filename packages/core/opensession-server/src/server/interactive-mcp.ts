@@ -23,6 +23,8 @@ import { createPublishMcpServer } from "../agents/slack/publish-tools";
 import { createAskUserMcpServer } from "../agents/slack/ask-tools";
 import { createReposMcpServer } from "../agents/slack/repos-tools";
 import { createPortalsMcpServer } from "./portals-mcp";
+import { createDesktopMcpServer } from "./desktop-mcp";
+import { getSandboxProvider } from "./sandbox";
 import { createWalkthroughMcpServer } from "../agents/slack/walkthrough-tools";
 import { createSlackComposeMcpServer } from "../agents/slack/slack-compose-tools";
 import { createMemoryMcpServer } from "../agents/slack/memory-tools";
@@ -37,6 +39,7 @@ import { createAssetsMcpServer } from "../agents/slack/assets-tools";
 import { createWorkflowsMcpServer } from "../agents/slack/workflow-tools";
 import { createSelfDeployMcpServer } from "./self-deploy";
 import { createWebMcpServer } from "./web-mcp";
+import { callMcpTool } from "./mcp-client";
 import { papercutsEnabledForRepo } from "./papercuts";
 import { defaultRepo, productName } from "./config";
 import { githubCredentialForRun } from "./github-auth";
@@ -65,59 +68,6 @@ import {
 import { makeAskHandler } from "./asks";
 import { createScheduleMcpServer } from "./schedule-mcp";
 import { activeSandboxFor } from "./session-sandbox";
-
-type PreviewAction = "start" | "status" | "stop";
-type PreviewModule = typeof import("./preview");
-
-interface PreviewLifecycleDeps {
-  findSession: typeof findSession;
-  activeSandboxFor: typeof activeSandboxFor;
-  loadPreview: () => Promise<PreviewModule>;
-}
-
-const previewLifecycleDeps: PreviewLifecycleDeps = {
-  findSession,
-  activeSandboxFor,
-  loadPreview: () => import("./preview"),
-};
-
-/**
- * Execute the same Preview lifecycle for an agent tool as the session UI.
- * Sandboxed workspaces must never fall through to host Preview: the host path
- * is a different checkout and cannot observe or control the sandbox service.
- */
-export async function runSessionPreviewAction(
-  sessionId: string,
-  action: PreviewAction,
-  deps: PreviewLifecycleDeps = previewLifecycleDeps,
-) {
-  const session = deps.findSession(sessionId);
-  const worktreeDir = session?.worktreeDir;
-  if (!session || !worktreeDir)
-    throw new Error("this session has no worktree to preview");
-
-  const sandbox = await deps.activeSandboxFor(session, {
-    wake: action === "start",
-  });
-  if (!sandbox && session.sandbox?.sandboxId) {
-    throw new Error(
-      `this session's ${session.sandbox.provider} sandbox is not available`,
-    );
-  }
-
-  const preview = await deps.loadPreview();
-  if (sandbox) {
-    if (action === "start")
-      return preview.startSandboxPreview(sandbox, worktreeDir, sessionId);
-    if (action === "stop")
-      return preview.stopSandboxPreview(sandbox, worktreeDir);
-    return preview.getSandboxPreviewStatus(sandbox, worktreeDir);
-  }
-
-  if (action === "start") return preview.startPreview(worktreeDir);
-  if (action === "stop") return preview.stopPreview(worktreeDir);
-  return preview.getPreviewStatus(worktreeDir);
-}
 
 /** The session's primary repo id, for the papercuts toggle (undefined =
  *  session-only session, which logs under no repo and is always enabled). */
@@ -149,6 +99,31 @@ function papercutsServerFor(
   };
 }
 
+export function editorFixtureGrantUser(
+  session: { createdByLogin?: string | null } | undefined,
+): string | undefined {
+  return session?.createdByLogin || undefined;
+}
+
+function desktopServerFor(sessionId: string): Record<string, unknown> {
+  if (!findSession(sessionId)?.sandbox?.provider) return {};
+  return {
+    "opensession-desktop": createDesktopMcpServer({
+      sessionId,
+      control: async () => {
+        const session = findSession(sessionId);
+        if (!session) return null;
+        const sandbox = await activeSandboxFor(session, { wake: true });
+        if (!sandbox) return null;
+        const provider = getSandboxProvider(sandbox.provider);
+        return provider.desktopControl
+          ? provider.desktopControl(sandbox.id)
+          : null;
+      },
+    }),
+  };
+}
+
 export function interactiveMcpServers(
   user?: string,
   sessionId?: string,
@@ -157,6 +132,9 @@ export function interactiveMcpServers(
   return {
     "opensession-sessions": createSessionsMcpServer({
       createdBy,
+      createdByLogin: sessionId
+        ? findSession(sessionId)?.createdByLogin
+        : undefined,
       isAdmin: true,
       currentSessionId: sessionId,
     }),
@@ -288,6 +266,21 @@ export function interactiveMcpServers(
             hasSandbox: () =>
               Boolean(findSession(sessionId)?.sandbox?.sandboxId),
             runner: () => findSession(sessionId),
+            verifyEditorFixture: (leaseId) => {
+              const session = findSession(sessionId);
+              const grantUser = editorFixtureGrantUser(session);
+              if (!grantUser)
+                throw new Error(
+                  "This session has no creator identity for Tella verification.",
+                );
+              return callMcpTool(
+                "tella-stage",
+                "verify_editor_fixture",
+                { leaseKey: sessionId, leaseId },
+                grantUser,
+                { requireUserGrant: true },
+              );
+            },
             setDefaultPath: async (path, options) => {
               const session = findSession(sessionId);
               if (!session) throw new Error("Session not found.");
@@ -309,6 +302,7 @@ export function interactiveMcpServers(
                 key: options.exclusiveKey,
                 sessionId,
                 path: path || "/",
+                sourceLeaseId: options.sourceLeaseId,
                 ttlMinutes: options.leaseMinutes,
               });
               if (!claim.ok)
@@ -402,6 +396,10 @@ export function interactiveMcpServers(
           // Friction log — log_papercut/list_papercuts, per-repo toggle in
           // Settings → Papercuts (dropped here when the repo opted out).
           ...papercutsServerFor(sessionId, "prompt", createdBy),
+          // The Sandbox desktop for the agent: screenshot, mouse, keyboard.
+          // Only a sandboxed session has one; the person watches the same
+          // screen in the session's Desktop tab.
+          ...desktopServerFor(sessionId),
         }
       : {}),
   };

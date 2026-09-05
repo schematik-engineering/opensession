@@ -39,6 +39,7 @@ import { resolveWorkspaceModelPreset } from "./workspace-model-presets";
 import { getAccountById } from "./claude-accounts";
 import { getCodexAccountById } from "./codex-accounts";
 import { getAcpAccountById } from "./acp-accounts";
+import { getXaiAccountById } from "./xai-accounts";
 import { githubUserLoginForRun } from "./github-auth";
 import { sessionMemoryScopes } from "./session-memory";
 import { sessionRepoIds } from "./session-repos";
@@ -377,6 +378,7 @@ export async function buildSessionEffectiveConfig(
               getAccountById(session.accountId)?.name ??
               getCodexAccountById(session.accountId)?.name ??
               getAcpAccountById(session.accountId)?.name ??
+              getXaiAccountById(session.accountId)?.name ??
               null,
           }
         : null,

@@ -49,7 +49,6 @@ const callbackOwners = {
     "onCloseStaging",
     "onCloseAssets",
     "onCloseTerminal",
-    "onClosePreviewTab",
   ],
   SessionViewerSubagentsBinding: [
     "onOpenSubagent",
@@ -158,7 +157,7 @@ test("duplicate session stays available at the current tip inside a workspace", 
   expect(viewer).toContain("                handleFork();");
   expect(conversation).toContain("void navigation.duplicateSession();");
   expect(viewer).not.toContain("const lastAssistantId = entries.findLast(");
-  expect(send).toContain("? { messageId: draft.forkFrom.messageId }");
+  expect(send).toContain("forkFrom.messageId = draft.forkFrom.messageId;");
 });
 
 test("App passes only SessionViewer navigation availability", async () => {

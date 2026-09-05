@@ -67,6 +67,16 @@ import {
 import { markCodexExhausted, type CodexAccount } from "./codex-accounts";
 import { pickAccount as pickClaudeAccount } from "./claude-accounts";
 import {
+  bindXaiAccount,
+  markXaiExhausted,
+  maskXaiAccount,
+  pickXaiAccount,
+  xaiSubscriptionModelEfforts,
+  type XaiAccount,
+} from "./xai-accounts";
+import { XAI_OAUTH_PROVIDER } from "./xai-provider-id";
+import { enableXaiProxyPayload } from "./xai-payload";
+import {
   enableOpenaiFastMode,
   pickOpenaiAccount,
   buildSeededOpenaiAuth,
@@ -80,7 +90,11 @@ import {
   runToolPolicy,
   readLocalInstructions,
 } from "./run-policy";
-import { buildRunInstructions } from "./run-instructions";
+import {
+  assembleRunSystemPrompt,
+  buildRunInstructions,
+  buildSessionContext,
+} from "./run-instructions";
 import {
   logInjectedContext,
   logStandingContext,
@@ -772,6 +786,43 @@ function contentToTextAndImages(content: unknown): {
 const CODEX_USAGE_LIMIT_CODE_SHAPES =
   /usage_limit_reached|usage_not_included|rate_limit_exceeded|insufficient_quota|usage_quota|exceeded your current quota|GoUsageLimitError|FreeUsageLimitError|OAuth refresh failed for openai-codex/i;
 
+/** SuperGrok shapes: the cli-chat-proxy's quota and rate-limit answers, plus
+ *  a rejected or unrefreshable token ("this account can't serve until someone
+ *  signs in again" is dry-pool semantics for the walk). Never a bare `quota`:
+ *  infrastructure errors like EDQUOT must not read as exhaustion. */
+const XAI_USAGE_LIMIT_SHAPES =
+  /\b429\b|too many requests|rate[ _-]?limit|usage[ _-]?limit|insufficient_quota|exceeded your (?:current )?quota|credits? (?:exhausted|depleted|limit)|out of credits|\b401\b|authentication rejected|invalid_grant|token refresh failed|no usable SuperGrok|no SuperGrok accounts|not currently usable/i;
+
+/** One pool account as the runner's walk sees it, whichever pool it came from. */
+interface PoolAccountRef {
+  id: string;
+  name: string;
+  masked: string;
+  pool: "openai" | typeof XAI_OAUTH_PROVIDER;
+  /** How the pool reads in logs: "codex" or "SuperGrok". */
+  label: string;
+}
+
+function codexPoolRef(account: CodexAccount): PoolAccountRef {
+  return {
+    id: account.id,
+    name: account.name,
+    masked: maskOpenaiAccount(account),
+    pool: "openai",
+    label: "codex",
+  };
+}
+
+function xaiPoolRef(account: XaiAccount): PoolAccountRef {
+  return {
+    id: account.id,
+    name: account.name,
+    masked: maskXaiAccount(account),
+    pool: XAI_OAUTH_PROVIDER,
+    label: "SuperGrok",
+  };
+}
+
 /** Provider-aware usage-limit classification for terminal errors — "this
  *  model's pool can't serve right now", which is exactly what
  *  usageLimitExhausted tells agent-runner's fallback walk. Anthropic runs see
@@ -790,6 +841,9 @@ export function isPiUsageLimitShape(
       isCodexUsageLimitError(message) ||
       CODEX_USAGE_LIMIT_CODE_SHAPES.test(message)
     );
+  }
+  if (providerID === XAI_OAUTH_PROVIDER) {
+    return XAI_USAGE_LIMIT_SHAPES.test(message);
   }
   if (
     isClaudeUsageLimitError(message, true) ||
@@ -1696,6 +1750,7 @@ async function* runPiAttempt(
   if (
     parsed.providerID !== "anthropic" &&
     parsed.providerID !== "openai" &&
+    parsed.providerID !== XAI_OAUTH_PROVIDER &&
     !configuredProvider?.apiKey
   ) {
     yield {
@@ -1806,18 +1861,24 @@ async function* runPiAttempt(
   let mcpRuntime: McpRuntime | undefined;
   let mcpBridge: PiMcpBridge | undefined;
   let sawSettled = false;
-  // pi/openai only: the picked codex account — visible to the catch/terminal
-  // paths so the account walk can rotate off it. Set as soon as the pick
-  // succeeds, BEFORE the seed and refresh-window checks, because those two
-  // failures are exactly the ones worth trying another account for.
-  let pickedOpenai: CodexAccount | undefined;
+  // Pool-backed providers only (pi/openai: Codex pool, pi/xai-oauth: SuperGrok
+  // pool): the picked account — visible to the catch/terminal paths so the
+  // account walk can rotate off it. Set as soon as the pick succeeds, BEFORE
+  // the seed and refresh-window checks, because those two failures are exactly
+  // the ones worth trying another account for.
+  let pickedAccount: PoolAccountRef | undefined;
   // The same account, but only once it is genuinely serving this turn. The
   // SIDELINE keys on this rather than on the pick: markCodexExhausted benches
   // an account for hours, cross-engine, shared with previous runner, and a local
   // auth.json we could not read (or a token inside pi's refresh window) is a
   // fault of this box, not a verdict on the account's usage. Rotating off it
   // is right; benching it globally is not.
-  let sidelineableOpenai: CodexAccount | undefined;
+  let sidelineableAccount: PoolAccountRef | undefined;
+  const sidelineAccount = (account: PoolAccountRef) => {
+    if (account.pool === "openai")
+      markCodexExhausted(account.id, parsed.modelID);
+    else markXaiExhausted(account.id, parsed.modelID);
+  };
   // Has the reader seen replay-unsafe output yet? A rotation replays the whole
   // attempt, so it may only run before model text or tool activity has escaped.
   // `usage_snapshot` does NOT close the walk: Pi emits a zero-token snapshot
@@ -1826,48 +1887,60 @@ async function* runPiAttempt(
   // equivalent gate is `partial.content.length === 0`.)
   let sawStreamedOutput = false;
 
-  /** Another OpenAI account that could serve this turn, or undefined when the
-   *  pool is dry. Both ChatGPT OAuth and standard OpenAI API-key accounts are
-   *  executable. A STRICT pin never rotates: excluding the pinned id would
-   *  make pickOpenaiAccount
-   *  skip its pin branch and widen into the pool, which is the one thing a
-   *  hard pin exists to prevent. */
-  const nextCodexAccount = (): CodexAccount | undefined => {
-    if (!pickedOpenai) return undefined;
+  /** Another account in the same pool that could serve this turn, or
+   *  undefined when the pool is dry. Both ChatGPT OAuth and standard OpenAI
+   *  API-key accounts are executable. A STRICT pin never rotates: excluding
+   *  the pinned id would make the picker skip its pin branch and widen into
+   *  the pool, which is the one thing a hard pin exists to prevent. */
+  const nextPoolAccount = (): PoolAccountRef | undefined => {
+    if (!pickedAccount) return undefined;
     if (opts.accountStrict && opts.accountId) return undefined;
-    const next = pickOpenaiAccount(
-      parsed.modelID,
-      readModelProviderConfig()?.openaiAccounts,
-      opts.accountAffinityKey || journal?.osSessionId || cwd,
-      undefined,
-      accountUser,
-      opts.accountId,
-      opts.accountStrict,
-      new Set([...walk.excluded, pickedOpenai.id]),
-    );
-    if ("error" in next) return undefined;
-    return next;
+    const excluded = new Set([...walk.excluded, pickedAccount.id]);
+    const affinity = opts.accountAffinityKey || journal?.osSessionId || cwd;
+    if (pickedAccount.pool === "openai") {
+      const next = pickOpenaiAccount(
+        parsed.modelID,
+        readModelProviderConfig()?.openaiAccounts,
+        affinity,
+        undefined,
+        accountUser,
+        opts.accountId,
+        opts.accountStrict,
+        excluded,
+      );
+      return "error" in next ? undefined : codexPoolRef(next);
+    }
+    const next = pickXaiAccount({
+      model: parsed.modelID,
+      sessionKey: affinity,
+      user: accountUser,
+      pinnedId: opts.accountId,
+      strict: opts.accountStrict,
+      restrictIds: readModelProviderConfig()?.xaiAccounts,
+      exclude: excluded,
+    });
+    return "error" in next ? undefined : xaiPoolRef(next);
   };
 
   /** Take the rotation, or return false and let the caller surface the
    *  failure. Records the burn, audits the switch and closes this attempt's
    *  audit; runPi replays the attempt on the next account. */
   const takeAccountRotation = (errorText: string): boolean => {
-    if (sawStreamedOutput || !pickedOpenai) return false;
-    const next = nextCodexAccount();
+    if (sawStreamedOutput || !pickedAccount) return false;
+    const next = nextPoolAccount();
     if (!next) return false;
     console.warn(
-      `[pi-runner] usage limit on codex account "${pickedOpenai.name}" ` +
+      `[pi-runner] usage limit on ${pickedAccount.label} account "${pickedAccount.name}" ` +
         `(${parsed.modelID}): retrying this turn on "${next.name}"`,
     );
     audit({
       ...auditBase,
       direction: "out",
       kind: "account_switch",
-      account: maskOpenaiAccount(pickedOpenai),
-      account_switch_to: maskOpenaiAccount(next),
+      account: pickedAccount.masked,
+      account_switch_to: next.masked,
     });
-    walk.excluded.add(pickedOpenai.id);
+    walk.excluded.add(pickedAccount.id);
     walk.rotate = true;
     reachedTerminal = true;
     endTurn({ ok: false, pi_session_id: piSessionId, error: errorText });
@@ -1958,18 +2031,32 @@ async function* runPiAttempt(
       usageCredits: opts.usageCredits,
       excludedOpenaiAccountIds: walk.excluded,
       onAccountEvidence: (evidence) => {
-        pickedOpenai = evidence.pickedOpenai;
-        sidelineableOpenai = evidence.sidelineableOpenai;
+        pickedAccount = evidence.pickedOpenai
+          ? codexPoolRef(evidence.pickedOpenai)
+          : evidence.pickedXai
+            ? xaiPoolRef(evidence.pickedXai)
+            : undefined;
+        sidelineableAccount = evidence.sidelineableOpenai
+          ? codexPoolRef(evidence.sidelineableOpenai)
+          : evidence.sidelineableXai
+            ? xaiPoolRef(evidence.sidelineableXai)
+            : undefined;
       },
       beforeRuntimeLoad: (evidence) => {
+        const picked = evidence.pickedOpenai
+          ? codexPoolRef(evidence.pickedOpenai)
+          : evidence.pickedXai
+            ? xaiPoolRef(evidence.pickedXai)
+            : undefined;
         audit({
           ...auditBase,
           direction: "in",
-          ...(evidence.pickedOpenai
+          ...(picked
             ? {
-                account: maskOpenaiAccount(evidence.pickedOpenai),
-                account_id: evidence.pickedOpenai.id.slice(0, 8),
-                pick_reason: evidence.openaiPickReason,
+                account: picked.masked,
+                account_id: picked.id.slice(0, 8),
+                pick_reason:
+                  evidence.openaiPickReason ?? evidence.xaiPickReason,
               }
             : {}),
           ...(policy.unattended
@@ -1980,12 +2067,14 @@ async function* runPiAttempt(
       },
       dependencies: {
         readOpenaiAccounts: () => readModelProviderConfig()?.openaiAccounts,
+        readXaiAccounts: () => readModelProviderConfig()?.xaiAccounts,
         pickOpenaiAccount,
         buildSeededOpenaiAuth,
         anthropicTransport: piAnthropicTransport,
         buildAnthropicProvider: buildPiAnthropicProvider,
         ensureAnthropicBridge,
         buildThirdPartyProviderPlan: buildPiThirdPartyProviderPlan,
+        bindXaiAccount,
       },
     });
     const { sdk, runtime, model: piModel } = binding;
@@ -2222,10 +2311,8 @@ async function* runPiAttempt(
       repoHost: isScratch ? undefined : cwdRepo?.host,
       localInstructions: readLocalInstructions(cwd),
       inProcessMcp: opts.inProcessMcp,
-      osSessionId: journal?.osSessionId,
-      user,
-      author,
-      githubUserLogin,
+      sandboxed: process.env.OPENSESSION_SANDBOX === "1",
+      hasSession: !!journal?.osSessionId,
       dialOracle:
         resolved?.dial && dialOracleAgent
           ? {
@@ -2251,14 +2338,21 @@ async function* runPiAttempt(
               presetLabel:
                 resolved.workspacePreset?.label || resolved.orchestrator.label,
               mainLabel: piModelLabel(resolved.orchestrator.model),
-              workers: resolved.orchestrator.workerAgents.map((name) => ({
-                agent: name,
-                label: ORCHESTRATOR_WORKER_AGENTS[name]?.label || name,
-                modelLabel:
-                  orchestratorWorkerForBridge(name, parsed.providerID)?.label ||
+              workers: resolved.orchestrator.workerAgents.flatMap((name) => {
+                const worker = orchestratorWorkerForBridge(
                   name,
-              })),
-              tool: "sessions",
+                  parsed.providerID,
+                );
+                return worker
+                  ? [
+                      {
+                        role: ORCHESTRATOR_WORKER_AGENTS[name]?.label || name,
+                        model: toPiModel(worker.model) || worker.model,
+                        modelLabel: worker.label,
+                      },
+                    ]
+                  : [];
+              }),
             }
           : undefined,
     });
@@ -2342,7 +2436,19 @@ async function* runPiAttempt(
         }),
       }),
       systemPromptOverride: (base) =>
-        base ? `${base}\n\n${instructions}` : instructions,
+        assembleRunSystemPrompt({ base, cwd, instructions }),
+    });
+    // What the system prompt leaves out so it stays byte-identical across
+    // sessions (prompt-cache sharing): session link, requester, checkout path.
+    const sessionContext = buildSessionContext({
+      osSessionId: journal?.osSessionId,
+      cwd,
+      isAsk,
+      isScratch,
+      repoHost: isScratch ? undefined : cwdRepo?.host,
+      user,
+      author,
+      githubUserLogin,
     });
     await loader.reload();
 
@@ -2419,6 +2525,16 @@ async function* runPiAttempt(
     // fast mode exposed by the clients.
     if (opts.fastMode && binding.usesOpenaiOAuth) {
       enableOpenaiFastMode(session.agent);
+    }
+    // SuperGrok turns ride the cli-chat-proxy, which rejects several stock
+    // Responses fields (xai-payload.ts). Same hook, no host extension.
+    if (binding.usesXaiProxy) {
+      enableXaiProxyPayload(session.agent, {
+        modelId: parsed.modelID,
+        sessionId: unifiedSessionId || runKey,
+        reasoning: piModel.reasoning,
+        effortCapable: xaiSubscriptionModelEfforts(parsed.modelID).length > 0,
+      });
     }
     // The first complete provider input only exists after Pi has combined its
     // base prompt with Open Session instructions, AGENTS.md, skills and active
@@ -2587,9 +2703,11 @@ async function* runPiAttempt(
       prompt,
       loader.getSkills().skills,
     );
-    const promptForEngine = resumeMissNote
-      ? `${wrapContext(resumeMissNote, "handoff")}\n\n${promptWithSkill}`
-      : promptWithSkill;
+    const promptForEngine = [
+      wrapContext(sessionContext, "session"),
+      ...(resumeMissNote ? [wrapContext(resumeMissNote, "handoff")] : []),
+      promptWithSkill,
+    ].join("\n\n");
     // Injected BELOW runOnModel's choke point, so that call never saw this
     // payload — log it here, exactly as the previous runner runner does for its own
     // same-engine-restart handoff. Re-logging is free: entry ids are
@@ -2981,8 +3099,8 @@ async function* runPiAttempt(
     // other engine's pick) skips it — shared sideline state with previous runner,
     // same per-(account, model) key.
     const sidelineOnUsageLimit = (usageLimit: boolean) => {
-      if (usageLimit && sidelineableOpenai) {
-        markCodexExhausted(sidelineableOpenai.id, parsed.modelID);
+      if (usageLimit && sidelineableAccount) {
+        sidelineAccount(sidelineableAccount);
       }
     };
     let terminal: StreamEvent;
@@ -3062,8 +3180,8 @@ async function* runPiAttempt(
     // stray shape in one of those must not sideline a healthy account for
     // 60 min across both engines. The in-band terminal branches (provider
     // messages only) keep classifier-driven sidelines.
-    if (e?.usageLimitExhausted === true && sidelineableOpenai) {
-      markCodexExhausted(sidelineableOpenai.id, parsed.modelID);
+    if (e?.usageLimitExhausted === true && sidelineableAccount) {
+      sidelineAccount(sidelineableAccount);
     }
     // Rotate rather than end the turn. Gated on the explicit flag for the
     // same reason the sideline above is: this catch also sees non-provider

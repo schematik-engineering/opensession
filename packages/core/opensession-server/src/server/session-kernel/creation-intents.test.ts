@@ -435,7 +435,11 @@ describe("creation opening intents", () => {
         pollMs: 1,
       }).catch((error) => error);
       expect(isCreationEffectPendingError(timeout)).toBe(true);
-      expect(timeout).toMatchObject({ retryable: true });
+      expect(timeout).toMatchObject({
+        retryable: true,
+        sessionId: opening.sessionId,
+        effectId: `opening:${opening.openingPromptEntryId}`,
+      });
       await expect(
         requestCreationOpening(opening, {
           kernel,

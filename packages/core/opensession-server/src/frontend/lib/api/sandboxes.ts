@@ -18,7 +18,23 @@ export interface SessionSandboxStatus {
   cwd?: string | null;
   canPause?: boolean;
   canResume?: boolean;
+  canDesktop?: boolean;
   logs?: { setup?: string; resume?: string };
+}
+
+export interface SandboxDesktopLink {
+  url: string;
+  expiresAt?: number;
+}
+
+/** Mints a one-viewer desktop URL. Open it in a new tab; never persist it. */
+export function openSandboxDesktop(
+  sessionId: string,
+): Promise<SandboxDesktopLink> {
+  return request(`/sessions/${encodeURIComponent(sessionId)}/sandbox/desktop`, {
+    method: "POST",
+    label: "Failed to open the sandbox desktop",
+  });
 }
 
 export function fetchSessionSandbox(
@@ -33,14 +49,11 @@ export function sandboxAction(
   sessionId: string,
   action: "pause" | "resume" | "recreate",
 ): Promise<SessionSandboxStatus> {
-  return request(
-    `/sessions/${encodeURIComponent(sessionId)}/sandbox/${action}`,
-    {
-      method: "POST",
-      ...(action === "recreate" ? { body: { confirm: true } } : {}),
-      label: `Failed to ${action} sandbox`,
-    },
-  );
+  const path = `/sessions/${encodeURIComponent(sessionId)}/sandbox/${action}`;
+  const label = `Failed to ${action} sandbox`;
+  return action === "recreate"
+    ? request(path, { method: "POST", body: { confirm: true }, label })
+    : request(path, { method: "POST", label });
 }
 
 export interface SandboxConnectionsResponse {

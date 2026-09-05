@@ -3,12 +3,17 @@ import { createRoot } from "react-dom/client";
 import { MotionConfig } from "motion/react";
 import { EffectRegistryProvider } from "./components/EffectRegistryProvider";
 import { AgentationFeedback } from "./components/AgentationFeedback";
-import { PreviewWait, matchPreviewWaitRoute } from "./components/PreviewWait";
 import { TranscriptMotionLab } from "./components/TranscriptMotionLab";
 import { transcriptMotionFixtureOptions } from "./lib/transcript-motion-scenarios";
 import { TooltipProvider } from "./ui/tooltip";
 import { AppContent } from "./AppContent";
 import type { AppProps } from "./lib/app-types";
+
+declare global {
+  interface Window {
+    __OPENSESSION_DEMO__?: boolean;
+  }
+}
 
 // Order matters: base.css (tokens, reset, platform chrome) then legacy.css,
 // which is now empty and stays imported so the "never add here" contract keeps
@@ -27,11 +32,8 @@ export function App(props: AppProps = {}) {
 // The marketing-site preview imports this component into its own fixture root.
 // Keep the ordinary SPA bootstrap intact for every production build, including
 // servers that still have this file configured as the bundle entry.
-const embeddedDemo = Boolean(Reflect.get(window, "__OPENSESSION_DEMO__"));
+const embeddedDemo = Boolean(window.__OPENSESSION_DEMO__);
 if (!embeddedDemo) {
-  // The preview interstitial renders INSTEAD of the app (and outside UserGate —
-  // it must work in cold-storage contexts like the iOS PWA's in-app browser).
-  const previewWaitSessionId = matchPreviewWaitRoute(location.pathname);
   const transcriptMotionFixture = transcriptMotionFixtureOptions(
     location.pathname,
     location.search,
@@ -51,8 +53,6 @@ if (!embeddedDemo) {
           speed={transcriptMotionFixture.speed}
           profile={transcriptMotionFixture.profile}
         />
-      ) : previewWaitSessionId ? (
-        <PreviewWait sessionId={previewWaitSessionId} />
       ) : (
         <TooltipProvider>
           <>

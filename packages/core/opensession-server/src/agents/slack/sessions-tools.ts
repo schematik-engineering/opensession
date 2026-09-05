@@ -44,7 +44,6 @@ import {
   isWorkerActor,
   workerActor,
 } from "../../server/session-actors";
-import { writeJsonAtomic } from "../../server/shared/atomic-write";
 import { userMatchesAny } from "../../server/shared/user-mappings";
 import { migrateSessionEngine } from "../../server/session-model-migration";
 import { resolveSessionRepoContext } from "../../server/session-repos";
@@ -54,6 +53,8 @@ import type { NativeSessionFile, TranscriptEntry } from "../../server/types";
 export interface SessionsToolContext {
   /** Display name credited when this session messages/creates others. */
   createdBy: string;
+  /** Verified login inherited by child sessions; never supplied by tool args. */
+  createdByLogin?: string;
   /** Trusted user — gates the control tools (answer/send/cancel/create). */
   isAdmin: boolean;
   /** The session using these tools, so worker sessions can report back to it. */
@@ -359,12 +360,12 @@ function defaultReadSessionFile(id: string): Partial<NativeSessionFile> | null {
 }
 
 /**
- * Persist spawnDepth on the child's session file. The file is first written at
- * the opening run's `init` event (opensession.ts persist(), which builds it from
- * scratch — anything written earlier would be clobbered), so poll until it
- * exists and then MERGE the field; every later update goes through
- * touchNativeSession-style merges, so it sticks. The in-memory depth map
- * (below) covers the guard in the meantime.
+ * Persist spawnDepth on the child's session. The session document is first
+ * committed at the opening run's `init` event (opensession.ts persist(), which
+ * builds it from scratch — anything written earlier would be clobbered), so
+ * poll until its derived file exists and then MERGE the field through the
+ * metadata facade, the only writer of session documents. The in-memory depth
+ * map (below) covers the guard in the meantime.
  */
 async function defaultStampSpawnDepth(
   id: string,
@@ -376,8 +377,16 @@ async function defaultStampSpawnDepth(
       try {
         const data = JSON.parse(readFileSync(path, "utf-8"));
         if (data?.id) {
-          if (data.spawnDepth !== depth)
-            writeJsonAtomic(path, { ...data, spawnDepth: depth });
+          if (data.spawnDepth !== depth) {
+            // Lazy: session-cache pulls in the run stack, which this MCP
+            // module must not load at import time.
+            const { updateSessionFile } =
+              await import("../../server/session-cache");
+            await updateSessionFile(id, (current) => ({
+              ...current,
+              spawnDepth: depth,
+            }));
+          }
           return;
         }
       } catch {}
@@ -446,15 +455,7 @@ export interface SpawnTaskArgs {
   /** Give the child its own worktree/branch instead of sharing the parent's. */
   isolatedWorktree?: boolean;
   /** true = config default provider; or an explicit configured provider id. */
-  sandbox?:
-    | boolean
-    | "docker"
-    | "daytona"
-    | "e2b"
-    | "box"
-    | "modal"
-    | "microvm"
-    | "lambda-microvm";
+  sandbox?: boolean | "daytona" | "box";
 }
 
 export type SpawnTaskResult =
@@ -529,6 +530,7 @@ export async function spawnTaskImpl(
   const { id, createdBy, createdAt } = await deps.control.createSession({
     requestId,
     requestScope: caller || ctx.createdBy,
+    createdByLogin: ctx.createdByLogin,
     prompt,
     repo: args.repo,
     mode,
@@ -1164,18 +1166,7 @@ export function createSessionsMcpServer(
               "Code mode: give the worker its own worktree and branch instead of sharing the parent workspace's worktree, while keeping child/report-back linkage. Use when fanning work out across separate workspaces so each child produces its own diff. Branch is generated from the prompt when omitted.",
             ),
           sandbox: z
-            .union([
-              z.boolean(),
-              z.enum([
-                "docker",
-                "daytona",
-                "e2b",
-                "box",
-                "modal",
-                "microvm",
-                "lambda-microvm",
-              ]),
-            ])
+            .union([z.boolean(), z.enum(["daytona", "box"])])
             .optional()
             .describe(
               "Run the session in an isolated sandbox: true = the server's default provider, or an explicit provider id (must be configured server-side, else the create fails with a clear error). Omit for a host run.",
@@ -1211,15 +1202,7 @@ export function createSessionsMcpServer(
             reportBack?: boolean;
             standalone?: boolean;
             isolatedWorktree?: boolean;
-            sandbox?:
-              | boolean
-              | "docker"
-              | "daytona"
-              | "e2b"
-              | "box"
-              | "modal"
-              | "microvm"
-              | "lambda-microvm";
+            sandbox?: boolean | "daytona" | "box";
             accountId?: string;
             forkFrom?: { sourceId: string; messageId?: string };
           },
@@ -1248,6 +1231,7 @@ export function createSessionsMcpServer(
                 args,
               ),
               requestScope: ctx.currentSessionId || ctx.createdBy,
+              createdByLogin: ctx.createdByLogin,
               prompt,
               repo: args.repo,
               mode: args.mode,
@@ -1365,18 +1349,7 @@ export function createSessionsMcpServer(
               "'code' (default) can edit files / open PRs; 'ask' is read-only.",
             ),
           sandbox: z
-            .union([
-              z.boolean(),
-              z.enum([
-                "docker",
-                "daytona",
-                "e2b",
-                "box",
-                "modal",
-                "microvm",
-                "lambda-microvm",
-              ]),
-            ])
+            .union([z.boolean(), z.enum(["daytona", "box"])])
             .optional()
             .describe(
               "Run the child in an isolated sandbox: true = the server's default provider, or an explicit configured provider id.",

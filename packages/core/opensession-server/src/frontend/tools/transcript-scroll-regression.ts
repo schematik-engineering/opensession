@@ -102,7 +102,7 @@ const APP = app;
 const lease = await acquireCdpBrowser();
 const results: ViewportResult[] = [];
 
-function assert(condition: unknown, message: string): asserts condition {
+function assert<T>(condition: T, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
@@ -111,9 +111,13 @@ function turnOf(anchorId: string): {
   role: "user" | "assistant";
   turn: number;
 } | null {
-  const match = anchorId.match(/^hydration-(user|assistant)-(\d+)/);
+  // Mid-scroll the probe can land on a virtualised range row rather than a
+  // mounted entry; its key is `range:` plus the id of the entry that opens
+  // the range, which is the turn a reader at that spot is looking at.
+  const match = anchorId.match(/^(?:range:)?hydration-(user|assistant)-(\d+)/);
   if (!match) return null;
-  return { role: match[1] as "user" | "assistant", turn: Number(match[2]) };
+  const role = match[1] === "user" ? "user" : "assistant";
+  return { role, turn: Number(match[2]) };
 }
 
 function drift(before: Snapshot, after: Snapshot): number {
@@ -183,7 +187,7 @@ try {
             response.exceptionDetails.text ||
             "browser evaluation failed",
         );
-      return response.result.value as T;
+      return response.result.value;
     };
     const settle = () =>
       evaluate<void>(
@@ -543,18 +547,30 @@ try {
           type: "touchEnd",
           touchPoints: [],
         });
+        const touchEndedAt = await evaluate<number>(`performance.now()`);
         let previousTop = await readScrollTop();
         let moving = 0;
-        for (let index = 0; index < 20 && moving < 2; index++) {
+        let lateMomentum = false;
+        for (let index = 0; index < 30 && !lateMomentum; index++) {
           await Bun.sleep(30);
-          const top = await readScrollTop();
-          if (top !== previousTop) moving++;
-          previousTop = top;
+          const sample = await evaluate<{ top: number; at: number }>(`(() => {
+            const scroller = document.querySelector("[data-transcript-motion-scroller]");
+            return { top: scroller.scrollTop, at: performance.now() };
+          })()`);
+          if (sample.top !== previousTop) {
+            moving++;
+            lateMomentum = sample.at - touchEndedAt > 250;
+          }
+          previousTop = sample.top;
         }
         assert(moving >= 2, "touch fling produced no momentum");
-        // The momentum keeps carrying the reader toward history, so grow a
-        // reply well above where they are now: it must still be above them
-        // when they stop, or there is nothing to correct.
+        assert(
+          lateMomentum,
+          "touch fling ended before delayed hydration could be tested",
+        );
+        // Hydration can arrive hundreds of milliseconds after touchend. Grow
+        // above the reader only once momentum has crossed that delay, so a
+        // touchend-only settle window cannot make this test pass by accident.
         const midFling = await probe.pick();
         const midTurn = midFling ? turnOf(midFling.id) : null;
         assert(

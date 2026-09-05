@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect";
 import type { BrowserSignalStreams } from "./effect-browser-events";
 import { browserSignalStreams } from "./effect-browser-events";
-import { makeEffectLifecycle, type EffectLifecycle } from "./effect-lifecycle";
+import * as EffectLifecycle from "./effect-lifecycle";
 import { ARCHIVED_POLL_MS } from "./session-list-state";
 
 type SessionListFiber =
@@ -16,15 +16,16 @@ export interface SessionListRuntimeOptions {
   readonly pollInterval: number;
   readonly loadArchived: boolean;
   readonly loading: boolean;
-  readonly pollLive: () => Promise<void>;
-  readonly pollArchived: () => Promise<void>;
+  readonly pollLive: (signal: AbortSignal) => Promise<void>;
+  readonly pollArchived: (signal: AbortSignal) => Promise<void>;
 }
 
 export interface SessionListRuntime {
   readonly configure: (options: SessionListRuntimeOptions) => void;
   readonly start: () => () => void;
   readonly refresh: () => void;
-  readonly invalidate: (action: () => void) => void;
+  readonly refreshArchived: () => void;
+  readonly invalidate: (options?: { refreshArchived?: boolean }) => void;
 }
 
 const NO_OPTIONS: SessionListRuntimeOptions = {
@@ -39,14 +40,15 @@ const NO_OPTIONS: SessionListRuntimeOptions = {
 export function makeSessionListRuntime({
   streams = browserSignalStreams,
   isVisible = () => document.visibilityState !== "hidden",
-  makeLifecycle = () => makeEffectLifecycle<SessionListFiber>(),
+  makeLifecycle = () => EffectLifecycle.makeEffectLifecycle<SessionListFiber>(),
 }: {
   streams?: BrowserSignalStreams;
   isVisible?: () => boolean;
-  makeLifecycle?: () => EffectLifecycle<SessionListFiber>;
+  makeLifecycle?: () => EffectLifecycle.EffectLifecycle<SessionListFiber>;
 } = {}): SessionListRuntime {
   let options = NO_OPTIONS;
-  let lifecycle: EffectLifecycle<SessionListFiber> | null = null;
+  let lifecycle: EffectLifecycle.EffectLifecycle<SessionListFiber> | null =
+    null;
   let lifecycleId = 0;
 
   const visible = isVisible;
@@ -56,7 +58,7 @@ export function makeSessionListRuntime({
     const current = lifecycleId;
     active.run(
       "live-request",
-      Effect.tryPromise(() => options.pollLive()).pipe(
+      Effect.tryPromise(options.pollLive).pipe(
         Effect.catch(() => Effect.void),
         Effect.andThen(
           Effect.sync(() => {
@@ -67,14 +69,18 @@ export function makeSessionListRuntime({
       ),
     );
   };
-  const runArchived = () => {
+  const runArchived = (force = false) => {
     const active = lifecycle;
-    if (!active || !visible() || !options.loadArchived || options.loading)
+    if (
+      !active ||
+      !visible() ||
+      (!force && (!options.loadArchived || options.loading))
+    )
       return;
     const current = lifecycleId;
     active.run(
       "archived-request",
-      Effect.tryPromise(() => options.pollArchived()).pipe(
+      Effect.tryPromise(options.pollArchived).pipe(
         Effect.catch(() => Effect.void),
         Effect.andThen(
           Effect.sync(() => {
@@ -95,6 +101,12 @@ export function makeSessionListRuntime({
       ),
     );
   };
+  const refresh = () => {
+    lifecycle?.cancel("live-fallback");
+    lifecycle?.cancel("archived-fallback");
+    runLive();
+    runArchived();
+  };
 
   return {
     configure(next) {
@@ -111,6 +123,7 @@ export function makeSessionListRuntime({
       options = next;
       if ((pollChanged || intervalChanged) && lifecycle) {
         lifecycle.cancel("live-fallback");
+        if (pollChanged) lifecycle.cancel("live-request");
         runLive();
       }
       if (shouldStopArchived) {
@@ -143,14 +156,17 @@ export function makeSessionListRuntime({
         active.stop();
       };
     },
-    refresh() {
-      lifecycle?.cancel("live-fallback");
+    refresh,
+    refreshArchived() {
       lifecycle?.cancel("archived-fallback");
-      runLive();
-      runArchived();
+      runArchived(true);
     },
-    invalidate(action) {
-      lifecycle?.sleep("invalidation-debounce", 250, action);
+    invalidate(invalidationOptions = {}) {
+      lifecycle?.sleep("invalidation-debounce", 250, () => {
+        refresh();
+        if (invalidationOptions.refreshArchived && !options.loadArchived)
+          runArchived(true);
+      });
     },
   };
 }

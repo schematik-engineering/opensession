@@ -154,9 +154,14 @@ from the verified actor and request id. Every opening prompt enters a durable di
 announced. Create retries and boot recovery share one request-derived
 prompt-entry id: whichever path runs first adopts that dispatch, so they cannot
 launch two opening turns. Creation is owned by the deterministic target session,
-not a person-wide mailbox. Command admission completes once the session and
-opening dispatch are durable, while the opening run continues under generation
-fencing. A retried create rebuilds
+not a person-wide mailbox. Once the create dispatch and setup plan are durable,
+the session file is written and announced before credential, branch and
+attachment effects run, so an accepted create is visible in every client while
+its workspace is prepared. The session is held busy until the opening turn takes
+run admission, so a prompt sent meanwhile queues behind the opening instead of
+starting a turn in a worktree that does not exist yet. Command admission
+completes at that announce, while environment preparation and the opening run
+continue under the actor and generation fencing. A retried create rebuilds
 its full environment plan from the deterministic id and original request. The actor's write-once setup plan persists nondeterministic branch and workspace
 choices before those resources are created, plus the serializable
 `ResolvedCreate` decisions (model, sandbox, MCP scope and assembled opening
@@ -372,9 +377,50 @@ The following public compatibility modules delegate writes to SessionKernel:
 - `session-control-wiring.ts`
 - `ws-handlers.ts`
 
-`updateSessionFile` remains the session JSON compatibility facade, but its
-per-session serialization belongs to the kernel. Direct session JSON writes
-outside that facade are rejected by a structural test.
+`updateSessionFile` is the one session metadata writer. The document (title,
+model, workspace, activity, PR refs, and every other `NativeSessionFile`
+field) is an actor record: the gateway reads it with `metadata get`, applies
+the field-scoped mutator, and commits with `metadata put`, a compare-and-set on
+`rev` with request-id replay. A conflict returns the committed document so the
+mutator re-applies on top of it. The per-session gateway mutex only keeps one
+process from racing itself; the actor's revision check is the authority.
+
+Every commit is projected into `session_kernel_metadata_catalog` in the central
+database in the same lane pass (`SessionKernelStoreHost.settleSessionMetadataCatalog`).
+The catalog is the only multi-session read surface for metadata: list
+rebuilds page it, and `pending_exports` is a bounded work index. Nothing
+walks the placement catalog to find documents.
+
+`<sessions dir>/<id>.json` is a derived export written after the commit for
+out-of-process readers (scripts, run hosts) and for this process's
+synchronous detail reads. Async detail reads (`findSessionAsync`, so every
+WebSocket handler and detail route) come from the catalog instead:
+`readNativeSessionAsync` asks `metadata catalog_get`, one indexed lookup in
+the central database that never opens the session's actor and is never behind
+the file, and falls back to the file only for a session the catalog has not
+seen. Agents run inside the gateway and read the derived file directly; none
+of them may write it (the `spawn_task` depth stamp commits through
+`updateSessionFile`), and the ownership test scans `src/agents` for writers.
+The gateway confirms each export with `metadata
+exported`; a crash in between leaves `exported_rev < rev`, and boot repairs
+exactly those sessions (`reconcileSessionMetadataExports`) instead of
+scanning the directory. A session written before the actor owned metadata
+seeds from its file on its first write. Direct session JSON writes outside
+the facade are rejected by a structural test.
+
+Historical files are projected into the catalog once by an operator:
+`bun scripts/seed-session-metadata-catalog.ts` runs online against the live
+kernel service, inserts a row for every file that has none (`metadata
+seed_catalog`, central only, already exported, no actor database opened),
+verifies coverage, and marks the catalog complete. From then on a cold list
+rebuild pages `catalog_page` from the central database instead of reading
+every session file (`catalogNativeSessionRows` in `session-cache.ts`); the
+directory scan remains the fallback while the catalog is incomplete or
+unreadable. Boot primes the list index this way right after the actor
+starts (`primeSessionListIndex`), before any boot step or route reads the
+list, and only then builds the Slack thread index from that snapshot
+(`ensureSlackLinkIndex`). A seeded session's first real write commits the
+next revision from the file and supersedes the seeded row.
 
 The transcript database keeps its own `changeSeq`, which is the client replay
 cursor. SessionKernel also records lifecycle and metadata changes in its own
@@ -423,6 +469,29 @@ The existing session-list cache, list snapshots, search index, and workspace
 summaries are read projections. They may be rebuilt or served stale while a
 refresh runs. Admission and recovery consult SessionKernel and the engine
 control plane, never those projections.
+
+A metadata commit publishes one row, not a whole-list invalidation. Web
+clients send `sessions_subscribe` with the sidebar query they render; the
+gateway evaluates the changed session against each distinct subscribed scope
+(its workspace or worktree group and parent chain, from the list index) and
+sends `session_row` or `session_row_removed` only to the sockets whose lens
+shows it, coalesced per session (`session-row-events.ts`). The cost of a write
+is O(distinct scopes) and a few hundred bytes per socket.
+
+Changes that bypass the metadata document publish rows the same way.
+`publishSessionChange(sessionId)` refreshes one index row from the current
+document and overlays (title, status and review overrides, the archive
+registry, a PR link, a generated title, a run starting or settling through
+`session-list-runtime-sync`) and publishes it. PR state lives in the PR cache,
+so a merge, close, review or webhook calls `publishSessionRowsForBranch`,
+which finds the live rows on that branch, its `-os-review` checkout and the
+members of a PR workspace whose head it is through the list index's `branch`
+column, and publishes exactly those. `sessions_invalidated` is now reserved
+for changes with no row to name: bulk archive, boot recovery, auth changes,
+integration reloads, and the fallback while the live index has no coverage.
+The client's slow fallback poll and reconnect refetch heal a lost frame either
+way. `scripts/load-control-plane.ts` measures this; see
+`docs/control-plane-load.md`.
 
 Transcript clients already reconnect by durable `changeSeq`. Current user
 entries also carry the stable source delivery ids that formed the turn, so
