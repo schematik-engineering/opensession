@@ -59,7 +59,7 @@ describe("remote engine credential projection", () => {
       "readRemoteState(provider, sandboxId)?.repoId",
     );
     expect(projection).toContain("getRepo(repoId)");
-    expect(projection).toContain("sandboxGithubAuth(");
+    expect(projection).toContain("githubServiceCredentialEnv(");
     expect(projection).not.toContain("git remote get-url origin");
   });
 
@@ -72,7 +72,7 @@ describe("remote engine credential projection", () => {
     expect(projection).toContain(
       "driver.writeFile(githubAuthPath, JSON.stringify(githubAuth))",
     );
-    expect(projection).not.toContain("if (githubAuth.GH_TOKEN)");
+    expect(projection).toContain("if (githubAuth.GH_TOKEN)");
     expect(source).toContain("[GITHUB_RUN_AUTH_FILE_ENV]: githubAuthPath");
   });
 

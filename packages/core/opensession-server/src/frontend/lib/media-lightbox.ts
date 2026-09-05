@@ -114,7 +114,8 @@ let nextLightboxId = 0;
 let host: ((request: LightboxRequest) => void) | null = null;
 
 export function mediaElement(origin?: Element | null): HTMLElement | undefined {
-  if (!(origin instanceof HTMLElement)) return undefined;
+  if (typeof HTMLElement === "undefined" || !(origin instanceof HTMLElement))
+    return undefined;
   if (origin.matches("img, video")) return origin;
   return origin.querySelector<HTMLElement>("img, video") || origin;
 }

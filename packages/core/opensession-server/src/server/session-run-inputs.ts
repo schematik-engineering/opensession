@@ -139,7 +139,9 @@ export async function resolveSessionRunInputs(
     mcpServersSource: mcpServers === undefined ? "all" : source,
     deniedTools: isAutomationSession ? automationDeniedTools() : undefined,
     user: isAutomationSession ? undefined : opts.user,
-    mcpGrantUser: session.createdByLogin || undefined,
+    mcpGrantUser: isAutomationSession
+      ? undefined
+      : session.createdByLogin || undefined,
     inProcessMcpBranch: sessionInProcessMcpBranch(session),
     sessionNote: !isAutomationSession,
   };
