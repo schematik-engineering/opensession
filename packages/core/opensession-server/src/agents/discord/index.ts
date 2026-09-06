@@ -598,6 +598,13 @@ export class DiscordAgent implements AgentModule {
             user: message.author!,
             onProgress: (text) =>
               this.requireRest().editMessage(outputChannel, status.id, text),
+            onSessionCreated: (sessionId) =>
+              this.requireRest().sendMessage(
+                outputChannel,
+                `Follow this session in OpenSession: ${sessionLink(sessionId)}`,
+                undefined,
+                messageNonce(message.id, "session-link"),
+              ),
           });
           await this.finishMessage(
             outputChannel,
@@ -745,6 +752,11 @@ export class DiscordAgent implements AgentModule {
                 interaction.token,
                 text,
               ),
+            onSessionCreated: (sessionId) =>
+              this.requireRest().editOriginalInteraction(
+                interaction.token,
+                `OpenSession is working. Follow it here: ${sessionLink(sessionId)}`,
+              ),
           });
           await this.finishInteraction(interaction.token, result);
           this.state.markProcessed(interaction.id);
@@ -826,6 +838,7 @@ export class DiscordAgent implements AgentModule {
     user: DiscordUser;
     timeoutMs?: number;
     onProgress: (text: string) => Promise<unknown>;
+    onSessionCreated?: (sessionId: string) => Promise<unknown>;
   }): Promise<string> {
     const control = this.requireControl();
     let conversation = this.state.conversation(input.key);
@@ -929,6 +942,11 @@ export class DiscordAgent implements AgentModule {
         updatedAt: new Date().toISOString(),
         openingEventId: input.eventId,
       });
+      // Post the link as soon as the session exists so the requester can
+      // follow a long run before the first answer lands.
+      await input.onSessionCreated?.(sessionId).catch((error) => {
+        console.warn(`[discord] session link post failed: ${safeError(error)}`);
+      });
     }
 
     console.log(
@@ -992,7 +1010,7 @@ export class DiscordAgent implements AgentModule {
           .find((entry) => entry.type === "tool_use")?.toolName;
         const elapsed = Math.max(1, Math.floor((Date.now() - started) / 1_000));
         await onProgress(
-          `OpenSession is ${summary.state.replace("_", " ")} (${elapsed}s)${latestTool ? ` — ${latestTool}` : ""}…`,
+          `OpenSession is ${summary.state.replace("_", " ")} (${elapsed}s)${latestTool ? ` — ${latestTool}` : ""}…\nFollow it here: ${sessionLink(sessionId)}`,
         ).catch(() => {});
         lastProgress = Date.now();
       }

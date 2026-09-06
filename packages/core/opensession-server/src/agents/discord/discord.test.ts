@@ -470,6 +470,7 @@ describe("Discord agent", () => {
     const statePath = join(tempDir(), "state.json");
     const state = new DiscordStateStore(statePath);
     const edits: string[] = [];
+    const sends: Array<{ channelId: string; content: string }> = [];
     const creates: any[] = [];
     const deliveries: Array<{ prompt: string; user?: string }> = [];
     const parentChannel = "1542925450790305908";
@@ -549,11 +550,10 @@ describe("Discord agent", () => {
         type: 11,
         parent_id: parentChannel,
       }),
-      sendMessage: async (channelId: string, content: string) => ({
-        id: "status",
-        channel_id: channelId,
-        content,
-      }),
+      sendMessage: async (channelId: string, content: string) => {
+        sends.push({ channelId, content });
+        return { id: "status", channel_id: channelId, content };
+      },
       editMessage: async (
         _channelId: string,
         _messageId: string,
@@ -620,6 +620,11 @@ describe("Discord agent", () => {
       sandbox: "docker",
       requestId: `discord:${event.id}:create`,
     });
+    const linkPost = sends.find((send) =>
+      send.content.startsWith("Follow this session in OpenSession:"),
+    );
+    expect(linkPost?.channelId).toBe(threadChannel);
+    expect(linkPost?.content).toContain("/session/os-discord-1");
     expect(creates[0].prompt).toContain("use Grok");
     expect(creates[0].prompt).toContain(
       "schematik production health: agent failure rate 32%",
