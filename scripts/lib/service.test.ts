@@ -333,7 +333,7 @@ describe.skipIf(!onServiceHost)("launchd plist", () => {
     expect(launcher).toContain("export OPENSESSION_EXECUTOR=0");
     expect(launcher).toContain("export OPENSESSION_PI_DETACH=0");
     expect(launcher).toMatch(
-      /exec \S*bun run packages\/core\/opensession-server\/opensession\.ts/,
+      /exec \S*bun run packages\/core\/opensession-server\/src\/server\/gateway-supervisor\.ts/,
     );
   });
 

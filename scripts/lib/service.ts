@@ -390,10 +390,12 @@ async function removeStaleSocketUnit(
  * Compiled-binary install: the binary is the server behind `server`, and the
  * unit runs it through the shim symlink (BIN_DIR/opensession) so `opensession
  * update` can repoint it without re-rendering the unit. The sharp sidecar
- * resolves via the binary's realpath, not PATH.
+ * resolves via the binary's realpath, not PATH. A compiled server binds PORT
+ * itself and does not inherit the systemd socket.
  *
- * Source install: `bun run packages/core/opensession-server/opensession.ts`
- * from the checkout.
+ * Source install: run gateway-supervisor.ts from the checkout. Starting the
+ * application entry directly would race the systemd socket that the
+ * supervisor is meant to inherit and fail with EADDRINUSE.
  */
 function serverExec(compiled = isCompiledBinary()): {
   cmd: string;
@@ -402,7 +404,7 @@ function serverExec(compiled = isCompiledBinary()): {
   if (compiled) return { cmd: `${SHIM_PATH} server`, binDir: BIN_DIR };
   const bun = bunPath();
   return {
-    cmd: `${bun} run packages/core/opensession-server/opensession.ts`,
+    cmd: `${bun} run packages/core/opensession-server/src/server/gateway-supervisor.ts`,
     binDir: bun.replace(/\/bun$/, ""),
   };
 }
@@ -530,12 +532,7 @@ export async function renderUnit(
   const exec = serverExec(compiled);
   let unit = (await Bun.file(template).text())
     .replace(/^WorkingDirectory=.*$/m, `WorkingDirectory=${serviceWorkdir()}`)
-    .replace(
-      /^ExecStart=.*$/m,
-      compiled
-        ? `ExecStart=${exec.cmd}`
-        : `ExecStart=${bunPath()} run packages/core/opensession-server/src/server/gateway-supervisor.ts`,
-    )
+    .replace(/^ExecStart=.*$/m, `ExecStart=${exec.cmd}`)
     .replace(
       /^Environment="PATH=.*"$/m,
       `Environment="PATH=${servicePath(exec.binDir)}"`,
