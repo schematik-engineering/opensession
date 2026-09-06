@@ -60,6 +60,14 @@ describe("gateway supervisor", () => {
     expect(gatewayControlSocketPath({})).toBe(
       "/run/opensession-gateway/control.sock",
     );
+    expect(gatewayControlSocketPath({ HOME: "/Users/runner" })).toBe(
+      "/Users/runner/.opensession/deploy/control.sock",
+    );
+    expect(
+      gatewayControlSocketPath({
+        OPENSESSION_DEPLOY_STATE: "/tmp/os-deploy",
+      }),
+    ).toBe("/tmp/os-deploy/control.sock");
     expect(
       gatewayControlSocketPath({
         RUNTIME_DIRECTORY: "/run/user/1001/opensession-gateway",

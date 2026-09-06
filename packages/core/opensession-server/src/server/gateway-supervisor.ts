@@ -3,6 +3,7 @@
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -10,7 +11,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "fs";
-import { join, resolve } from "path";
+import { dirname, join, resolve } from "path";
 import {
   createGatewayTcpProxyMetrics,
   startGatewayTcpProxy,
@@ -23,9 +24,10 @@ import { publishGatewayBackendPort } from "./gateway-routing";
  * Where the supervisor listens for handoff commands. systemd hands a unit
  * with `RuntimeDirectory=` its directory through RUNTIME_DIRECTORY:
  * /run/opensession-gateway for the system service, and
- * $XDG_RUNTIME_DIR/opensession-gateway for a rootless user install. The fixed
- * /run path exists only on the former, so a user service that assumed it died
- * at boot with ENOENT and the installer reported a server that never came up.
+ * $XDG_RUNTIME_DIR/opensession-gateway for a rootless user install. launchd
+ * has no RuntimeDirectory, so a Mac source install falls back to
+ * ~/.opensession/deploy — the fixed /run path does not exist there, and the
+ * installer reported a server that never came up.
  */
 export function gatewayControlSocketPath(
   env: Record<string, string | undefined> = process.env,
@@ -34,7 +36,11 @@ export function gatewayControlSocketPath(
     return env.OPENSESSION_GATEWAY_CONTROL_SOCKET;
   // Several RuntimeDirectory= entries arrive colon-separated; ours is one.
   const runtimeDir = env.RUNTIME_DIRECTORY?.split(":")[0];
-  return `${runtimeDir || "/run/opensession-gateway"}/control.sock`;
+  if (runtimeDir) return `${runtimeDir}/control.sock`;
+  if (env.OPENSESSION_DEPLOY_STATE)
+    return join(env.OPENSESSION_DEPLOY_STATE, "control.sock");
+  if (env.HOME) return join(env.HOME, ".opensession/deploy", "control.sock");
+  return "/run/opensession-gateway/control.sock";
 }
 
 export const GATEWAY_CONTROL_SOCKET = gatewayControlSocketPath();
@@ -1062,6 +1068,7 @@ export function readGatewayHandoffTransaction(
 function serveControl(
   supervisor: GatewaySupervisor,
 ): ReturnType<typeof Bun.listen> {
+  mkdirSync(dirname(GATEWAY_CONTROL_SOCKET), { recursive: true, mode: 0o700 });
   if (existsSync(GATEWAY_CONTROL_SOCKET)) unlinkSync(GATEWAY_CONTROL_SOCKET);
   const listener = Bun.listen({
     unix: GATEWAY_CONTROL_SOCKET,
