@@ -36,12 +36,7 @@ import {
 } from "@tellahq/opensession-protocol/workspace-group";
 import { deleteSessionTranscript, transcript } from "../actor-transcript";
 import { clearSessionFileArchive } from "../plain-archive";
-import {
-  editPrReviewers,
-  isNoPrError,
-  prMetaForBranch,
-  prReviewerSpecs,
-} from "../pr-info";
+import { editPrReviewers, isNoPrError, prReviewerSpecs } from "../pr-info";
 
 import {
   clientVisibleQueuedCount,
@@ -137,12 +132,10 @@ import {
 } from "fs";
 import { statePath } from "../paths";
 import { writeFileAtomic } from "../shared/atomic-write";
-import {
-  githubCredentialRequiredResponse,
-  githubMutationCredential,
-} from "./github-credential";
+import { githubMutationCredential } from "./github-credential";
 import { defaultRepo } from "../config";
 import type { UnifiedSession } from "../types";
+import { persistReviewRequest } from "../review-request-mutation";
 import {
   enrichSessionPrRefs,
   projectWorkspacePrRefs,
@@ -1790,11 +1783,9 @@ export async function handleSessionsRoutes(
     const prevReviewer = getReviewRequest(session.id, reviewAliases)?.to;
     const reviewTeam = reviewTeamFor(reviewer);
     const previousReviewTeam = reviewTeamFor(prevReviewer);
-    // Mirror the request onto GitHub's own Reviewers list before committing the
-    // local assignment, so an auth/API failure cannot leave the two disagreeing.
-    // setting a reviewer adds them, re-assigning swaps, clearing removes.
-    // Only for sessions with a branch/PR whose reviewer maps to a GitHub
-    // login — a phone buzz always fires below regardless.
+    // Open Session's request drives the reviewer's inbox and notification.
+    // Save it first. Mirroring onto the provider is useful context, but it must
+    // not make this picker depend on provider latency, credentials, or uptime.
     const addLogin = reviewer
       ? reviewTeam?.github || githubLoginFor(reviewer)
       : null;
@@ -1806,87 +1797,78 @@ export async function handleSessionsRoutes(
             : githubLoginFor(prevReviewer))
         : null;
     const target = resolvePrTarget(session, body?.repo);
-    // Hosts without a reviewer concept (code.storage) have nothing to mirror
-    // onto — the internal review request stands on its own there instead of
-    // dying on the host round-trip. GitHub repos are unaffected (always true).
     const hostReviewers = target
       ? prHostFor(getRepo(target.repoId)).capabilities.reviewers
       : false;
-    // Whether the reviewer actually reached GitHub's list — false when there
-    // was no PR to mirror onto, which the push marker below depends on.
-    let mirroredToGithub = false;
-    // What has to change on GitHub's Reviewers list. Clearing a session with
-    // no request of its own withdraws GitHub's own pending requests instead:
-    // the chip reports those as the same "somebody is waiting on you" state
-    // (WorkspaceInfo's ReviewerChip falls back to them), and this is the only
-    // way to take one down from here. Read as the service identity, so a clear
-    // with nothing on GitHub to remove never demands a personal credential.
     const removeSpecs = new Set(removeLogin ? [removeLogin] : []);
-    if (!reviewer && !prevReviewer && target && hostReviewers) {
-      const specs = await prReviewerSpecs(target.branch, target.ghRepo).catch(
-        () => null,
-      );
-      for (const spec of specs || []) removeSpecs.add(spec);
-    }
-    if (target && hostReviewers && (addLogin || removeSpecs.size)) {
-      const credential = githubMutationCredential(ctx);
-      // No personal credential only actually blocks this when there is a PR
-      // to mirror onto: `target` comes from branch metadata alone, so most
-      // sessions reaching here have nothing on GitHub to change. Ask (as the
-      // service identity — a read) before refusing, so an expired GitHub
-      // connection can't take the internal review request down with it.
-      // Fails closed: if we can't establish there's no PR, we still refuse.
-      if (!credential) {
-        const existing = await prMetaForBranch(
-          target.branch,
-          target.ghRepo,
-        ).catch(() => "unknown" as const);
-        if (existing !== null) return githubCredentialRequiredResponse();
-      } else {
-        const mirrored = await editPrReviewers(
-          target.branch,
-          { add: addLogin, remove: [...removeSpecs] },
-          target.ghRepo,
-          credential,
-        ).catch((e: any) => ({ error: e?.message || String(e) }));
-        // Same reasoning the other way round: `gh pr edit` answering "no
-        // pull requests found" is an answer, not a failure — nothing to
-        // mirror, so the local request stands on its own. Every other
-        // error still blocks, so a PR that DOES exist can never silently
-        // disagree with the request stored here.
-        if ("error" in mirrored) {
-          if (!isNoPrError(mirrored.error))
-            return Response.json(mirrored, { status: 502 });
-        } else mirroredToGithub = true;
-      }
-    }
-    await executeSessionProjection(sessionId, "review_request", () =>
-      setReviewRequest(
-        session.id,
-        reviewer
-          ? {
-              to: reviewTeam?.github || reviewer,
-              ...(reviewTeam ? { recipients: reviewTeam.members } : {}),
-              by: by || "someone",
-              at: new Date().toISOString(),
+    // With no local request, Clear means withdrawing provider requests shown
+    // in the same row. Resolve those inside the background mirror too.
+    const clearProviderRequests = !reviewer && !prevReviewer;
+    const credential = githubMutationCredential(ctx);
+    const mirrorToProvider =
+      target &&
+      hostReviewers &&
+      credential &&
+      (addLogin || removeSpecs.size || clearProviderRequests)
+        ? async () => {
+            if (clearProviderRequests) {
+              const specs = await prReviewerSpecs(
+                target.branch,
+                target.ghRepo,
+                credential,
+              );
+              for (const spec of specs || []) removeSpecs.add(spec);
             }
-          : null,
-        reviewAliases,
-      ),
-    );
-    // The chip's GitHub fallback reads the bulk PR cache, which the throttled
-    // sweep only refills every 10-30 minutes. Without a write-through, a clear
-    // that did reach GitHub still leaves the reviewers on screen.
-    if (!reviewer && mirroredToGithub && target)
-      markCachedPrReviewRequestsCleared(target.ghRepo, target.branch);
+            const mirrored = await editPrReviewers(
+              target.branch,
+              { add: addLogin, remove: [...removeSpecs] },
+              target.ghRepo,
+              credential,
+            );
+            if ("error" in mirrored) {
+              if (isNoPrError(mirrored.error)) return;
+              throw new Error(mirrored.error);
+            }
+            // The chip's provider fallback reads the bulk PR cache. Update it
+            // after a successful clear so a removed reviewer disappears now.
+            if (!reviewer)
+              markCachedPrReviewRequestsCleared(target.ghRepo, target.branch);
+            // Suppress the watcher push only after the provider accepted the
+            // request. A failed mirror still needs Open Session's own push.
+            if (reviewer && addLogin) {
+              for (const recipient of reviewTeam?.members || [reviewer])
+                markPrReviewNotified(target.ghRepo, target.branch, recipient);
+            }
+          }
+        : undefined;
+    await persistReviewRequest({
+      sessionId: session.id,
+      persist: () =>
+        executeSessionProjection(sessionId, "review_request", () =>
+          setReviewRequest(
+            session.id,
+            reviewer
+              ? {
+                  to: reviewTeam?.github || reviewer,
+                  ...(reviewTeam ? { recipients: reviewTeam.members } : {}),
+                  by: by || "someone",
+                  at: new Date().toISOString(),
+                }
+              : null,
+            reviewAliases,
+          ),
+        ),
+      mirrorToProvider,
+      onMirrorError: (error) =>
+        audit({
+          msg: "review_request_mirror_failed",
+          session_id: session.id,
+          repo: target?.ghRepo,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+    });
     invalidateSessionsCache();
     if (reviewer) {
-      // Only suppress the watcher's own push when the request really landed on
-      // GitHub; marking a skipped mirror would swallow a later genuine one.
-      if (mirroredToGithub && target && addLogin) {
-        for (const recipient of reviewTeam?.members || [reviewer])
-          markPrReviewNotified(target.ghRepo, target.branch, recipient);
-      }
       // Best-effort phone buzz — never let a push hiccup fail the request.
       void (async () => {
         try {
