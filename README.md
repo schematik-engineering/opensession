@@ -124,6 +124,8 @@ requires Bun and git.
 - [CLIENTS.md](CLIENTS.md) — web UI, PWA, desktop shell, native app, extension
 - [docs/worktrees.md](docs/worktrees.md) — how sessions map to git worktrees,
   and where the disk goes
+- [docs/session-imports.md](docs/session-imports.md) — open Claude Code and Codex
+  conversations in Open Session
 - [docs/repo-lifecycle.md](docs/repo-lifecycle.md) — the `.agents/` lifecycle
   scripts a repo commits so sessions provision and boot it themselves
 - [docs/extending.md](docs/extending.md) — adding tools, recipes, integrations
