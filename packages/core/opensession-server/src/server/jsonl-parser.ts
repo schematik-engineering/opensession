@@ -838,11 +838,29 @@ function parseCodexEntry(raw: any): TranscriptEntry[] {
   return [];
 }
 
-function parseCodexLines(lines: string[]): TranscriptEntry[] {
+export function parseCodexLines(lines: string[]): TranscriptEntry[] {
   const entries: TranscriptEntry[] = [];
   for (const line of lines) {
     try {
       entries.push(...parseCodexEntry(JSON.parse(line)));
+    } catch {
+      continue;
+    }
+  }
+  return entries;
+}
+
+/** Codex parser for uploaded rollouts. Parsing a large external transcript
+ * yields between bounded batches so one import cannot stall request traffic. */
+export async function parseCodexLinesAsync(
+  lines: string[],
+  yieldEveryLines = 1000,
+): Promise<TranscriptEntry[]> {
+  const entries: TranscriptEntry[] = [];
+  for (let index = 0; index < lines.length; index++) {
+    if (index > 0 && index % yieldEveryLines === 0) await Bun.sleep(0);
+    try {
+      entries.push(...parseCodexEntry(JSON.parse(lines[index])));
     } catch {
       continue;
     }
