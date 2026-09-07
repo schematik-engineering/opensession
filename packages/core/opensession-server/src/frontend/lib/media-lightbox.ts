@@ -114,9 +114,8 @@ let nextLightboxId = 0;
 let host: ((request: LightboxRequest) => void) | null = null;
 
 export function mediaElement(origin?: Element | null): HTMLElement | undefined {
-  if (typeof HTMLElement === "undefined" || !(origin instanceof HTMLElement)) {
+  if (typeof HTMLElement === "undefined" || !(origin instanceof HTMLElement))
     return undefined;
-  }
   if (origin.matches("img, video")) return origin;
   return origin.querySelector<HTMLElement>("img, video") || origin;
 }
@@ -165,8 +164,8 @@ export function markTransition(
 
 export function supportsHeroTransition(): boolean {
   return (
-    typeof (document as ViewTransitionDocument).startViewTransition ===
-      "function" &&
+    "startViewTransition" in document &&
+    document.startViewTransition instanceof Function &&
     !window.matchMedia("(prefers-reduced-motion: reduce)").matches
   );
 }
@@ -217,13 +216,13 @@ export function openLightbox(
 
 function extFromMime(mime: string): string {
   const sub = mime.split("/")[1]?.split(";")[0] || "";
-  const special: Record<string, string> = {
-    jpeg: "jpg",
-    "svg+xml": "svg",
-    quicktime: "mov",
-    "x-matroska": "mkv",
-  };
-  return special[sub] || sub || "bin";
+  const special = new Map<string, string>([
+    ["jpeg", "jpg"],
+    ["svg+xml", "svg"],
+    ["quicktime", "mov"],
+    ["x-matroska", "mkv"],
+  ]);
+  return special.get(sub) || sub || "bin";
 }
 
 export function suggestedMediaName(item: LightboxItem): string {

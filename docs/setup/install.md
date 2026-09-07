@@ -344,6 +344,16 @@ set +a
 opensession start --foreground
 ```
 
+Settings writes integration credentials, `ENABLE_*` flags, and ingress origins
+back into this file. Each write copies the current file to `.bak-<n>` and then
+replaces it through an atomic rename, both created beside it, so the service
+user must own the directory, not just the file. `OPENSESSION_ENV_FILE` moves
+the file, but keep it somewhere the service user can write. Do not put it in
+`/etc/opensession`: that directory holds the root-only executor and session
+kernel credentials, every install and deploy resets it to `root:root 0700`,
+and `service install --system` and `deploy/deploy.sh` refuse an env file the
+service user cannot edit.
+
 The server settings are optional, but an enabled integration needs the
 credentials its setup page marks as required. Common operator-facing variables:
 
@@ -381,7 +391,7 @@ credentials its setup page marks as required. Common operator-facing variables:
 
 | Feature                   | Vars                                                                                                                                                                   | Page                                                                                   |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Slack                     | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` or `SLACK_SIGNING_SECRET`, `ALLOWED_SLACK_USER_ID`, `WORKTREE_HOOK_SECRET`, `SLACK_MENTION_INTENT_MODEL`, `SCHEDULE_WHEN_MODEL`   | [slack.md](slack.md)                                                                   |
+| Slack                     | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `ALLOWED_SLACK_USER_ID`, `WORKTREE_HOOK_SECRET`, `SLACK_MENTION_INTENT_MODEL`, `SCHEDULE_WHEN_MODEL`                        | [slack.md](slack.md)                                                                   |
 | Discord                   | `DISCORD_APPLICATION_ID`, `DISCORD_BOT_TOKEN_FILE`, `DISCORD_GUILD_IDS`, optional channel/role/user allowlists                                                         | [discord.md](discord.md)                                                               |
 | GitHub                    | App: `OPENSESSION_GITHUB_CLIENT_ID`, `OPENSESSION_GITHUB_CLIENT_SECRET`, `OPENSESSION_GITHUB_APP_SLUG`, `OPENSESSION_GITHUB_APP_KEY`; webhook: `GITHUB_WEBHOOK_SECRET` | [github.md](github.md)                                                                 |
 | Linear                    | `LINEAR_CLIENT_ID`, `LINEAR_CLIENT_SECRET`, `LINEAR_WEBHOOK_SECRET`, `LINEAR_API_KEY`                                                                                  | [linear.md](linear.md)                                                                 |
@@ -431,7 +441,7 @@ The two sections a team install normally sets:
 
 - `repos` — your git repos (checkout path, `defaultBranch`, `ghRepo`
   owner/name for the `gh` CLI, `default: true` on the main one, optional
-  `depsInstall`/`previewCommand`, preview cache markers, deployment tracking,
+  `depsInstall`, warm cache markers, deployment tracking,
   and security-scan guidance). When `repos` is present it is authoritative.
   With no config, a source checkout registers itself as the shared
   `opensession` repo.
@@ -457,10 +467,11 @@ claude setup-token   # prints sk-ant-…
 ```
 
 With the server running, open **Workspace → Providers** and paste the token.
-The same page can sign in a ChatGPT-plan account by device code, or add a
-third-party provider API key and select one of its models. Subscription account
-stores live at `~/.opensession/claude-accounts.json` and
-`~/.opensession/codex-accounts.json`; provider keys live at
+The same page can sign in a ChatGPT-plan or SuperGrok account by device code,
+or add a third-party provider API key and select one of its models.
+Subscription account stores live at `~/.opensession/claude-accounts.json`,
+`~/.opensession/codex-accounts.json` and `~/.opensession/xai-accounts.json`;
+provider keys live at
 `~/.opensession/model-providers.json`. All are server-managed mode-`0600`
 files, so use the UI rather than hand-editing them. The exception is a custom
 OpenAI-compatible gateway's per-model catalog, which is hand-written and
@@ -582,7 +593,9 @@ Unit choices worth knowing (comments in the file itself):
 - `ExecStart` uses the stable installed shim for compiled releases and Bun for
   source installs.
 - The gateway's `EnvironmentFile=<your home>/.opensession.env` loads your
-  secrets. It is optional in user scope and required in system scope.
+  secrets. It is optional in user scope and required in system scope. Its
+  directory must be writable by the service user so Settings can edit it; see
+  [section 4](#4-secrets-opensessionenv).
 - System scope loads separate executor and session-kernel credentials. User
   scope keeps its session-kernel token under `~/.opensession/` and disables the
   executor and detached runs.

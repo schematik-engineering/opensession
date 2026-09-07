@@ -20,6 +20,9 @@ describe("model catalog provider availability", () => {
   test("keeps preset ids intact for picker defaults", () => {
     expect(pickerModelId("dial/high")).toBe("pi/dial/high");
     expect(pickerModelId("pi/orchestrator/sol")).toBe("pi/orchestrator/sol");
+    expect(pickerModelId("orchestrator/fable-sol")).toBe(
+      "pi/orchestrator/fable-sol",
+    );
   });
 
   test("keeps the whole Dial hidden until both account providers exist", () => {
@@ -53,6 +56,19 @@ describe("model catalog provider availability", () => {
         openaiOnly,
       ),
     ).toBe(true);
+  });
+
+  test("requires every provider used by a global orchestrator", () => {
+    expect(
+      chooseConfiguredDefaultModel(
+        "orchestrator/fable-sol",
+        new Set(["anthropic"]),
+        ["pi/anthropic/claude-fable-5-1"],
+      ),
+    ).toBe("pi/anthropic/claude-fable-5-1");
+    expect(
+      chooseConfiguredDefaultModel("orchestrator/fable-sol", both, []),
+    ).toBe("pi/orchestrator/fable-sol");
   });
 
   test("replaces an unavailable default with the first configured model", () => {

@@ -61,7 +61,11 @@ import { useNewSessionCreateStart } from "./hooks/useNewSessionCreateStart";
 import { useNewSessionPalette } from "./hooks/useNewSessionPalette";
 import { useNewTabMorphTimer } from "./hooks/useNewTabMorphTimer";
 import { useOnboarding } from "./hooks/useOnboarding";
-import { sidebarSessionsQuery, useSessions } from "./hooks/useSessions";
+import {
+  sidebarSessionsQuery,
+  type SidebarSessionsQueryOptions,
+  useSessions,
+} from "./hooks/useSessions";
 import { useSessionTabs } from "./hooks/useSessionTabs";
 import { useShortcutKeys } from "./hooks/useShortcutBindings";
 import { useWebSocket } from "./hooks/useWebSocket";
@@ -103,6 +107,7 @@ import {
   receivePins,
   unpin,
 } from "./lib/pins";
+import { ARCHIVED_PAGE_COLUMN } from "./lib/archived-classes";
 import { PR_PAGE_COLUMN } from "./lib/pr-list-classes";
 import { repoLabel } from "./lib/repo-label";
 import { NO_REPO } from "./lib/session-repo";
@@ -131,6 +136,14 @@ import { ToastHost, toast } from "./ui/toast";
 import { Tooltip } from "./ui/tooltip";
 import { TopBar, TopBarActions, TopBarTitle } from "./ui/top-bar";
 
+interface PendingInitialPrompt {
+  content: string;
+  user: string;
+  sentAt: number;
+  images?: string[];
+  pastedTexts?: string[];
+}
+
 export function AppContent({
   serviceWorker = true,
   initialTeamViewing = [],
@@ -157,14 +170,19 @@ export function AppContent({
     goBackRoute(currentSessionRef.current?.parentSessionId ?? undefined);
   const currentUser = useCurrentUser();
   const sidebarFilter = useSidebarFilter();
-  const liveSessionsQuery = sidebarSessionsQuery({
+  const liveSessionsQueryInput: SidebarSessionsQueryOptions = {
     user: currentUser,
     person: sidebarFilter.person,
     repo: sidebarFilter.repo,
     autoCreated: sidebarFilter.autoCreated,
-    ...(route.view === "session" ? { selectedSessionId: route.id } : {}),
-    ...(route.view === "workspace" ? { selectedWorkspaceId: route.id } : {}),
-  });
+  };
+  if (route.view === "session") {
+    liveSessionsQueryInput.selectedSessionId = route.id;
+  }
+  if (route.view === "workspace") {
+    liveSessionsQueryInput.selectedWorkspaceId = route.id;
+  }
+  const liveSessionsQuery = sidebarSessionsQuery(liveSessionsQueryInput);
   const mainSocket = useWebSocket();
   const { connected, send, setTyping, addHandler } = mainSocket;
   const {
@@ -197,10 +215,7 @@ export function AppContent({
   });
   const pendingCreateDraftRef = useRef<PendingCreateDraft | null>(null);
   const [pendingInitialPrompts, setPendingInitialPrompts] = useState<
-    Record<
-      string,
-      { content: string; user: string; sentAt: number; images?: string[] }
-    >
+    Record<string, PendingInitialPrompt>
   >({});
   // Transient toasts (e.g. "Link copied", "Archived · stopped the running
   // turn") route through the global toast store — stacked, animated, and
@@ -417,7 +432,6 @@ export function AppContent({
     videoActive,
     stagingActive,
     assetsActive,
-    previewLiveActive,
     portalActive,
     terminalActive,
     subagentSelected,
@@ -651,14 +665,15 @@ export function AppContent({
           );
         }
         if (draft?.prompt || draft?.images?.length) {
+          const initialPrompt: PendingInitialPrompt = {
+            content: draft.prompt,
+            user: draft.user,
+            sentAt: new Date(draft.startedAt).getTime(),
+          };
+          if (draft.images?.length) initialPrompt.images = draft.images;
           setPendingInitialPrompts((prev) => ({
             ...prev,
-            [msg.id]: {
-              content: draft.prompt,
-              user: draft.user,
-              sentAt: new Date(draft.startedAt).getTime(),
-              ...(draft.images?.length ? { images: draft.images } : {}),
-            },
+            [msg.id]: initialPrompt,
           }));
           window.setTimeout(() => {
             setPendingInitialPrompts((prev) => {
@@ -743,18 +758,17 @@ export function AppContent({
     wsRecord,
     setActiveViewTab,
     stagingOpen,
-    previewTabOpen,
     assetsOpen,
     terminalOpen,
     currentPortalTarget,
     openStaging,
     closeStagingTab,
-    openPreviewTab,
-    closePreviewTab,
     openAssets,
     closeAssetsTab,
     openTerminal,
     closeTerminalTab,
+    openDesktop,
+    closeDesktopTab,
     openPortal,
     closePortalTab,
     prRefMissing,
@@ -846,7 +860,7 @@ export function AppContent({
         closeStagingTab: workspacePanes.closeStagingTab,
         closeAssetsTab: workspacePanes.closeAssetsTab,
         closeTerminalTab: workspacePanes.closeTerminalTab,
-        closePreviewTab: workspacePanes.closePreviewTab,
+        closeDesktopTab: workspacePanes.closeDesktopTab,
         closePortalTab: workspacePanes.closePortalTab,
         closeConversationTab: workspacePanes.closeConversationTab,
         closeVideoTab: workspacePanes.closeVideoTab,
@@ -1038,14 +1052,15 @@ export function AppContent({
         return;
       }
       // Default the new session onto the workspace's branch when it has one.
-      openPrefilledSession({
+      const prefill: Parameters<typeof openPrefilledSession>[0] = {
         workspaceId: id,
         repo: workspace?.repo,
         branch: workspace?.branch,
-        ...(workspace?.externalRefs?.length && !workspace?.repo
-          ? { mode: "scratch" as const }
-          : {}),
-      });
+      };
+      if (workspace?.externalRefs?.length && !workspace.repo) {
+        prefill.mode = "scratch";
+      }
+      openPrefilledSession(prefill);
     }
   };
   const openNewSessionInRepo = (repo: string) => {
@@ -1113,7 +1128,7 @@ export function AppContent({
         stagingActive: appViewState.stagingActive,
         assetsActive: appViewState.assetsActive,
         terminalActive: appViewState.terminalActive,
-        previewLiveActive: appViewState.previewLiveActive,
+        desktopActive: appViewState.desktopActive,
         portalActive: appViewState.portalActive,
         reviewFocusPr: appViewState.reviewFocusPr,
       }}
@@ -1132,9 +1147,9 @@ export function AppContent({
         subagentActive: workspacePanes.subagentActive,
         terminalOpen: workspacePanes.terminalOpen,
         closeStagingTab: workspacePanes.closeStagingTab,
-        closePreviewTab: workspacePanes.closePreviewTab,
         closeAssetsTab: workspacePanes.closeAssetsTab,
         closeTerminalTab: workspacePanes.closeTerminalTab,
+        closeDesktopTab: workspacePanes.closeDesktopTab,
       }}
       tabs={{
         context: {
@@ -1190,10 +1205,10 @@ export function AppContent({
     openPrefilledSession,
     openReview,
     openStaging,
-    openPreview: openPreviewTab,
     openPortal,
     openAssets,
     openTerminal,
+    openDesktop,
     openCurrentWorkspace: () => setActiveViewTab(null),
   } satisfies NavigationActions;
 
@@ -1320,6 +1335,9 @@ export function AppContent({
                     showToast,
                     panelIcon,
                     sidebarToggleKeys,
+                    footerAccessory: (
+                      <UpdatePill addHandler={addHandler} variant="footer" />
+                    ),
                   }}
                   shell={{
                     sidebarCollapsed,
@@ -1392,6 +1410,7 @@ export function AppContent({
                             DETAIL_TOPBAR_TITLE,
                             (route.view === "prs" || route.view === "feed") &&
                               PR_PAGE_COLUMN,
+                            route.view === "archived" && ARCHIVED_PAGE_COLUMN,
                           )}
                         >
                           <span
@@ -1404,7 +1423,9 @@ export function AppContent({
                           <TopBarActions
                             className={cn(
                               DETAIL_TOPBAR_ACTIONS,
-                              route.view === "prs" && "ml-4 flex-1 pl-0",
+                              (route.view === "prs" ||
+                                route.view === "archived") &&
+                                "ml-4 flex-1 pl-0",
                             )}
                             ref={setTopbarActionsEl}
                           />
@@ -1498,6 +1519,17 @@ export function AppContent({
                         onOpenPr={(repo, branch) =>
                           navigate({ view: "pr", repo, branch })
                         }
+                        onStartSession={() =>
+                          void (async () => {
+                            // The workspace home is the new tab: a blank
+                            // canvas with the composer at the bottom.
+                            const { workspaceId } = await resolveWorkspaceApi({
+                              pr: { repo: route.repo, branch: route.branch },
+                            });
+                            await refreshWorkspaces();
+                            navigate({ view: "workspace", id: workspaceId });
+                          })().catch((e) => console.error(e))
+                        }
                         send={send}
                         addHandler={addHandler}
                       />
@@ -1574,7 +1606,6 @@ export function AppContent({
                       onSelect={(s) => navigate({ view: "session", id: s.id })}
                       onChanged={refresh}
                       topbarActionsEl={topbarActionsEl}
-                      mobileActionsEl={headerActionsEl}
                     />
                   ) : route.view === "supporttinder" ? (
                     <SupportTinder
@@ -1774,11 +1805,11 @@ export function AppContent({
 
             {/* Durable prompts use a separate shelf from transient feedback. The
 				    desktop shelf stays clear of the composer; phones put the compact
-				    equivalent in the app header instead. */}
+				    equivalent in the app header instead. The update nudge is not here:
+				    desktop shows it beside Settings in the sidebar's account footer. */}
             {!isPhone && (
               <div className={PERSISTENT_NOTICE_SHELF}>
                 {launchComplete && <DesktopLinkToast />}
-                <UpdatePill addHandler={addHandler} />
               </div>
             )}
 

@@ -31,6 +31,10 @@ import {
 import { prepareEntriesForWire, transcriptMatchSnippet } from "../jsonl-parser";
 import { classifyEntry } from "@tellahq/opensession-protocol/notices";
 import {
+  pastedTextsFromWire,
+  withPastedTexts,
+} from "@tellahq/opensession-protocol/pasted-text";
+import {
   inWorkspaceGroup,
   type WorkspaceGroup,
 } from "@tellahq/opensession-protocol/workspace-group";
@@ -62,13 +66,21 @@ import {
   getCachedSessionsAsync,
   getSessionListSnapshotAsync,
   invalidateSessionsCache,
+  publishSessionChange,
   maybePersistEffort,
   maybePersistFastMode,
   runErrors,
   sessionRuntimeSnapshot,
   type SessionRuntimeSnapshot,
 } from "../session-cache";
-import { asDataUrlList, countImageRefs, parseImageDataUrls } from "../uploads";
+import {
+  asDataUrlList,
+  countImageRefs,
+  InvalidUploadError,
+  parseImageDataUrls,
+} from "../uploads";
+import { MAX_PROMPT_IMAGES } from "@tellahq/opensession-protocol/session";
+import { SessionKernelActorError } from "../session-kernel/actor-client";
 import { notifyMentions } from "../mentions";
 import { reviewTeamFor } from "../people";
 import { sendPushToUser } from "../push";
@@ -147,6 +159,7 @@ import {
   indexedWorkspaceMemberSessions,
   indexedWorkspaceSessions,
 } from "../session-list-store";
+import { buildAtCurrentSessionListRevision } from "../session-list-response-revision";
 import {
   loadSidebarSessionScopeContext,
   parseSidebarSessionScope,
@@ -534,6 +547,55 @@ function enrichSession(
 }
 
 /**
+ * One session as the detail and create responses serialize it: enriched like
+ * a list row, plus the PR refs its workspace siblings contribute. A new tab
+ * shows the workspace's PR from its first paint this way, instead of waiting
+ * for the next list poll to project it.
+ */
+export async function sessionDetail(
+  session: UnifiedSession,
+): Promise<UnifiedSession> {
+  const signals = await sessionListRuntimeSignals();
+  const context = sessionEnrichmentContext();
+  const enriched = enrichSession(session, signals, context);
+  if (!enriched.workspaceId) return enriched;
+  return projectWorkspacePrRefs(
+    enriched,
+    indexedWorkspaceMemberSessions(enriched.workspaceId).map((member) =>
+      enrichSessionPrRefs(member, {
+        defaultRepoId: context.defaultRepoId,
+        prsByRepo: context.prsByRepo,
+        footerMatches: footerPrsFor(context.prsBySession, member),
+      }),
+    ),
+  );
+}
+
+/**
+ * One changed session as a row frame, plus the enriched rows its sidebar
+ * visibility depends on. session-row-events evaluates each subscribed scope
+ * against `group` and sends `row` to the sockets whose lens shows it.
+ */
+export async function sidebarRowProjection(
+  session: UnifiedSession,
+  group: UnifiedSession[],
+): Promise<{
+  row: SessionListRow;
+  group: Array<UnifiedSession & SessionListSignals>;
+}> {
+  const signals = await sessionListRuntimeSignals();
+  const context = sessionEnrichmentContext();
+  const enrichedGroup = group.map((member) =>
+    enrichSession(member, signals, context),
+  );
+  shareWorkspacePrRefs(enrichedGroup);
+  const enriched =
+    enrichedGroup.find((member) => member.id === session.id) ??
+    enrichSession(session, signals, context);
+  return { row: sessionListRow(enriched), group: enrichedGroup };
+}
+
+/**
  * A session as list clients consume it.
  *
  * The detail route keeps the full UnifiedSession. The list drops fields used
@@ -852,7 +914,7 @@ function refreshSidebarSessionsResponse(
   const key = sidebarSessionScopeKey(scope);
   const current = sessionsResponseRefreshes.get(key);
   if (current) return current;
-  const refresh = (async () => {
+  const refresh = buildAtCurrentSessionListRevision(async () => {
     const signals = await sessionListRuntimeSignals();
     const context = sessionEnrichmentContext();
     const indexed = indexedSidebarSessions(scope.selectedSessionId);
@@ -867,16 +929,19 @@ function refreshSidebarSessionsResponse(
       loadSidebarSessionScopeContext(scope, bounded),
     );
     const text = JSON.stringify(scoped.map(sessionListRow));
-    const snapshot: SessionsResponseSnapshot = {
+    return {
       text,
       hash: Bun.hash(text).toString(16),
       expiresAt: Date.now() + SESSIONS_RESPONSE_TTL_MS,
     };
-    sessionsResponseSnapshots.set(key, snapshot);
-    return snapshot;
-  })().finally(() => {
-    sessionsResponseRefreshes.delete(key);
-  });
+  })
+    .then((snapshot) => {
+      sessionsResponseSnapshots.set(key, snapshot);
+      return snapshot;
+    })
+    .finally(() => {
+      sessionsResponseRefreshes.delete(key);
+    });
   sessionsResponseRefreshes.set(key, refresh);
   return refresh;
 }
@@ -886,7 +951,7 @@ function refreshSessionsResponse(
 ): Promise<SessionsResponseSnapshot> {
   const current = sessionsResponseRefreshes.get(variant);
   if (current) return current;
-  const refresh = (async () => {
+  const refresh = buildAtCurrentSessionListRevision(async () => {
     const signals = await sessionListRuntimeSignals();
     const context = sessionEnrichmentContext();
     const slice =
@@ -908,17 +973,20 @@ function refreshSessionsResponse(
         ? listed.map(archivedIndexRow)
         : listed.map(sessionListRow),
     );
-    const snapshot: SessionsResponseSnapshot = {
+    return {
       text,
       hash: Bun.hash(text).toString(16),
       expiresAt: Date.now() + SESSIONS_RESPONSE_TTL_MS,
     };
-    sessionsResponseSnapshots.set(variant, snapshot);
-    if (variant === "exclude") persistDiskLiveList(text);
-    return snapshot;
-  })().finally(() => {
-    sessionsResponseRefreshes.delete(variant);
-  });
+  })
+    .then((snapshot) => {
+      sessionsResponseSnapshots.set(variant, snapshot);
+      if (variant === "exclude") persistDiskLiveList(snapshot.text);
+      return snapshot;
+    })
+    .finally(() => {
+      sessionsResponseRefreshes.delete(variant);
+    });
   sessionsResponseRefreshes.set(variant, refresh);
   return refresh;
 }
@@ -942,6 +1010,7 @@ export async function handleSessionsRoutes(
       fastMode?: unknown;
       images?: unknown;
       files?: unknown;
+      pastedTexts?: unknown;
       branch?: unknown;
       user?: unknown;
       workspaceId?: unknown;
@@ -952,12 +1021,13 @@ export async function handleSessionsRoutes(
     } | null;
     const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
     const files = Array.isArray(body?.files) ? body.files : undefined;
+    const pastedTexts = pastedTextsFromWire(body?.pastedTexts);
     const imageUrls = Array.isArray(body?.images)
       ? body.images.filter(
           (value): value is string => typeof value === "string",
         )
       : [];
-    if (!prompt && !files?.length && !imageUrls.length) {
+    if (!prompt && !files?.length && !imageUrls.length && !pastedTexts) {
       return Response.json(
         { error: "prompt or attachment required" },
         { status: 400 },
@@ -1036,6 +1106,7 @@ export async function handleSessionsRoutes(
         id: targetId,
         requestId,
         requestScope: actorScope,
+        createdByLogin: ctx.authUser?.login,
         prompt,
         mode,
         ...(mode === "code" && branch ? { branch } : {}),
@@ -1062,6 +1133,7 @@ export async function handleSessionsRoutes(
         // Image and file attachments from the native create path.
         ...(imageUrls.length ? { images: imageUrls } : {}),
         ...(files?.length ? { files } : {}),
+        ...(pastedTexts ? { pastedTexts } : {}),
         user: actor,
       });
       return Response.json({
@@ -1215,6 +1287,7 @@ export async function handleSessionsRoutes(
         fastMode?: unknown;
         busyMode?: unknown;
         files?: unknown;
+        pastedTexts?: unknown;
         contextSessions?: unknown;
         clientId?: unknown;
       } | null;
@@ -1224,7 +1297,12 @@ export async function handleSessionsRoutes(
           : typeof body?.prompt === "string"
             ? body.prompt
             : "";
-      const content = raw.trim();
+      // Pasted blocks fold in at intake, after the message, so every path
+      // below (queue, steer, run, persistence) carries one string.
+      const content = withPastedTexts(
+        raw.trim(),
+        pastedTextsFromWire(body?.pastedTexts),
+      );
       const images = parseImageDataUrls(body?.images);
       const imageUrls = asDataUrlList(body?.images);
       // An image-only send is a real message, so only reject an empty one.
@@ -1242,6 +1320,15 @@ export async function handleSessionsRoutes(
           {
             error: "An attached image is no longer available. Attach it again.",
           },
+          { status: 400 },
+        );
+      }
+      // Same terminal answer for a list the queue would refuse to stage. Ask
+      // before delivery so the kernel never records a receipt for a message
+      // that can only ever fail the same way.
+      if ((images?.length ?? 0) > MAX_PROMPT_IMAGES) {
+        return Response.json(
+          { error: `Attach up to ${MAX_PROMPT_IMAGES} images per message.` },
           { status: 400 },
         );
       }
@@ -1274,20 +1361,38 @@ export async function handleSessionsRoutes(
           typeof body?.fastMode === "boolean" ? body.fastMode : undefined,
         );
       }
-      const result = await getSessionControl().deliverToSession(
-        sessionId,
-        content,
-        user,
-        {
-          busy: busyMode,
-          hold: busyMode === "queue",
-          images,
-          imageUrls,
-          files,
-          contextSessions,
-          ...(clientId ? { deliveryId: clientId } : {}),
-        },
-      );
+      let result: Awaited<
+        ReturnType<ReturnType<typeof getSessionControl>["deliverToSession"]>
+      >;
+      try {
+        result = await getSessionControl().deliverToSession(
+          sessionId,
+          content,
+          user,
+          {
+            busy: busyMode,
+            hold: busyMode === "queue",
+            images,
+            imageUrls,
+            files,
+            contextSessions,
+            ...(clientId ? { deliveryId: clientId } : {}),
+          },
+        );
+      } catch (error) {
+        // A rejected attachment list, or the kernel replaying the failure it
+        // recorded for this client id, will not change on retry. Say so with
+        // a 4xx: a 500 reads as transient and keeps the outbox looping on a
+        // message nobody can edit or discard.
+        if (error instanceof InvalidUploadError)
+          return Response.json(
+            { error: error.message },
+            { status: error.status },
+          );
+        if (error instanceof SessionKernelActorError && !error.retryable)
+          return Response.json({ error: error.message }, { status: 409 });
+        throw error;
+      }
       if (result.status === "error") {
         return Response.json(
           { ...result, error: result.message },
@@ -1380,24 +1485,31 @@ export async function handleSessionsRoutes(
         // content keeps its exact legacy shape; toolInput/images are
         // additive (existing clients ignore them) — they carry the
         // unstripped fields the bounded store row summarized away.
-        if (full)
+        if (full) {
+          // Same stripping the wire path applies, so expanding a
+          // clamped notice doesn't suddenly reveal the sentinel and
+          // "[Name] " prefix its folded form hid. The store row
+          // carries no type; a user turn is the only kind that
+          // arrives with delivery plumbing, and the detectors are
+          // conservative enough to leave anything else alone. Pasted
+          // blocks lift the same way, whole: this is where a card
+          // whose block the wire clamped fetches the rest.
+          const classified = classifyEntry({
+            id: entryId,
+            type: "user",
+            content: full.content,
+            timestamp: "",
+          });
           return Response.json({
-            // Same stripping the wire path applies, so expanding a
-            // clamped notice doesn't suddenly reveal the sentinel and
-            // "[Name] " prefix its folded form hid. The store row
-            // carries no type; a user turn is the only kind that
-            // arrives with delivery plumbing, and the detectors are
-            // conservative enough to leave anything else alone.
-            content: classifyEntry({
-              id: entryId,
-              type: "user",
-              content: full.content,
-              timestamp: "",
-            }).content,
+            content: classified.content,
+            ...(classified.pastedTexts
+              ? { pastedTexts: classified.pastedTexts }
+              : {}),
             toolInput: full.toolInput,
             images: full.images,
             featuredMedia: full.featuredMedia,
           });
+        }
       } catch {
         // store read failed — the legacy scan below still serves the entry
       }
@@ -1409,6 +1521,7 @@ export async function handleSessionsRoutes(
       const entry = classifyEntry(found);
       return Response.json({
         content: entry.content,
+        ...(entry.pastedTexts ? { pastedTexts: entry.pastedTexts } : {}),
         toolInput: entry.toolInput,
         images: entry.images,
         featuredMedia: entry.featuredMedia,
@@ -1666,7 +1779,7 @@ export async function handleSessionsRoutes(
     // unarchive, also clear the file flag so the session returns to "My
     // sessions".
     if (!archived) clearSessionFileArchive(sessionId);
-    invalidateSessionsCache();
+    publishSessionChange(sessionId);
     if (archived) {
       // setArchived drops the plain id pin; also drop legacy alias-id pins,
       // and the workspace pin once its last live session is archived (else the
@@ -1690,7 +1803,7 @@ export async function handleSessionsRoutes(
     await executeSessionProjection(sessionId, "title_override", () =>
       setTitleOverride(sessionId, title || null),
     );
-    invalidateSessionsCache();
+    publishSessionChange(sessionId);
     return Response.json({ ok: true });
   }
 
@@ -1708,7 +1821,7 @@ export async function handleSessionsRoutes(
     await executeSessionProjection(sessionId, "status_override", () =>
       setStatusOverride(sessionId, status),
     );
-    invalidateSessionsCache();
+    publishSessionChange(sessionId);
     return Response.json({ ok: true });
   }
 
@@ -1751,7 +1864,7 @@ export async function handleSessionsRoutes(
           : null,
         reviewAliases,
       );
-      invalidateSessionsCache();
+      publishSessionChange(session.id);
       // Buzz whoever asked for the review that it landed (not on self-review).
       if (
         body.accept &&
@@ -1910,22 +2023,7 @@ export async function handleSessionsRoutes(
       const session = await findSessionAsync(sessionId);
       if (!session)
         return Response.json({ error: "Session not found" }, { status: 404 });
-      const signals = await sessionListRuntimeSignals();
-      const context = sessionEnrichmentContext();
-      const enriched = enrichSession(session, signals, context);
-      const detail = enriched.workspaceId
-        ? projectWorkspacePrRefs(
-            enriched,
-            indexedWorkspaceMemberSessions(enriched.workspaceId).map((member) =>
-              enrichSessionPrRefs(member, {
-                defaultRepoId: context.defaultRepoId,
-                prsByRepo: context.prsByRepo,
-                footerMatches: footerPrsFor(context.prsBySession, member),
-              }),
-            ),
-          )
-        : enriched;
-      return Response.json(detail, {
+      return Response.json(await sessionDetail(session), {
         headers: { "Cache-Control": "private, no-cache" },
       });
     }
@@ -1971,7 +2069,7 @@ export async function handleSessionsRoutes(
         );
       }
       await purgeTranscriptRows(session.id);
-      invalidateSessionsCache();
+      publishSessionChange(session.id);
       // Tear down the session's sandbox (container + engine-state volumes,
       // and in volume-workspace mode the workspace volume itself; that data
       // loss is the mode's documented contract). Best-effort and detached:

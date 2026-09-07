@@ -84,6 +84,12 @@ export const INTERNAL_MCP_CAPABILITIES = {
     guidance:
       "Start and manage supervised HTTP or WebSocket services for this workspace instead of leaving an unmanaged background process.",
   },
+  "opensession-desktop": {
+    summary:
+      "See and drive the Sandbox desktop: screenshot, click, type, keys, windows.",
+    guidance:
+      "Drive GUI software or a real browser on the Sandbox desktop when a task cannot be done from the shell: screenshot first, act in desktop pixels, screenshot again. The person can watch in the Desktop tab.",
+  },
   "opensession-walkthrough": {
     summary:
       "Publish a walkthrough (video, before/after, writeup) onto the Review tab and the PR.",
@@ -108,7 +114,7 @@ export const INTERNAL_MCP_CAPABILITIES = {
   "opensession-assets": {
     summary: "Per-session scratch assets, previewed in the Assets tab.",
     guidance:
-      "Save uncommitted reports, diagrams, visualizations, or sample data that should be previewable from this session.",
+      "Save uncommitted reports, diagrams, visualizations, or sample data that should be previewable from this session. Publish existing workspace files with write_asset.sourcePath, especially binary outputs such as DOCX, PDF, and ZIP files.",
   },
   "opensession-todos": {
     summary: "The user's Desk todo list.",

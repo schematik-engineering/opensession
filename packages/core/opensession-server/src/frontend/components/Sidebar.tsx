@@ -135,6 +135,7 @@ import { PeopleBand } from "./sidebar/PeopleBand";
 import { PersonalBand } from "./sidebar/PersonalBand";
 import { ProjectBands } from "./sidebar/ProjectBands";
 import { SetupWidget } from "./sidebar/SetupWidget";
+import { SidebarAccountFooter } from "./sidebar/SidebarAccountFooter";
 import { SidebarChrome } from "./sidebar/SidebarChrome";
 import { SidebarCustomizeDialog } from "./sidebar/SidebarCustomizeDialog";
 import { SidebarItem } from "./sidebar/SidebarItem";
@@ -169,6 +170,7 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
     reportsActive,
     analyticsActive,
     showDraftRow,
+    footerAccessory,
     draftRowActive,
     onRenameWorkspace,
     onDeleteWorkspace,
@@ -865,11 +867,12 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
   // reads as two pieces of work); the repo *filter* honours every repo it
   // touches, so it stays findable from the others.
   function wsRowRepo(row: WsRow): string {
+    const firstSession = row.sessions[0];
     return (
       row.workspace?.repo ||
       row.workspace?.externalRefs?.[0]?.kind ||
-      row.sessions[0]?.repo ||
-      sessionRepo(row.sessions[0] || ({} as UnifiedSession))
+      firstSession?.repo ||
+      (firstSession ? sessionRepo(firstSession) : DEFAULT_PROJECT)
     );
   }
   function shipsDirectlyToMain(
@@ -1415,9 +1418,8 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
               onDragOver={handleRepoAutoScroll}
               onDragLeave={(event) => {
                 if (
-                  !event.currentTarget.contains(
-                    event.relatedTarget as Node | null,
-                  )
+                  !(event.relatedTarget instanceof Node) ||
+                  !event.currentTarget.contains(event.relatedTarget)
                 )
                   stopRepoAutoScroll();
               }}
@@ -1774,6 +1776,12 @@ export const Sidebar = React.forwardRef<SidebarHandle, Props>(function Sidebar(
           hasCreatedSession={sessions.length > 0}
           onOpenSettings={navigation.openSettings}
           onNewSession={navigation.openNewWorkspace}
+        />
+      )}
+      {!isPhone && (
+        <SidebarAccountFooter
+          onOpenSettings={navigation.openSettings}
+          accessory={footerAccessory}
         />
       )}
       <SidebarCustomizeDialog

@@ -6,6 +6,7 @@ import { cn } from "../ui/cn";
 import { CopyCheck, useCopy } from "../ui/copy";
 import { fieldClasses } from "../ui/input";
 import { IconCopy } from "./icons";
+import { z } from "zod";
 
 // Shared vocabulary for the Settings → Setup page (Setup.tsx) and its section
 // siblings (SetupTeam.tsx, SetupRepos.tsx): the /api/setup/* response shapes,
@@ -53,9 +54,8 @@ export interface SetupGithub {
 export interface SetupRepoLifecycle {
   dir: string | null;
   setup: boolean;
-  start: boolean;
-  previewJson: boolean;
-  previewCommand: boolean;
+  resume: boolean;
+  portals: boolean;
 }
 
 export interface SetupRepo {
@@ -74,8 +74,9 @@ export interface SetupEngine {
   claudeBin: string | null;
   claudeAccounts: number;
   codexAccounts: number;
+  xaiAccounts: number;
   defaultModel: string;
-  provider?: "claude" | "codex";
+  provider?: "claude" | "codex" | "xai";
   ready: boolean;
   blocker: string | null;
   fix: string | null;
@@ -137,40 +138,39 @@ export interface BrowseRepo {
 /** Same-origin JSON fetch against the setup API: prefixes BASE_PATH, encodes
  * an optional `json` body, and surfaces the backend's `{error}` message (or a
  * plain status line) as a thrown Error. */
+const setupErrorSchema = z.object({ error: z.string() });
+
 export async function setupRequest<T = unknown>(
   path: string,
   init?: RequestInit & { json?: unknown },
 ): Promise<T> {
   const { json, ...rest } = init ?? {};
-  const res = await fetch(`${BASE_PATH}${path}`, {
-    ...rest,
-    ...(json !== undefined
-      ? {
-          headers: {
-            "Content-Type": "application/json",
-            ...(rest.headers as Record<string, string> | undefined),
-          },
-          body: JSON.stringify(json),
-        }
-      : {}),
-  });
-  let body: unknown = null;
-  await (async () => {
-    body = await res.json();
-  })().catch(async () => {});
-  const responseError =
-    typeof body === "object" &&
-    body !== null &&
-    "error" in body &&
-    typeof body.error === "string"
-      ? body.error
-      : null;
-  if (!res.ok)
-    throw new Error(responseError || `Request failed (${res.status})`);
-  return body as T;
+  const request: RequestInit = { ...rest };
+  if (json !== undefined) {
+    const headers = new Headers({ "Content-Type": "application/json" });
+    new Headers(rest.headers).forEach((value, key) => headers.set(key, value));
+    request.headers = headers;
+    request.body = JSON.stringify(json);
+  }
+  const res = await fetch(`${BASE_PATH}${path}`, request);
+  const body = await res.json().catch(() => null);
+  const parsedError = setupErrorSchema.safeParse(body);
+  if (!res.ok) {
+    throw new Error(
+      parsedError.success && parsedError.data.error
+        ? parsedError.data.error
+        : `Request failed (${res.status})`,
+    );
+  }
+  return body;
 }
 
 export type ChipTone = "on" | "warn" | "off";
+
+export interface ChipState {
+  tone: ChipTone;
+  label: string;
+}
 
 const CHIP_DOTS: Record<ChipTone, string> = {
   on: "var(--green)",
@@ -195,10 +195,7 @@ export type SetupStepId =
   | "members"
   | "review";
 
-export function integrationState(i: SetupIntegration): {
-  tone: ChipTone;
-  label: string;
-} {
+export function integrationState(i: SetupIntegration): ChipState {
   if (i.enabled && i.missingRequired.length === 0)
     return { tone: "on", label: "On" };
   if (i.enabled)
@@ -206,10 +203,7 @@ export function integrationState(i: SetupIntegration): {
   return { tone: "off", label: "Off" };
 }
 
-export function githubAuthState(g: SetupGithub): {
-  tone: ChipTone;
-  label: string;
-} {
+export function githubAuthState(g: SetupGithub): ChipState {
   if (!g.appCredentialConfigured)
     return { tone: "warn", label: "Missing App credential" };
   if (!g.appSlug) return { tone: "warn", label: "Missing App slug" };
@@ -218,25 +212,20 @@ export function githubAuthState(g: SetupGithub): {
   return { tone: "on", label: g.userPrAuth ? "GitHub" : "None" };
 }
 
-/** Does this repo carry what a session needs to provision and boot it on its
- *  own? `.agents/start.sh` (or an instance `previewCommand`) is the
- *  load-bearing half — without it the Preview button has nothing to run and an
- *  agent can't see its own UI change. `.agents/setup` alone still helps:
- *  worktrees provision, but nothing boots. Explained in
- *  docs/repo-lifecycle.md.
+/** Does this repo carry what a session needs to prepare itself and expose
+ *  its app? `.agents/portals.json` is the load-bearing half — without a
+ *  declared Portal an agent has nothing to open and can't see its own UI
+ *  change. `.agents/setup` alone still helps: workspaces provision, but
+ *  nothing is exposed. Explained in docs/repo-lifecycle.md.
  *
  *  The chip label is the whole answer a row gives. A sentence under every
  *  repo restated the same mechanism once per row, so the footer says it once
  *  and the label carries the state. */
-export function repoLifecycleState(repo: SetupRepo): {
-  tone: ChipTone;
-  label: string;
-} {
-  const { setup, start, previewCommand } = repo.lifecycle;
-  if (start) return { tone: "on", label: setup ? "Ready" : "Boots previews" };
-  if (previewCommand) return { tone: "on", label: "Instance preview" };
+export function repoLifecycleState(repo: SetupRepo): ChipState {
+  const { setup, portals } = repo.lifecycle;
+  if (portals) return { tone: "on", label: setup ? "Ready" : "Portals only" };
   if (setup) return { tone: "warn", label: "Setup only" };
-  return { tone: "off", label: "No previews" };
+  return { tone: "off", label: "No Portals" };
 }
 
 export function StateChip({ tone, label }: { tone: ChipTone; label: string }) {

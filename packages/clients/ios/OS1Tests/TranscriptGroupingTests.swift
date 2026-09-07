@@ -1354,10 +1354,36 @@ final class ToolPresentationTests: XCTestCase {
     func testBashSummaryFlattensNewlines() {
         let presentation = ToolPresentation.make(
             toolName: "Bash",
-            input: .object(["command": .string("cd src\nbun test")])
+            input: .object(["command": .string("bun install\nbun test")])
         )
-        XCTAssertEqual(presentation.summary, "cd src ⏎ bun test")
+        XCTAssertEqual(presentation.summary, "bun install ⏎ bun test")
         XCTAssertEqual(presentation.family, .run)
+    }
+
+    func testBashSummaryHidesLeadingCd() {
+        let chained = ToolPresentation.make(
+            toolName: "Bash",
+            input: .object(["command": .string("cd ~/scratch/thinking-status && grep -n foo a.ts | head")])
+        )
+        XCTAssertEqual(chained.summary, "grep -n foo a.ts | head")
+
+        let quoted = ToolPresentation.make(
+            toolName: "Bash",
+            input: .object(["command": .string("cd '/tmp/my dir'; bun test\nbun run check")])
+        )
+        XCTAssertEqual(quoted.summary, "bun test ⏎ bun run check")
+
+        let bareCd = ToolPresentation.make(
+            toolName: "Bash",
+            input: .object(["command": .string("cd /tmp/scratch")])
+        )
+        XCTAssertEqual(bareCd.summary, "cd /tmp/scratch")
+
+        let prefixOnly = ToolPresentation.make(
+            toolName: "Bash",
+            input: .object(["command": .string("cdparanoia && ls")])
+        )
+        XCTAssertEqual(prefixOnly.summary, "cdparanoia && ls")
     }
 
     func testPathsAreRepoRelativeInsideTheWorktree() {

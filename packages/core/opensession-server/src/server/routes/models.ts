@@ -17,7 +17,7 @@ import {
   getModelFallbackAuto,
   interactiveDefaultModel,
   modelEfforts,
-  orchestratorWorkerForBridge,
+  orchestratorWorkerModels,
   piModelLabel,
   refreshPickerModels,
   setDefaultModel,
@@ -147,33 +147,30 @@ export async function handleModelsRoutes(
               ),
             ),
             ...(orchestratorEnabled()
-              ? ORCHESTRATOR_PRESETS.filter((p) =>
-                  presetFitsConfiguredProviders(
-                    {
-                      group: "orchestrator",
-                      lead: { model: p.model },
-                    },
+              ? ORCHESTRATOR_PRESETS.map((preset) => ({
+                  preset,
+                  workers: orchestratorWorkerModels(
+                    preset,
                     configuredProviders,
                   ),
-                ).map((p) => {
-                  const lead = toPiModel(p.model) || p.model;
-                  const leadProvider = lead.split("/")[1] || "anthropic";
-                  return globalPresetEntry(
-                    p,
-                    "orchestrator",
-                    presetComposition([
-                      lead,
-                      ...p.workerAgents.map(
-                        (name) =>
-                          orchestratorWorkerForBridge(
-                            name,
-                            leadProvider,
-                            configuredProviders,
-                          )?.model,
-                      ),
-                    ]),
-                  );
-                })
+                }))
+                  .filter(({ preset, workers }) =>
+                    presetFitsConfiguredProviders(
+                      {
+                        group: "orchestrator",
+                        lead: { model: preset.model },
+                        supporting: workers.map((model) => ({ model })),
+                      },
+                      configuredProviders,
+                    ),
+                  )
+                  .map(({ preset, workers }) =>
+                    globalPresetEntry(
+                      preset,
+                      "orchestrator",
+                      presetComposition([preset.model, ...workers]),
+                    ),
+                  )
               : []),
           ]
         : [];

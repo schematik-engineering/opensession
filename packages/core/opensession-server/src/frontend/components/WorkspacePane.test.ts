@@ -80,8 +80,8 @@ test("the first workspace session receives its draft attachments", () => {
   const payload = source.slice(sendStart, sendEnd);
 
   expect(sendStart).toBeGreaterThan(-1);
-  expect(payload).toContain("...(images.length ? { images } : {})");
-  expect(payload).toContain("files: files.map");
+  expect(payload).toContain("if (images.length) message.images = images;");
+  expect(payload).toContain("message.files = files.map");
   expect(source).toContain("dropStagingAttachments(draftKey)");
 });
 
@@ -273,6 +273,12 @@ test("wide Review keeps page navigation in the identity bar", () => {
   expect(source).toContain("page={reviewPage}");
   expect(source).not.toContain("onReviewPageChange={setReviewPage}");
   expect(source).toContain("compactToolbar={reviewSummaryVisible}");
+  expect(source).toContain("ref={setReviewSessionActionTarget}");
+  expect(source).toContain("sessionActionTarget={");
+  expect(prPanelSource).toContain(
+    "createPortal(sessionActionButton, sessionActionTarget)",
+  );
+  expect(prPanelSource).toContain("sessionActionTarget === undefined");
   expect(prPanelSource).toContain('label="Pull request pages"');
   expect(prPanelSource).toContain('className="shrink-0 phone:hidden"');
   expect(prPanelSource).toContain('className="flex h-11');

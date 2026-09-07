@@ -217,6 +217,15 @@ export function IconChevronDown(p: IconProps) {
   );
 }
 
+export function IconChevronsUpDown(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path {...stroke} d="M8.25 9.25L12 5.5L15.75 9.25" />
+      <path {...stroke} d="M8.25 14.75L12 18.5L15.75 14.75" />
+    </Svg>
+  );
+}
+
 export function IconChevronLeft(p: IconProps) {
   return (
     <Svg {...p}>
@@ -1514,7 +1523,7 @@ export function IconChart(p: IconProps) {
   );
 }
 
-export function IconShapes(p: IconProps) {
+function IconSparkles(p: IconProps) {
   return (
     <Svg {...p}>
       <path
@@ -1524,6 +1533,8 @@ export function IconShapes(p: IconProps) {
     </Svg>
   );
 }
+
+export { IconSparkles as "IconShapes" };
 
 // ⋯ more options. Deliberately NOT iconic-pro's `dots-horizontal` geometry
 // (8/12/16 at r=1): that spans only 10 of the 24 grid and renders visibly

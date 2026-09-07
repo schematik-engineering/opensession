@@ -17,7 +17,6 @@ import type {
   WSClientMessage,
   WSServerMessage,
 } from "../lib/types";
-import { PrSessionsList, prRelatedSessions } from "./PrSessions";
 import { WalkthroughCard } from "./WalkthroughCard";
 import { PrOverviewPage } from "./pr/PrOverviewPage";
 import { PrFilesPage } from "./pr/PrFilesPage";
@@ -68,7 +67,6 @@ import {
   IconGitMerge,
   IconGlobe,
   IconMessage,
-  IconMessages,
   IconPlus,
   IconPullRequest,
   IconSliders,
@@ -104,8 +102,6 @@ import { ReviewRail } from "./pr/ReviewRail";
 import { GitStatusRows } from "./pr/GitStatus";
 import { ReviewToolbar } from "./pr/ReviewToolbar";
 import { EmptyState, LoadingState } from "../ui/state";
-import { ResponsiveDialog } from "../ui/sheet";
-import { useIsPhone } from "../hooks/useIsPhone";
 import { revealDiffFile } from "../lib/diff-navigation";
 import { BrandMark } from "./BrandTile";
 import { useCopy } from "../ui/copy";
@@ -176,14 +172,11 @@ interface Props {
   editGate?: boolean;
   /** Session-less PR target; uses the same canvas with repo+branch APIs. */
   previewTarget?: { repo: string; branch: string };
-  /**
-   * Live sessions list. When provided, the panel surfaces every session
-   * linked to the shown PR (matched by repo + head branch / number) and — with
-   * `send` — offers starting a new session on the PR's head branch.
-   */
+  /** Live sessions list; tells the panel whether the hosting session runs. */
   sessions?: UnifiedSession[];
-  /** Navigate to a session picked from the linked-sessions list. */
-  onOpenSessionById?: (id: string) => void;
+  /** Open a new session tab in the PR's workspace. Existing sessions are
+   * already the tabs above the panel, so this is the only session action. */
+  onStartSession?: () => void;
   /** Host the session action in surrounding workspace chrome. `undefined`
    * keeps it in this PR toolbar for standalone review views. */
   sessionActionTarget?: HTMLElement | null;
@@ -230,7 +223,7 @@ export function PrPanel({
   editGate,
   previewTarget,
   sessions,
-  onOpenSessionById,
+  onStartSession,
   sessionActionTarget,
   onOpenPr,
   addHandler: addHandlerProp,
@@ -334,8 +327,6 @@ export function PrPanel({
   // Merging is a separate decision from approving, so it starts off: the
   // reviewer opts into it, and the primary action stays "Approve".
   const [mergeAfterReview, setMergeAfterReview] = useState(false);
-  const [sessionsOpen, setSessionsOpen] = useState(false);
-  const isPhone = useIsPhone();
   /**
    * The review is two places, not six tabs: Overview (the conversation and the
    * PR's metadata) and Files changed (the code). `codeView` is which lens the
@@ -548,11 +539,9 @@ export function PrPanel({
             comment.startLine !== comment.endLine
               ? comment.startLine
               : undefined,
-          side: (comment.side === "deletions" ? "LEFT" : "RIGHT") as
-            | "LEFT"
-            | "RIGHT",
+          side: comment.side === "deletions" ? "LEFT" : "RIGHT",
         })),
-      };
+      } satisfies Parameters<typeof submitPrReviewApi>[1];
       const result = previewTarget
         ? await submitPrPreviewReviewApi(
             previewTarget.repo,
@@ -869,7 +858,13 @@ export function PrPanel({
     };
     // Optimistic: flip locally, revert if GitHub rejects the mutation.
     setPrViewed({ ...info, viewed: apply(info.viewed, next) });
-    void setPrFileViewed(info.prId, path, next, getCurrentUser()).catch(() => {
+    void setPrFileViewed(
+      activeRepoId,
+      info.prId,
+      path,
+      next,
+      getCurrentUser(),
+    ).catch(() => {
       setPrViewed((prev) =>
         prev && prev.key === info.key
           ? { ...prev, viewed: apply(prev.viewed, !next) }
@@ -902,26 +897,16 @@ export function PrPanel({
   // Tab bar across the top: one tab per PR (primary repo, attached repos,
   // linked PRs) plus the link affordance. With a single target the bar
   // disappears and "Link PR" moves into the actions row instead.
-  // Sessions linked to the shown PR — only when the caller wires the list.
-  // Matched against the ACTIVE target (linked PRs carry their own branch; the
-  // primary/attached branch resolves through the loaded PR's headRefName).
-  const relatedSessions =
-    sessions && active
-      ? prRelatedSessions(sessions, active.repo, active.branch, pr)
-      : [];
-  const sessionActionLabel =
-    relatedSessions.length === 0
-      ? "Start session"
-      : relatedSessions.length === 1
-        ? "Open session"
-        : `Open ${relatedSessions.length} sessions`;
-  const sessionActionButton = sessions ? (
+  // Starting a session opens a new tab in the PR's workspace with the composer
+  // at the bottom. Existing sessions are the tabs above, so there is no list.
+  const sessionActionLabel = "New session";
+  const sessionActionButton = onStartSession ? (
     sessionActionTarget === undefined ? (
       <Button
         variant="default"
         size="sm"
-        icon={<IconMessages size={18} />}
-        onClick={() => setSessionsOpen(true)}
+        icon={<IconPlus size={18} />}
+        onClick={onStartSession}
       >
         {sessionActionLabel}
       </Button>
@@ -933,7 +918,7 @@ export function PrPanel({
           className="flex-none rounded-control"
           aria-label={sessionActionLabel}
           icon={<IconPlus size={22} />}
-          onClick={() => setSessionsOpen(true)}
+          onClick={onStartSession}
         />
       </Tooltip>
     )
@@ -1119,7 +1104,7 @@ export function PrPanel({
             </Button>
           }
         >
-          {loadError}
+          <span className="text-pretty">{loadError}</span>
         </EmptyState>
       </div>
     );
@@ -1273,8 +1258,7 @@ export function PrPanel({
       mergeError={mergeError}
       onOpenFile={scrollToFile}
       onOpenFiles={() => setPage("files")}
-      onOpenSessions={sessions ? () => setSessionsOpen(true) : undefined}
-      sessionCount={relatedSessions.length}
+      onStartSession={onStartSession}
       focusChecksSeq={focusChecksSeq}
       compact={railStacked}
     />
@@ -1320,11 +1304,11 @@ export function PrPanel({
             size="sm"
             value={codeView}
             onValueChange={(next) => {
-              const key = next as CodeView;
-              if (key === "flow" && codeView !== "flow" && codeFlowError) {
+              if (next !== "all" && next !== "guide" && next !== "flow") return;
+              if (next === "flow" && codeView !== "flow" && codeFlowError) {
                 resetCodeFlowError();
               }
-              setCodeView(key);
+              setCodeView(next);
             }}
           >
             <SegmentedOption value="all">Changes</SegmentedOption>
@@ -1610,17 +1594,13 @@ export function PrPanel({
                     </span>
                   </Menu.Item>
                 )}
-              {sessions &&
+              {onStartSession &&
                 sessionActionTarget === undefined &&
                 headerCompact && (
-                  <Menu.Item onClick={() => setSessionsOpen(true)}>
-                    <IconMessages size={18} className={MENU_ICON} />
+                  <Menu.Item onClick={onStartSession}>
+                    <IconPlus size={18} className={MENU_ICON} />
                     <span className="min-w-0 flex-1 truncate">
-                      {relatedSessions.length === 0
-                        ? "Start a session"
-                        : relatedSessions.length === 1
-                          ? "Open session"
-                          : `Open ${relatedSessions.length} sessions`}
+                      {sessionActionLabel}
                     </span>
                   </Menu.Item>
                 )}
@@ -1753,51 +1733,6 @@ export function PrPanel({
           diffGroupsLoading={diffGroupsLoading}
         />
       )}
-
-      <ResponsiveDialog
-        open={sessionsOpen}
-        onClose={() => setSessionsOpen(false)}
-        phone={isPhone}
-        label="Sessions on this pull request"
-        sheetClassName="max-h-[88dvh]"
-        modalClassName="w-[min(460px,calc(100vw-32px))]"
-      >
-        <div className="flex min-h-0 flex-col">
-          <div className="flex shrink-0 items-center gap-3 px-5 pb-3 pt-5 phone:pt-2">
-            <div className="min-w-0 flex-1">
-              <h2 className="text-item-title font-semibold text-fg">
-                Sessions on this PR
-              </h2>
-              <p className="mt-0.5 text-supporting text-dim">
-                Open existing work or start something new on this branch.
-              </p>
-            </div>
-            <Button
-              variant="ghost"
-              className="size-10 shrink-0 phone:size-11"
-              icon={<IconX size={20} />}
-              aria-label="Close sessions"
-              onClick={() => setSessionsOpen(false)}
-            />
-          </div>
-          <div className="min-h-0 overflow-y-auto px-5 pb-5">
-            <PrSessionsList
-              sessions={relatedSessions}
-              repo={active?.repo || ""}
-              branch={active?.branch}
-              pr={pr}
-              currentSessionId={sessionId || undefined}
-              onOpenSession={(id) => {
-                setSessionsOpen(false);
-                onOpenSessionById?.(id);
-              }}
-              send={send}
-              addHandler={addHandler}
-              compose
-            />
-          </div>
-        </div>
-      </ResponsiveDialog>
 
       {/* Review controls only exist while the person is actively reviewing.
           Passive PR browsing should not imply that a review is in progress. */}

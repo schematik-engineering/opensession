@@ -2,10 +2,14 @@ import { listAccountsPublic } from "./claude-accounts";
 import { listCodexAccountsPublic } from "./codex-accounts";
 import { modelProviders } from "./model-providers";
 import { configuredAcpProviders } from "./acp-config";
+import { hasXaiAccounts } from "./xai-accounts";
+import { XAI_OAUTH_PROVIDER } from "./xai-provider-id";
 import {
   KNOWN_MODELS,
   interactiveDefaultModel,
   modelPreset,
+  orchestratorPreset,
+  orchestratorWorkerModels,
   refreshPickerModels,
   toPiModel,
 } from "./models";
@@ -22,6 +26,7 @@ export function configuredModelProviders(): Set<string> {
   return new Set([
     ...(listAccountsPublic().length ? ["anthropic"] : []),
     ...(listCodexAccountsPublic().length ? ["openai"] : []),
+    ...(hasXaiAccounts() ? [XAI_OAUTH_PROVIDER] : []),
     ...Object.entries(modelProviders())
       .filter(([, provider]) => !!provider.apiKey)
       .map(([provider]) => provider),
@@ -82,12 +87,16 @@ function selectionFitsConfiguredProviders(
 ): boolean {
   const preset = modelPreset(model);
   if (!preset) return modelFitsConfiguredProviders(model, configuredProviders);
+  const orchestrator = orchestratorPreset(model);
   return presetFitsConfiguredProviders(
     {
-      group: model.replace(/^pi\//, "").startsWith("dial/")
-        ? "dial"
-        : "orchestrator",
+      group: orchestrator ? "orchestrator" : "dial",
       lead: { model: preset.model },
+      supporting: orchestrator
+        ? orchestratorWorkerModels(orchestrator, configuredProviders).map(
+            (worker) => ({ model: worker }),
+          )
+        : undefined,
     },
     configuredProviders,
   );

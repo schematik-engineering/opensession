@@ -31,7 +31,13 @@ interface AppSessionPaneProps {
   data: {
     pendingInitialPrompts: Record<
       string,
-      { content: string; user: string; sentAt: number; images?: string[] }
+      {
+        content: string;
+        user: string;
+        sentAt: number;
+        images?: string[];
+        pastedTexts?: string[];
+      }
     >;
     sidebarRef: RefObject<SidebarHandle | null>;
     sessions: UnifiedSession[];
@@ -61,7 +67,7 @@ interface AppSessionPaneProps {
     | "stagingActive"
     | "assetsActive"
     | "terminalActive"
-    | "previewLiveActive"
+    | "desktopActive"
     | "portalActive"
     | "reviewFocusPr"
   >;
@@ -79,9 +85,9 @@ interface AppSessionPaneProps {
     | "subagentActive"
     | "terminalOpen"
     | "closeStagingTab"
-    | "closePreviewTab"
     | "closeAssetsTab"
     | "closeTerminalTab"
+    | "closeDesktopTab"
   >;
   tabs: {
     context: Pick<
@@ -145,7 +151,7 @@ export function AppSessionPane({
     stagingActive,
     assetsActive,
     terminalActive,
-    previewLiveActive,
+    desktopActive,
     portalActive,
     reviewFocusPr,
   },
@@ -159,9 +165,9 @@ export function AppSessionPane({
     subagentActive,
     terminalOpen,
     closeStagingTab,
-    closePreviewTab,
     closeAssetsTab,
     closeTerminalTab,
+    closeDesktopTab,
   },
   tabs: {
     context: { activeWorkspaceId, workspaceSessions, emptyWorkspaceSession },
@@ -315,18 +321,18 @@ export function AppSessionPane({
           // Presence, not foreground: the shells stay mounted behind whatever
           // else is in front, and only unmount when the tab is closed.
           terminalTabOpen: !!wsKey && terminalOpen.has(wsKey),
-          showPreviewTab: splitMode
-            ? viewTabKind(surfaceId) === "preview"
-            : focused && previewLiveActive,
           showPortal: splitMode
             ? viewTabKind(surfaceId) === "portal"
             : focused && portalActive,
           portalTarget: currentPortalTarget,
+          showDesktop: splitMode
+            ? viewTabKind(surfaceId) === "desktop"
+            : focused && desktopActive,
           reviewFocusPr,
           onCloseStaging: closeStagingTab,
-          onClosePreviewTab: closePreviewTab,
           onCloseAssets: closeAssetsTab,
           onCloseTerminal: closeTerminalTab,
+          onCloseDesktop: closeDesktopTab,
         }}
         subagents={{
           // The sub-agent drill-in, opened from this pane's own transcript.

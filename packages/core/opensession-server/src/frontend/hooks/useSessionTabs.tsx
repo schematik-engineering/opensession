@@ -1,6 +1,7 @@
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { mutate as revalidateApiResources } from "swr";
 import type { SplitSide } from "../components/SessionSplit";
 import { SessionTabs } from "../components/SessionTabs";
 import { getCurrentUser } from "../components/UserPicker";
@@ -24,7 +25,9 @@ import {
 } from "../lib/landing-session";
 import { setLane, type Lane } from "../lib/lanes";
 import { dedupeViewers, otherViewers } from "../lib/presence";
+import { sessionApiKeyFilter } from "../lib/api-swr";
 import { newClientSessionId } from "../lib/session-id";
+import { siblingTabPrRefs } from "../lib/session-prs";
 import type { NewTabMorphOrigin, ViewTab } from "../lib/session-tabs-types";
 import { sessionPath, workspacePanePath } from "../lib/share-link";
 import { matchesShortcut } from "../lib/shortcuts";
@@ -145,7 +148,7 @@ interface UseSessionTabsOptions {
       | "closeStagingTab"
       | "closeAssetsTab"
       | "closeTerminalTab"
-      | "closePreviewTab"
+      | "closeDesktopTab"
       | "closePortalTab"
       | "closeConversationTab"
       | "closeVideoTab"
@@ -229,7 +232,7 @@ export function useSessionTabs({
       closeStagingTab,
       closeAssetsTab,
       closeTerminalTab,
-      closePreviewTab,
+      closeDesktopTab,
       closePortalTab,
       closeConversationTab,
       closeVideoTab,
@@ -689,7 +692,7 @@ export function useSessionTabs({
             else if (id.startsWith("staging:")) closeStagingTab();
             else if (id.startsWith("assets:")) closeAssetsTab();
             else if (id.startsWith("terminal:")) closeTerminalTab();
-            else if (id.startsWith("preview:")) closePreviewTab();
+            else if (id.startsWith("desktop:")) closeDesktopTab();
             else if (id.startsWith("portal:")) closePortalTab();
             else {
               const closingTab = id.startsWith("conversation:")
@@ -773,8 +776,26 @@ export function useSessionTabs({
       archived: false,
       waitingForInput: false,
       queuedCount: 0,
+      // The source tab's PR is the workspace's PR. Keep it, as a shared ref
+      // rather than this shell's own: the flat fields describe the source's
+      // branch, which a stack or ask sibling does not have.
+      prs: siblingTabPrRefs(src),
+      linkedPrs: undefined,
       prUrl: undefined,
       prState: undefined,
+      prNumber: undefined,
+      prTitle: undefined,
+      prIsDraft: undefined,
+      prMergeable: undefined,
+      prReviewDecision: undefined,
+      prReviewRequested: undefined,
+      prReviewedBy: undefined,
+      prAdditions: undefined,
+      prDeletions: undefined,
+      prChangedFiles: undefined,
+      prChecks: undefined,
+      prAuthor: undefined,
+      prUpdatedAt: undefined,
       automation: undefined,
       plainThreadId: undefined,
       goal: undefined,
@@ -782,14 +803,12 @@ export function useSessionTabs({
       // This sibling reuses an already-ready workspace. The disconnected pane
       // holds messages locally until the server has persisted the session.
       workspacePreparing: false,
-      ...(mode === "ask"
-        ? {
-            branch: null,
-            worktreeDir: null,
-            mode: "ask" as const,
-          }
-        : {}),
     };
+    if (mode === "ask") {
+      draft.branch = null;
+      draft.worktreeDir = null;
+      draft.mode = "ask";
+    }
     // Commit the local shell before changing the route. Without this boundary,
     // the route can render against the previous list and keep the old session's
     // conversation visible until the create response arrives.
@@ -843,6 +862,11 @@ export function useSessionTabs({
         },
         { sticky: true },
       );
+      // The tab's PR and git surfaces already asked the server about this id
+      // while it was only a local shell, and SWR kept the 404. The server
+      // knows the id now: ask again, so the workspace's PR fills in without
+      // waiting for a poll.
+      void revalidateApiResources(sessionApiKeyFilter(createdId));
       clearTimeout(pendingTimer.current);
       setPendingSessionId((pending) => (pending === id ? null : pending));
       setOptimisticSession((pending) => (pending?.id === id ? null : pending));
@@ -875,23 +899,21 @@ export function useSessionTabs({
     const workspace = src.workspaceId
       ? workspaces.find((item) => item.id === src.workspaceId)
       : undefined;
-    openPrefilledSession({
-      ...(prompt ? { prompt } : {}),
+    const prefill: Parameters<typeof openPrefilledSession>[0] = {
       repo: src.repo || workspace?.repo,
-      ...(src.workspaceId
-        ? {
-            workspaceId: src.workspaceId,
-            modelWorkspaceId: src.workspaceId,
-          }
-        : {}),
-      // Sharing starts from the workspace's branch. Omitting the branch for
-      // a stack keeps NewSession on "New branch", which the create path
-      // resolves as a stacked worktree after the first prompt is sent.
-      ...(mode === "share" && (src.branch || workspace?.branch)
-        ? { branch: src.branch || workspace?.branch }
-        : {}),
-      ...(mode === "ask" ? { mode: "ask" as const } : {}),
-    });
+    };
+    if (prompt) prefill.prompt = prompt;
+    if (src.workspaceId) {
+      prefill.workspaceId = src.workspaceId;
+      prefill.modelWorkspaceId = src.workspaceId;
+    }
+    // Sharing starts from the workspace's branch. Omitting the branch for
+    // a stack keeps NewSession on "New branch", which the create path
+    // resolves as a stacked worktree after the first prompt is sent.
+    const branch = src.branch || workspace?.branch;
+    if (mode === "share" && branch) prefill.branch = branch;
+    if (mode === "ask") prefill.mode = "ask";
+    openPrefilledSession(prefill);
   }
 
   // Open a real sibling tab immediately. Its first prompt starts the engine, so
@@ -912,15 +934,16 @@ export function useSessionTabs({
     const openSessionlessWorkspaceComposer = () => {
       if (route.view !== "workspace") return;
       const workspace = workspaces.find((item) => item.id === route.id);
-      openPrefilledSession({
+      const prefill: Parameters<typeof openPrefilledSession>[0] = {
         workspaceId: route.id,
         repo: workspace?.repo,
         branch: workspace?.branch,
-        // Feed workspaces without a repo start in Scratch.
-        ...(workspace?.externalRefs?.length && !workspace.repo
-          ? { mode: "scratch" as const }
-          : {}),
-      });
+      };
+      // Feed workspaces without a repo start in Scratch.
+      if (workspace?.externalRefs?.length && !workspace.repo) {
+        prefill.mode = "scratch";
+      }
+      openPrefilledSession(prefill);
     };
 
     let src = newSessionSource(

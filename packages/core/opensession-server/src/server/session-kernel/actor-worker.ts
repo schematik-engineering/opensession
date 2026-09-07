@@ -17,6 +17,7 @@ import type { SessionActorReducerCommand } from "./lifecycle-protocol";
 import { isReadReducer, sessionActorReducerRoute } from "./actor-routing";
 import { READ_METHODS, sessionKernelStoreRoute } from "./store-routing";
 import { assertTranscriptActorRequest } from "./transcript-protocol";
+import { assertMetadataActorRequest } from "./metadata-protocol";
 
 class SessionQuarantinedError extends Error {
   readonly code = "session_quarantined";
@@ -95,7 +96,16 @@ export function startSessionKernelActorWorker(): void {
           if (quarantine)
             throw new SessionQuarantinedError(sessionId, quarantine.reason);
         }
-        if (sessionId)
+        // An export receipt only advances catalog bookkeeping. It rides the
+        // session mailbox so it lands after the commit it confirms, but it
+        // must not mark the actor dirty for a runtime scan.
+        // A catalog read names a session but serves it from the central
+        // projection; opening the actor would defeat the point.
+        const centralOnly =
+          command.kind === "metadata" &&
+          (command.request.op === "exported" ||
+            command.request.op === "catalog_get");
+        if (sessionId && !centralOnly)
           store = host.storeForSession(
             sessionId,
             command.kind === "transcript" ? false : !isReadReducer(command),
@@ -259,8 +269,44 @@ export function startSessionKernelActorWorker(): void {
           } else if (core.op === "clear")
             result = store.clearSession(core.sessionId);
           else result = store.tombstoneSession(core.sessionId);
-          if (core.op === "clear" || core.op === "tombstone")
+          if (core.op === "clear" || core.op === "tombstone") {
             host.refreshSessionProjections(core.sessionId);
+            host.settleSessionMetadataCatalog(core.sessionId);
+          }
+        } else if (command.kind === "metadata") {
+          const metadata = command.request;
+          assertMetadataActorRequest(metadata);
+          if (metadata.op === "get")
+            result = store.sessionMetadata(metadata.sessionId);
+          else if (metadata.op === "put") {
+            const put = store.putSessionMetadata(metadata);
+            if (put.status === "committed")
+              host.settleSessionMetadataCatalog(metadata.sessionId);
+            result = put;
+          } else if (metadata.op === "exported")
+            result = host.central.markSessionMetadataExported(
+              metadata.sessionId,
+              metadata.rev,
+            );
+          else if (metadata.op === "catalog_get")
+            result = host.central.sessionMetadataCatalogGet(metadata.sessionId);
+          else if (metadata.op === "catalog_page")
+            result = host.central.sessionMetadataCatalogPage(
+              metadata.afterSessionId,
+              metadata.limit,
+            );
+          else if (metadata.op === "pending_exports")
+            result = host.central.sessionMetadataPendingExports(metadata.limit);
+          else if (metadata.op === "seed_catalog")
+            result = host.central.seedSessionMetadataCatalog(metadata.rows);
+          else if (metadata.op === "catalog_complete")
+            result = host.central.sessionMetadataCatalogComplete();
+          else if (metadata.op === "mark_catalog_complete")
+            result = host.central.markSessionMetadataCatalogComplete();
+          else
+            throw new Error(
+              `Unknown session metadata op ${String((metadata as { op?: unknown }).op)}`,
+            );
         } else if (command.kind === "turn") {
           const turn = command.request;
           if (turn.op === "snapshot")

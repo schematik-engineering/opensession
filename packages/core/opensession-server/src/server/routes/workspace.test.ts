@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { RouteContext } from "./context";
-import { deleteWorkspaceMemberSessions, worktreeRepoQuery } from "./workspace";
+import { deleteWorkspaceMemberSessions } from "./workspace";
 
 function workspaceDeleteContext(): RouteContext {
   const url = new URL("http://localhost/api/workspaces/ws-1?worktree=true");
@@ -48,9 +48,17 @@ test("workspace deletion ignores a raced 404 but stops on another session failur
   expect(failure?.status).toBe(409);
 });
 
-test("worktree aggregate selection is never treated as a repository id", () => {
-  expect(worktreeRepoQuery(null)).toBeUndefined();
-  expect(worktreeRepoQuery("")).toBeUndefined();
-  expect(worktreeRepoQuery("all")).toBeUndefined();
-  expect(worktreeRepoQuery("biss-client")).toBe("biss-client");
+test("every new-session response carries the workspace PR projection", async () => {
+  const source = await Bun.file(
+    new URL("./workspace.ts", import.meta.url),
+  ).text();
+  const route = source.slice(
+    source.indexOf("/new-session$/"),
+    source.indexOf("/promote$/"),
+  );
+  // The existing tab, the reusable empty tab, and the freshly created one.
+  expect(route.match(/await sessionDetail\(/g)).toHaveLength(3);
+  expect(route).not.toContain("session: existing }");
+  expect(route).not.toContain("session: reusable }");
+  expect(route).not.toContain("session: (await findSessionAsync(bksId))");
 });

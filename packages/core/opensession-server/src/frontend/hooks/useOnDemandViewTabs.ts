@@ -16,16 +16,11 @@ export function useOnDemandViewTabs({
 }) {
   const stagingActive = activeViewTab === "staging";
   const assetsActive = activeViewTab === "assets";
-  const previewLiveActive = activeViewTab === "preview";
   const portalActive = activeViewTab === "portal";
+  const desktopActive = activeViewTab === "desktop";
   const terminalActive = activeViewTab === "terminal";
   const [stagingOpen, setStagingOpen] = useState<Set<string>>(
     () => new Set(getActiveViewTabKeys("staging")),
-  );
-  // Sessions whose local-dev Preview view-tab is open (full-width iframe of
-  // the running dev server — sibling of Staging, which shows the PR deploy).
-  const [previewTabOpen, setPreviewTabOpen] = useState<Set<string>>(
-    () => new Set(getActiveViewTabKeys("preview")),
   );
   // One transient browser target per workspace. Selecting another service
   // reuses the same center pane instead of filling the tab strip with ports.
@@ -40,6 +35,9 @@ export function useOnDemandViewTabs({
   const [terminalOpen, setTerminalOpen] = useState<Set<string>>(
     () => new Set(),
   );
+  // Workspaces with the Sandbox Desktop view-tab open. Also starts empty:
+  // the pane mints a one-viewer URL and may wake the Sandbox when it mounts.
+  const [desktopOpen, setDesktopOpen] = useState<Set<string>>(() => new Set());
 
   // Open/foreground this workspace's Preview environment view-tab (the Info
   // panel button). Adds the tab to the strip if absent.
@@ -51,30 +49,6 @@ export function useOnDemandViewTabs({
       return new Set(prev).add(key);
     });
     setActiveViewTab("staging");
-  }
-  // Open/foreground this workspace's local-dev Preview view-tab (the header
-  // Preview button routes here instead of window.open — the Mac shell was
-  // turning those into stray Electron windows).
-  function openPreviewTab() {
-    if (!workspaceKey) return;
-    const key = workspaceKey;
-    setPreviewTabOpen((prev) => {
-      if (prev.has(key)) return prev;
-      return new Set(prev).add(key);
-    });
-    setActiveViewTab("preview");
-  }
-  function closePreviewTab() {
-    if (workspaceKey) {
-      const key = workspaceKey;
-      setPreviewTabOpen((prev) => {
-        if (!prev.has(key)) return prev;
-        const next = new Set(prev);
-        next.delete(key);
-        return next;
-      });
-    }
-    if (previewLiveActive) setActiveViewTab(null);
   }
   function openPortal(target: PortalTarget) {
     if (!workspaceKey) return;
@@ -148,24 +122,45 @@ export function useOnDemandViewTabs({
     if (terminalActive) setActiveViewTab(null);
   }
 
+  // Open/foreground this workspace's Desktop view-tab (the Sandbox popover's
+  // Open desktop). Closing it drops the embedded stream.
+  function openDesktop() {
+    if (!workspaceKey) return;
+    const key = workspaceKey;
+    setDesktopOpen((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
+    setActiveViewTab("desktop");
+  }
+  function closeDesktopTab() {
+    if (workspaceKey) {
+      const key = workspaceKey;
+      setDesktopOpen((prev) => {
+        if (!prev.has(key)) return prev;
+        const next = new Set(prev);
+        next.delete(key);
+        return next;
+      });
+    }
+    if (desktopActive) setActiveViewTab(null);
+  }
+
   const currentPortalTarget = workspaceKey
     ? (portalTargets[workspaceKey] ?? null)
     : null;
 
   return {
     stagingOpen,
-    previewTabOpen,
     assetsOpen,
     terminalOpen,
+    desktopOpen,
     currentPortalTarget,
     openStaging,
     closeStagingTab,
-    openPreviewTab,
-    closePreviewTab,
     openAssets,
     closeAssetsTab,
     openTerminal,
     closeTerminalTab,
+    openDesktop,
+    closeDesktopTab,
     openPortal,
     closePortalTab,
   };

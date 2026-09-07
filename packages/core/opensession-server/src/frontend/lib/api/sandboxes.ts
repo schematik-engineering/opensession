@@ -18,7 +18,23 @@ export interface SessionSandboxStatus {
   cwd?: string | null;
   canPause?: boolean;
   canResume?: boolean;
+  canDesktop?: boolean;
   logs?: { setup?: string; resume?: string };
+}
+
+export interface SandboxDesktopLink {
+  url: string;
+  expiresAt?: number;
+}
+
+/** Mints a one-viewer desktop URL. Open it in a new tab; never persist it. */
+export function openSandboxDesktop(
+  sessionId: string,
+): Promise<SandboxDesktopLink> {
+  return request(`/sessions/${encodeURIComponent(sessionId)}/sandbox/desktop`, {
+    method: "POST",
+    label: "Failed to open the sandbox desktop",
+  });
 }
 
 export function fetchSessionSandbox(
@@ -29,18 +45,39 @@ export function fetchSessionSandbox(
   });
 }
 
+/** Body of `POST /sessions/:id/sandbox/attach`; `confirm` accepts leaving
+ * unpushed work behind on this machine. */
+interface AttachSandboxBody {
+  provider: string;
+  confirm?: true;
+}
+
+/** Moves a session that runs on this machine into a Sandbox, which is
+ * provisioned on its next turn. A 428 means work exists only on this machine;
+ * repeat with `confirm` to move anyway. */
+export function attachSandbox(
+  sessionId: string,
+  provider: string,
+  opts: { confirm?: boolean } = {},
+): Promise<SessionSandboxStatus> {
+  const body: AttachSandboxBody = { provider };
+  if (opts.confirm) body.confirm = true;
+  return request(`/sessions/${encodeURIComponent(sessionId)}/sandbox/attach`, {
+    method: "POST",
+    body,
+    label: "Failed to move the session into a Sandbox",
+  });
+}
+
 export function sandboxAction(
   sessionId: string,
   action: "pause" | "resume" | "recreate",
 ): Promise<SessionSandboxStatus> {
-  return request(
-    `/sessions/${encodeURIComponent(sessionId)}/sandbox/${action}`,
-    {
-      method: "POST",
-      ...(action === "recreate" ? { body: { confirm: true } } : {}),
-      label: `Failed to ${action} sandbox`,
-    },
-  );
+  const path = `/sessions/${encodeURIComponent(sessionId)}/sandbox/${action}`;
+  const label = `Failed to ${action} sandbox`;
+  return action === "recreate"
+    ? request(path, { method: "POST", body: { confirm: true }, label })
+    : request(path, { method: "POST", label });
 }
 
 export interface SandboxConnectionsResponse {

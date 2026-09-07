@@ -19,6 +19,8 @@ import {
   routeModel,
   toPiModel,
   KNOWN_MODELS,
+  orchestratorPreset,
+  orchestratorWorkerModels,
   refreshPickerModels,
 } from "./models";
 
@@ -65,6 +67,7 @@ describe("Pi-only model routing", () => {
 
   test("maps native model ids to Pi", () => {
     expect(toPiModel("claude-opus-5")).toBe("pi/anthropic/claude-opus-5");
+    expect(toPiModel("gpt-6-astra")).toBe("pi/openai/gpt-6-astra");
     expect(toPiModel("gpt-5.6-sol")).toBe("pi/openai/gpt-5.6-sol");
   });
 
@@ -145,7 +148,7 @@ describe("Pi-only model routing", () => {
       "pi/openrouter/z-ai/glm-5.3",
     );
     expect(toPiModel("pi/vercel/zai/glm-5.3-flash")).toBe(
-      "pi/vercel-ai-gateway/zai/glm-5.3-flash",
+      "pi/vercel/zai/glm-5.3-flash",
     );
     expect(piModelLabel("pi/openrouter/stealth/ox-alpha")).toBe("GLM-5.3");
     expect(modelEfforts("pi/openrouter/stealth/ox-alpha")).toEqual([
@@ -168,6 +171,19 @@ describe("Pi-only model routing", () => {
   test("keeps engine keys provider-neutral", () => {
     expect(modelEngineKey("pi/anthropic/claude-opus-5")).toBe("claude-opus-5");
     expect(modelEngineKey("pi/dial/opus-fable")).toBe("dial/opus-fable");
+  });
+
+  test("keeps the Fable and Sol orchestrator cross-provider", () => {
+    const preset = orchestratorPreset("orchestrator/fable-sol");
+    expect(preset).toMatchObject({
+      model: "claude-fable-5-1",
+      effort: "high",
+      workerAgents: ["worker-sol"],
+    });
+    if (!preset) throw new Error("missing Fable + Sol orchestrator preset");
+    expect(
+      orchestratorWorkerModels(preset, new Set(["anthropic", "openai"])),
+    ).toEqual(["openai/gpt-5.6-sol"]);
   });
 
   test("builds a Pi-only fallback chain", () => {
@@ -236,7 +252,20 @@ describe("Pi-only model routing", () => {
   });
 
   test("labels Pi models without an engine prefix", () => {
+    expect(modelLabel("pi/openai/gpt-6-astra")).toBe("GPT-6 Astra");
     expect(modelLabel("pi/openai/gpt-5.6-sol")).toBe("GPT-5.6 Sol");
+  });
+
+  test("exposes Astra's reasoning efforts and aliases", () => {
+    expect(resolveModel("astra")?.id).toBe("gpt-6-astra");
+    expect(resolveModel("gpt6")?.id).toBe("gpt-6-astra");
+    expect(modelEfforts("pi/openai/gpt-6-astra")).toEqual([
+      "none",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
   });
 
   test("seeds subscription models without the retired pickerModels setting", () => {
@@ -250,6 +279,7 @@ describe("Pi-only model routing", () => {
     const pickerIds = KNOWN_MODELS.filter(
       (model) => model.provider === "pi",
     ).map((model) => model.id);
+    expect(pickerIds).toContain("pi/openai/gpt-6-astra");
     expect(pickerIds).toContain("pi/openai/gpt-5.6-sol");
     expect(pickerIds).toContain("pi/anthropic/claude-fable-5-1");
   });

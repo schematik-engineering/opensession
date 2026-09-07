@@ -232,7 +232,7 @@ const readyEntry = () => _prewarmPoolForTest().get("daytona:tella-fusion");
 describe("requestPrewarm", () => {
   test("unknown provider / repo / local provider → unsupported", async () => {
     makeFakeAdapter();
-    expect((await requestPrewarm("docker", "tella-fusion")).state).toBe(
+    expect((await requestPrewarm("e2b", "tella-fusion")).state).toBe(
       "unsupported",
     );
     expect((await requestPrewarm("daytona", "no-such-repo")).state).toBe(

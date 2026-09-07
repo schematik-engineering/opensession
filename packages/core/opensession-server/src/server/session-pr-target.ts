@@ -12,7 +12,18 @@ function inheritedBranch(
   if (!workspace?.branch) return null;
   if (session.repo && workspace.repo && session.repo !== workspace.repo)
     return null;
-  return workspace.branch;
+  return workspacePrHead(workspace) ?? workspace.branch;
+}
+
+/**
+ * The PR head a PR-backed workspace names, or null when it has no PR. A PR
+ * workspace materialized by its review checkout can carry the derived
+ * `<head>-os-review` branch instead of the head (the PR cache never has a PR
+ * on that branch), so resolve on the head it was derived from.
+ */
+export function workspacePrHead(workspace: Workspace): string | null {
+  if (workspace.prNumber == null || !workspace.branch) return null;
+  return workspace.branch.replace(/-os-review$/, "");
 }
 
 /**
@@ -26,7 +37,10 @@ function inheritedBranch(
  *
  * Legacy GitHub review sessions invert that: they store their local `*-os-review`
  * checkout as the session branch, and the PR-backed workspace retains the real
- * head branch, so the workspace wins over the session there.
+ * head branch, so the workspace wins over the session there. A user-made tab in
+ * the same PR workspace inherits that derived checkout as its own branch too,
+ * so it resolves the same way; otherwise it showed "No PR open" beside the
+ * review tab that showed the PR.
  *
  * Pass `workspace` to reuse an already-read record (see {@link prWorkspaceReader});
  * leaving it `undefined` reads it, `null` opts out of the lookup entirely.
@@ -39,10 +53,11 @@ export function sessionPrBranch(
     workspace === undefined && session.workspaceId
       ? getWorkspace(session.workspaceId)
       : workspace;
-  if (session.automation === "github-pr-review")
-    return parent?.prNumber != null && parent.branch
-      ? parent.branch
-      : session.branch;
+  const prHead = parent ? workspacePrHead(parent) : null;
+  const reviewCheckout =
+    session.automation === "github-pr-review" ||
+    (!!prHead && session.branch === `${prHead}-os-review`);
+  if (reviewCheckout) return prHead ?? session.branch;
   return session.branch || inheritedBranch(session, parent);
 }
 
@@ -57,7 +72,11 @@ export function prWorkspaceReader(): (s: UnifiedSession) => Workspace | null {
   const cache = new Map<string, Workspace | null>();
   return (session) => {
     if (!session.workspaceId) return null;
-    if (session.branch && session.automation !== "github-pr-review")
+    if (
+      session.branch &&
+      session.automation !== "github-pr-review" &&
+      !session.branch.endsWith("-os-review")
+    )
       return null;
     let workspace = cache.get(session.workspaceId);
     if (workspace === undefined)
@@ -74,11 +93,15 @@ function prRefKey(ref: Pick<SessionPrRef, "repo" | "branch">): string {
 }
 
 function flatPrRef(session: UnifiedSession): SessionPrRef | null {
-  if ((!session.prUrl && session.prNumber == null) || !session.branch)
-    return null;
+  // The flat fields were resolved through sessionPrBranch, so the ref must
+  // name that branch too: a tab on a `<head>-os-review` checkout otherwise
+  // projects a primary ref on the review branch, and the PR routes then look
+  // up a PR that branch never had.
+  const branch = sessionPrBranch(session);
+  if ((!session.prUrl && session.prNumber == null) || !branch) return null;
   return {
     repo: session.repo || defaultRepo().id,
-    branch: session.branch,
+    branch,
     source: "primary",
     url: session.prUrl,
     state: session.prState,

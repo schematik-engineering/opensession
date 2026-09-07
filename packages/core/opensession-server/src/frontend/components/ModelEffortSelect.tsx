@@ -15,9 +15,25 @@ import {
 import { Menu } from "../ui/menu";
 import { cn } from "../ui/cn";
 import { Tooltip } from "../ui/tooltip";
-import { IconBolt, IconChevronRight, IconSparkle, IconUndo } from "./icons";
+import {
+  IconBolt,
+  IconChevronRight,
+  IconPeople,
+  IconSparkle,
+  IconUndo,
+} from "./icons";
 import { ModelMark } from "./ModelMark";
+import { BrandMark } from "./BrandTile";
+import { UserAvatar } from "./UserAvatar";
+import { useCurrentUser } from "./UserPicker";
+import { useNavigation } from "../hooks/useNavigation";
+import { usePeople } from "../lib/people";
 import type { ModelEffortSelectProps } from "../lib/model-effort-select-types";
+import {
+  weeklyRemainingReadout,
+  weeklyRemainingRows,
+  type WeeklyRemainingRow,
+} from "../lib/account-limits";
 import { UsageCost, UsageDetails } from "./UsageMeter";
 
 export const EFFORTS = [
@@ -42,13 +58,12 @@ const PRIMARY_MODEL_ID_SET = new Set<string>(PRIMARY_MODEL_IDS);
 
 /** Engine display names, keyed by ModelOption.provider — only used for the
  * legacy (no-engine-configured) grouping fallback below. */
-export const ENGINE_LABELS: Record<string, string> = {
+export const ENGINE_LABELS = {
   claude: "Claude",
   codex: "Codex",
   pi: "Pi",
-  grok: "SuperGrok",
-  cursor: "Cursor",
 };
+const ENGINE_LABEL_BY_ID = new Map(Object.entries(ENGINE_LABELS));
 
 /** De-emphasized group name for the native Claude-SDK/Codex entries that stick
  * around as automation/fallback plumbing during the engine migration. */
@@ -101,7 +116,7 @@ export function friendlyModelSlug(slug: string): string {
       const suffix = m[2]
         ?.replace(/-/g, " ")
         .replace(
-          /^(sol|terra|luna)$/i,
+          /^(astra|sol|terra|luna)$/i,
           (name) => name.charAt(0).toUpperCase() + name.slice(1).toLowerCase(),
         );
       return `GPT-${m[1].replace(/-/g, ".")}${suffix ? ` ${suffix}` : ""}`;
@@ -166,13 +181,14 @@ export function shortModelLabel(id: string, models: ModelOption[]): string {
 }
 
 /** Friendly names for the upstream providers in the grouped main list. */
-const PROVIDER_LABELS: Record<string, string> = {
+const PROVIDER_LABELS = {
   dial: "The Dial",
   custom: "Custom",
   orchestrator: "The Orchestrator",
   anthropic: "Anthropic",
   openai: "OpenAI",
   pi: "Pi",
+  "xai-oauth": "xAI SuperGrok",
   xai: "xAI",
   meta: "Meta",
   google: "Google",
@@ -184,6 +200,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   cerebras: "Cerebras",
   wafer: "Wafer",
 };
+const PROVIDER_LABEL_BY_ID = new Map(Object.entries(PROVIDER_LABELS));
 
 /** Section order in the grouped main list; unlisted providers follow in
  * config order. */
@@ -193,6 +210,7 @@ const PROVIDER_ORDER = [
   "orchestrator",
   "anthropic",
   "openai",
+  "xai-oauth",
   "pi",
   "cerebras",
   "wafer",
@@ -211,6 +229,7 @@ const MODEL_TAIL_ORDER = [
   "medium",
   "low",
   "fable",
+  "fable-sol",
   "sol",
   "claude-fable-5-1",
   "claude-opus-5",
@@ -235,7 +254,7 @@ const MODEL_TAIL_ORDER = [
 ];
 
 /** The engine providers whose entries form the first-class model list. */
-const ENGINE_PROVIDERS = new Set(["pi", "grok", "cursor"]);
+const ENGINE_PROVIDERS = new Set(["pi"]);
 
 /**
  * Split the registry into the first-class Pi entries and current canonical
@@ -243,10 +262,12 @@ const ENGINE_PROVIDERS = new Set(["pi", "grok", "cursor"]);
  * the legacy group; Fable, Sol, and their current siblings remain ordinary
  * choices even against an older server that still returns native ids.
  */
-export function splitModelOptions(models: ModelOption[]): {
+type SplitModelOptions = {
   primary: ModelOption[];
   legacy: ModelOption[];
-} {
+};
+
+export function splitModelOptions(models: ModelOption[]): SplitModelOptions {
   const rank = (m: ModelOption) => {
     const i = MODEL_TAIL_ORDER.indexOf(m.id.split("/").pop() || "");
     return i === -1 ? MODEL_TAIL_ORDER.length : i;
@@ -287,6 +308,22 @@ type ModelMenuOption = {
 };
 
 const PICKER_ROW_GAP = "mb-0.5 last:mb-0";
+
+/** Ink for a weekly-remaining figure: colour only once it is running out. */
+const REMAINING_TONE: Record<WeeklyRemainingRow["tone"], string> = {
+  low: "text-red",
+  warn: "text-yellow",
+  ok: "text-green",
+};
+
+/** Brand mark for an account pool, keyed by ProviderAccountOption.provider. */
+const ACCOUNT_BRAND: Record<WeeklyRemainingRow["provider"], string> = {
+  claude: "claude",
+  codex: "codex",
+  xai: "xai",
+  grok: "xai",
+  cursor: "cursor",
+};
 
 /**
  * Combined model + reasoning-effort menu: one trigger opens a short list of
@@ -337,6 +374,11 @@ export function ModelEffortSelect({
   } = actions;
   const effectiveModel = model || defaultModel;
   const isPreferredDefault = preferredDefaultModel === effectiveModel;
+  const [open, setOpen] = React.useState(false);
+  const setMenuOpen = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    onOpenChange?.(nextOpen);
+  };
   const [recentModelIds, setRecentModelIds] = React.useState(getRecentModels);
   React.useEffect(
     () => onRecentModelsChanged(() => setRecentModelIds(getRecentModels())),
@@ -412,6 +454,26 @@ export function ModelEffortSelect({
   const accountLabel = currentAccount
     ? providerAccountLabel(currentAccount)
     : "Auto";
+  // The submenu inventories every account this person can spend. Its compact
+  // readout is narrower: the current main model's cap on the account automatic
+  // routing will prefer (personal first, then pool), or the explicit pin.
+  const viewer = useCurrentUser();
+  const navigation = useNavigation();
+  // The owner avatars resolve through the people directory; subscribing here
+  // fetches it if nothing else has yet and redraws the rows when it lands.
+  usePeople();
+  const weeklyRows = weeklyRemainingRows(accounts ?? [], viewer);
+  const weeklyRowsForModel = weeklyRows.filter(
+    (row) => row.provider === accountProvider,
+  );
+  const weeklyReadout = weeklyRemainingReadout({
+    rows: weeklyRows,
+    accounts: accounts ?? [],
+    viewer,
+    provider: accountProvider,
+    model: modelInfo?.composition?.[0] ?? effectiveBase,
+    accountId,
+  });
   // Routing stays sticky across model changes even though engine selection is
   // no longer exposed. Existing sessions keep their stored routing prefix.
   const activeEngine = modelEngine(effectiveModel);
@@ -538,7 +600,7 @@ export function ModelEffortSelect({
       otherOptions.length;
     // No-engine fallback only: "Other models" grouped by engine. With
     // engine present the submenu is the flat legacy list instead.
-    const engineOrder = ["pi", "grok", "cursor", "claude", "codex"];
+    const engineOrder = ["pi", "claude", "codex"];
     const engines = [
       ...engineOrder,
       ...otherOptions
@@ -548,15 +610,15 @@ export function ModelEffortSelect({
     const otherGroups = [...new Set(engines)]
       .map((engine) => ({
         engine,
-        label: ENGINE_LABELS[engine] || engine,
+        label: ENGINE_LABEL_BY_ID.get(engine) || engine,
         options: otherOptions.filter((o) => o.engine === engine),
       }))
       .filter((g) => g.options.length > 0);
     // Main-list sections by upstream provider (Anthropic / OpenAI / xAI / …) —
     // a flat list stops scanning well once third-party providers join the
     // picker. Falls back to flat when everything is one provider.
-    const providerOf = (option: ModelMenuOption) =>
-      routedModelParts(option.id)?.provider || option.engine || "other";
+    const providerOf = (id: string) =>
+      routedModelParts(id)?.provider || "other";
     const providerGroups: Array<{
       provider: string;
       label: string;
@@ -564,13 +626,13 @@ export function ModelEffortSelect({
     }> = [];
     for (const option of primaryOptions) {
       // A registry group ("dial") overrides provider-segment grouping.
-      const provider = option.group || providerOf(option);
+      const provider = option.group || providerOf(option.id);
       let group = providerGroups.find((g) => g.provider === provider);
       if (!group) {
         group = {
           provider,
           label:
-            PROVIDER_LABELS[provider] ||
+            PROVIDER_LABEL_BY_ID.get(provider) ||
             provider.charAt(0).toUpperCase() + provider.slice(1),
           options: [],
         };
@@ -727,9 +789,16 @@ export function ModelEffortSelect({
   const heroTrigger = triggerVariant === "hero";
 
   return (
-    <Menu.Root onOpenChange={onOpenChange}>
+    <Menu.Root open={open} onOpenChange={setMenuOpen}>
       <Menu.Trigger
         type="button"
+        onTouchEnd={(event) => {
+          // iOS synthesizes mousedown after touchend. That blur collapses an
+          // empty phone composer and unmounts this trigger before Base UI can
+          // open its menu, so finish the touch here and keep the trigger alive.
+          event.preventDefault();
+          setMenuOpen(!open);
+        }}
         className={cn(
           menuRowTrigger
             ? "flex w-full cursor-pointer items-center gap-[7px] whitespace-nowrap rounded-control border border-line-strong bg-transparent px-3 py-[7px] text-control-label font-medium text-faint hover:bg-hover hover:text-fg data-[popup-open]:bg-hover data-[popup-open]:text-fg"
@@ -806,6 +875,105 @@ export function ModelEffortSelect({
               </Menu.SubmenuTrigger>
               <Menu.Popup className="w-64 max-w-[min(360px,calc(100vw-1rem))]">
                 <UsageDetails usage={usage} className="p-1.5" />
+              </Menu.Popup>
+            </Menu.SubmenuRoot>
+            <Menu.Separator className="my-1" />
+          </>
+        )}
+        {weeklyRows.length > 0 && (
+          <>
+            <Menu.SubmenuRoot>
+              <Menu.SubmenuTrigger className="justify-between gap-3">
+                <span className="min-w-0 truncate">Weekly remaining</span>
+                <span className="flex flex-none items-center gap-1 text-dim">
+                  {weeklyReadout && (
+                    <span
+                      className={cn(
+                        "tabular-nums",
+                        REMAINING_TONE[weeklyReadout.tone],
+                      )}
+                    >
+                      {weeklyReadout.remaining}%
+                    </span>
+                  )}
+                  <IconChevronRight className="shrink-0" size={17} />
+                </span>
+              </Menu.SubmenuTrigger>
+              <Menu.Popup className="w-72 max-w-[min(360px,calc(100vw-1rem))]">
+                {weeklyRows.map((row, i) => {
+                  const pinnable =
+                    hasAccount && row.provider === accountProvider;
+                  const selected = pinnable && row.accountId === accountId;
+                  return (
+                    <Menu.Item
+                      key={`${row.accountId}-${i}`}
+                      onClick={() => onAccountChange!(row.accountId)}
+                      disabled={!pinnable}
+                      title={
+                        pinnable
+                          ? `Use ${row.label} for this session`
+                          : hasAccount
+                            ? "Not for this model"
+                            : undefined
+                      }
+                      className={cn(
+                        PICKER_ROW_GAP,
+                        "justify-between gap-3",
+                        selected && "bg-hover",
+                        !pinnable && "opacity-70",
+                      )}
+                    >
+                      <span className="flex min-w-0 flex-1 items-center gap-2">
+                        <span className="flex size-4 shrink-0 items-center justify-center text-dim">
+                          <BrandMark
+                            name={ACCOUNT_BRAND[row.provider]}
+                            size={15}
+                          />
+                        </span>
+                        <span className="min-w-0 truncate">{row.label}</span>
+                      </span>
+                      <span className="flex flex-none items-center gap-2 tabular-nums">
+                        {row.owner ? (
+                          <UserAvatar
+                            name={row.owner}
+                            size={14}
+                            edge={false}
+                            title="Yours"
+                          />
+                        ) : (
+                          <IconPeople
+                            size={14}
+                            className="text-faint"
+                            aria-label="Shared"
+                          />
+                        )}
+                        <span className="text-faint" title={row.resetTitle}>
+                          {row.day}
+                        </span>
+                        <span
+                          className={cn(
+                            "min-w-9 text-right",
+                            REMAINING_TONE[row.tone],
+                          )}
+                        >
+                          {row.remaining}%
+                        </span>
+                      </span>
+                      <Menu.Check on={selected} className="text-dim" />
+                    </Menu.Item>
+                  );
+                })}
+                {hasAccount && weeklyRowsForModel.length > 0 && (
+                  <MenuHint>Choose one to use it for this session</MenuHint>
+                )}
+                <Menu.Separator className="my-1" />
+                <Menu.Item
+                  className="justify-between gap-3"
+                  onClick={() => navigation.openSettings("providers")}
+                >
+                  <span className="min-w-0 truncate">Manage accounts</span>
+                  <IconChevronRight className="shrink-0 text-dim" size={17} />
+                </Menu.Item>
               </Menu.Popup>
             </Menu.SubmenuRoot>
             <Menu.Separator className="my-1" />

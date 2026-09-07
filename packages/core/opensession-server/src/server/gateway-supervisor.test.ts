@@ -11,7 +11,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import {
   discoverRuntimePeerGenerations,
-  currentReleaseRoot,
+  gatewayControlSocketPath,
   GatewaySupervisor,
   inheritedGatewaySocketFd,
   type ManagedGateway,
@@ -53,10 +53,37 @@ function controlledGateway(pid: number, releaseRoot: string, standby = false) {
 }
 
 describe("gateway supervisor", () => {
-  test("boots from the installed worktree before immutable deploy state exists", () => {
-    const state = mkdtempSync(join(tmpdir(), "gateway-empty-state-"));
-    const checkout = mkdtempSync(join(tmpdir(), "gateway-checkout-"));
-    expect(currentReleaseRoot(state, checkout)).toBe(realpathSync(checkout));
+  test("listens for control in the runtime directory systemd hands it", () => {
+    // The system unit's RuntimeDirectory= is under /run; a rootless user
+    // unit's is under $XDG_RUNTIME_DIR, where the fixed /run path does not
+    // exist. Both arrive through RUNTIME_DIRECTORY.
+    expect(gatewayControlSocketPath({})).toBe(
+      "/run/opensession-gateway/control.sock",
+    );
+    expect(gatewayControlSocketPath({ HOME: "/Users/runner" })).toBe(
+      "/Users/runner/.opensession/deploy/control.sock",
+    );
+    expect(
+      gatewayControlSocketPath({
+        OPENSESSION_DEPLOY_STATE: "/tmp/os-deploy",
+      }),
+    ).toBe("/tmp/os-deploy/control.sock");
+    expect(
+      gatewayControlSocketPath({
+        RUNTIME_DIRECTORY: "/run/user/1001/opensession-gateway",
+      }),
+    ).toBe("/run/user/1001/opensession-gateway/control.sock");
+    expect(
+      gatewayControlSocketPath({
+        RUNTIME_DIRECTORY: "/run/opensession-gateway:/run/other",
+      }),
+    ).toBe("/run/opensession-gateway/control.sock");
+    expect(
+      gatewayControlSocketPath({
+        RUNTIME_DIRECTORY: "/run/user/1001/opensession-gateway",
+        OPENSESSION_GATEWAY_CONTROL_SOCKET: "/tmp/dev.sock",
+      }),
+    ).toBe("/tmp/dev.sock");
   });
 
   test("accepts only systemd descriptors addressed to this supervisor", () => {

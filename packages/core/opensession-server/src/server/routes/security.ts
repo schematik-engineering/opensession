@@ -22,7 +22,7 @@ import {
   scannableRepos,
   updateProfile,
 } from "../security";
-import { invalidateSessionsCache } from "../session-cache";
+import { publishSessionChange } from "../session-cache";
 import { getSessionControl } from "../session-control";
 import { getRepo } from "../worktree";
 
@@ -119,6 +119,7 @@ export async function handleSecurityRoutes(
         mode: "code",
         repo: repos[0],
         user: createdBy,
+        createdByLogin: ctx.authUser?.login,
       });
       const scan = createScanRecord({
         repos,
@@ -138,8 +139,8 @@ export async function handleSecurityRoutes(
       createdBy,
     });
     void executeScan(scan, {
-      onSessionCreated: () => {
-        invalidateSessionsCache();
+      onSessionCreated: (sessionId) => {
+        publishSessionChange(sessionId);
       },
     });
     return Response.json({ scan });

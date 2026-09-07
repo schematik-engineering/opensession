@@ -6,7 +6,15 @@
  * agent can inspect services without becoming their process manager.
  */
 
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "fs";
 import { join, resolve } from "path";
 import { audit } from "./audit";
 import { configuredPaths, configuredServer } from "./config";
@@ -25,7 +33,16 @@ import { shellQuoteWord } from "./sandbox/adapters/bootstrap";
 import { sandboxHttpsPortFor } from "./sandbox/preview-ports";
 import { cacheSandboxPortalRecords } from "./sandbox-portals";
 import { REPO_ROOT } from "../runner-host/protocol";
-import { sessionScratchRoot } from "./session-scratch";
+import {
+  previewScopeCommand,
+  stopUserScopeAndWait,
+  systemdUserScopesAvailable,
+  userScopeActive,
+} from "./systemd-scopes";
+import {
+  sandboxSessionScratchDir,
+  sessionScratchRoot,
+} from "./session-scratch";
 import type { Sandbox } from "./sandbox/provider";
 import type { UnifiedSession } from "./types";
 
@@ -47,15 +64,23 @@ export type PortalRecord = {
   defaultPath?: string;
   state: PortalState;
   pid?: number;
+  /** Detached user scope for a host Portal's complete process tree. */
+  scopeUnit?: string;
   startedAt?: string;
   lastError?: string;
 };
+
+/** The longest a Portal may take to listen. A cold Sandbox resume can spend
+ * minutes pulling a lazy volume before a dev server binds, and the waiting
+ * page keeps the person informed meanwhile. The same bound decides when a
+ * "starting" record is stuck. */
+export const MAX_PORTAL_READY_MS = 600_000;
 
 const PREFIX = "# opensession-portal ";
 const NAME = /^[a-z][a-z0-9-]{0,62}$/;
 const MIN_PORT = 1024;
 const MAX_PORT = 19_000;
-const SANDBOX_PORTAL_PATH =
+export const SANDBOX_PORTAL_PATH =
   "/home/ubuntu/.bun/bin:/home/ubuntu/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 const remoteRelayAgents: Map<string, { expiresAt: number }> = ((
   globalThis as Record<string, unknown>
@@ -208,6 +233,8 @@ type PortalOps = {
   probePort: (port: number) => Promise<boolean>;
   pidAlive: (pid?: number) => Promise<boolean>;
   signalGroup: (pid: number, signal: "SIGTERM" | "SIGKILL") => Promise<void>;
+  scopeAlive?: (unit: string) => Promise<boolean>;
+  stopScope?: (unit: string) => Promise<void>;
 };
 
 function hostPortalOps(worktreeDir: string): PortalOps {
@@ -216,6 +243,8 @@ function hostPortalOps(worktreeDir: string): PortalOps {
     writeRegistry: async (records) => writePortalRegistry(worktreeDir, records),
     probePort: portListening,
     pidAlive,
+    scopeAlive: userScopeActive,
+    stopScope: stopUserScopeAndWait,
     // Signal the whole setsid group even if its original leader has already
     // exited. That is the common failure mode for a supervisor which leaves
     // its worker behind after a server restart.
@@ -231,16 +260,34 @@ function hostPortalOps(worktreeDir: string): PortalOps {
   };
 }
 
+type PortalProcess = Pick<PortalRecord, "pid" | "scopeUnit">;
+
+async function portalProcessAlive(
+  ops: PortalOps,
+  processRef: PortalProcess,
+): Promise<boolean> {
+  // The systemd-run client remains in the gateway cgroup while its detached
+  // scope runs. Check both so launch cannot race unit creation, while a new
+  // gateway can still rediscover a surviving Portal by its persisted unit.
+  if (
+    processRef.scopeUnit &&
+    ops.scopeAlive &&
+    (await ops.scopeAlive(processRef.scopeUnit))
+  )
+    return true;
+  return ops.pidAlive(processRef.pid);
+}
+
 async function waitForPortalPort(
   ops: PortalOps,
   port: number,
-  pid: number,
+  processRef: PortalProcess,
   timeoutMs = 15_000,
 ): Promise<"ready" | "exited" | "timeout"> {
   const until = Date.now() + timeoutMs;
   while (Date.now() < until) {
     if (await ops.probePort(port)) return "ready";
-    if (!(await ops.pidAlive(pid))) return "exited";
+    if (!(await portalProcessAlive(ops, processRef))) return "exited";
     await Bun.sleep(200);
   }
   return "timeout";
@@ -300,6 +347,19 @@ function upsert(records: PortalRecord[], next: PortalRecord): PortalRecord[] {
   return copy;
 }
 
+/** " See <log>" plus the last lines of the log when it is readable here. */
+function portalLogHint(logPath: string | undefined): string {
+  if (!logPath) return "";
+  let tail = "";
+  try {
+    if (existsSync(logPath)) {
+      const lines = readFileSync(logPath, "utf8").trimEnd().split("\n");
+      tail = lines.slice(-12).join("\n").slice(-1_500);
+    }
+  } catch {}
+  return tail ? ` Log (${logPath}):\n${tail}` : ` Log: ${logPath}`;
+}
+
 async function listPortals(ops: PortalOps): Promise<PortalRecord[]> {
   const records = await ops.readRegistry();
   let changed = false;
@@ -308,7 +368,7 @@ async function listPortals(ops: PortalOps): Promise<PortalRecord[]> {
       if (record.state === "stopped" || record.state === "failed")
         return record;
       const listening = await ops.probePort(record.port);
-      const alive = await ops.pidAlive(record.pid);
+      const alive = await portalProcessAlive(ops, record);
       // "pid alive but not listening" only means starting while the Portal has
       // never been awake. Once it WAS awake, losing the listener is a crash even
       // when a wrapper (just/concurrently) survives its dead dev server —
@@ -319,7 +379,8 @@ async function listPortals(ops: PortalOps): Promise<PortalRecord[]> {
       const startedMs = record.startedAt
         ? Date.now() - Date.parse(record.startedAt)
         : 0;
-      const stuckStarting = record.state === "starting" && startedMs > 300_000;
+      const stuckStarting =
+        record.state === "starting" && startedMs > MAX_PORTAL_READY_MS;
       const state: PortalState = listening
         ? "awake"
         : alive && record.state !== "awake" && !stuckStarting
@@ -361,12 +422,16 @@ async function startPortal(
     /** Extra, side-specific qualification of the chosen port (published Sandbox ports). */
     qualifyPort?: (port: number, records: PortalRecord[]) => Promise<void>;
     urlFor: (port: number) => string;
+    /** Where the service's stdout/stderr land. Named in failure messages so
+     *  an agent can read why a Portal died; the tail is inlined when the file
+     *  is readable from here (host Portals). */
+    logPath?: string;
     launch: (context: {
       name: string;
       command: string;
       port: number;
       url: string;
-    }) => Promise<number>;
+    }) => Promise<Required<Pick<PortalRecord, "pid">> & PortalProcess>;
   },
 ): Promise<PortalRecord & { url: string }> {
   const name = validateName(input.name);
@@ -388,7 +453,7 @@ async function startPortal(
   // A dead record can leave its process group behind (a crashed dev server's
   // wrapper, watchers, lock holders). Reap it before starting anew so the
   // fresh start does not collide with orphaned ReScript/Next processes.
-  if (current) await terminatePortalProcess(ops, current.pid);
+  if (current) await terminatePortalProcess(ops, current);
   const port =
     input.port == null
       ? await input.allocatePort(records)
@@ -413,9 +478,9 @@ async function startPortal(
     startedAt: new Date().toISOString(),
   };
   await ops.writeRegistry(upsert(records, base));
-  let pid: number;
+  let processRef: Required<Pick<PortalRecord, "pid">> & PortalProcess;
   try {
-    pid = await input.launch({ name, command, port, url });
+    processRef = await input.launch({ name, command, port, url });
   } catch (error) {
     const failed = {
       ...base,
@@ -425,25 +490,32 @@ async function startPortal(
     await ops.writeRegistry(upsert(records, failed));
     throw error;
   }
-  const record = { ...base, pid };
+  const record = { ...base, ...processRef };
   await ops.writeRegistry(upsert(records, record));
   const readyTimeoutMs = Math.min(
-    300_000,
+    MAX_PORTAL_READY_MS,
     Math.max(5_000, input.readyTimeoutMs ?? 15_000),
   );
-  const readiness = await waitForPortalPort(ops, port, pid, readyTimeoutMs);
+  const readiness = await waitForPortalPort(
+    ops,
+    port,
+    processRef,
+    readyTimeoutMs,
+  );
   if (readiness !== "ready") {
     const lastError =
-      readiness === "exited"
+      (readiness === "exited"
         ? "The Portal process exited before it started listening."
-        : `Nothing listened on port ${port} within ${Math.round(readyTimeoutMs / 1_000)} seconds.`;
+        : `Nothing listened on port ${port} within ${Math.round(readyTimeoutMs / 1_000)} seconds.`) +
+      portalLogHint(input.logPath);
     // A timed-out process may still be compiling and can leave watchers or
     // lock files behind. Never lose its PID by overwriting the failed record
     // before the complete process group has been terminated.
-    await terminatePortalProcess(ops, pid);
+    await terminatePortalProcess(ops, processRef);
     const failed = {
       ...record,
       pid: undefined,
+      scopeUnit: undefined,
       state: "failed" as const,
       lastError,
     };
@@ -457,8 +529,13 @@ async function startPortal(
 
 async function terminatePortalProcess(
   ops: PortalOps,
-  pid?: number,
+  processRef: PortalProcess,
 ): Promise<void> {
+  if (processRef.scopeUnit && ops.stopScope) {
+    await ops.stopScope(processRef.scopeUnit);
+    if (!(await portalProcessAlive(ops, processRef))) return;
+  }
+  const pid = processRef.pid;
   if (!pid || pid < 2 || !(await ops.pidAlive(pid))) return;
   await ops.signalGroup(pid, "SIGTERM");
   await Bun.sleep(1_500);
@@ -469,8 +546,13 @@ async function stopPortal(ops: PortalOps, name: string): Promise<PortalRecord> {
   const records = await ops.readRegistry();
   const current = records.find((record) => record.name === name);
   if (!current) throw new Error(`Portal '${name}' does not exist.`);
-  await terminatePortalProcess(ops, current.pid);
-  const stopped = { ...current, state: "stopped" as const, pid: undefined };
+  await terminatePortalProcess(ops, current);
+  const stopped = {
+    ...current,
+    state: "stopped" as const,
+    pid: undefined,
+    scopeUnit: undefined,
+  };
   await ops.writeRegistry(upsert(records, stopped));
   return stopped;
 }
@@ -509,34 +591,51 @@ export async function startPortalService(input: {
   /** Narrow, caller-owned additions for a trusted declared recipe. */
   env?: Record<string, string>;
 }): Promise<PortalRecord & { url: string }> {
+  const logDir = join(sessionScratchRoot(), input.sessionId, "portals");
+  const logPath = join(logDir, `${input.name}.log`);
   const started = await startPortal(hostPortalOps(input.worktreeDir), {
     ...input,
     ownsProcess: true,
+    logPath,
     allocatePort: () => allocatePort(input.worktreeDir),
     urlFor: (port) =>
       `https://${configuredServer().previewHost}:${port + 6_000}`,
     launch: async ({ name, command, port, url }) => {
-      const proc = Bun.spawn(["setsid", "bash", "-lc", `exec ${command}`], {
+      mkdirSync(logDir, { recursive: true });
+      const log = openSync(logPath, "w");
+      const directCommand = ["setsid", "bash", "-lc", `exec ${command}`];
+      const portalEnv = {
+        PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin",
+        HOME: process.env.HOME || "/tmp",
+        ...input.env,
+        PORT: String(port),
+        PORTAL_URL: url,
+        OPENSESSION_PORTAL: name,
+        // Next's detached telemetry flusher escapes the Portal process group
+        // during shutdown. Portals do not need telemetry, so never create it.
+        NEXT_TELEMETRY_DISABLED: "1",
+      };
+      const scoped = previewScopeCommand(
+        directCommand,
+        input.worktreeDir,
+        name,
+        { env: portalEnv },
+      );
+      const proc = Bun.spawn(scoped.command, {
         cwd: input.worktreeDir,
         // Portal commands are user-authored code. Do not hand them the Open
         // Session service environment, which can include operator credentials.
-        env: {
-          PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin",
-          HOME: process.env.HOME || "/tmp",
-          ...input.env,
-          PORT: String(port),
-          PORTAL_URL: url,
-          OPENSESSION_PORTAL: name,
-          // Next's detached telemetry flusher escapes the Portal process group
-          // during shutdown. Portals do not need telemetry, so never create it.
-          NEXT_TELEMETRY_DISABLED: "1",
-        },
+        env: scoped.env,
         stdin: "ignore",
-        stdout: "ignore",
-        stderr: "ignore",
+        stdout: log,
+        stderr: log,
       });
+      closeSync(log);
       proc.unref();
-      return proc.pid;
+      return {
+        pid: proc.pid,
+        ...(scoped.unit ? { scopeUnit: scoped.unit } : {}),
+      };
     },
   });
   audit({
@@ -591,6 +690,23 @@ export type PortalOwnerSession = Pick<
 >;
 export type PortalReapResult = {
   stopped: Array<{ sessionId: string; worktreeDir: string; name: string }>;
+};
+
+export function portalsNeedingContainment(
+  records: readonly PortalRecord[],
+  scopesAvailable = systemdUserScopesAvailable(),
+): PortalRecord[] {
+  if (!scopesAvailable) return [];
+  return records.filter(
+    (record) =>
+      (record.state === "awake" || record.state === "starting") &&
+      !record.scopeUnit &&
+      !!record.pid,
+  );
+}
+
+export type PortalContainmentMigrationResult = {
+  migrated: Array<{ sessionId: string; worktreeDir: string; name: string }>;
 };
 
 function canonicalDir(dir: string): string {
@@ -665,7 +781,66 @@ export async function reapOrphanedPortalServices(
   return { stopped };
 }
 
+/**
+ * A release predating Portal scopes can leave live preview trees inside the
+ * gateway service cgroup. Restart only durable, live-owned Portal records so
+ * they re-enter through startPortalService and acquire their private scope.
+ * Stopped/failed records and non-systemd development hosts are untouched.
+ */
+export async function migrateUnscopedPortalServices(
+  sessions: readonly PortalOwnerSession[],
+): Promise<PortalContainmentMigrationResult> {
+  if (!systemdUserScopesAvailable()) return { migrated: [] };
+  const owners = new Map<string, Set<string>>();
+  const addOwner = (dir: string | null | undefined, sessionId: string) => {
+    if (!dir) return;
+    const key = canonicalDir(dir);
+    const set = owners.get(key) ?? new Set<string>();
+    set.add(sessionId);
+    owners.set(key, set);
+  };
+  for (const session of sessions) {
+    addOwner(session.worktreeDir, session.id);
+    for (const repo of session.attachedRepos ?? [])
+      addOwner(repo.dir, session.id);
+  }
+
+  const migrated: PortalContainmentMigrationResult["migrated"] = [];
+  for (const [worktreeDir, liveOwners] of owners) {
+    const records = readPortalRegistry(worktreeDir);
+    for (const portal of portalsNeedingContainment(records, true)) {
+      const owned = portal.sessionId
+        ? liveOwners.has(portal.sessionId)
+        : liveOwners.size > 0;
+      if (!owned) continue;
+      const sessionId = portal.sessionId || liveOwners.values().next().value;
+      if (!sessionId) continue;
+      try {
+        await restartPortalService({
+          sessionId,
+          worktreeDir,
+          name: portal.name,
+          readyTimeoutMs: 180_000,
+        });
+        migrated.push({ sessionId, worktreeDir, name: portal.name });
+        audit({
+          msg: "portal_containment_migrated",
+          session_id: sessionId,
+          portal: portal.name,
+        });
+      } catch (error) {
+        console.warn(
+          `[portals] could not migrate ${portal.name} in ${worktreeDir} into a private scope:`,
+          error,
+        );
+      }
+    }
+  }
+  return { migrated };
+}
+
 let portalReapTimer: ReturnType<typeof setInterval> | null = null;
+let portalReconcileInFlight = false;
 
 /** Reconcile Portal process groups after boot and every five minutes. */
 export function startPortalReaper(
@@ -673,6 +848,7 @@ export function startPortalReaper(
 ): void {
   if (portalReapTimer) return;
   const run = () => {
+    if (portalReconcileInFlight) return;
     let sessions: readonly PortalOwnerSession[];
     try {
       sessions = getSessions();
@@ -683,14 +859,25 @@ export function startPortalReaper(
       );
       return;
     }
+    portalReconcileInFlight = true;
     void reapOrphanedPortalServices(sessions)
-      .then(({ stopped }) => {
+      .then(async ({ stopped }) => {
         if (stopped.length)
           console.log(
             `[portals] reaped ${stopped.length} orphaned Portal service(s)`,
           );
+        const { migrated } = await migrateUnscopedPortalServices(sessions);
+        if (migrated.length)
+          console.log(
+            `[portals] migrated ${migrated.length} Portal service(s) into private scopes`,
+          );
       })
-      .catch((error) => console.error("[portals] orphan reap failed:", error));
+      .catch((error) =>
+        console.error("[portals] reconciliation failed:", error),
+      )
+      .finally(() => {
+        portalReconcileInFlight = false;
+      });
   };
   run();
   portalReapTimer = setInterval(run, PORTAL_REAP_INTERVAL_MS);
@@ -840,7 +1027,7 @@ export async function ensureRemoteSandboxPortalAgent(input: {
     const grant = mintSandboxPortalGrant(relayIdentity);
     const callbackBase = remoteSandboxCallbackBaseUrl().replace(/\/$/, "");
     const endpoint = `${callbackBase}/sandbox-portal-ws?session=${encodeURIComponent(input.sessionId)}&sandbox=${encodeURIComponent(input.sandbox.id)}&port=${input.port}`;
-    const logDir = join(sessionScratchRoot(), input.sessionId);
+    const logDir = sandboxSessionScratchDir(input.sessionId);
     const logPath = `${logDir}/sandbox-portal-${input.port}.log`;
     // Portal transport fixes must not wait for a repository image refresh or
     // mutate the prepared project. Copy this small, self-contained sidecar
@@ -887,6 +1074,42 @@ export async function listSandboxPortalServices(
   return listPortals(sandboxPortalOps(sandbox));
 }
 
+/** The registry as persisted, without the liveness probe. A sandbox that just
+ * woke has no processes left, so every record still marked live is a Portal
+ * to restore rather than one to declare failed. */
+export async function readSandboxPortalRecords(
+  sandbox: Sandbox,
+): Promise<PortalRecord[]> {
+  return (await readSandboxPortalRegistry(sandbox)).records;
+}
+
+/**
+ * The Portals the registry marks live whose process is gone: a provider that
+ * stopped and restarted the Sandbox on its own (an idle timeout) leaves the
+ * registry intact and every process dead, while the session's lifecycle never
+ * saw a wake. `marked` is the registry as persisted; `probed` is the same
+ * registry after the liveness probe (listSandboxPortalServices). A Portal the
+ * probe still finds awake or starting is healthy and stays untouched.
+ */
+export function portalsToRestore(
+  marked: PortalRecord[],
+  probed: PortalRecord[],
+): PortalRecord[] {
+  const live = new Set(
+    probed
+      .filter(
+        (record) => record.state !== "stopped" && record.state !== "failed",
+      )
+      .map((record) => record.name),
+  );
+  return marked.filter(
+    (record) =>
+      record.state !== "stopped" &&
+      record.state !== "failed" &&
+      !live.has(record.name),
+  );
+}
+
 type SandboxPortalStartInput = {
   sessionId: string;
   sandbox: Sandbox;
@@ -907,6 +1130,16 @@ function sandboxPortalOperations(): Map<string, Promise<PortalRecord>> {
   return (global.__opensessionSandboxPortalOperations ??= new Map());
 }
 
+/** Whether a start, restart, or wake-restore for this Sandbox Portal is
+ * running right now. The forward-auth probe shows the waiting page for it
+ * instead of proxying to a port nobody listens on yet. */
+export function sandboxPortalOperationPending(
+  sandboxId: string,
+  name: string,
+): boolean {
+  return sandboxPortalOperations().has(`${sandboxId}:${name}`);
+}
+
 function withSandboxPortalOperation(
   input: Pick<SandboxPortalStartInput, "sandbox" | "name">,
   operation: () => Promise<PortalRecord>,
@@ -925,6 +1158,12 @@ function withSandboxPortalOperation(
 async function startSandboxPortalServiceInner(
   input: SandboxPortalStartInput,
 ): Promise<PortalRecord> {
+  // Sandbox-side path: it must match the agent's $OPENSESSION_SCRATCH there,
+  // not the host's scratch root.
+  const sandboxRuntimeDir = join(
+    sandboxSessionScratchDir(input.sessionId),
+    "portals",
+  );
   const awake = await startPortal(
     sandboxPortalOps(input.sandbox, input.sessionId),
     {
@@ -940,12 +1179,9 @@ async function startSandboxPortalServiceInner(
       },
       urlFor: (port) =>
         `https://${configuredServer().previewHost}:${sandboxHttpsPortFor(input.sandbox.id, port)}`,
+      logPath: `${sandboxRuntimeDir}/${input.name}.log`,
       launch: async ({ name, command, port, url }) => {
-        const runtimeDir = join(
-          sessionScratchRoot(),
-          input.sessionId,
-          "portals",
-        );
+        const runtimeDir = sandboxRuntimeDir;
         const legacyLogPath = `.opensession-portal-${name}.log`;
         const legacyPidPath = `.opensession-portal-${name}.pid`;
         const logPath = `${runtimeDir}/${name}.log`;
@@ -973,7 +1209,7 @@ async function startSandboxPortalServiceInner(
           const pid = Number(marker.stdout.trim());
           if (Number.isInteger(pid) && pid >= 2) {
             await input.sandbox.exec(["rm", "-f", pidPath]);
-            return pid;
+            return { pid };
           }
           await Bun.sleep(250);
         }

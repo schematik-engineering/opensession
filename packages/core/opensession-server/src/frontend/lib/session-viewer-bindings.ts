@@ -52,6 +52,7 @@ export interface SessionViewerLifecycleBinding {
     user: string;
     sentAt: number;
     images?: string[];
+    pastedTexts?: string[];
   };
   /** Archive through the sidebar so the nearest visible row becomes active. */
   onArchive?: () => void;
@@ -193,10 +194,10 @@ export interface SessionViewerViewTabsBinding {
   videoPanel?: RefWebPanel | null;
   /** The feed item's title (pane header). */
   videoTitle?: string | null;
-  /** Foregrounded full-width local-dev Preview view-tab (App state). */
-  showPreviewTab?: boolean;
-  /** Close the Preview view-tab (its Stop button / tab close). */
-  onClosePreviewTab?: () => void;
+  /** Foregrounded Sandbox desktop pane (the Desktop view-tab). */
+  showDesktop?: boolean;
+  /** Close this session's Desktop view-tab, dropping the stream. */
+  onCloseDesktop?: () => void;
   /** Foregrounded browser pane for a service selected in Portals. */
   showPortal?: boolean;
   /** The service currently loaded in the center-panel browser. */

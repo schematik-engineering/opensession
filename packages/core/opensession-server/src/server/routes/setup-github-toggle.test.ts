@@ -171,4 +171,23 @@ describe("GitHub App identity settings", () => {
     expect(written.integrations.github.installationOwner).toBe("other-owner");
     expect(written.integrations.github.installationId).toBeUndefined();
   });
+
+  test("allows clearing the optional default installation owner", async () => {
+    const config = setupFiles();
+    const url = new URL("http://localhost/api/setup/github");
+    const response = await handleSetupRoutes({
+      req: new Request(url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ installationOwner: "" }),
+      }),
+      url,
+      path: url.pathname,
+      publicPrefix: "",
+    });
+
+    expect(response?.status).toBe(200);
+    const written = JSON.parse(readFileSync(config, "utf8"));
+    expect(written.integrations.github.installationOwner).toBeUndefined();
+  });
 });

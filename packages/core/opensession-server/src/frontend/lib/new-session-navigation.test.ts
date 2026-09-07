@@ -113,5 +113,6 @@ describe("shouldOpenCreatedSession", () => {
     expect(handler.indexOf("setActiveViewTabState(null)")).toBeLessThan(
       handler.indexOf('navigate({ view: "session", id: started.id })'),
     );
+    expect(handler).not.toContain("setTimeout(");
   });
 });

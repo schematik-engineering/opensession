@@ -25,6 +25,7 @@ import {
 } from "./run-state";
 import type { StreamEvent, ImageInput } from "./run-events";
 import { isShuttingDown } from "./shutdown-state";
+import { hasPendingOpening } from "./session-state-events";
 import {
   sessionQuarantineSnapshot,
   sessionTurn,
@@ -394,6 +395,18 @@ async function* runOnModel(
   });
   if (engineForTest) {
     yield* engineForTest(opts, mapped);
+    return;
+  }
+  // Dev-only load harness seam (OPENSESSION_DEV=1 + OPENSESSION_SYNTHETIC_ENGINE=1):
+  // a paced synthetic engine instead of Pi, so an isolated instance can be
+  // driven at scale with zero model spend. Never active in production, where
+  // OPENSESSION_DEV is unset. Loaded lazily so ordinary boots never import it.
+  if (
+    process.env.OPENSESSION_SYNTHETIC_ENGINE === "1" &&
+    process.env.OPENSESSION_DEV === "1"
+  ) {
+    const { syntheticEngine } = await import("./testing/synthetic-engine");
+    yield* syntheticEngine(opts, mapped);
     return;
   }
   const route = routeModel(requested, { interactive: isInteractiveRun(opts) });
@@ -1075,7 +1088,12 @@ export function isAgentSessionBusy(
   ...ids: Array<string | null | undefined>
 ): boolean {
   if (hasActiveRunFor(...ids) || isAgentEngineBusy(...ids)) return true;
-  return ids.some((id) => !!id && isRunStateUnsettled(getRunState(id)));
+  // A persisted create still owes its opening turn: a prompt admitted now
+  // would run before the workspace exists, so it queues behind the opening.
+  return ids.some(
+    (id) =>
+      !!id && (isRunStateUnsettled(getRunState(id)) || hasPendingOpening(id)),
+  );
 }
 
 /**
@@ -1839,15 +1857,8 @@ export async function resumeInterruptedRuns(
     // out of processes that never touch them.
     if (
       run.sandboxId &&
-      (run.sandboxProvider === "docker" ||
-        run.sandboxProvider === "daytona" ||
-        run.sandboxProvider === "e2b" ||
-        run.sandboxProvider === "box" ||
-        run.sandboxProvider === "modal" ||
-        run.sandboxProvider === "microvm" ||
-        run.sandboxProvider === "lambda-microvm")
+      (run.sandboxProvider === "daytona" || run.sandboxProvider === "box")
     ) {
-      const isDocker = run.sandboxProvider === "docker";
       rememberHandledSession(run);
       trackRecovery(run);
       recoveryTasks.push(
@@ -1874,10 +1885,8 @@ export async function resumeInterruptedRuns(
           try {
             if (await checkpointStoppedRecovery(run)) return;
             Object.assign(run, journalStartRecovery(run));
-            const resume = isDocker
-              ? (await import("./sandbox/docker")).resumeDockerSandboxRun
-              : (await import("./sandbox/adapters/bootstrap"))
-                  .resumeRemoteSandboxRun;
+            const resume = (await import("./sandbox/adapters/bootstrap"))
+              .resumeRemoteSandboxRun;
             if (await checkpointStoppedRecovery(run)) return;
             const events = await resume(run, {
               onAskUser: run.osSessionId

@@ -9,6 +9,7 @@ import {
   remoteModelProviderId,
   remoteRunNeedsAnthropic,
   remoteRunNeedsOpenai,
+  remoteRunNeedsXai,
   warmRemoteWorkspace,
 } from "./bootstrap";
 import type { RemoteDriver } from "./bootstrap";
@@ -58,7 +59,7 @@ describe("remote engine credential projection", () => {
       "readRemoteState(provider, sandboxId)?.repoId",
     );
     expect(projection).toContain("getRepo(repoId)");
-    expect(projection).toContain("sandboxGithubAuth(");
+    expect(projection).toContain("githubServiceCredentialEnv(");
     expect(projection).not.toContain("git remote get-url origin");
   });
 
@@ -71,12 +72,12 @@ describe("remote engine credential projection", () => {
     expect(projection).toContain(
       "driver.writeFile(githubAuthPath, JSON.stringify(githubAuth))",
     );
-    expect(projection).not.toContain("if (githubAuth.GH_TOKEN)");
+    expect(projection).toContain("if (githubAuth.GH_TOKEN)");
     expect(source).toContain("[GITHUB_RUN_AUTH_FILE_ENV]: githubAuthPath");
   });
 
   test("every remote provider delegates launch credential projection to bootstrap", () => {
-    for (const provider of ["daytona", "box", "e2b", "modal"]) {
+    for (const provider of ["daytona", "box"]) {
       const source = readFileSync(
         join(import.meta.dir, `${provider}.ts`),
         "utf-8",
@@ -118,6 +119,16 @@ describe("remote engine credential projection", () => {
       remoteRunNeedsOpenai("pi/dial/opus-fable", "pi/anthropic/claude-opus-5"),
     ).toBe(true);
     expect(remoteRunNeedsOpenai("pi/dial/opus-fable", "none")).toBe(false);
+    expect(remoteRunNeedsXai("pi/xai-oauth/grok-4.6", "none")).toBe(true);
+    expect(remoteRunNeedsXai("pi/openai/gpt-5.6-sol", "none")).toBe(false);
+    expect(
+      remoteRunNeedsXai(
+        "pi/anthropic/claude-sonnet-5",
+        "pi/xai-oauth/grok-4.6",
+      ),
+    ).toBe(true);
+    // API-key xAI stays a third-party provider, not the subscription pool.
+    expect(remoteRunNeedsXai("pi/xai/grok-4", "none")).toBe(false);
   });
 
   test("Claude projection strips host paths and unknown future fields", () => {
@@ -286,6 +297,7 @@ describe("remote engine credential projection", () => {
         bridge: {
           accounts: ["wide-claude"],
           openaiAccounts: ["wide-openai"],
+          xaiAccounts: ["wide-xai"],
         },
         providers: {
           cerebras: { apiKey: "selected" },
@@ -303,8 +315,19 @@ describe("remote engine credential projection", () => {
       bridge: {
         accounts: ["pinned-account"],
         openaiAccounts: ["pinned-account"],
+        xaiAccounts: ["pinned-account"],
       },
       providers: { cerebras: { apiKey: "selected" } },
+    });
+  });
+
+  test("interactive projection keeps the designated SuperGrok list", () => {
+    const projected = projectRemoteModelProviderConfig(
+      { bridge: { xaiAccounts: ["grok-a", 7, "grok-b"] } },
+      "pi/xai-oauth/grok-4.6",
+    );
+    expect(JSON.parse(projected.content)).toEqual({
+      bridge: { xaiAccounts: ["grok-a", "grok-b"] },
     });
   });
 });

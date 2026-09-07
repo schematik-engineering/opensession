@@ -39,6 +39,7 @@ import { makeAskHandler } from "./asks";
 import { getAccountById } from "./claude-accounts";
 import { getCodexAccountById } from "./codex-accounts";
 import { getAcpAccountById } from "./acp-accounts";
+import { getXaiAccountById } from "./xai-accounts";
 import { buildForkHandoffNote } from "./fork-handoff";
 import { ensureGeneratedTitle } from "./generated-titles";
 import { nameKnownSessionReferencesForTitle } from "./session-reference-title";
@@ -56,6 +57,10 @@ import { configuredInteractiveDefaultModel } from "./model-catalog";
 import { notifyMentions } from "./mentions";
 import { newSessionId } from "./paths";
 import { enablesPstackMode, PSTACK_MODE_NOTE } from "./pstack-mode";
+import {
+  pastedTextsFromWire,
+  withPastedTexts,
+} from "@tellahq/opensession-protocol/pasted-text";
 import { wrapContext } from "./prompt-context";
 import {
   acknowledgePromptDispatch,
@@ -101,7 +106,7 @@ import {
   SESSION_EFFORTS,
   findSession,
   findSessionAsync,
-  invalidateSessionsCache,
+  publishSessionChange,
   recordRunOutcome,
   touchNativeSession,
   updateSessionFile,
@@ -179,6 +184,10 @@ import {
   preparingWorkspaces,
 } from "./ws-hub";
 import {
+  holdPendingOpening,
+  releasePendingOpening,
+} from "./session-state-events";
+import {
   markReplayedCommandResult,
   replayedSessionCreatedResult,
   terminalCreateCommandResult,
@@ -215,6 +224,8 @@ export interface CreateSessionMessage {
   branch: string;
   images?: unknown;
   files?: unknown;
+  /** Large pastes, folded after the opening prompt (protocol pasted-text.ts). */
+  pastedTexts?: unknown;
   fromPr?: unknown;
   forkFrom?: unknown;
   model?: unknown;
@@ -303,7 +314,9 @@ export function resolvePinnedAccountId(
           ? getAccountById(accountId)
           : provider === "grok" || provider === "cursor"
             ? getAcpAccountById(accountId)
-            : undefined
+            : provider === "xai"
+              ? getXaiAccountById(accountId)
+              : undefined
       : undefined;
   return requested &&
     (!requested.owner || (!!user && userMatchesAny(user, [requested.owner])))
@@ -426,12 +439,17 @@ export interface ResolvedCreate {
 export function openingCreateTrustPolicy(
   spec: Pick<
     ResolvedCreate,
-    "automationDescendantPolicy" | "branch" | "runMcpServers" | "user"
+    | "automationDescendantPolicy"
+    | "branch"
+    | "runMcpServers"
+    | "user"
+    | "createdByLogin"
   >,
 ): {
   automation: boolean;
   mcpServers: McpScope;
   user: string | undefined;
+  mcpGrantUser: string | undefined;
   aws: boolean;
   trustProfile: "interactive" | "automation";
   publicationPolicy?: { repo: string; branch: string; headBranch: string };
@@ -441,6 +459,7 @@ export function openingCreateTrustPolicy(
     automation: !!policy,
     mcpServers: policy ? [] : (spec.runMcpServers as McpScope),
     user: policy ? undefined : spec.user,
+    mcpGrantUser: policy ? undefined : spec.createdByLogin,
     aws: !policy,
     trustProfile: policy ? "automation" : "interactive",
     ...(policy
@@ -637,9 +656,226 @@ function snapshotOpeningPlan(spec: ResolvedCreate): Record<string, unknown> {
   return plan;
 }
 
-export function runOpeningCreateOnce(
+// Creation fields as create-if-absent defaults. The early projection and the
+// opening turn write the same object, so the file a person sees while the
+// workspace is prepared is the one the opening turn later extends.
+function createdSessionFileDefaults(spec: ResolvedCreate): NativeSessionFile {
+  return {
+    id: spec.id,
+    claudeSessionId: "",
+    branch: spec.persistBranch,
+    worktreeDir: spec.wtPath,
+    // Repo-less sessions resolve no repoId, and record the absence as
+    // a decision so clients don't have to guess (types.ts, repoLess).
+    ...(spec.repoId ? { repo: spec.repoId } : { repoLess: true }),
+    ...(spec.workspaceId ? { workspaceId: spec.workspaceId } : {}),
+    ...(spec.parentSessionId ? { parentSessionId: spec.parentSessionId } : {}),
+    ...(spec.spawnDepth !== undefined ? { spawnDepth: spec.spawnDepth } : {}),
+    ...(spec.agentStarted ? { agentStarted: true } : {}),
+    ...(spec.spawnedBy ? { spawnedBy: spec.spawnedBy } : {}),
+    ...(spec.automationDescendantPolicy
+      ? {
+          automation: spec.automationDescendantPolicy.automationName,
+          automationId: spec.automationDescendantPolicy.automationId,
+          automationDescendantPolicy: spec.automationDescendantPolicy,
+        }
+      : {}),
+    // Persisted so the failure beacon (handoff-evidence.ts) can tell
+    // a worker that owes its parent a report from a child session
+    // that was explicitly told not to report (e.g. the PR session).
+    ...(spec.parentSessionId && spec.reportBack ? { reportBack: true } : {}),
+    createdBy: spec.createdBy,
+    ...(spec.createdByLogin ? { createdByLogin: spec.createdByLogin } : {}),
+    createdAt: spec.createdAt,
+    title: spec.title,
+    mode: spec.mode,
+    ...(spec.stackedOn && spec.stackedOn.branch !== spec.persistBranch
+      ? { stackedOn: spec.stackedOn }
+      : {}),
+    ...(spec.effort ? { effort: spec.effort } : {}),
+    ...(spec.presetNote ? { presetNote: spec.presetNote } : {}),
+    ...(enablesPstackMode(spec.displayPrompt) ? { pstackMode: true } : {}),
+    ...(spec.fastMode ? { fastMode: true } : {}),
+    ...(spec.accountId ? { accountId: spec.accountId } : {}),
+    ...(spec.plainThreadId ? { plainThreadId: spec.plainThreadId } : {}),
+    ...(spec.externalRefs?.length ? { externalRefs: spec.externalRefs } : {}),
+    ...(spec.persistMcpServers !== undefined
+      ? { mcpServers: spec.persistMcpServers }
+      : {}),
+    ...(spec.model ? { model: spec.model } : {}),
+    ...(spec.sandboxProvider
+      ? {
+          sandbox: {
+            provider: spec.sandboxProvider,
+            lifecycle: "preparing",
+            // Volume intent is recorded up front so the prompt
+            // paths know the workspace never exists host-side
+            // (hasRemoteWorkspace) even before the first ensure.
+            // Remote providers are ALWAYS volume — no host mounts.
+            ...(spec.volumeWorkspace || spec.remoteSandbox
+              ? { workspace: "volume" as const }
+              : {}),
+          },
+        }
+      : {}),
+    ...(spec.runnerTarget
+      ? {
+          runner: {
+            id: spec.runnerTarget.id,
+            name: spec.runnerTarget.name,
+            workspacePath: spec.runnerTarget.workspacePath,
+            lifecycle: "preparing" as const,
+          },
+        }
+      : {}),
+    lastActivity: new Date().toISOString(),
+  };
+}
+
+// The viewer shows "Setting up workspace" and queues sends while any of this
+// environment work is still ahead of the opening turn.
+function creationPreparesEnvironment(spec: ResolvedCreate): boolean {
+  return (
+    spec.needsWorktree ||
+    !!spec.attachRepos?.repos.length ||
+    !!spec.sandboxProvider ||
+    !!spec.runnerTarget
+  );
+}
+
+// The opening prompt's visible transcript row, keyed by its stable dispatch id
+// so the runner's later upsert and a replayed create land on the same row.
+async function appendOpeningPromptLine(
+  spec: ResolvedCreate,
+  openingPromptEntryId: string,
+): Promise<void> {
+  const displayPrompt = spec.displayPrompt ?? spec.titlePrompt;
+  if (!displayPrompt.trim() && !spec.images?.length) return;
+  await storeAppendUserLineEarly(
+    spec.id,
+    transcriptLineUser(
+      displayPrompt,
+      openingPromptEntryId,
+      spec.createdAt,
+      spec.images,
+    ),
+    { required: true },
+  );
+}
+
+// Persist and announce an accepted create before its slow environment setup.
+// The create dispatch and setup plan are durable at this point, so the session
+// is real: a person must find it in the list while credential, branch and
+// attachment effects run, and a reload must still show the prompt they sent.
+// Until the opening turn takes run admission the session is held busy, so a
+// prompt sent meanwhile queues instead of starting a turn in a worktree that
+// does not exist yet.
+async function projectAcceptedCreate(
+  spec: ResolvedCreate,
+  openingPromptEntryId: string,
+  io: CreateSessionIO,
+): Promise<void> {
+  holdPendingOpening(spec.id);
+  try {
+    await updateSessionFile(spec.id, (data) => ({
+      ...createdSessionFileDefaults(spec),
+      ...data,
+    }));
+    await appendOpeningPromptLine(spec, openingPromptEntryId);
+  } catch (error) {
+    releasePendingOpening(spec.id);
+    throw error;
+  }
+  const preparingWorkspace = creationPreparesEnvironment(spec);
+  if (preparingWorkspace) preparingWorkspaces.add(spec.id);
+  io.announce({
+    id: spec.id,
+    workspaceId: spec.announceWorkspaceId,
+    newWorkspace: !!spec.createdWorkspaceNow,
+    preparingWorkspace,
+    createdBy: spec.createdBy,
+    createdAt: spec.createdAt,
+  });
+}
+
+// Surface a setup failure on an announced session: the client is already in
+// it, so the stream closes out there and the row reads "Needs input" instead
+// of an inexplicably empty session (bks-019f472f, 2026-07-09).
+async function reportSetupFailure(
+  sessionId: string,
+  io: CreateSessionIO,
+  message: string,
+): Promise<void> {
+  // Persist before terminal delivery or creation settlement. A failed
+  // outcome projection leaves recovery evidence intact for retry.
+  await recordRunOutcome(sessionId, `Session setup failed: ${message}`);
+  io.emit({ type: "error", message });
+  io.emit({ type: "stream_done" });
+  io.emit({ type: "notice", message: `Session setup failed: ${message}` });
+  io.emit({ type: "session_status", isRunning: false });
+}
+
+// Environment setup failed after the session was projected.
+async function failProjectedCreate(
   spec: ResolvedCreate,
   io: CreateSessionIO,
+  creationIdentity: string,
+  openingPromptEntryId: string,
+  error: unknown,
+): Promise<void> {
+  preparingWorkspaces.delete(spec.id);
+  releasePendingOpening(spec.id);
+  io.emit({ type: "workspace_status", ready: true });
+  const timedOut = isCreationEffectPendingError(error);
+  await reportSetupFailure(
+    spec.id,
+    io,
+    timedOut
+      ? `Workspace setup did not finish within ${CREATION_SETUP_TIMEOUT_MS / 60_000} minutes`
+      : error instanceof Error
+        ? error.message
+        : String(error),
+  );
+  try {
+    // A timed-out effect is still the actor's current effect. Failing against
+    // its id is the one accepted terminal transition; its late receipt is then
+    // ignored as stale.
+    await settleCreationFailed(
+      spec.id,
+      creationIdentity,
+      error,
+      undefined,
+      timedOut ? error.effectId : undefined,
+    );
+  } catch (settleError) {
+    // Keep the create dispatch: boot recovery can still resume this create.
+    console.error(
+      `[create] Could not settle failed setup for ${spec.id}:`,
+      settleError,
+    );
+    return;
+  }
+  await acknowledgePromptDispatch(spec.id, openingPromptEntryId);
+}
+
+// The projection announces once. openCreatedSession's own announce is then the
+// idempotent second pass; restart recovery still re-announces to the session
+// room through its fresh io.
+function announceOnce(io: CreateSessionIO): CreateSessionIO {
+  let announced = false;
+  return {
+    ...io,
+    announce: (info) => {
+      if (announced) return;
+      announced = true;
+      io.announce(info);
+    },
+  };
+}
+
+export function runOpeningCreateOnce(
+  spec: ResolvedCreate,
+  callerIo: CreateSessionIO,
   creationIdentity: string,
 ): { owner: boolean; done: Promise<void> } {
   const existing = activeOpeningCreates.get(spec.id);
@@ -650,6 +886,7 @@ export function runOpeningCreateOnce(
       );
     return { owner: false, done: existing.done };
   }
+  const io = announceOnce(callerIo);
   // Validate and bound actor recovery input before accepting the prompt dispatch.
   const openingPlan = snapshotOpeningPlan(spec);
   const done = (async () => {
@@ -674,6 +911,16 @@ export function runOpeningCreateOnce(
     );
     if (openingPromptEntryId !== spec.openingPromptEntryId)
       throw new Error("Opening prompt identity changed before actor dispatch");
+    // The prompt and setup plan are durable: show the session now. Every
+    // later step (credential, branch and attachment effects, the opening-turn
+    // queue) can take minutes, and a create that exists only as a client-side
+    // shell reads as lost the moment that shell is gone.
+    try {
+      await projectAcceptedCreate(spec, openingPromptEntryId, io);
+    } catch (error) {
+      io.fail(error instanceof Error ? error.message : String(error));
+      throw error;
+    }
     // The creation actor owns one physical effect at a time. Materialize the
     // primary worktree before dispatching the long-running opening effect;
     // otherwise openCreatedSession would try to emit a branch effect while the
@@ -683,7 +930,13 @@ export function runOpeningCreateOnce(
       try {
         await spec.materializeWorktree();
       } catch (error) {
-        io.fail(error instanceof Error ? error.message : String(error));
+        await failProjectedCreate(
+          spec,
+          io,
+          creationIdentity,
+          openingPromptEntryId,
+          error,
+        );
         throw error;
       }
     }
@@ -708,7 +961,14 @@ export function runOpeningCreateOnce(
   return { owner: true, done };
 }
 
-function actorWorktreeMaterializer(input: {
+// The session is already projected while its git work runs, so this bound is
+// only a backstop against an effect that never settles. The actor keeps the
+// credential and branch effects durable either way; a timeout records a setup
+// failure on the visible session instead of leaving it preparing forever.
+const CREATION_SETUP_TIMEOUT_MS = 10 * 60_000;
+const CREATION_SETUP_POLL_MS = 100;
+
+export function actorWorktreeMaterializer(input: {
   sessionId: string;
   identity: string;
   project: string;
@@ -719,26 +979,36 @@ function actorWorktreeMaterializer(input: {
   existingBranch?: boolean;
   credentialPrincipal?: string;
 }): () => Promise<string> {
+  const wait = {
+    timeoutMs: CREATION_SETUP_TIMEOUT_MS,
+    pollMs: CREATION_SETUP_POLL_MS,
+  };
   return async () => {
     if (input.credentialPrincipal) {
-      await requestCreationCredential({
+      await requestCreationCredential(
+        {
+          sessionId: input.sessionId,
+          identity: input.identity,
+          principal: input.credentialPrincipal,
+          scope: `git:${input.project}`,
+        },
+        wait,
+      );
+    }
+    await requestCreationBranch(
+      {
         sessionId: input.sessionId,
         identity: input.identity,
-        principal: input.credentialPrincipal,
-        scope: `git:${input.project}`,
-      });
-    }
-    await requestCreationBranch({
-      sessionId: input.sessionId,
-      identity: input.identity,
-      project: input.project,
-      branch: input.branch,
-      worktreePath: input.worktreePath,
-      baseBranch: input.baseBranch || getRepo(input.project).defaultBranch,
-      isolated: input.isolated,
-      existingBranch: input.existingBranch,
-      credentialPrincipal: input.credentialPrincipal,
-    });
+        project: input.project,
+        branch: input.branch,
+        worktreePath: input.worktreePath,
+        baseBranch: input.baseBranch || getRepo(input.project).defaultBranch,
+        isolated: input.isolated,
+        existingBranch: input.existingBranch,
+        credentialPrincipal: input.credentialPrincipal,
+      },
+      wait,
+    );
     return input.worktreePath;
   };
 }
@@ -1131,6 +1401,10 @@ export async function openCreatedSession(
   assertAutomationDescendantOpeningIsolation(spec);
   const bksId = spec.id;
   const pstackMode = enablesPstackMode(spec.displayPrompt);
+  const pendingAttach = spec.attachRepos?.repos.length
+    ? spec.attachRepos
+    : null;
+  const preparingEnvironment = creationPreparesEnvironment(spec);
   // Replace the raw first-line title with a short summary in the background;
   // the next sessions poll (≤5s) picks it up. A workspace minted by THIS
   // create is named ONCE from the same generated summary (it provisionally
@@ -1143,7 +1417,7 @@ export async function openCreatedSession(
     )
     .then((t) => {
       if (!t) return;
-      invalidateSessionsCache();
+      publishSessionChange(bksId);
       if (!wsToName) return;
       const cur = getWorkspace(wsToName.id);
       if (cur && cur.name === wsToName.name)
@@ -1197,89 +1471,16 @@ export async function openCreatedSession(
     return head && head !== spec.branch ? { branch: head } : {};
   };
   // Field-scoped write: creation fields are create-if-absent defaults
-  // (an existing file — e.g. one touched with the engine id or a
-  // materialized sandboxId while the opening run streams — wins);
-  // this run only owns the engine-id/model/HEAD-sync fields it
+  // (an existing file — the early projection, or one touched with the
+  // engine id or a materialized sandboxId while the opening run streams —
+  // wins); this run only owns the engine-id/model/HEAD-sync fields it
   // actually changes. Serialized via updateSessionFile.
   const persist = () =>
     updateSessionFile(bksId, (data) => {
       // Widen to Partial: the file may not exist yet.
       const existing: Partial<NativeSessionFile> = data;
       return {
-        id: bksId,
-        claudeSessionId: "",
-        branch: spec.persistBranch,
-        worktreeDir: spec.wtPath,
-        // Repo-less sessions resolve no repoId, and record the absence as
-        // a decision so clients don't have to guess (types.ts, repoLess).
-        ...(spec.repoId ? { repo: spec.repoId } : { repoLess: true }),
-        ...(spec.workspaceId ? { workspaceId: spec.workspaceId } : {}),
-        ...(spec.parentSessionId
-          ? { parentSessionId: spec.parentSessionId }
-          : {}),
-        ...(spec.spawnDepth !== undefined
-          ? { spawnDepth: spec.spawnDepth }
-          : {}),
-        ...(spec.agentStarted ? { agentStarted: true } : {}),
-        ...(spec.spawnedBy ? { spawnedBy: spec.spawnedBy } : {}),
-        ...(spec.automationDescendantPolicy
-          ? {
-              automation: spec.automationDescendantPolicy.automationName,
-              automationId: spec.automationDescendantPolicy.automationId,
-              automationDescendantPolicy: spec.automationDescendantPolicy,
-            }
-          : {}),
-        // Persisted so the failure beacon (handoff-evidence.ts) can tell
-        // a worker that owes its parent a report from a child session
-        // that was explicitly told not to report (e.g. the PR session).
-        ...(spec.parentSessionId && spec.reportBack
-          ? { reportBack: true }
-          : {}),
-        createdBy: spec.createdBy,
-        ...(spec.createdByLogin ? { createdByLogin: spec.createdByLogin } : {}),
-        createdAt: spec.createdAt,
-        title: spec.title,
-        mode: spec.mode,
-        ...(spec.stackedOn && spec.stackedOn.branch !== spec.persistBranch
-          ? { stackedOn: spec.stackedOn }
-          : {}),
-        ...(spec.effort ? { effort: spec.effort } : {}),
-        ...(spec.presetNote ? { presetNote: spec.presetNote } : {}),
-        ...(pstackMode ? { pstackMode: true } : {}),
-        ...(spec.fastMode ? { fastMode: true } : {}),
-        ...(spec.accountId ? { accountId: spec.accountId } : {}),
-        ...(spec.plainThreadId ? { plainThreadId: spec.plainThreadId } : {}),
-        ...(spec.externalRefs?.length
-          ? { externalRefs: spec.externalRefs }
-          : {}),
-        ...(spec.persistMcpServers !== undefined
-          ? { mcpServers: spec.persistMcpServers }
-          : {}),
-        ...(spec.sandboxProvider
-          ? {
-              sandbox: {
-                provider: spec.sandboxProvider,
-                lifecycle: "preparing",
-                // Volume intent is recorded up front so the prompt
-                // paths know the workspace never exists host-side
-                // (hasRemoteWorkspace) even before the first ensure.
-                // Remote providers are ALWAYS volume — no host mounts.
-                ...(spec.volumeWorkspace || spec.remoteSandbox
-                  ? { workspace: "volume" as const }
-                  : {}),
-              },
-            }
-          : {}),
-        ...(spec.runnerTarget
-          ? {
-              runner: {
-                id: spec.runnerTarget.id,
-                name: spec.runnerTarget.name,
-                workspacePath: spec.runnerTarget.workspacePath,
-                lifecycle: "preparing" as const,
-              },
-            }
-          : {}),
+        ...createdSessionFileDefaults(spec),
         ...existing,
         ...(engineSessionId
           ? engineSessionPatch(effectiveProvider, engineSessionId)
@@ -1298,13 +1499,14 @@ export async function openCreatedSession(
     });
 
   try {
-    // Persist + announce BEFORE the slow parts (worktree git work,
-    // engine boot with its MCP connects) so the client drops into
-    // the empty session immediately — the title fills in from the
-    // background summary and the opening turn streams in when the
-    // engine is up. The starting mark keeps a prompt typed in that
-    // window from double-starting a run (same race as
-    // runSessionPrompt).
+    // Persist + announce BEFORE the slow parts (repo attach, engine boot
+    // with its MCP connects) so the client drops into the empty session
+    // immediately — the title fills in from the background summary and the
+    // opening turn streams in when the engine is up. runOpeningCreateOnce
+    // normally projected the session already; this pass is idempotent and
+    // covers a restart-recovered opening. The starting mark keeps a prompt
+    // typed in that window from double-starting a run (same race as
+    // runSessionPrompt); the pending-opening hold covered it until now.
     startToken = await markSessionStarting(
       bksId,
       openingRun
@@ -1323,14 +1525,8 @@ export async function openCreatedSession(
       throw new Error("Opening turn lost actor admission before preparation");
     }
     startGeneration = admittedRun.generation;
-    const pendingAttach = spec.attachRepos?.repos.length
-      ? spec.attachRepos
-      : null;
-    const preparingEnvironment =
-      spec.needsWorktree ||
-      Boolean(pendingAttach) ||
-      Boolean(spec.sandboxProvider) ||
-      Boolean(spec.runnerTarget);
+    // The run-state admission now holds later prompts behind this turn.
+    releasePendingOpening(bksId);
     if (preparingEnvironment) preparingWorkspaces.add(bksId);
     try {
       openingPromptEntryId = await beginPromptDispatch(
@@ -1356,19 +1552,7 @@ export async function openCreatedSession(
       // The opening prompt is accepted before slow workspace setup. Persist
       // its visible row at the same boundary so a setup failure cannot leave
       // a titled but empty session. The runner later upserts this stable id.
-      const displayPrompt = spec.displayPrompt ?? spec.titlePrompt;
-      if (displayPrompt.trim() || spec.images?.length) {
-        await storeAppendUserLineEarly(
-          bksId,
-          transcriptLineUser(
-            displayPrompt,
-            openingPromptEntryId,
-            spec.createdAt,
-            spec.images,
-          ),
-          { required: true },
-        );
-      }
+      await appendOpeningPromptLine(spec, openingPromptEntryId);
       // A session starting in a workspace consumes its draft. The
       // composer prompt it held is now this session's opening prompt.
       // After persist() so this never races the create with a client
@@ -1506,7 +1690,7 @@ export async function openCreatedSession(
             lifecycle: "awake",
           },
         });
-        invalidateSessionsCache();
+        publishSessionChange(bksId);
         const stored = await findSessionAsync(bksId);
         // The session-list projection may still hold the pre-Runner create row
         // for this same command turn. Launch from the just-committed immutable
@@ -1655,7 +1839,7 @@ export async function openCreatedSession(
               shouldCancel: () => isAgentSessionCancelled(bksId, startToken),
               cwd: spec.wtPath,
               mode: spec.mode,
-              mcpGrantUser: openingTrust.user,
+              mcpGrantUser: openingTrust.mcpGrantUser,
               model: spec.model,
               effort: spec.effort,
               fastMode: spec.fastMode,
@@ -1875,6 +2059,7 @@ export async function openCreatedSession(
       else onHumanAsksSessionIdle(bksId);
     }
   } catch (e: any) {
+    releasePendingOpening(bksId);
     if (creationSettled) {
       console.error(`[create] Post-opening follow-up failed for ${bksId}:`, e);
       return;
@@ -1909,19 +2094,7 @@ export async function openCreatedSession(
           },
         });
       }
-      // Persist before terminal delivery or creation settlement. A failed
-      // outcome projection leaves recovery evidence intact for retry.
-      await recordRunOutcome(
-        bksId,
-        `Session setup failed: ${e.message || String(e)}`,
-      );
-      io.emit({ type: "error", message: e.message || String(e) });
-      io.emit({ type: "stream_done" });
-      io.emit({
-        type: "notice",
-        message: `Session setup failed: ${e.message || String(e)}`,
-      });
-      io.emit({ type: "session_status", isRunning: false });
+      await reportSetupFailure(bksId, io, e.message || String(e));
     } else {
       io.fail(e.message || String(e));
     }
@@ -2479,19 +2652,11 @@ export async function handleCreateSessionMessage(
         wtPath = worktreePathFor(branch, repo.id, {
           isolated: isolatesConfiguredSharedCheckout,
         });
-        // Volume-mode sandbox (docs/self-hosting-sandboxes.md): the
-        // workspace is cloned into a per-session volume INSIDE the
-        // sandbox — skip host createWorktree entirely. The session
-        // keeps the canonical path; the provider's ensure()
-        // materializes it on the opening run below. Docker only in
-        // volume config; remote providers (daytona/e2b) always.
-        if (
-          createSandboxProvider &&
-          sandboxesEnabled() &&
-          (remoteSandbox ||
-            (createSandboxProvider === "docker" &&
-              sandboxConfig().workspace === "volume"))
-        ) {
+        // Sandbox workspaces (docs/self-hosting-sandboxes.md) are cloned
+        // INSIDE the sandbox — skip host createWorktree entirely. The
+        // session keeps the canonical path; the provider's ensure()
+        // materializes it on the opening run below.
+        if (createSandboxProvider && sandboxesEnabled() && remoteSandbox) {
           volumeWorkspace = true;
         } else {
           needsWorktree = true;
@@ -2521,11 +2686,22 @@ export async function handleCreateSessionMessage(
       (!usesSharedCheckout || fromPr) &&
       (worktreeMode !== "stack" || !workspace.branch)
     ) {
+      // A PR workspace's branch is the PR head. The session materializing
+      // it may sit on the derived <head>-os-review checkout, which no PR
+      // ever resolves on, so that checkout never renames the workspace.
+      const workspaceBranch =
+        workspace.prNumber != null && workspace.branch
+          ? workspace.branch
+          : branch;
       updateWorkspace(workspace.id, {
         worktreeDir: wtPath,
-        ...(branch ? { branch } : {}),
+        ...(workspaceBranch ? { branch: workspaceBranch } : {}),
       });
-      workspace = { ...workspace, worktreeDir: wtPath, branch };
+      workspace = {
+        ...workspace,
+        worktreeDir: wtPath,
+        branch: workspaceBranch,
+      };
     }
     // The branch this session actually works on (also persisted below).
     const sessionBranch = forkSource
@@ -2643,8 +2819,10 @@ export async function handleCreateSessionMessage(
         identity: createIdentity,
         ...attachment,
       });
+    // Pasted blocks follow the message; the uploads note follows them, so the
+    // parser's end-anchored note regex still finds it.
     let openingPrompt = withUploadsNote(
-      prompt,
+      withPastedTexts(prompt, pastedTextsFromWire(msg.pastedTexts)),
       attachmentSources.map((attachment) => ({
         name: attachment.name,
         path: creationAttachmentPath(

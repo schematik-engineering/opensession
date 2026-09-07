@@ -23,7 +23,7 @@
 
 import { audit } from "../audit";
 import { GITHUB_APP_GRANT_PERMISSIONS } from "../../shared/github-app-permissions";
-import { envRequired, type IntegrationSpec } from "../integrations/registry";
+import type { IntegrationSpec } from "../integrations/registry";
 import { setupAccessSnapshot } from "../setup-access";
 import { requireWorkspaceAdmin } from "../workspace-auth";
 import type { RouteContext } from "./context";
@@ -51,7 +51,7 @@ async function integrationSnapshot(
       : !!process.env[name];
   const env = spec.env.map((e) => ({
     name: e.name,
-    required: envRequired(e, present),
+    required: !!e.required,
     description: e.description,
     present: present(e.name),
   }));
@@ -361,10 +361,7 @@ export async function handleSetupRoutes(
         isolatedWorktrees: !sharedCheckoutForNewSessions(r),
         // Can sessions in this repo provision and boot themselves? Read off
         // the main checkout — worktrees carry the same committed files.
-        lifecycle: {
-          ...repoLifecycle(r.repo),
-          previewCommand: !!r.previewCommand,
-        },
+        lifecycle: repoLifecycle(r.repo),
       })),
       team: (() => {
         const team = configuredIdentity().team;
@@ -447,13 +444,23 @@ export async function handleSetupRoutes(
       return Response.json({ error: "Nothing to change" }, { status: 400 });
     }
 
-    const { applyEnvFileEdits, readEnvFileValues } =
+    const { EnvFileWriteError, applyEnvFileEdits, readEnvFileValues } =
       await import("../env-file-edit");
     const { rawConfig, persistRawConfig, withConfigMutationLock } =
       await import("../config-mutation");
 
     return withConfigMutationLock(async () => {
-      applyEnvFileEdits(edits);
+      try {
+        applyEnvFileEdits(edits);
+      } catch (error) {
+        // A misplaced env file is an install problem, not a request problem.
+        // Name the path and the fix instead of leaking a raw fs error as 500.
+        if (error instanceof EnvFileWriteError) {
+          console.error(`[setup] ${error.message}`);
+          return Response.json({ error: error.message }, { status: 500 });
+        }
+        throw error;
+      }
       if (enabled !== undefined) {
         const config = rawConfig();
         const integrations =
@@ -635,14 +642,6 @@ export async function handleSetupRoutes(
           : typeof github.oauthClientId === "string"
             ? github.oauthClientId
             : "";
-      const effectiveOwner =
-        body.installationOwner !== undefined
-          ? String(body.installationOwner).trim()
-          : typeof github.installationOwner === "string"
-            ? github.installationOwner
-            : typeof github.appOrg === "string"
-              ? github.appOrg
-              : "";
       const effectiveSecret =
         body.oauthClientSecret !== undefined
           ? String(body.oauthClientSecret).trim()
@@ -651,14 +650,11 @@ export async function handleSetupRoutes(
             : "";
       if (
         (appSettingsChanging || body.userPrAuth === true) &&
-        (!effectiveClientId ||
-          !effectiveOwner ||
-          (!privateKey && !githubAppConfigured()))
+        (!effectiveClientId || (!privateKey && !githubAppConfigured()))
       ) {
         return Response.json(
           {
-            error:
-              "Client id, installation owner and private key are required for the GitHub App",
+            error: "Client id and private key are required for the GitHub App",
           },
           { status: 409 },
         );

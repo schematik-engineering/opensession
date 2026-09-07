@@ -474,10 +474,9 @@ export function SessionViewer({
     showVideo = false,
     videoPanel = null,
     videoTitle = null,
-    showPreviewTab = false,
-    onClosePreviewTab,
     showPortal = false,
     portalTarget = null,
+    showDesktop = false,
   },
   subagents: {
     parentSession,
@@ -513,7 +512,7 @@ export function SessionViewer({
       showStaging,
       showAssets,
       showTerminal,
-      showPreviewTab,
+      showDesktop,
       showPortal,
       hasPortalTarget: !!portalTarget,
       showSubagent,
@@ -614,7 +613,6 @@ export function SessionViewer({
     setHistoryTruncated,
     loadingHistory,
     setLoadingHistory,
-    loadingAllHistory,
     setLoadingAllHistory,
   } = transcriptHistory.state;
   const {
@@ -637,6 +635,7 @@ export function SessionViewer({
     indexExpectedRef: transcriptIndexExpectedRef,
     indexEpochRef: transcriptIndexEpochRef,
     rangeRetryGeneration: transcriptRangeRetryGeneration,
+    rangesLoading: transcriptRangesLoading,
     existingIndexForInit,
     setIndexMode,
     acceptInitTail,
@@ -1323,7 +1322,6 @@ export function SessionViewer({
     },
     preview: {
       controller: previewController,
-      showPreviewTab,
       showPortal,
       activePanelOpen,
       worktreeDir: session.worktreeDir,
@@ -1582,8 +1580,7 @@ export function SessionViewer({
           surfaces={{
             showPortal,
             portalTarget,
-            showPreviewTab,
-            onClosePreviewTab,
+            showDesktop,
             showStaging,
             staging,
             stagingUrl,
@@ -1617,12 +1614,14 @@ export function SessionViewer({
             openPr,
             allSessions,
             workspaceSessions,
-            openSession,
             reviewSessionActionTarget,
             connected: presentedConnected,
             isBusy,
             noEngine,
             openCurrentWorkspace,
+            openNewSession: openNewSession
+              ? () => void openNewSession("share")
+              : undefined,
             setComposerPrefill,
             panelReviewRepos,
             discoveredPrs,
@@ -1662,8 +1661,7 @@ export function SessionViewer({
               transcriptIndexExpected,
               historyTruncated,
               atTop,
-              loadingHistory,
-              loadingAllHistory,
+              loadingHistory: loadingHistory || transcriptRangesLoading,
             },
             actions: {
               openAssetFromTranscript,

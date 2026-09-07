@@ -84,7 +84,10 @@ const SNAPSHOT_TAIL_ENTRIES = 132;
 // This larger target mainly extends tool-heavy tails, where folded work would
 // otherwise leave later hydration to grow the visible transcript after open.
 const SNAPSHOT_MIN_MESSAGES = 100;
-const SNAPSHOT_MIN_USER_MESSAGES_WITH_TOOL_WORK = 1;
+// Intermediate assistant notes count as transcript messages but collapse into
+// the work fold. Fifty user turns keeps the 100-message target meaningful in
+// tool-heavy sessions instead of letting one verbose turn satisfy it alone.
+const SNAPSHOT_MIN_USER_MESSAGES_WITH_TOOL_WORK = 50;
 const SNAPSHOT_MAX_ENTRIES = 1400;
 const SNAPSHOT_MAX_ESTIMATED_BYTES = 850_000;
 

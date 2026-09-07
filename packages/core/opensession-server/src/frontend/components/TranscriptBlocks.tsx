@@ -51,11 +51,10 @@ import {
 } from "./session-viewer/transcript-hydration";
 import { isLegacyReasoningHeading } from "../lib/reasoning-display";
 import {
+  arrangeThinkingMessages,
   getThinkingMessagesPref,
   onThinkingMessagesChanged,
-  thinkingMessageIsVisible,
-  thinkingMessageVisibility,
-  type ThinkingMessageVisibility,
+  type ThinkingMessagesPref,
 } from "../lib/thinking-messages-pref";
 
 type RenderBlock =
@@ -100,6 +99,8 @@ interface Props {
   owner?: string;
   /** Lets wire-clamped entries' "Show full message" fetch the full content. */
   sessionId?: string;
+  /** Older transcript rows are currently being fetched. */
+  historyLoading?: boolean;
   /** Agent-published walkthrough — rendered inline where it was published.
    *  Pass a referentially stable object (see SessionViewer) so the memo holds. */
   walkthrough?: SessionWalkthrough;
@@ -131,9 +132,8 @@ interface Props {
   virtualize?: boolean;
   /** Stable outer range identity for the one work turn rendered inside it. */
   turnMountScope?: string;
-  /** Resolved once against the full loaded payload, then shared with indexed
-   * range renderers so "Latest" means one row across the whole transcript. */
-  thinkingVisibility?: ThinkingMessageVisibility;
+  /** Which thinking rows each work rail shows; see arrangeThinkingMessages. */
+  thinkingMessages?: ThinkingMessagesPref;
 }
 
 type ReviewBlockRole =
@@ -317,14 +317,15 @@ export const TranscriptBlocks = function TranscriptBlocks(props: Props) {
       ),
     [],
   );
-  const renderedProps: Props = {
-    ...props,
-    entries,
-    thinkingVisibility: thinkingMessageVisibility(entries, thinkingMessages),
-  };
+  const renderedProps: Props = { ...props, entries, thinkingMessages };
   return (
     <>
-      {props.sessionId && <SessionContextMessage sessionId={props.sessionId} />}
+      {props.sessionId && (
+        <SessionContextMessage
+          sessionId={props.sessionId}
+          historyLoading={props.historyLoading}
+        />
+      )}
       {props.transcriptIndex ? (
         <IndexedTranscriptBlocks {...renderedProps} />
       ) : (
@@ -357,7 +358,7 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
   scrollElement,
   shouldMaintainEnd,
   onLayout,
-  thinkingVisibility,
+  thinkingMessages = getThinkingMessagesPref(),
 }: Props) {
   // Top level only (nested per-range instances pass virtualize={false} and are
   // suppressed): without an outline every block renders real content, so the
@@ -374,11 +375,7 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
   const pendingDeliveryEntryIds = new Set(pendingDeliveryIds ?? []);
   const renderedEntries = normalizeLegacyVoiceToolEntries(entries)
     .map(classifyEntry)
-    .filter(
-      (entry) =>
-        thinkingMessageIsVisible(entry, thinkingVisibility) &&
-        (entry.turnBoundary || !isRenderlessUserEntry(entry)),
-    );
+    .filter((entry) => entry.turnBoundary || !isRenderlessUserEntry(entry));
   const shareAfterEntryIds = new Set<string>();
   if (slackShare) {
     for (let i = 0; i < renderedEntries.length; i++) {
@@ -416,7 +413,13 @@ const LoadedTranscriptBlocks = function LoadedTranscriptBlocks({
     // an earlier candidate moves into work only once a later step proves it was
     // intermediate narration.
     const final = last.type === "assistant" && !last.isReasoning ? last : null;
-    const work = final ? turn.slice(0, -1) : turn;
+    // Thinking is laid out per rail: a status at the tail of the live turn, or
+    // the full trace in place. See arrangeThinkingMessages.
+    const work = arrangeThinkingMessages(
+      final ? turn.slice(0, -1) : turn,
+      thinkingMessages,
+      Boolean(live) && trailing,
+    );
     if (work.length > 0) {
       blocks.push({
         kind: "turn",
@@ -728,8 +731,8 @@ function IndexedTranscriptBlocks(props: Props) {
   const ranges = buildTranscriptRanges(transcriptIndex);
   const payloadById = new Map(entries.map((entry) => [entry.id, entry]));
   const indexedIds = new Set(ranges.flatMap((range) => range.entryIds));
-  const optimisticIds = new Set(
-    (props.optimisticEntries ?? []).map((entry) => entry.id),
+  const optimisticById = new Map(
+    (props.optimisticEntries ?? []).map((entry) => [entry.id, entry]),
   );
   let atoms: IndexedTimelineAtom[] = ranges.map((range) => ({
     kind: "range",
@@ -744,13 +747,13 @@ function IndexedTranscriptBlocks(props: Props) {
   );
   const tailRangeAtom = rangeAtoms[rangeAtoms.length - 1];
   for (const entry of entries) {
-    if (typeof entry.seq === "number" || indexedIds.has(entry.id)) continue;
+    if (entry.seq !== undefined || indexedIds.has(entry.id)) continue;
     const timestampMs = Date.parse(entry.timestamp) || 0;
-    if (optimisticIds.has(entry.id) && rangeAtoms.length > 0) {
+    const optimistic = optimisticById.get(entry.id);
+    if (optimistic && rangeAtoms.length > 0) {
       // Keep the prompt in the structural range that was current when it was
       // sent. Wall clocks are deliberately absent here: a browser clock ahead
       // of the server used to place later assistant/tool rows above the prompt.
-      const optimistic = entry as OptimisticTranscriptEntry;
       const anchorId = optimistic.optimisticAfterEntryId;
       const anchorSeq = optimistic.optimisticAfterSeq;
       const rangeAtom =
@@ -826,10 +829,18 @@ function IndexedTranscriptBlocks(props: Props) {
   // every height on screen is a real measurement.
   const renderedTimeline = timeline
     .map((item, index) => ({ item, index }))
-    .filter(({ item }) => {
+    .filter(({ item, index }) => {
+      // A loose thinking atom renders as a one-row rail of its own. Skip it
+      // when arrangement would leave that rail empty, so it never occupies an
+      // empty measured row.
       if (
         item.kind === "entry" &&
-        !thinkingMessageIsVisible(item.entry, props.thinkingVisibility)
+        item.entry.isReasoning &&
+        arrangeThinkingMessages(
+          [item.entry],
+          props.thinkingMessages ?? getThinkingMessagesPref(),
+          Boolean(props.live) && index === timeline.length - 1,
+        ).length === 0
       ) {
         return false;
       }
@@ -915,13 +926,13 @@ function IndexedTranscriptBlocks(props: Props) {
         const entry = payloadById.get(id);
         return entry ? [entry] : [];
       });
-      const optimisticRangeEntries = rangeEntries.filter(
-        (entry): entry is OptimisticTranscriptEntry =>
-          optimisticIds.has(entry.id),
-      );
+      const optimisticRangeEntries = rangeEntries.flatMap((entry) => {
+        const optimistic = optimisticById.get(entry.id);
+        return optimistic ? [optimistic] : [];
+      });
       const itemEntries = mergeOptimisticTranscriptEntries(
         orderTranscriptEntries(
-          rangeEntries.filter((entry) => !optimisticIds.has(entry.id)),
+          rangeEntries.filter((entry) => !optimisticById.has(entry.id)),
         ),
         optimisticRangeEntries,
       );

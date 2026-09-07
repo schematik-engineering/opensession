@@ -67,7 +67,10 @@ import { Spinner } from "../ui/spinner";
 import { Skeleton, SkeletonBar } from "../ui/state";
 import { cn } from "../ui/cn";
 import { useShortcutLabel } from "../hooks/useShortcutBindings";
-import { useDeferredMergePhase } from "../hooks/useDeferredMerge";
+import {
+  useDeferredMergeDeadline,
+  useDeferredMergePhase,
+} from "../hooks/useDeferredMerge";
 import {
   cancelDeferredMergeByKey,
   deferredMergeKey,
@@ -175,7 +178,6 @@ interface Props {
 interface PrBarButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   tone:
     | "green"
-    | "yellow"
     | "purple"
     | "red"
     | "status-red"
@@ -196,8 +198,6 @@ function PrBarButton({
   const tones = {
     green:
       "bg-[var(--green)] border-[color-mix(in_srgb,var(--green)_78%,black)] text-white",
-    yellow:
-      "bg-[var(--yellow)] border-[color-mix(in_srgb,var(--yellow)_78%,black)] text-[var(--on-yellow)]",
     purple:
       "bg-[var(--purple)] border-[color-mix(in_srgb,var(--purple)_78%,black)] text-white",
     red: "bg-[var(--red)] border-[color-mix(in_srgb,var(--red)_78%,black)] text-white",
@@ -274,6 +274,8 @@ function PrBarButton({
 function PrCopyItems({ pr }: { pr: PrDetails }) {
   const [copied, setCopied] = useState<"link" | "number" | null>(null);
   const provider = providerFromUrl(pr.url);
+  const openChord = useShortcutLabel("open-pr");
+  const copyChord = useShortcutLabel("pr-copy-link");
 
   const copy = (kind: "link" | "number", text: string) => {
     navigator.clipboard?.writeText(text).then(() => {
@@ -296,6 +298,7 @@ function PrCopyItems({ pr }: { pr: PrDetails }) {
       >
         <IconArrowUpRight size={20} className={MENU_ICON} />
         <span className="grow">Open on {provider.name}</span>
+        {openChord && <ContextMenu.Shortcut>{openChord}</ContextMenu.Shortcut>}
       </ContextMenu.Item>
       <ContextMenu.Item
         closeOnClick={false}
@@ -309,6 +312,7 @@ function PrCopyItems({ pr }: { pr: PrDetails }) {
         <span className="grow">
           {copied === "link" ? "Copied" : "Copy link"}
         </span>
+        {copyChord && <ContextMenu.Shortcut>{copyChord}</ContextMenu.Shortcut>}
       </ContextMenu.Item>
       <ContextMenu.Item
         closeOnClick={false}
@@ -515,6 +519,7 @@ export function PrStatusBar({
   const { mutate: reloadGit } = gitResource;
   const mergeKey = deferredMergeKey(pr?.url);
   const mergePhase = useDeferredMergePhase(mergeKey);
+  const mergeDeadline = useDeferredMergeDeadline(mergeKey);
   const loaded =
     !prResource.isLoading && (Boolean(promoted) || !gitResource.isLoading);
   const [busy, setBusy] = useState<string | null>(null);
@@ -643,7 +648,7 @@ export function PrStatusBar({
           : "text-faint";
   const checksLabel = `${checksSummary.total} check${checksSummary.total === 1 ? "" : "s"}`;
 
-  async function run(name: string, fn: () => Promise<unknown>) {
+  async function run<Result>(name: string, fn: () => Promise<Result>) {
     if (busy) return;
     setBusy(name);
     setError(null);
@@ -651,7 +656,7 @@ export function PrStatusBar({
       await fn();
       await load();
     })()
-      .catch(async (error: unknown) => {
+      .catch(async (error) => {
         setError(errorMessage(error, `${name} failed`));
       })
       .finally(async () => {
@@ -677,12 +682,18 @@ export function PrStatusBar({
       return;
     }
     if (mergePhase !== "idle") return;
+    // Two branches rather than one conditional expression: the two calls
+    // resolve to differently shaped results, and inferring `run`'s type
+    // parameter from that union depends on check order (the Vercel build
+    // rejected it while a fresh `tsc` accepted it).
     scheduleDeferredMerge(mergeKey, async () => {
-      await run("merge", () =>
-        stackMerge
-          ? mergePrStackApi(sessionId, "squash", targetRepo, targetBranch)
-          : mergePrApi(sessionId, "squash", targetRepo, targetBranch),
-      );
+      await run("merge", async () => {
+        if (stackMerge) {
+          await mergePrStackApi(sessionId, "squash", targetRepo, targetBranch);
+        } else {
+          await mergePrApi(sessionId, "squash", targetRepo, targetBranch);
+        }
+      });
     });
   }
 
@@ -755,52 +766,6 @@ export function PrStatusBar({
   // session header it sizes up to the header's other bordered controls, so the
   // chip and the action read as a matched pair.
   const actionBtn = variant === "header" ? PR_HEAD_BTN : "";
-  function renderMergeAction(
-    tone: "green" | "yellow",
-    disabledReason?: string,
-  ): React.ReactNode {
-    const mergeScheduled = mergePhase === "scheduled";
-    const merging = mergePhase === "running" || busy === "merge";
-    if (mergeScheduled)
-      return (
-        <MergeUndoControl
-          className={variant === "header" ? "min-h-[32px]" : undefined}
-          onUndo={handleMerge}
-        />
-      );
-    return (
-      <PrBarButton
-        className={actionBtn}
-        tone={tone}
-        icon={!merging ? <IconGitMerge size={18} /> : undefined}
-        disabled={Boolean(disabledReason) || !!busy || merging}
-        onClick={handleMerge}
-        title={
-          disabledReason ||
-          (stackMerge
-            ? `Squash and merge ${stackMerge.layers
-                .map((l) => `#${l.number}`)
-                .join(
-                  ", ",
-                )} into ${pr?.stack?.baseRefName || "the base branch"}, all or nothing`
-            : "Squash and merge this PR into its base branch")
-        }
-      >
-        {merging
-          ? stackMerge
-            ? "Merging stack…"
-            : "Merging…"
-          : stackMerge
-            ? "Merge stack"
-            : "Merge"}
-        {stackMerge && !merging && (
-          <span className="ml-1.5 rounded-full bg-white/20 px-1.5 tabular-nums">
-            {stackMerge.layers.length}
-          </span>
-        )}
-      </PrBarButton>
-    );
-  }
   function renderAction(): React.ReactNode {
     if (prompted) {
       const tone: PrBarButtonProps["tone"] =
@@ -940,16 +905,11 @@ export function PrStatusBar({
             Resolve
           </PrBarButton>
         ) : null;
+      // "N checks pending…" / "Checks failed" IS the affordance: hovering the
+      // headline shows the checks, clicking it opens Review's Checks tab. A
+      // View checks button beside it would be the same action twice.
       case "running":
-      case "review-required":
-        return renderMergeAction(
-          "yellow",
-          headline.key === "running"
-            ? "Merge is unavailable until checks finish"
-            : "Merge is unavailable until requested reviews finish",
-        );
-      // "Checks failed" is the affordance: hovering the headline shows the
-      // checks, and clicking it opens Review's Checks tab.
+        return null;
       case "failing":
         return send ? (
           <PrBarButton
@@ -1008,8 +968,56 @@ export function PrStatusBar({
             Create PR
           </PrBarButton>
         ) : null;
-      case "ready":
-        return renderMergeAction("green");
+      case "ready": {
+        const mergeScheduled = mergePhase === "scheduled";
+        // The five-second window already reads as merging: the button holds
+        // its place and label, and the undo glyph lands in front of it so
+        // nothing the user just pressed moves.
+        const merging =
+          mergeScheduled || mergePhase === "running" || busy === "merge";
+        const mergeButton = (
+          <PrBarButton
+            className={actionBtn}
+            tone="green"
+            icon={!merging ? <IconGitMerge size={18} /> : undefined}
+            disabled={!!busy || merging}
+            onClick={handleMerge}
+            title={
+              stackMerge
+                ? `Squash and merge ${stackMerge.layers
+                    .map((l) => `#${l.number}`)
+                    .join(
+                      ", ",
+                    )} into ${pr?.stack?.baseRefName || "the base branch"}, all or nothing`
+                : "Squash and merge this PR into its base branch"
+            }
+          >
+            {merging
+              ? stackMerge
+                ? "Merging stack…"
+                : "Merging…"
+              : stackMerge
+                ? "Merge stack"
+                : "Merge"}
+            {stackMerge && !merging && (
+              <span className="ml-1.5 rounded-full bg-white/20 px-1.5 tabular-nums">
+                {stackMerge.layers.length}
+              </span>
+            )}
+          </PrBarButton>
+        );
+        if (!mergeScheduled) return mergeButton;
+        return (
+          <span className="inline-flex shrink-0 items-center gap-1">
+            <MergeUndoControl
+              className={variant === "header" ? undefined : "min-h-[30px]"}
+              deadline={mergeDeadline}
+              onUndo={handleMerge}
+            />
+            {mergeButton}
+          </span>
+        );
+      }
       default:
         return null;
     }
@@ -1017,11 +1025,11 @@ export function PrStatusBar({
 
   // The summary card: one row for the PR, the way a sidebar row carries its
   // own subtext. One row for all of it, including the preview deploy, which
-  // sits beside the primary action instead of taking a line of its own to say a
-  // name the globe already says. Where the work stands is the line that matters,
-  // so the headline leads and the PR number sits under it as secondary. The PR
-  // title is gone: it restates the session title the card already hangs from,
-  // and it cost the card a whole row to do it.
+  // leads the row as a mark instead of taking a line of its own to say a name
+  // the globe already says. Where the work stands is the line that matters, so
+  // the headline follows the mark and the PR number sits under it as secondary.
+  // The PR title is gone: it restates the session title the card already hangs
+  // from, and it cost the card a whole row to do it.
   //
   // The row is a div holding two targets rather than one row-wide button,
   // which is the card's only departure from "the whole row is the target". It
@@ -1090,6 +1098,11 @@ export function PrStatusBar({
     // trigger, and without one it is a plain div. Same children either way.
     const rowBody = (
       <>
+        {/* The preview environment this PR deployed leads the row, at the far
+            end from Merge, Push or Pull: a 28px link next to the merge button
+            was too easy to hit by mistake. Renders nothing when the PR has no
+            preview, and the row closes up. */}
+        {children}
         {/* When checks exist, the headline is their control: hovering lists
 				    them and clicking opens Review's Checks tab. The PR's own title
 				    stays as the native fallback. */}
@@ -1159,10 +1172,6 @@ export function PrStatusBar({
             </button>
           </Tooltip>
         )}
-        {/* Keep the preview environment with the action it informs. It sits
-				    immediately left of Merge, Push or Pull, and renders nothing when
-				    this PR has no preview. */}
-        {children}
         {renderAction()}
       </>
     );

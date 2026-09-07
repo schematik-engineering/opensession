@@ -84,6 +84,7 @@ export class SessionListStore {
 				is_running INTEGER NOT NULL DEFAULT 0,
 				waiting_for_input INTEGER NOT NULL DEFAULT 0,
 				manual_status TEXT,
+				branch TEXT,
 				payload TEXT NOT NULL
 			);
 			CREATE INDEX IF NOT EXISTS idx_session_list_archive_activity
@@ -105,6 +106,23 @@ export class SessionListStore {
 			CREATE INDEX IF NOT EXISTS idx_session_list_created_by_activity
 				ON session_list(created_by, archived, last_activity_ms DESC);
 		`);
+    // `branch` arrived after the first index shipped. Add it in place and drop
+    // coverage, so the next rebuild (a catalog page, not a file scan) fills it
+    // for every row instead of leaving old rows unmatched by branch.
+    const columns = this.db
+      .query("PRAGMA table_info(session_list)")
+      .all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === "branch")) {
+      this.db.exec(`
+				ALTER TABLE session_list ADD COLUMN branch TEXT;
+				DELETE FROM session_list_meta WHERE key LIKE 'covered:%';
+			`);
+    }
+    this.db.exec(`
+			CREATE INDEX IF NOT EXISTS idx_session_list_branch
+				ON session_list(branch, archived)
+				WHERE branch IS NOT NULL;
+		`);
     if (path !== ":memory:") {
       for (const file of [path, `${path}-wal`, `${path}-shm`]) {
         if (existsSync(file)) chmodSync(file, 0o600);
@@ -114,8 +132,8 @@ export class SessionListStore {
 			INSERT INTO session_list (
 				id, source, archived, last_activity_ms, workspace_id, worktree_dir,
 				automation, repo, started_by, created_by, desk, is_running,
-				waiting_for_input, manual_status, payload
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				waiting_for_input, manual_status, branch, payload
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET
 				source = excluded.source,
 				archived = excluded.archived,
@@ -130,6 +148,7 @@ export class SessionListStore {
 				is_running = excluded.is_running,
 				waiting_for_input = excluded.waiting_for_input,
 				manual_status = excluded.manual_status,
+				branch = excluded.branch,
 				payload = excluded.payload
 		`);
   }
@@ -151,6 +170,7 @@ export class SessionListStore {
       session.isRunning ? 1 : 0,
       signals.waitingForInput ? 1 : 0,
       session.manualStatus || null,
+      session.branch || null,
       JSON.stringify(session),
     );
   }
@@ -191,6 +211,50 @@ export class SessionListStore {
 
   remove(id: string): void {
     this.db.run("DELETE FROM session_list WHERE id = ?", [id]);
+  }
+
+  get(id: string): UnifiedSession | null {
+    const row = this.db
+      .query("SELECT payload FROM session_list WHERE id = ?")
+      .get(id) as StoredRow | null;
+    return row ? (decodeRows([row])[0] ?? null) : null;
+  }
+
+  /**
+   * The rows a sidebar scope consults to decide one session's visibility:
+   * its workspace or worktree group and its parent chain. Group rules
+   * (workspace owner, selection, overlays, PR ownership) read siblings and
+   * ancestors, so a lone row would be misjudged; the whole list is never
+   * needed.
+   */
+  listVisibilityGroup(session: UnifiedSession): UnifiedSession[] {
+    const rows = new Map<string, UnifiedSession>([[session.id, session]]);
+    // Live siblings only: the sidebar scopes its live slice, so an archived
+    // sibling must not lend ownership or attention to this row.
+    const members = session.workspaceId
+      ? (this.db
+          .query(
+            "SELECT payload FROM session_list WHERE workspace_id = ? AND archived = 0",
+          )
+          .all(session.workspaceId) as StoredRow[])
+      : session.worktreeDir?.includes("/worktrees/")
+        ? (this.db
+            .query(
+              "SELECT payload FROM session_list WHERE worktree_dir = ? AND archived = 0",
+            )
+            .all(session.worktreeDir) as StoredRow[])
+        : [];
+    for (const member of decodeRows(members)) rows.set(member.id, member);
+    const seen = new Set<string>();
+    let parentId = session.parentSessionId;
+    while (parentId && !seen.has(parentId) && seen.size < 16) {
+      seen.add(parentId);
+      const parent = rows.get(parentId) ?? this.get(parentId);
+      if (!parent) break;
+      rows.set(parent.id, parent);
+      parentId = parent.parentSessionId;
+    }
+    return [...rows.values()];
   }
 
   setArchived(id: string, archived: boolean, reason?: string): void {
@@ -239,13 +303,28 @@ export class SessionListStore {
   }
 
   /** Every materialized member of one known workspace, live or archived. */
+  /** Live rows on any of `branches`. PR state changes fan out to exactly
+   * these rows instead of telling every client to refetch its list. */
+  listLiveByBranch(branches: string[]): UnifiedSession[] {
+    if (!branches.length) return [];
+    const rows = this.db
+      .query(
+        `SELECT payload FROM session_list
+         WHERE archived = 0 AND branch IN (${branches.map(() => "?").join(", ")})`,
+      )
+      .all(...branches) as StoredRow[];
+    return decodeRows(rows);
+  }
+
   listWorkspaceMembers(workspaceId: string): UnifiedSession[] {
     const rows = this.db
-      .query(`
+      .query(
+        `
         SELECT payload FROM session_list
         WHERE workspace_id = ?
         ORDER BY last_activity_ms DESC
-      `)
+      `,
+      )
       .all(workspaceId) as StoredRow[];
     return decodeRows(rows);
   }
@@ -259,18 +338,22 @@ export class SessionListStore {
       : null;
     const rows = isolatedWorktree
       ? (this.db
-          .query(`
+          .query(
+            `
 						SELECT payload FROM session_list
 						WHERE archived = 1 AND (workspace_id = ? OR worktree_dir = ?)
 						ORDER BY last_activity_ms DESC
-					`)
+					`,
+          )
           .all(workspaceId, isolatedWorktree) as StoredRow[])
       : (this.db
-          .query(`
+          .query(
+            `
 						SELECT payload FROM session_list
 						WHERE workspace_id = ? AND archived = 1
 						ORDER BY last_activity_ms DESC
-					`)
+					`,
+          )
           .all(workspaceId) as StoredRow[]);
     return decodeRows(rows);
   }
@@ -294,7 +377,8 @@ export class SessionListStore {
    */
   listSidebar(selectedSessionId?: string): UnifiedSession[] {
     const rows = this.db
-      .query(`
+      .query(
+        `
 				WITH ranked_automation AS (
 					SELECT payload, id, last_activity_ms, is_running,
 						waiting_for_input, manual_status,
@@ -322,7 +406,8 @@ export class SessionListStore {
 				SELECT payload, automation_run_count
 				FROM selected
 				ORDER BY last_activity_ms DESC
-			`)
+			`,
+      )
       .all(selectedSessionId || "", selectedSessionId || "") as StoredRow[];
     return decodeRows(rows);
   }
@@ -365,6 +450,19 @@ export function indexedSessions(
 ): UnifiedSession[] | null {
   const store = sessionListStore();
   return store.hasCoverage(slice) ? store.list(slice) : null;
+}
+
+/** Live rows on any of `branches`, or null while the live slice has no
+ * coverage and a branch lookup could miss rows. */
+export function indexedLiveSessionsByBranch(
+  branches: string[],
+): UnifiedSession[] | null {
+  const store = sessionListStore();
+  return store.hasCoverage("exclude") ? store.listLiveByBranch(branches) : null;
+}
+
+export function indexedWorkspaceMembers(workspaceId: string): UnifiedSession[] {
+  return sessionListStore().listWorkspaceMembers(workspaceId);
 }
 
 export function indexedSidebarSessions(
@@ -416,6 +514,16 @@ export function rebuildSessionListIndex(sessions: UnifiedSession[]): void {
 
 export function removeIndexedSession(id: string): void {
   sessionListStore().remove(id);
+}
+
+export function indexedSession(id: string): UnifiedSession | null {
+  return sessionListStore().get(id);
+}
+
+export function indexedVisibilityGroup(
+  session: UnifiedSession,
+): UnifiedSession[] {
+  return sessionListStore().listVisibilityGroup(session);
 }
 
 export function setIndexedSessionArchived(

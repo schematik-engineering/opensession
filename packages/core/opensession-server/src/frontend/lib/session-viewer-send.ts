@@ -2,17 +2,24 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { getCurrentUser } from "../components/UserPicker";
 import type { SessionSocketSend } from "../hooks/useSessionSocket";
 import { postSessionNoteApi } from "./api";
+import { MAX_PROMPT_IMAGES } from "@tellahq/opensession-protocol/session";
 import { dropStagingAttachments } from "./attachments";
+import type { ComposerSendOptions } from "./composer-types";
 import { unhideForSession } from "./hides";
+import { composePastedText } from "./pasted-text";
 import type { FileAttachment } from "./images";
 import type { OptimisticPendingPrompt } from "./pending-reconcile";
-import { promptOutbox, type PromptOutboxItem } from "./prompt-outbox";
+import {
+  promptOutbox,
+  type PromptOutboxInput,
+  type PromptOutboxItem,
+} from "./prompt-outbox";
 import { withQuotes, type Quote } from "./quotes";
 import type { SessionRuntimeAction } from "./session-runtime";
 import type { QueueReceipt } from "./session-queue";
 import { measureSessionPerf } from "./session-performance";
 import type { TranscriptViewStore } from "./transcript-view-store";
-import type { UnifiedSession } from "./types";
+import type { UnifiedSession, WSClientMessage } from "./types";
 import { toast } from "../ui/toast";
 import type { SessionForkTarget } from "../hooks/useSessionComposerController";
 
@@ -71,7 +78,7 @@ interface SendSessionMessageOptions {
  */
 export function sendSessionMessage(
   raw: string,
-  options: { steer?: boolean } | undefined,
+  options: ComposerSendOptions | undefined,
   isolatedImages: string[] | undefined,
   controller: SendSessionMessageOptions,
 ): boolean | Promise<boolean> {
@@ -86,17 +93,34 @@ export function sendSessionMessage(
     : withQuotes(draft.quote ? [draft.quote] : [], typed);
   const images = isolatedImages ?? draft.images;
   const files = isolated ? [] : draft.files;
-  if (!typed && images.length === 0 && files.length === 0) return false;
+  // Large pastes ride beside the text; the server places them after the
+  // message in the prompt and lifts them back onto the entry as cards.
+  const pastedTexts = isolated ? [] : (options?.pastedTexts ?? []);
+  if (
+    !typed &&
+    images.length === 0 &&
+    files.length === 0 &&
+    pastedTexts.length === 0
+  )
+    return false;
+  // Attaching already stops at the cap; this catches a message brought back
+  // for editing with more. The server would refuse it, and a refused message
+  // used to sit in the outbox retrying with nothing to press.
+  if (images.length > MAX_PROMPT_IMAGES) {
+    toast(`Attach up to ${MAX_PROMPT_IMAGES} images per message`);
+    return false;
+  }
 
   // Note mode: post a team note on this session — never a prompt. The
   // server broadcast echoes it back into `notes` for every viewer, so
   // nothing is rendered optimistically here. Notes carry the quoted
-  // selection too (as "> " lines, the same shape a prompt sends).
+  // selection too (as "> " lines, the same shape a prompt sends), and a
+  // paste folded in behind a divider: a note has no attachment slot.
   if (!isolated && identity.noteMode) {
-    if (!typed && images.length === 0) return false;
+    if (!typed && images.length === 0 && pastedTexts.length === 0) return false;
     return postSessionNoteApi(
       identity.session.id,
-      text,
+      composePastedText(text, pastedTexts),
       getCurrentUser(),
       images,
     ).then(
@@ -125,20 +149,26 @@ export function sendSessionMessage(
   // message, keeping the real conversation history. App navigates into it on
   // session_created.
   if (!isolated && draft.forkFrom) {
-    send({
+    type CreateSessionMessage = Extract<
+      WSClientMessage,
+      { type: "create_session" }
+    >;
+    const forkFrom: NonNullable<CreateSessionMessage["forkFrom"]> = {
+      sourceId: identity.session.id,
+    };
+    if (draft.forkFrom.kind === "message")
+      forkFrom.messageId = draft.forkFrom.messageId;
+    const message: CreateSessionMessage = {
       type: "create_session",
       branch: "",
       prompt: text || "Continue from here.",
       user,
-      forkFrom: {
-        sourceId: identity.session.id,
-        ...(draft.forkFrom.kind === "message"
-          ? { messageId: draft.forkFrom.messageId }
-          : {}),
-      },
-      ...(images.length ? { images } : {}),
-      ...(files.length ? { files: filePayload } : {}),
-    });
+      forkFrom,
+    };
+    if (images.length) message.images = images;
+    if (files.length) message.files = filePayload;
+    if (pastedTexts.length) message.pastedTexts = pastedTexts;
+    send(message);
     draft.setForkFrom(null);
     dropStagingAttachments(draft.draftKey);
     draft.setImages([]);
@@ -173,7 +203,7 @@ export function sendSessionMessage(
       : undefined;
   let outboxItem: PromptOutboxItem;
   try {
-    outboxItem = promptOutbox.enqueue({
+    const input: PromptOutboxInput = {
       sessionId: identity.session.id,
       content: text,
       user,
@@ -182,12 +212,13 @@ export function sendSessionMessage(
       busyMode: runtime.isBusy ? (steerNow ? "steer" : "queue") : undefined,
       transcriptAfterEntryId,
       transcriptAfterSeq,
-      ...(images.length ? { images } : {}),
-      ...(files.length ? { files: filePayload } : {}),
-      ...(!isolated && draft.contextSessions.length
-        ? { contextSessions: draft.contextSessions }
-        : {}),
-    });
+    };
+    if (images.length) input.images = images;
+    if (files.length) input.files = filePayload;
+    if (pastedTexts.length) input.pastedTexts = pastedTexts;
+    if (!isolated && draft.contextSessions.length)
+      input.contextSessions = draft.contextSessions;
+    outboxItem = promptOutbox.enqueue(input);
   } catch (error) {
     toast(
       error instanceof Error
@@ -209,6 +240,7 @@ export function sendSessionMessage(
     transcriptAfterEntryId,
     transcriptAfterSeq,
     images: images.length ? images : undefined,
+    pastedTexts: pastedTexts.length ? pastedTexts : undefined,
     ...(steerNow
       ? { busyMode: "steer" }
       : runtime.isBusy
@@ -303,9 +335,9 @@ export function commitSessionQueueReorder(
   const next = pendingReorderRef.current;
   pendingReorderRef.current = null;
   if (!next) return;
-  const order = next
-    .map((item) => item.id)
-    .filter((id): id is string => typeof id === "string");
+  const order = next.flatMap((item) =>
+    item.id === undefined ? [] : [item.id],
+  );
   if (order.length > 1)
     send({ type: "reorder_queued_prompt", sessionId, order });
 }

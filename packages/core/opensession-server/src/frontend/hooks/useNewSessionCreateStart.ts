@@ -11,6 +11,14 @@ import type { useAppRoute } from "./useAppRoute";
 import type { useNewSessionPalette } from "./useNewSessionPalette";
 import type { useSessions } from "./useSessions";
 
+interface PendingInitialPrompt {
+  content: string;
+  user: string;
+  sentAt: number;
+  images?: string[];
+  pastedTexts?: string[];
+}
+
 interface UseNewSessionCreateStartOptions {
   getCurrentRoute: ReturnType<typeof useAppRoute>["getCurrentRoute"];
   navigate: ReturnType<typeof useAppRoute>["navigate"];
@@ -23,12 +31,7 @@ interface UseNewSessionCreateStartOptions {
   setActiveViewTabState: Dispatch<SetStateAction<ActiveViewTab>>;
   setOptimisticSession: Dispatch<SetStateAction<UnifiedSession | null>>;
   setPendingInitialPrompts: Dispatch<
-    SetStateAction<
-      Record<
-        string,
-        { content: string; user: string; sentAt: number; images?: string[] }
-      >
-    >
+    SetStateAction<Record<string, PendingInitialPrompt>>
   >;
   setPendingNewWorkspace: Dispatch<SetStateAction<boolean>>;
   setPendingSessionId: Dispatch<SetStateAction<string | null>>;
@@ -40,7 +43,6 @@ export function useNewSessionCreateStart({
   goBack,
   hidePalette,
   inject,
-  unstick,
   pendingCreateDraftRef,
   pendingTimer,
   setActiveViewTabState,
@@ -107,29 +109,31 @@ export function useNewSessionCreateStart({
     // and the target workspace's remembered selection before navigating.
     setActiveViewTabState(null);
     if (started.workspaceId) saveActiveViewTab(started.workspaceId, null);
-    if (started.prompt || started.images?.length) {
+    if (
+      started.prompt ||
+      started.images?.length ||
+      started.pastedTexts?.length
+    ) {
+      const prompt: PendingInitialPrompt = {
+        content: started.prompt,
+        user,
+        sentAt: new Date(startedAt).getTime(),
+      };
+      if (started.images?.length) prompt.images = started.images;
+      if (started.pastedTexts?.length) prompt.pastedTexts = started.pastedTexts;
       setPendingInitialPrompts((current) => ({
         ...current,
-        [started.id]: {
-          content: started.prompt,
-          user,
-          sentAt: new Date(startedAt).getTime(),
-          ...(started.images?.length ? { images: started.images } : {}),
-        },
+        [started.id]: prompt,
       }));
     }
     setPendingSessionId(started.id);
     setPendingNewWorkspace(!started.workspaceId);
     clearTimeout(pendingTimer.current);
-    pendingTimer.current = setTimeout(() => {
-      setPendingSessionId((pending) =>
-        pending === started.id ? null : pending,
-      );
-      setOptimisticSession((pending) =>
-        pending?.id === started.id ? null : pending,
-      );
-      unstick(started.id);
-    }, 120_000);
+    // The WebSocket command outbox retains this exact create until the server
+    // returns a terminal receipt. Keep its matching shell for the same lifetime:
+    // a slow durable workspace effect is still a pending session, not a missing
+    // one, and timing the shell out would hide the only visible copy of its
+    // submitted prompt.
     navigate({ view: "session", id: started.id });
   };
 

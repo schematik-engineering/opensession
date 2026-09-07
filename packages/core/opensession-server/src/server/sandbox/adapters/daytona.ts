@@ -35,7 +35,13 @@
 
 import type { Daytona, Sandbox as DaytonaSandbox } from "@daytonaio/sdk";
 import { getRepo, worktreePathFor } from "../../worktree";
-import { sandboxConfig } from "../config";
+import { sandboxConfig, remoteSandboxCallbackBaseUrl } from "../config";
+import { audit } from "../../audit";
+import {
+  automationEgressDomains,
+  automationEgressProbeBlockedUrl,
+  daytonaDomainAllowList,
+} from "../automation-egress";
 import {
   getSandboxConnection,
   sandboxProviderCredential,
@@ -46,13 +52,19 @@ import type {
   SandboxProvider,
   SandboxSessionSpec,
   SandboxStatus,
+  SandboxDesktop,
+  SandboxDesktopControl,
+  SandboxDesktopWindow,
+  SandboxScreenshot,
 } from "../provider";
+import { x11WindowsViaXprop } from "../x11-desktop";
 import {
   assertDialbackReachable,
   bootstrapRemoteSandbox,
   findRemoteStateBySession,
   makeRemoteSandbox,
   readRemoteState,
+  runResumeHook,
   remoteCloneUrl,
   removeRemoteState,
   resolveTrustPolicy,
@@ -81,6 +93,77 @@ import {
 
 const SESSION_LABEL = "opensession.session";
 const DEFAULT_IDLE_STOP_MINUTES = 30;
+/** Automation Executors are destroyed by the launcher after the run; the
+ *  provider-side stop/delete intervals only catch a crashed coordinator. */
+const AUTOMATION_IDLE_STOP_MINUTES = 60;
+/**
+ * Prove the domain allowlist is enforced inside the guest: the dial-back host
+ * must answer and a host outside the list must not. Qualification confirms the
+ * Daytona base image provides curl before automation use is enabled.
+ *
+ * Daytona applies `updateNetworkSettings` asynchronously: the runner rewrites
+ * the guest's policy 8–16s later, and for a moment every host is dark while
+ * it reloads. Probe until both sides settle instead of judging the first
+ * sample, which still shows the previous policy.
+ */
+export const EGRESS_POLICY_SETTLE_MS = 90_000;
+const EGRESS_POLICY_PROBE_INTERVAL_MS = 4_000;
+
+export async function assertAutomationEgressRestricted(
+  driver: RemoteDriver,
+  callbackBaseUrl: string,
+  blockedUrl: string,
+  options: {
+    settleMs?: number;
+    intervalMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+    now?: () => number;
+  } = {},
+): Promise<void> {
+  const httpBase = callbackBaseUrl
+    .replace(/\/+$/, "")
+    .replace(/^ws(s?):\/\//, "http$1://");
+  const now = options.now ?? Date.now;
+  const sleep = options.sleep ?? Bun.sleep;
+  const deadline = now() + (options.settleMs ?? EGRESS_POLICY_SETTLE_MS);
+  let allowed = "000";
+  let blocked = "000";
+  for (;;) {
+    const probe = await driver.exec(
+      `command -v curl >/dev/null 2>&1 || { echo __OPENSESSION_NO_CURL__; exit 0; }; ` +
+        `a=$(curl -sS -o /dev/null -m 10 -w '%{http_code}' ${shellQuoteWord(`${httpBase}/`)} 2>/dev/null || true); ` +
+        `b=$(curl -sS -o /dev/null -m 10 -w '%{http_code}' ${shellQuoteWord(blockedUrl)} 2>/dev/null || true); ` +
+        `echo "allowed=$a blocked=$b"`,
+      { timeoutMs: 40_000 },
+    );
+    if (probe.stdout.includes("__OPENSESSION_NO_CURL__")) {
+      throw new Error(
+        "automation egress policy cannot be verified: curl is missing in the Executor",
+      );
+    }
+    const match = /allowed=(\d{3}) blocked=(\d{3})/.exec(probe.stdout);
+    if (!match) {
+      throw new Error(
+        `automation egress probe failed: ${(probe.stderr || probe.stdout).trim().slice(0, 300)}`,
+      );
+    }
+    allowed = match[1]!;
+    blocked = match[2]!;
+    if (allowed !== "000" && blocked === "000") return;
+    if (now() >= deadline) break;
+    await sleep(options.intervalMs ?? EGRESS_POLICY_PROBE_INTERVAL_MS);
+  }
+  if (allowed === "000") {
+    throw new Error(
+      `automation egress policy blocks the dial-back URL ${httpBase}; check callbackBaseUrl and the Daytona org tier`,
+    );
+  }
+  if (blocked !== "000") {
+    throw new Error(
+      `automation egress policy is not enforced by this Daytona org (unlisted host answered ${blocked}); sandbox automations need a Tier 3+ or self-hosted Daytona`,
+    );
+  }
+}
 // Daytona's image keeps the process user + passwordless-sudo contract that
 // bootstrapRemoteSandbox needs. A plain Ubuntu image launches correctly but
 // cannot create the stable /home/ubuntu layout.
@@ -398,6 +481,101 @@ export async function daytonaPtySession(
   };
 }
 
+/** Daytona's computer-use stack serves noVNC (websockify) on this port. */
+const DAYTONA_NOVNC_PORT = 6080;
+const DAYTONA_DESKTOP_URL_TTL_SECONDS = 60 * 60;
+
+/** The signed preview host is the secret; noVNC's page and its websocket
+ * both resolve relative to it, verified live 2026-09-04 (RFB banner over wss). */
+export function daytonaDesktopUrl(signedPreviewUrl: string): string {
+  const url = new URL("/vnc.html", signedPreviewUrl);
+  url.search = "?autoconnect=1&resize=scale";
+  return url.toString();
+}
+
+/** Daytona's computer-use API, shaped as the shared desktop control. Chords
+ *  pass through: Daytona normalizes `Return`, `cmd`, `control` itself. */
+export function daytonaDesktopControl(
+  computerUse: DaytonaSandbox["computerUse"],
+  /** Window list with real geometry; Daytona's own reports every window at
+   *  0x0. Falls back to the API list when it yields nothing. */
+  listWindows?: () => Promise<SandboxDesktopWindow[]>,
+): SandboxDesktopControl {
+  const display = async () => {
+    const info = await computerUse.display.getInfo();
+    const primary =
+      info.displays?.find((d) => d.isActive) ?? info.displays?.[0];
+    if (!primary?.width || !primary.height)
+      throw new Error("Could not read the display size");
+    return { width: primary.width, height: primary.height };
+  };
+  return {
+    async screenshot(options = {}) {
+      const format = options.format ?? "png";
+      const [size, shot] = await Promise.all([
+        display(),
+        computerUse.screenshot.takeCompressed({
+          format,
+          scale: options.scale ?? 1,
+          showCursor: true,
+          ...(format === "jpeg" ? { quality: 80 } : {}),
+        }),
+      ]);
+      if (!shot.screenshot) throw new Error("Daytona returned no screenshot");
+      return {
+        data: shot.screenshot,
+        mimeType: format === "jpeg" ? "image/jpeg" : "image/png",
+        width: size.width,
+        height: size.height,
+      } satisfies SandboxScreenshot;
+    },
+    display,
+    async windows() {
+      const listed = await listWindows?.().catch(() => []);
+      if (listed?.length) return listed;
+      const { windows = [] } = await computerUse.display.getWindows();
+      return windows.map((w) => ({
+        id: String(w.id ?? ""),
+        title: w.title ?? "",
+        x: w.x ?? 0,
+        y: w.y ?? 0,
+        width: w.width ?? 0,
+        height: w.height ?? 0,
+        active: Boolean(w.isActive),
+      }));
+    },
+    async move(x, y) {
+      await computerUse.mouse.move(x, y);
+    },
+    async click(x, y, options = {}) {
+      await computerUse.mouse.click(
+        x,
+        y,
+        options.button ?? "left",
+        options.double ?? false,
+      );
+    },
+    async drag(from, to, options = {}) {
+      await computerUse.mouse.drag(
+        from.x,
+        from.y,
+        to.x,
+        to.y,
+        options.button ?? "left",
+      );
+    },
+    async scroll(x, y, direction, amount = 3) {
+      await computerUse.mouse.scroll(x, y, direction, amount);
+    },
+    async type(text) {
+      if (text) await computerUse.keyboard.type(text);
+    },
+    async key(chord) {
+      await computerUse.keyboard.hotkey(chord.replace(/\s+/g, ""));
+    },
+  };
+}
+
 function stateOf(sbx: DaytonaSandbox): SandboxStatus {
   const s = String((sbx as any).state || "");
   if (s === "started") return "running";
@@ -444,8 +622,28 @@ export class DaytonaProvider implements SandboxProvider {
         "source verification requires the automation trust profile and a credential-free clone",
       );
     }
+    // Unattended runs (public review and sandboxed automations) get a fresh
+    // disposable Executor: no prewarm or repo-template adoption, short
+    // provider-side auto-delete backstops, and strict disposal on failure.
+    const disposable =
+      sourceVerification || trust.trustProfile === "automation";
     const repo = getRepo(spec.repo || prevState?.repoId);
     const branch = spec.branch || prevState?.branch || repo.defaultBranch;
+    const cloneUrl = await remoteCloneUrl(repo, {
+      credential: spec.cloneCredential,
+    });
+    const automationDomains =
+      trust.trustProfile === "automation" && !sourceVerification
+        ? automationEgressDomains({
+            callbackBaseUrl: remoteSandboxCallbackBaseUrl(),
+            cloneUrl,
+            extra: [
+              ...trust.egressAllowlist,
+              ...(cfg.runnerBundleUrl ? [cfg.runnerBundleUrl] : []),
+              ...(cfg.runnerRepoUrl ? [cfg.runnerRepoUrl] : []),
+            ],
+          })
+        : undefined;
     const verificationKey = spec.sessionId.replace(/[^A-Za-z0-9_.-]+/g, "-");
     const cwd =
       spec.cwd ||
@@ -467,7 +665,7 @@ export class DaytonaProvider implements SandboxProvider {
       } catch {}
     }
     if (sbx && stateOf(sbx) === "gone") sbx = null;
-    if (!sbx && !sourceVerification) {
+    if (!sbx && !disposable) {
       // Warm-on-typing adoption (src/server/sandbox/prewarm.ts): a ready
       // prewarm for (daytona, repo) whose runner pin + snapshot still match
       // is claimed atomically and relabeled to this session — the expensive
@@ -518,7 +716,7 @@ export class DaytonaProvider implements SandboxProvider {
       // 2026-07). Unset = Daytona's default snapshot (1 vCPU/1GB/3GiB disk),
       // too small for real repo workspaces: the runner payload alone is ~2GB
       // and a large repo's clone died on ENOSPC. See SandboxDaytonaConfig.
-      const template = sourceVerification
+      const template = disposable
         ? undefined
         : await recoverDaytonaRepoTemplate(client, repo.id);
       // A prepared repo template already carries its machine shape. When the
@@ -538,18 +736,26 @@ export class DaytonaProvider implements SandboxProvider {
               ...(sourceVerification
                 ? { "opensession.public-review": "1" }
                 : {}),
+              ...(trust.trustProfile === "automation" && !sourceVerification
+                ? { "opensession.automation": "1" }
+                : {}),
             },
             autoStopInterval: sourceVerification
               ? 10
-              : cfg.idleStopMinutes || DEFAULT_IDLE_STOP_MINUTES,
-            ...(sourceVerification ? { autoDeleteInterval: 30 } : {}),
+              : disposable
+                ? AUTOMATION_IDLE_STOP_MINUTES
+                : cfg.idleStopMinutes || DEFAULT_IDLE_STOP_MINUTES,
+            ...(automationDomains
+              ? { domainAllowList: daytonaDomainAllowList(automationDomains) }
+              : {}),
+            ...(disposable ? { autoDeleteInterval: 30 } : {}),
           } as any,
           { timeout: 300 },
         );
       };
       try {
         sbx = await create(
-          sourceVerification
+          disposable
             ? undefined
             : template?.artifactId || cfg.daytona?.snapshot,
         );
@@ -585,12 +791,36 @@ export class DaytonaProvider implements SandboxProvider {
       ...trust,
     });
 
+    const wokeFromSleep = !newlyCreated && stateOf(sbx) !== "running";
     try {
       const driver = daytonaDriver(sbx);
       // client.create resolves only after Daytona reports the sandbox started.
       // A second refresh/start round trip added 2–3s to every snapshot restore.
       if (!newlyCreated) await driver.ensureStarted();
       mark("sandbox started");
+      if (automationDomains) {
+        // Enforce before bootstrap, repository setup hooks, private workspace
+        // seeds, or model credentials can enter the guest. Reapplying also
+        // closes a crash-recovery path where the provider created the sandbox
+        // but had not yet persisted its network policy.
+        await sbx.updateNetworkSettings({
+          domainAllowList: daytonaDomainAllowList(automationDomains),
+        });
+        await assertAutomationEgressRestricted(
+          driver,
+          remoteSandboxCallbackBaseUrl(),
+          automationEgressProbeBlockedUrl(automationDomains),
+        );
+        audit({
+          kind: "sandbox_automation_egress",
+          session_id: spec.sessionId,
+          provider: this.id,
+          sandbox_id: sbx.id,
+          resolved_targets: automationDomains,
+          outcome: "ok",
+        });
+        mark("egress restricted");
+      }
       const prepareRunner = async () => {
         if (sourceVerification) return;
         // A sandbox that cannot reach our callback URL can never run anything.
@@ -603,7 +833,7 @@ export class DaytonaProvider implements SandboxProvider {
         await setupRemoteWorkspace(
           driver,
           cwd,
-          await remoteCloneUrl(repo, { credential: spec.cloneCredential }),
+          cloneUrl,
           branch,
           repo.defaultBranch,
           repo.id,
@@ -615,7 +845,8 @@ export class DaytonaProvider implements SandboxProvider {
             trustProfile: trust.trustProfile,
           },
           {
-            seedPrivateFiles: !sourceVerification,
+            seedPrivateFiles:
+              trust.trustProfile !== "automation" && !sourceVerification,
             runLifecycleHooks: !sourceVerification,
           },
         );
@@ -631,6 +862,15 @@ export class DaytonaProvider implements SandboxProvider {
         await prepareRunner();
         await prepareWorkspace();
       }
+      if (wokeFromSleep) {
+        await runResumeHook(driver, this.id, sbx.id, {
+          cwd,
+          sessionId: spec.sessionId,
+          repoId: repo.id,
+          trustProfile: trust.trustProfile,
+        });
+        mark("resume hook ran");
+      }
       writeRemoteState({
         sandboxId: sbx.id,
         provider: this.id,
@@ -642,15 +882,17 @@ export class DaytonaProvider implements SandboxProvider {
         lastActivityAt: new Date().toISOString(),
         ...trust,
       });
-      return this.makeHandle(sbx, spec.sessionId, cwd);
+      return Object.assign(this.makeHandle(sbx, spec.sessionId, cwd), {
+        wokeFromSleep,
+      });
     } catch (error) {
-      if (sourceVerification) {
+      if (disposable) {
         try {
           await this.destroy(sbx.id, { strict: true });
         } catch (cleanupError) {
           throw new AggregateError(
             [error, cleanupError],
-            "public review Executor setup failed and strict disposal also failed",
+            "disposable Executor setup failed and strict disposal also failed",
           );
         }
       }
@@ -673,7 +915,6 @@ export class DaytonaProvider implements SandboxProvider {
       async ports(requestedPorts = []): Promise<PortMap> {
         const map: PortMap = {};
         const ports = new Set([
-          ...(sandboxConfig().previewPorts || []),
           ...requestedPorts.filter(
             (port) => Number.isInteger(port) && port > 0 && port <= 65_535,
           ),
@@ -727,7 +968,41 @@ export class DaytonaProvider implements SandboxProvider {
     }
   }
 
-  /** Release compute while retaining the session's exact volume workspace. */
+  async desktop(sandboxId: string): Promise<SandboxDesktop> {
+    const sbx = await this.desktopSandbox(sandboxId);
+    const signed = await sbx.getSignedPreviewUrl(
+      DAYTONA_NOVNC_PORT,
+      DAYTONA_DESKTOP_URL_TTL_SECONDS,
+    );
+    return {
+      url: daytonaDesktopUrl(signed.url),
+      expiresAt: Date.now() + DAYTONA_DESKTOP_URL_TTL_SECONDS * 1000,
+    };
+  }
+
+  async desktopControl(sandboxId: string): Promise<SandboxDesktopControl> {
+    const sbx = await this.desktopSandbox(sandboxId);
+    const sandbox = await this.get(sandboxId);
+    return daytonaDesktopControl(
+      sbx.computerUse,
+      sandbox
+        ? () => x11WindowsViaXprop((cmd, opts) => sandbox.exec(cmd, opts))
+        : undefined,
+    );
+  }
+
+  /** The running sandbox with its computer-use stack (Xvfb + xfce4 + x11vnc +
+   *  noVNC) up. start() is not idempotent, so ask first. */
+  private async desktopSandbox(sandboxId: string): Promise<DaytonaSandbox> {
+    const client = await daytonaClient();
+    const sbx = await client.get(sandboxId);
+    if (!sbx || stateOf(sbx) !== "running")
+      throw new Error("Wake the sandbox first");
+    const status = await sbx.computerUse.getStatus().catch(() => null);
+    if (status?.status !== "active") await sbx.computerUse.start();
+    return sbx;
+  }
+
   async pause(sandboxId: string): Promise<void> {
     const client = await daytonaClient();
     const sbx = await client.get(sandboxId);
@@ -740,9 +1015,14 @@ export class DaytonaProvider implements SandboxProvider {
     const client = await daytonaClient();
     const sbx = await client.get(sandboxId);
     if (!sbx || stateOf(sbx) === "gone") return null;
-    if (stateOf(sbx) !== "running") await sbx.start(120);
-    await daytonaDriver(sbx).ensureStarted();
-    return this.makeHandle(sbx, state.sessionId, state.cwd);
+    const woke = stateOf(sbx) !== "running";
+    if (woke) await sbx.start(120);
+    const driver = daytonaDriver(sbx);
+    await driver.ensureStarted();
+    if (woke) await runResumeHook(driver, this.id, sandboxId, state);
+    return Object.assign(this.makeHandle(sbx, state.sessionId, state.cwd), {
+      wokeFromSleep: woke,
+    });
   }
 
   /** Deletes the sandbox — and with it the volume-style workspace (documented
@@ -953,6 +1233,13 @@ export async function qualifyDaytonaConnection(): Promise<void> {
     );
     if (lifecycle.exitCode !== 0)
       throw new Error("Daytona stop/start lost filesystem state");
+    await source.updateNetworkSettings({ domainAllowList: "example.com" });
+    await assertAutomationEgressRestricted(
+      sourceDriver,
+      "https://example.com",
+      "https://www.iana.org/",
+    );
+    await source.updateNetworkSettings({ networkBlockAll: false });
     // Even a nearly-empty Daytona sandbox can take 8–10 minutes to seal when
     // the provider is busy. Keep this aligned with repository templates: a
     // shorter client wait reports a false SNAPSHOT_FAILED while Daytona keeps

@@ -2,6 +2,7 @@
 import { listAccountsPublic } from "./claude-accounts";
 import { listCodexAccountsPublic } from "./codex-accounts";
 import { listAcpAccountsPublic } from "./acp-accounts";
+import { listXaiAccountsPublic } from "./xai-accounts";
 import { accountProviderForModel } from "./models";
 import { configuredInteractiveDefaultModel } from "./model-catalog";
 import { modelProviders } from "./model-providers";
@@ -20,8 +21,9 @@ export interface EngineStatus {
   codexAccounts: number;
   grokAccounts: number;
   cursorAccounts: number;
+  xaiAccounts: number;
   defaultModel: string;
-  provider: "claude" | "codex" | "grok" | "cursor" | undefined;
+  provider: "claude" | "codex" | "grok" | "cursor" | "xai" | undefined;
   ready: boolean;
   blocker: string | null;
   fix: string | null;
@@ -33,6 +35,7 @@ export function engineStatus(): EngineStatus {
   const claudePool = listAccountsPublic();
   const codexPool = listCodexAccountsPublic();
   const acpPool = listAcpAccountsPublic();
+  const xaiPool = listXaiAccountsPublic();
   const claudeAccounts = claudePool.length;
   const codexAccounts = codexPool.length;
   const grokAccounts = acpPool.filter(
@@ -40,6 +43,10 @@ export function engineStatus(): EngineStatus {
   ).length;
   const cursorAccounts = acpPool.filter(
     (account) => account.provider === "cursor",
+  ).length;
+  const xaiAccounts = xaiPool.length;
+  const xaiAvailable = xaiPool.filter(
+    (account) => account.usable && !account.exhaustedUntil,
   ).length;
   const claudeAvailable = claudePool.filter(
     (account) => account.usable && !account.exhaustedUntil,
@@ -62,6 +69,7 @@ export function engineStatus(): EngineStatus {
     codexAccounts,
     grokAccounts,
     cursorAccounts,
+    xaiAccounts,
     defaultModel,
     provider,
   };
@@ -106,10 +114,17 @@ export function engineStatus(): EngineStatus {
       true,
     );
   }
+  if (provider === "xai" && !xaiAvailable) {
+    return blocked(
+      "No usable SuperGrok accounts are available for the default model.",
+      "Add an xAI account under Workspace → Setup, or wait for an exhausted account to reset.",
+    );
+  }
   if (
     !provider &&
     !claudeAvailable &&
     !codexAvailable &&
+    !xaiAvailable &&
     !Object.keys(modelProviders()).length
   ) {
     return blocked(

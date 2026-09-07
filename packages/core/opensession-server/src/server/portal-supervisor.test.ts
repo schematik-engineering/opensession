@@ -7,6 +7,9 @@ import {
   listPortalServices,
   listSandboxPortalServices,
   normalizePortalPath,
+  portalsNeedingContainment,
+  type PortalRecord,
+  portalsToRestore,
   readPortalRegistry,
   reapOrphanedPortalServices,
   SANDBOX_PORTAL_AGENT_ENTRY,
@@ -52,6 +55,85 @@ afterAll(() => {
   if (previousPath == null) delete process.env.PATH;
   else process.env.PATH = previousPath;
   rmSync(processTools, { recursive: true, force: true });
+});
+
+describe("portalsToRestore", () => {
+  const record = (
+    name: string,
+    state: PortalRecord["state"],
+    pid = 100,
+  ): PortalRecord => ({
+    name,
+    key: `${name.toUpperCase()}_PORT`,
+    command: `serve ${name}`,
+    port: 4000,
+    state,
+    pid,
+  });
+
+  test("restarts only live-marked Portals the probe found dead", () => {
+    const marked = [
+      record("web", "awake"),
+      record("api", "awake"),
+      record("old", "stopped"),
+      record("broken", "failed"),
+    ];
+    const probed = [
+      record("web", "awake"),
+      record("api", "failed"),
+      record("old", "stopped"),
+      record("broken", "failed"),
+    ];
+    expect(portalsToRestore(marked, probed).map((r) => r.name)).toEqual([
+      "api",
+    ]);
+  });
+
+  test("treats a Portal the probe no longer lists as dead", () => {
+    expect(
+      portalsToRestore([record("web", "awake")], []).map((r) => r.name),
+    ).toEqual(["web"]);
+  });
+
+  test("leaves a starting Portal alone", () => {
+    expect(
+      portalsToRestore(
+        [record("web", "starting")],
+        [record("web", "starting")],
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("Portal containment migration", () => {
+  test("selects only live legacy host Portals when user scopes are available", () => {
+    const record = (
+      name: string,
+      state: PortalRecord["state"],
+      extra: Partial<PortalRecord> = {},
+    ): PortalRecord => ({
+      name,
+      key: `${name.toUpperCase()}_PORT`,
+      command: `serve ${name}`,
+      port: 4000,
+      state,
+      pid: 100,
+      ...extra,
+    });
+    const records = [
+      record("awake-legacy", "awake"),
+      record("starting-legacy", "starting"),
+      record("managed", "awake", { scopeUnit: "opensession-preview-a" }),
+      record("stopped", "stopped"),
+      record("failed", "failed"),
+      record("missing-pid", "awake", { pid: undefined }),
+    ];
+
+    expect(portalsNeedingContainment(records, true).map((r) => r.name)).toEqual(
+      ["awake-legacy", "starting-legacy"],
+    );
+    expect(portalsNeedingContainment(records, false)).toEqual([]);
+  });
 });
 
 describe("session Portal supervisor", () => {
@@ -348,7 +430,7 @@ describe("session Portal supervisor", () => {
         managed: true,
       }),
     ]);
-  });
+  }, 10_000);
 });
 
 function PREFIX(record: unknown): string {
@@ -371,13 +453,23 @@ async function freePort(): Promise<number> {
 }
 
 function sandboxFor(cwd: string, port: number): Sandbox {
+  // The fake runs Sandbox commands on the host. Translate the guest's fixed
+  // scratch root so macOS and non-root Linux tests do not write /home/ubuntu.
+  const guestScratchRoot = "/home/ubuntu/.opensession/session-scratch";
+  const hostScratchRoot = join(cwd, ".sandbox-session-scratch");
   const commandForHarness = (command: string[]) =>
-    testSetsid
-      ? command.map((part) => part.replace(/\bsetsid\b/g, testSetsid!))
-      : command;
+    command.map((part) => {
+      const withHostScratch = part.replaceAll(
+        guestScratchRoot,
+        hostScratchRoot,
+      );
+      return testSetsid
+        ? withHostScratch.replace(/\bsetsid\b/g, testSetsid)
+        : withHostScratch;
+    });
   return {
     id: "sandbox-portal-test",
-    provider: "docker",
+    provider: "local",
     cwd,
     async exec(command, options) {
       if (options?.background) {

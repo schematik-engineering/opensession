@@ -20,6 +20,7 @@ import { fetchSlackChannels } from "../../lib/api/shipped-changes";
 import { getCurrentUser } from "../UserPicker";
 import { SessionPreviewSurface } from "../session/SessionPreviewSurface";
 import { AssetsPanel } from "../AssetsPanel";
+import { SandboxDesktopPane } from "../SandboxDesktopPane";
 import { SubagentPane } from "../SubagentPane";
 import { ConversationPane } from "../ConversationPane";
 import { SlackChannelPane } from "../SlackChannelPane";
@@ -72,8 +73,6 @@ import {
   PILL_CENTRED,
   TRANSCRIPT_ICON_BUTTON,
   TRANSCRIPT_PILL_BUTTON,
-  TRANSCRIPT_PILL_LOADING,
-  TRANSCRIPT_PILL_SPINNER,
   TRANSCRIPT_PILL_TOP,
   VIEWER_ACTION_ROW,
   VIEWER_ACTION_ROW_WITH_SCROLL,
@@ -107,6 +106,7 @@ type PreviewController = ReturnType<
   typeof useSessionRuntimeController
 >["preview"];
 type PreviewSurface = ComponentProps<typeof SessionPreviewSurface>["surface"];
+type PreviewStatus = import("../../lib/api").PreviewStatus;
 type ComposerProps = ComponentProps<typeof Composer>;
 type TranscriptProps = ComponentProps<typeof TranscriptView>;
 type PrPanelProps = ComponentProps<typeof PrPanel>;
@@ -114,7 +114,12 @@ type AssetFiles = ComponentProps<typeof AssetsPanel>["files"];
 type SubagentStack = ComponentProps<typeof SubagentPane>["stack"];
 type TranscriptEntries = TranscriptProps["entries"];
 type LiveTurnStore = TranscriptProps["liveTurnStore"];
-type ComposerPrefill = { seq: number; text: string; replace?: boolean } | null;
+type ComposerPrefill = {
+  seq: number;
+  text: string;
+  replace?: boolean;
+  pastedTexts?: string[];
+} | null;
 type AskState =
   ComponentProps<typeof AskCard> extends {
     questions: infer Questions;
@@ -131,8 +136,7 @@ type SlackComposerDraft = {
 interface SurfaceRegion {
   showPortal: boolean;
   portalTarget: SessionViewerProps["viewTabs"]["portalTarget"];
-  showPreviewTab: boolean;
-  onClosePreviewTab: SessionViewerProps["viewTabs"]["onClosePreviewTab"];
+  showDesktop: boolean;
   showStaging: boolean;
   staging: Extract<PreviewSurface, { kind: "staging" }>["deployment"];
   stagingUrl?: string | null;
@@ -161,23 +165,19 @@ interface PaneRegion {
   hasWorkspace: boolean;
   waitingForWorkspace: boolean;
   terminalTabOpen: boolean;
-  previewStatus: Extract<PreviewSurface, { kind: "preview" }>["status"];
+  previewStatus: PreviewStatus | null;
 }
 
 interface ReviewRegion {
   openPr: PrPanelProps["onOpenPr"];
   allSessions: SessionViewerProps["workspace"]["allSessions"];
   workspaceSessions: SessionViewerProps["workspace"]["workspaceSessions"];
-  openSession: SessionViewerProps["availability"]["canOpenSession"] extends
-    | boolean
-    | undefined
-    ? Navigation["openSession"] | undefined
-    : never;
   reviewSessionActionTarget: PrPanelProps["sessionActionTarget"];
   connected: boolean;
   isBusy: boolean;
   noEngine: boolean;
   openCurrentWorkspace: PrPanelProps["onOpenSession"];
+  openNewSession: PrPanelProps["onStartSession"];
   setComposerPrefill: Dispatch<SetStateAction<ComposerPrefill>>;
   panelReviewRepos: PrPanelProps["repos"];
   discoveredPrs: PrPanelProps["discoveredPrs"];
@@ -219,7 +219,6 @@ interface TranscriptContent {
   historyTruncated: boolean;
   atTop: boolean;
   loadingHistory: boolean;
-  loadingAllHistory: boolean;
 }
 
 interface TranscriptActions {
@@ -415,8 +414,7 @@ export function SessionViewerMainRegion({
   const {
     showPortal,
     portalTarget,
-    showPreviewTab,
-    onClosePreviewTab,
+    showDesktop,
     showStaging,
     staging,
     stagingUrl,
@@ -450,12 +448,12 @@ export function SessionViewerMainRegion({
     openPr,
     allSessions,
     workspaceSessions,
-    openSession,
     reviewSessionActionTarget,
     connected,
     isBusy,
     noEngine,
     openCurrentWorkspace,
+    openNewSession,
     setComposerPrefill,
     panelReviewRepos,
     discoveredPrs,
@@ -494,7 +492,6 @@ export function SessionViewerMainRegion({
     historyTruncated,
     atTop,
     loadingHistory,
-    loadingAllHistory,
   } = transcript.content;
   const {
     openAssetFromTranscript,
@@ -631,15 +628,12 @@ export function SessionViewerMainRegion({
         <SessionPreviewSurface
           surface={{ kind: "portal", target: portalTarget }}
         />
-      ) : showPreviewTab ? (
-        <SessionPreviewSurface
-          surface={{
-            kind: "preview",
-            session,
-            status: previewStatus,
-            onClose: () => onClosePreviewTab?.(),
-          }}
-        />
+      ) : showDesktop ? (
+        // The Sandbox desktop, full-width like a Portal. Mounted only while
+        // in front: the pane mints a one-viewer URL each time it opens.
+        <div className={VIEWER_REVIEW_MAIN}>
+          <SandboxDesktopPane sessionId={session.id} />
+        </div>
       ) : showStaging && stagingUrl ? (
         <SessionPreviewSurface
           surface={{
@@ -715,7 +709,7 @@ export function SessionViewerMainRegion({
             onOpenPr={openPr}
             sessionId={session.id}
             sessions={allSessions || workspaceSessions || []}
-            onOpenSessionById={openSession}
+            onStartSession={openNewSession}
             sessionActionTarget={
               isPhone ? undefined : reviewSessionActionTarget
             }
@@ -933,6 +927,7 @@ export function SessionViewerMainRegion({
                     optimisticEntries={optimisticTranscriptEntries}
                     pendingDeliveryIds={pendingTranscriptDeliveryIds}
                     transcriptIndex={transcriptIndex ?? undefined}
+                    historyLoading={loadingHistory}
                     transcriptRangeRetryGeneration={
                       transcriptRangeRetryGeneration
                     }
@@ -1066,42 +1061,28 @@ export function SessionViewerMainRegion({
               />
             )}
 
-            {/* The pill belongs to the head of the transcript, so it only
-							    shows while the reader is in reach of it. Over the live tail
-							    it was an offer for something far above, floating across
-							    whatever was being read. The loading state ignores the gate:
-							    the prepend it reports pushes the reader away from the top,
-							    and hiding the pill mid-load takes the feedback with it. */}
+            {/* The action belongs to the transcript head. While it loads, the
+                session-context slot reports the request without adding a row. */}
             {!transcriptIndexExpected &&
               historyTruncated &&
-              (atTop || loadingHistory) && (
+              atTop &&
+              !loadingHistory && (
                 <div className={TRANSCRIPT_PILL_TOP}>
-                  {loadingHistory ? (
-                    <div className={TRANSCRIPT_PILL_LOADING}>
-                      <span className={TRANSCRIPT_PILL_SPINNER} aria-hidden />
-                      <span>
-                        {loadingAllHistory
-                          ? "Loading all messages…"
-                          : "Loading older messages…"}
-                      </span>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={loadAllHistory}
-                      className={cn(
-                        TRANSCRIPT_PILL_BUTTON,
-                        "pointer-events-auto",
-                      )}
-                    >
-                      <IconArrowUp
-                        size={13}
-                        className="text-dim transition-transform group-hover:-translate-y-px"
-                        aria-hidden
-                      />
-                      Load all
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={loadAllHistory}
+                    className={cn(
+                      TRANSCRIPT_PILL_BUTTON,
+                      "pointer-events-auto",
+                    )}
+                  >
+                    <IconArrowUp
+                      size={13}
+                      className="text-dim transition-transform group-hover:-translate-y-px"
+                      aria-hidden
+                    />
+                    Load all
+                  </button>
                 </div>
               )}
 

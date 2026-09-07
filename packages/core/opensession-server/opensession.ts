@@ -36,6 +36,7 @@ import {
 } from "./src/server/automations";
 import { startUsagePoller } from "./src/server/claude-accounts";
 import { startCodexUsagePoller } from "./src/server/codex-accounts";
+import { startXaiUsagePoller } from "./src/server/xai-accounts";
 import {
   FRONTEND_SRC,
   IS_DEV,
@@ -48,9 +49,10 @@ import {
   sharedCheckoutEditors,
   spaEntry,
 } from "./src/server/frontend-build";
-import { configuredIntegration } from "./src/server/config";
+import { configuredIntegration, configuredServer } from "./src/server/config";
 import { readMcpConfig } from "./src/server/connections";
 import { warmAwsMcpIamAuth } from "./src/server/aws-mcp-auth";
+import { portalSignInRedirect } from "./src/server/portal-sign-in";
 import { initHumanAsks } from "./src/server/human-asks";
 import { interactiveMcpServers } from "./src/server/interactive-mcp";
 import {
@@ -103,6 +105,9 @@ import {
   reconcileRecoverableSafetyFences,
   recordRunOutcome,
   startSessionOwnershipWatchdog,
+  primeSessionListIndex,
+  publishSessionChange,
+  reconcileSessionMetadataExports,
   stopSessionOwnershipWatchdog,
 } from "./src/server/session-cache";
 import { getSessionControl } from "./src/server/session-control";
@@ -160,7 +165,7 @@ import {
   pauseWorkflowsForShutdown,
 } from "./src/server/workflow-store";
 import { recoverInterruptedWorkflows } from "./src/server/workflow-runner";
-import "./src/server/session-control-wiring"; // opensession-sessions MCP + Slack-link bridge
+import { ensureSlackLinkIndex } from "./src/server/session-control-wiring"; // opensession-sessions MCP + Slack-link bridge
 import "./src/server/keychain"; // registers the keychain human-ask domain handler
 import { websocketHandlers } from "./src/server/ws-handlers";
 import { routeHandlers, type RouteContext } from "./src/server/routes";
@@ -264,6 +269,12 @@ const g = globalThis as any;
 
 // The actor owns the writable kernel store before any gateway projection hydrates.
 if (!g.__opensessionBooted) await startSessionKernelActor();
+// The first list read fills the list index. With the actor up it can come
+// from the metadata catalog; before this point it would have to read every
+// session file. Prime it here so no later boot step or route pays that scan,
+// then build the Slack thread index from the same snapshot.
+if (!g.__opensessionBooted) await primeSessionListIndex();
+void ensureSlackLinkIndex();
 
 // Loaded agents (Plain/Linear/Slack/Stripe/…). Module-scoped because request
 // handlers (health routes) read it, and globalThis-backed so the set survives a
@@ -278,6 +289,9 @@ if (!g.__opensessionBooted && !isDevInstance()) {
   await restorePendingAsks();
   await hydratePersistedQueueState();
 }
+// Session files are exports of actor-owned metadata. Repair the ones a crash
+// left behind their committed revision before any route reads them.
+if (!g.__opensessionBooted) await reconcileSessionMetadataExports();
 
 const gatewayProcessLabel = process.env.OPENSESSION_GATEWAY_BACKEND_PORT
   ? "gateway backend"
@@ -536,6 +550,16 @@ const server: import("bun").Server<WSClientData> = hotServe({
           // wider one.
           /^\/(?:opensession\/)?d\//.test(path))
       ) {
+        // A person opening a Portal in a browser that has no session (a
+        // phone's Safari, opened from the native app or the home-screen
+        // web app) gets sent to this app to sign in and back again; the
+        // Portal port itself has no sign-in screen to show.
+        const portalRedirect = portalSignInRedirect(
+          req,
+          path,
+          configuredServer().publicBaseUrl,
+        );
+        if (portalRedirect) return portalRedirect;
         return Response.json(
           reconnectRequired
             ? {
@@ -732,13 +756,6 @@ if (!g.__opensessionBooted) {
         const { startSandboxEnvironmentMaintenance } =
           await import("./src/server/sandbox/environments");
         startSandboxEnvironmentMaintenance();
-        // Modal has no docker daemon to piggyback on: its idle stop is a
-        // server-owned sweep (checkpoint → terminate → lifecycle sleeping).
-        // Armed here so an idle sandbox left by a previous process is still
-        // stopped even if no new ensure/get ever runs.
-        const { ensureModalIdleSweep } =
-          await import("./src/server/sandbox/adapters/modal");
-        ensureModalIdleSweep();
         await poolStartup;
       })
       .catch((e) => console.error("[sandbox-prewarm] startup failed:", e));
@@ -787,7 +804,8 @@ if (!g.__opensessionBooted) {
     }
 
     // Cron-scheduled automations + internal event bus (agents → automations)
-    const onAutomationSession = () => invalidateSessionsCache();
+    const onAutomationSession = (sessionId: string) =>
+      publishSessionChange(sessionId);
     setEventSessionCallback(onAutomationSession);
     const resumedAutomationIntents =
       resumePendingAutomationRuns(onAutomationSession);
@@ -803,9 +821,7 @@ if (!g.__opensessionBooted) {
     hydrateScheduledPromptTimers();
 
     // Archive triage sessions when their Plain ticket is done.
-    startPlainArchiveSweep(() => {
-      invalidateSessionsCache();
-    });
+    startPlainArchiveSweep();
 
     // Unattended installs stage a Claude token in the env or a file; import it
     // into the pool before anything can ask for an account.
@@ -813,6 +829,8 @@ if (!g.__opensessionBooted) {
     startUsagePoller();
     // Poll supported ChatGPT/Codex rate-limit windows per registered CODEX_HOME.
     startCodexUsagePoller();
+    // Poll SuperGrok credit usage and the live Grok catalog per xAI account.
+    startXaiUsagePoller();
 
     // DM account owners when pool credentials expire or break (account-health.ts)
     startAccountHealthMonitor();
@@ -868,9 +886,7 @@ if (!g.__opensessionBooted) {
 
     // Re-try sidebar titles whose one-shot died in flight (a restart, or an
     // engine-spawn outage) — without this they stay raw forever.
-    startGeneratedTitleSweep(() => {
-      invalidateSessionsCache();
-    });
+    startGeneratedTitleSweep(publishSessionChange);
   } else {
     agents = [];
     g.__agents = agents;
@@ -1115,6 +1131,11 @@ if (!g.__opensessionBooted) {
       // readiness prerequisite and only extended every handoff.
     }, 0);
   } else {
+    // A dev instance has no recovery stage to wait for, but its actors still
+    // need durable timers and creation effects to wake: without the runtime
+    // every create waits on a workspace effect nobody executes and times out.
+    // The state dir is isolated, so this touches nothing live.
+    startSessionKernelRuntime();
     setServiceReadiness("ready");
   }
 

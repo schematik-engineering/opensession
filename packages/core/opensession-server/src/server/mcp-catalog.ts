@@ -56,6 +56,7 @@ import { createHealthMcpServer } from "./health-mcp";
 import { createRunnersMcpServer } from "./runners-mcp";
 import { createScheduleMcpServer } from "./schedule-mcp";
 import { createPortalsMcpServer } from "./portals-mcp";
+import { createDesktopMcpServer } from "./desktop-mcp";
 import { createSelfDeployMcpServer } from "./self-deploy";
 import { createWebMcpServer } from "./web-mcp";
 
@@ -306,10 +307,26 @@ export const MCP_SERVER_CATALOG: McpServerCatalogEntry[] = [
       createPortalsMcpServer({
         sessionId: SESSION_ID,
         worktreeDir: () => undefined,
+        verifyEditorFixture: async () => {
+          throw new Error("catalog-only fixture verifier");
+        },
         setDefaultPath: async () => ({}),
         sandbox: async () => null,
         hasSandbox: () => false,
         runner: () => undefined,
+      }),
+  },
+  {
+    name: "opensession-desktop",
+    summary: INTERNAL_MCP_CAPABILITIES["opensession-desktop"].summary,
+    source: "packages/core/opensession-server/src/server/desktop-mcp.ts",
+    wiring: ["packages/core/opensession-server/src/server/interactive-mcp.ts"],
+    runClasses: ["interactive"],
+    condition: "Needs a sandboxed session.",
+    build: () =>
+      createDesktopMcpServer({
+        sessionId: SESSION_ID,
+        control: async () => null,
       }),
   },
   {

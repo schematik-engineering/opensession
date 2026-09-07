@@ -1,4 +1,6 @@
+import { os1Shell } from "../lib/os1-shell";
 import React, { useEffect, useState } from "react";
+import { z } from "zod";
 import type { WSServerMessage } from "../lib/types";
 import { PRODUCT_NAME } from "../lib/brand";
 import { subscribeFrontendVersion } from "../lib/frontend-version";
@@ -7,9 +9,11 @@ import { Tooltip } from "../ui/tooltip";
 
 interface Props {
   addHandler: (handler: (msg: WSServerMessage) => void) => () => void;
-  // "card" lives in the persistent desktop shelf. "pill" is the compact
-  // topbar variant that sits next to the brand logo on phones.
-  variant?: "card" | "pill";
+  // "card" is the standalone notice card. "pill" is the compact topbar
+  // variant that sits next to the brand logo on phones. "footer" is the
+  // desktop one: a small accent button beside Settings at the bottom of the
+  // sidebar, so the nudge lives in the chrome rather than floating over it.
+  variant?: "card" | "pill" | "footer";
 }
 
 /** Grace before a forced update reloads a VISIBLE tab (hidden tabs reload
@@ -17,29 +21,46 @@ interface Props {
  *  protocol-break deploy converges in under a minute. */
 const FORCE_GRACE_MS = 20_000;
 
-type ShellUpdateState = {
-  state: "idle" | "available" | "downloaded";
-  version?: string | null;
+const shellUpdateStateSchema = z.object({
+  state: z.enum(["idle", "available", "downloaded"]),
+  version: z.string().nullable().optional(),
+});
+
+type ShellUpdateState = z.infer<typeof shellUpdateStateSchema>;
+
+type ShellUpdates = {
+  onState: (cb: (state: ShellUpdateState) => void) => (() => void) | undefined;
+  install: () => void;
 };
 
 /** The mac shell's updater bridge — absent in a browser. `onState` replays the
  *  current state on subscribe, so a reload re-surfaces a staged update. */
-function os1Updates():
-  | {
-      onState: (cb: (s: ShellUpdateState) => void) => (() => void) | void;
-      install: () => void;
-    }
-  | undefined {
-  return (
-    window as {
-      os1?: {
-        updates?: {
-          onState: (cb: (s: ShellUpdateState) => void) => (() => void) | void;
-          install: () => void;
-        };
+function os1Updates(): ShellUpdates | undefined {
+  const updates = os1Shell()?.updates;
+  if (
+    !(updates instanceof Object) ||
+    !("onState" in updates) ||
+    !(updates.onState instanceof Function) ||
+    !("install" in updates) ||
+    !(updates.install instanceof Function)
+  )
+    return undefined;
+
+  const onState = updates.onState.bind(updates);
+  const install = updates.install.bind(updates);
+  return {
+    onState: (callback) => {
+      const handleState = (
+        value: Parameters<typeof shellUpdateStateSchema.safeParse>[0],
+      ) => {
+        const state = shellUpdateStateSchema.safeParse(value);
+        if (state.success) callback(state.data);
       };
-    }
-  ).os1?.updates;
+      const unsubscribe = onState(handleState);
+      return unsubscribe instanceof Function ? () => unsubscribe() : undefined;
+    },
+    install: () => install(),
+  };
 }
 
 /**
@@ -58,8 +79,8 @@ function os1Updates():
  *
  * Acting is normally optional — new page loads already get the new build; this
  * just nudges already-open tabs — so it's non-blocking (it never covers the
- * composer). Desktop shows a toast over the sidebar bottom; phones show a
- * compact pill in the top bar, right after the brand logo.
+ * composer). Desktop shows a button in the sidebar's account footer; phones
+ * show a compact pill in the top bar, right after the brand logo.
  *
  * `force: true` broadcasts (POST /api/admin/frontend-reload — sent before a
  * server-side protocol change that old bundles can't follow) auto-reload
@@ -112,11 +133,10 @@ export function UpdatePill({ addHandler, variant = "card" }: Props) {
   useEffect(() => {
     const updates = os1Updates();
     if (!updates?.onState) return;
-    const off = updates.onState((s) => {
+    return updates.onState((s) => {
       setShellReady(s.state === "downloaded");
       setShellVersion(s.version ?? null);
     });
-    return typeof off === "function" ? off : undefined;
   }, []);
 
   useEffect(() => {
@@ -156,6 +176,35 @@ export function UpdatePill({ addHandler, variant = "card" }: Props) {
         ? "Restart"
         : "Refresh";
   const detail = restart ? shellVersion : by;
+
+  if (variant === "footer") {
+    const label = refreshing
+      ? restart
+        ? "Restarting…"
+        : "Refreshing…"
+      : forced
+        ? `Update ${secondsLeft}s`
+        : "Update";
+    const hint = forced
+      ? `Updating in ${secondsLeft}s. Click to refresh now.`
+      : restart
+        ? `${PRODUCT_NAME} ${shellVersion ?? "update"} is ready. Restart to install it.`
+        : `New update available${by ? ` (${by})` : ""}. Click to refresh.`;
+    return (
+      <Tooltip label={hint} side="top" multiline>
+        <button
+          className="inline-flex h-7 shrink-0 cursor-pointer items-center rounded-control border-none bg-accent px-2.5 text-supporting font-semibold leading-none text-on-accent transition-[background] duration-[var(--dur-micro)] ease-[var(--ease)] hover:bg-accent-hover disabled:cursor-wait disabled:opacity-75 animate-[update-toast-in_var(--dur-lg)_var(--ease)] motion-reduce:animate-none"
+          onClick={refresh}
+          disabled={refreshing}
+          role="status"
+          aria-live="polite"
+          aria-label={hint}
+        >
+          <span className="[text-box:trim-both_cap_alphabetic]">{label}</span>
+        </button>
+      </Tooltip>
+    );
+  }
 
   if (variant === "pill") {
     return (

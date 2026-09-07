@@ -15,12 +15,21 @@ import {
   type TranscriptActorRequest,
   type TranscriptActorResult,
 } from "./transcript-protocol";
+import { envCapacity } from "../shared/env-capacity";
 
 const CENTRAL_STORE_FAILURE = "SESSION_KERNEL_CENTRAL_STORE_FAILURE";
 // Catalog discovery returns ids only. Each candidate then claims work on its
-// own session lane, and this bound prevents crash recovery from flooding those
-// latency-sensitive mailboxes in one tick.
-const RUNTIME_WAKE_CANDIDATE_BATCH = 4;
+// own session lane, in parallel across lanes, and this bound keeps crash
+// recovery from flooding those latency-sensitive mailboxes in one pass. It is
+// also the runtime's discovery throughput: a pass admits at most this many
+// sessions' due timers and effects, so a create burst drains at this rate per
+// pass. The kernel service reads the override from its own drop-in only.
+export const RUNTIME_WAKE_CANDIDATE_BATCH = envCapacity(
+  "OPENSESSION_KERNEL_RUNTIME_WAKE_CANDIDATES",
+  32,
+  4,
+  256,
+);
 
 export type SessionKernelStoreHostMetrics = {
   kernelStoreCacheMisses: number;
@@ -488,6 +497,20 @@ export class SessionKernelStoreHost {
     if (route.mutation && SPARSE_PROJECTION_MUTATIONS.has(method))
       this.refreshSessionProjections(route.sessionId);
     return result;
+  }
+
+  /** Project one session's committed metadata document into the central
+   * catalog. Works for isolated and legacy central placements alike; an absent
+   * document (cleared or deleted session) removes the catalog row. */
+  settleSessionMetadataCatalog(sessionId: string): void {
+    const store = this.storeForSession(sessionId);
+    const record =
+      store === this.central
+        ? this.centralOperation(() => this.central.sessionMetadata(sessionId))
+        : store.sessionMetadata(sessionId);
+    this.centralOperation(() =>
+      this.central.settleSessionMetadataCatalog(sessionId, record ?? undefined),
+    );
   }
 
   refreshSessionProjections(sessionId: string): void {

@@ -44,6 +44,7 @@ git config --file "$tmp_git_config" init.defaultBranch main
 find_tests | xargs -0 -n 1 -P "$jobs" env \
   -u OPENSESSION_EXECUTOR \
   -u OPENSESSION_TEST_IN_PROCESS_RUNS \
+  NODE_ENV=test \
   GIT_CONFIG_GLOBAL="$tmp_git_config" \
   GIT_CONFIG_NOSYSTEM=1 \
   bun test --no-orphans --reporter dots --timeout "$timeout_ms"
