@@ -671,7 +671,7 @@ export async function* runAgentHosted(
     yield* runAgentInProcess(opts);
     return;
   }
-  if (!runHostsEnabled()) {
+  if (!hostedPhysicalRunnerForTest && !runHostsEnabled()) {
     if (localRunHostsSupported())
       throw new Error(
         "Detached run hosts are disabled; refusing to run agent work inside the gateway",
@@ -723,7 +723,7 @@ export async function* runAuxiliaryAgentHosted(
     yield* runAgentInProcess({ ...opts, shouldCancel }, "auxiliary");
     return;
   }
-  if (!runHostsEnabled()) {
+  if (!hostedPhysicalRunnerForTest && !runHostsEnabled()) {
     if (localRunHostsSupported()) {
       throw new Error(
         "Detached run hosts are disabled; refusing to run auxiliary agent work inside the gateway",

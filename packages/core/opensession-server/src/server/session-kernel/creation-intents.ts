@@ -1,4 +1,5 @@
 import { sessionKernel } from "./kernel";
+import { waitForCreationStateChange } from "./wakes";
 import type {
   CreationEventDecisionResult,
   DurableCreationState,
@@ -138,6 +139,23 @@ export function safeCreationFailureMessage(error: unknown): string {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 600);
+}
+
+// A waiter is woken by the creation event that changes its state in this
+// process; the poll is the fallback for a commit made elsewhere. It starts at
+// `pollMs` and backs off, so a pending create or a long opening turn costs the
+// actor at most one state read per second instead of forty.
+const CREATION_POLL_CAP_MS = 1_000;
+
+function creationStateWaiter(
+  sessionId: string,
+  options: CreationIntentOptions,
+): () => Promise<void> {
+  let interval = options.pollMs ?? 25;
+  return async () => {
+    await waitForCreationStateChange(sessionId, interval);
+    interval = Math.min(interval * 2, CREATION_POLL_CAP_MS);
+  };
 }
 
 function assertIdentity(state: DurableCreationState, identity: string): void {
@@ -316,10 +334,11 @@ export async function requestCreationAttachment(
     state = emitted.state;
   }
   const deadline = Date.now() + (options.timeoutMs ?? 30_000);
+  const wait = creationStateWaiter(input.sessionId, options);
   while (!state.completedEffectIds.includes(effectId)) {
     if (Date.now() >= deadline)
       throw new CreationEffectPendingError(input.sessionId, effectId);
-    await Bun.sleep(options.pollMs ?? 25);
+    await wait();
     const current = await kernel.creationState();
     if (!current)
       throw new Error(
@@ -344,6 +363,7 @@ export async function requestCreationOpening(
   );
   const effectId = `opening:${input.openingPromptEntryId}`;
   const deadline = Date.now() + (options.timeoutMs ?? 24 * 60 * 60_000);
+  const wait = creationStateWaiter(input.sessionId, options);
   if (state.state === "ready") return state;
   while (state.currentEffectId && state.currentEffectId !== effectId) {
     if (state.state === "failed")
@@ -354,7 +374,7 @@ export async function requestCreationOpening(
       throw new Error(
         `Creation effect ${state.currentEffectId} must settle before ${effectId}`,
       );
-    await Bun.sleep(options.pollMs ?? 25);
+    await wait();
     const current = await kernel.creationState();
     if (!current)
       throw new Error("Creation state disappeared before opening dispatch");
@@ -420,7 +440,7 @@ export async function requestCreationOpening(
       );
     if (Date.now() >= deadline)
       throw new CreationEffectPendingError(input.sessionId, effectId);
-    await Bun.sleep(options.pollMs ?? 25);
+    await wait();
     const current = await kernel.creationState();
     if (!current)
       throw new Error("Creation state disappeared while opening was pending");
@@ -479,10 +499,11 @@ export async function requestCreationWorkspace(
     state = emitted.state;
   }
   const deadline = Date.now() + (options.timeoutMs ?? 30_000);
+  const wait = creationStateWaiter(input.sessionId, options);
   while (!state.completedEffectIds.includes(effectId)) {
     if (Date.now() >= deadline)
       throw new CreationEffectPendingError(input.sessionId, effectId);
-    await Bun.sleep(options.pollMs ?? 25);
+    await wait();
     const current = await kernel.creationState();
     if (!current)
       throw new Error(
@@ -540,10 +561,11 @@ export async function requestCreationBranch(
     state = emitted.state;
   }
   const deadline = Date.now() + (options.timeoutMs ?? 30_000);
+  const wait = creationStateWaiter(input.sessionId, options);
   while (!state.completedEffectIds.includes(effectId)) {
     if (Date.now() >= deadline)
       throw new CreationEffectPendingError(input.sessionId, effectId);
-    await Bun.sleep(options.pollMs ?? 25);
+    await wait();
     const current = await kernel.creationState();
     if (!current)
       throw new Error(
@@ -596,10 +618,11 @@ export async function requestCreationCredential(
     state = emitted.state;
   }
   const deadline = Date.now() + (options.timeoutMs ?? 30_000);
+  const wait = creationStateWaiter(input.sessionId, options);
   while (!state.completedEffectIds.includes(effectId)) {
     if (Date.now() >= deadline)
       throw new CreationEffectPendingError(input.sessionId, effectId);
-    await Bun.sleep(options.pollMs ?? 25);
+    await wait();
     const current = await kernel.creationState();
     if (!current)
       throw new Error(
@@ -660,10 +683,11 @@ export async function requestCreationSandbox(
     state = emitted.state;
   }
   const deadline = Date.now() + (options.timeoutMs ?? 30_000);
+  const wait = creationStateWaiter(input.sessionId, options);
   while (!state.completedEffectIds.includes(effectId)) {
     if (Date.now() >= deadline)
       throw new CreationEffectPendingError(input.sessionId, effectId);
-    await Bun.sleep(options.pollMs ?? 25);
+    await wait();
     const current = await kernel.creationState();
     if (!current)
       throw new Error(

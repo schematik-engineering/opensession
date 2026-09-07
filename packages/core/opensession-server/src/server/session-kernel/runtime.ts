@@ -25,6 +25,10 @@ import {
 import { audit } from "../audit";
 import { SessionKernelQuarantinedError } from "./actor-client";
 import { envCapacity } from "../shared/env-capacity";
+import {
+  requestSessionKernelRuntimeDrain,
+  setSessionKernelRuntimeDrainRequest,
+} from "./wakes";
 
 // Runtime effect execution happens in the gateway process (physical work),
 // so these knobs are read from the gateway environment.
@@ -141,6 +145,9 @@ type RuntimeState = {
   activeOpeningOutbox?: Map<number, string>;
   pendingOutbox?: Map<number, DurableOutboxItem>;
   lastRuntimePollErrorAt?: number;
+  /** A wake arrived while a pass was running; run another when it ends. */
+  drainRequested?: boolean;
+  drainScheduled?: ReturnType<typeof setTimeout>;
 };
 
 const globalRuntime = globalThis as typeof globalThis & {
@@ -161,6 +168,10 @@ const MAINTENANCE_CONTINUATION_DELAY_MS = 15_000;
 // retaining a short, durable retry horizon if the gateway disappears.
 const ACTIVE_OUTBOX_RECHECK_MS = 30_000;
 const PENDING_OUTBOX_LIMIT = 512;
+// A wake (an emitted effect, a freed execution slot) runs a pass this soon
+// instead of on the next tick; a burst of wakes shares one pass, which also
+// caps discovery at twenty passes per second during a recovery backlog.
+const DRAIN_WAKE_DEBOUNCE_MS = 50;
 
 export function registerSessionTimerHandler(
   kind: string,
@@ -230,7 +241,10 @@ export async function fireStoredSessionTimer(
 }
 
 export async function drainSessionKernelRuntime(): Promise<void> {
-  if (runtime.draining) return;
+  if (runtime.draining) {
+    runtime.drainRequested = true;
+    return;
+  }
   runtime.draining = true;
   try {
     const timerKinds = [...runtime.timerHandlers.keys()];
@@ -413,7 +427,12 @@ export async function drainSessionKernelRuntime(): Promise<void> {
             );
           }
         })
-        .finally(() => active.delete(item.id));
+        .finally(() => {
+          active.delete(item.id);
+          // The freed slot admits the next pending item now, not at the tick:
+          // otherwise a group's throughput is its concurrency per second.
+          requestSessionKernelRuntimeDrain();
+        });
     }
     passivateIdleSessionKernels();
     const maintenanceNow = Date.now();
@@ -446,6 +465,10 @@ export async function drainSessionKernelRuntime(): Promise<void> {
     }
   } finally {
     runtime.draining = false;
+    if (runtime.drainRequested) {
+      runtime.drainRequested = false;
+      requestSessionKernelRuntimeDrain();
+    }
   }
 }
 
@@ -464,6 +487,14 @@ export function startSessionKernelRuntime(intervalMs = 1_000): void {
       }
     });
   };
+  setSessionKernelRuntimeDrainRequest(() => {
+    if (runtime.drainScheduled) return;
+    runtime.drainScheduled = setTimeout(() => {
+      runtime.drainScheduled = undefined;
+      drain();
+    }, DRAIN_WAKE_DEBOUNCE_MS);
+    runtime.drainScheduled.unref?.();
+  });
   runtime.handle = setInterval(() => {
     drain();
   }, intervalMs);
@@ -474,6 +505,10 @@ export function startSessionKernelRuntime(intervalMs = 1_000): void {
 export function stopSessionKernelRuntime(): void {
   if (runtime.handle) clearInterval(runtime.handle);
   runtime.handle = undefined;
+  setSessionKernelRuntimeDrainRequest(undefined);
+  if (runtime.drainScheduled) clearTimeout(runtime.drainScheduled);
+  runtime.drainScheduled = undefined;
+  runtime.drainRequested = false;
 }
 
 /** Settle durable ownership left behind without a recoverable journal. */
