@@ -32,7 +32,8 @@ describe("Linear session projection", () => {
       const { mkdirSync } = await import("node:fs");
       mkdirSync(process.env.HOME + "/.linear-sessions", { recursive: true });
       const list = await import(${JSON.stringify(listStoreUrl)});
-      list.sessionListStore().markCovered("include");
+      list.__setSessionListStoreForTest(new list.SessionListStore(":memory:"));
+      await list.upsertIndexedSessions([], "include");
       const { saveSessionInfo, loadSessionInfo, ensureLinearWorktree, linearSessionRepoId } = await import(${JSON.stringify(sessionUrl)});
       const repoId = linearSessionRepoId();
       await saveSessionInfo("check-open-sch274", {
@@ -49,9 +50,9 @@ describe("Linear session projection", () => {
         lastActiveUser: null,
         issueCreator: null
       });
-      const indexed = list.indexedSessions("include") || [];
-      const { findSession } = await import(${JSON.stringify(cacheUrl)});
-      const direct = findSession("linear-check-open-sch274");
+      const indexed = (await list.indexedSessions("include")) || [];
+      const { findSessionAsync } = await import(${JSON.stringify(cacheUrl)});
+      const direct = await findSessionAsync("linear-check-open-sch274");
       await Bun.write(process.env.HOME + "/.linear-sessions/legacy.json", JSON.stringify({
         branch: "legacy",
         worktreeDir: process.env.OPENSESSION_STATE_DIR + "/.opensession/worktrees/biss-client-legacy"

@@ -267,7 +267,7 @@ describe("resolvePiRoutedModel", () => {
       modelID: "claude-fable-5-1",
       orchestrator: {
         id: "orchestrator/fable-sol",
-        workerAgents: ["worker-sol"],
+        workerAgents: ["worker-astra"],
       },
       effort: "high",
     });
@@ -1318,6 +1318,20 @@ test("unattended runs select the isolated CLI home", () => {
   expect(source).toContain(
     "const isolatedHome = policy.unattended || Boolean(opts.publicationPolicy)",
   );
+});
+
+test("host runs never resolve the operator's ambient gh identity", () => {
+  const env = piBashHomeEnv({
+    runKey: "run/unsafe",
+    scratchDir: "/scratch/session",
+    isolated: false,
+    hostHome: "/Users/operator",
+  });
+  expect(env.HOME).toBe("/Users/operator");
+  // gh answers from GH_TOKEN when a credential was injected; without one it
+  // must fail "not logged in" rather than act as whatever identity the host's
+  // ~/.config/gh/hosts.yml holds.
+  expect(env.GH_CONFIG_DIR).toBe("/scratch/session/gh-config-run_unsafe");
 });
 
 test("automation descendants receive an isolated CLI home", () => {

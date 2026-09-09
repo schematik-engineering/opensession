@@ -50,6 +50,7 @@ const PRIMARY_MODEL_IDS = [
   "claude-opus-5",
   "claude-sonnet-5",
   "claude-haiku-4-5",
+  "gpt-6-astra",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",
@@ -173,6 +174,10 @@ export function shortModelLabel(id: string, models: ModelOption[]): string {
   const preset = workspacePresetLabel(baseModelId(id), models);
   if (preset) return preset;
   const oc = routedModelParts(id);
+  if (oc?.provider === "dial" || oc?.provider === "orchestrator") {
+    const label = models.find((m) => m.id === id)?.label;
+    if (label) return label;
+  }
   if (oc) return friendlyModelSlug(oc.model);
   // Last resort is the id itself, minus its routing prefix — an id with no
   // catalog entry is still a name, and the engine is not part of it.
@@ -237,6 +242,7 @@ const MODEL_TAIL_ORDER = [
   "claude-sonnet-5",
   "claude-sonnet-4-6",
   "claude-haiku-4-5",
+  "gpt-6-astra",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",

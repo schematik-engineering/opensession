@@ -1415,13 +1415,13 @@ export async function openCreatedSession(
     .then((titlePrompt) =>
       ensureGeneratedTitle(bksId, titlePrompt, spec.user, spec.model),
     )
-    .then((t) => {
+    .then(async (t) => {
       if (!t) return;
       publishSessionChange(bksId);
       if (!wsToName) return;
-      const cur = getWorkspace(wsToName.id);
+      const cur = await getWorkspace(wsToName.id);
       if (cur && cur.name === wsToName.name)
-        updateWorkspace(wsToName.id, { name: t });
+        await updateWorkspace(wsToName.id, { name: t });
     })
     .catch(() => {});
 
@@ -1558,8 +1558,8 @@ export async function openCreatedSession(
       // After persist() so this never races the create with a client
       // still editing the draft through the workspace PATCH route.
       if (spec.workspaceId) {
-        const ws = getWorkspace(spec.workspaceId);
-        if (ws?.draft) updateWorkspace(ws.id, { draft: null });
+        const ws = await getWorkspace(spec.workspaceId);
+        if (ws?.draft) await updateWorkspace(ws.id, { draft: null });
       }
       io.announce({
         id: bksId,
@@ -2472,9 +2472,9 @@ export async function handleCreateSessionMessage(
     !!repo.sharedCheckout &&
     msg.checkoutMode === "worktree";
   let workspace = recoveringSession?.workspaceId
-    ? getWorkspace(recoveringSession.workspaceId)
+    ? await getWorkspace(recoveringSession.workspaceId)
     : typeof msg.workspaceId === "string" && msg.workspaceId
-      ? getWorkspace(msg.workspaceId)
+      ? await getWorkspace(msg.workspaceId)
       : null;
   // A ticket-linked create always lands in the ticket's ONE workspace
   // (adopt-don't-duplicate, workspace-resolve.ts) — even when the
@@ -2487,14 +2487,16 @@ export async function handleCreateSessionMessage(
       : undefined;
   if (msgPlainThreadId && !workspace) {
     try {
-      workspace = resolvePlainWorkspace({
-        threadId: msgPlainThreadId,
-        title:
-          typeof msg.createWorkspace?.name === "string"
-            ? msg.createWorkspace.name
-            : undefined,
-        createdBy: user || "Anonymous",
-      }).workspace;
+      workspace = (
+        await resolvePlainWorkspace({
+          threadId: msgPlainThreadId,
+          title:
+            typeof msg.createWorkspace?.name === "string"
+              ? msg.createWorkspace.name
+              : undefined,
+          createdBy: user || "Anonymous",
+        })
+      ).workspace;
     } catch {}
   }
   // Whether this create made a brand-new workspace (vs. adding a session
@@ -2517,7 +2519,7 @@ export async function handleCreateSessionMessage(
       const existingWt = (await listWorktrees(repo.id)).find(
         (w) => w.branch === branch,
       )?.path;
-      workspace = workspaceOwningWorktree(existingWt);
+      workspace = await workspaceOwningWorktree(existingWt);
     }
     if (!workspace) {
       createdWorkspaceNow = true;
@@ -2534,7 +2536,7 @@ export async function handleCreateSessionMessage(
         ...(isRepoLess ? {} : { project: repo.id }),
         createdBy: user || "Anonymous",
       });
-      workspace = getWorkspace(plannedWorkspaceId);
+      workspace = await getWorkspace(plannedWorkspaceId);
       if (!workspace)
         throw new Error(
           `Workspace ${plannedWorkspaceId} projection is missing after actor receipt`,
@@ -2693,7 +2695,7 @@ export async function handleCreateSessionMessage(
         workspace.prNumber != null && workspace.branch
           ? workspace.branch
           : branch;
-      updateWorkspace(workspace.id, {
+      await updateWorkspace(workspace.id, {
         worktreeDir: wtPath,
         ...(workspaceBranch ? { branch: workspaceBranch } : {}),
       });
@@ -2781,7 +2783,7 @@ export async function handleCreateSessionMessage(
         // checkout is used by every other session there too.
         ...(ownedWorktree(wtPath) ? { worktreeDir: wtPath } : {}),
       });
-      workspace = getWorkspace(plannedWorkspaceId);
+      workspace = await getWorkspace(plannedWorkspaceId);
       if (!workspace)
         throw new Error(
           `Workspace ${plannedWorkspaceId} projection is missing after actor receipt`,

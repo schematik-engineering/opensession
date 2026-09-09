@@ -20,8 +20,10 @@
  * outbound Portal relay (sandbox-portal-relay.ts).
  */
 import { $ } from "bun";
-import { existsSync, readFileSync } from "fs";
-import { dirname, join } from "path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { basename, dirname, join, resolve } from "path";
+import type { Repo } from "./config";
+import { repoForPathOrNull } from "./worktree";
 import {
   ensureRemoteSandboxPortalAgent,
   forgetRemoteSandboxPortalAgents,
@@ -44,6 +46,43 @@ import { shellQuoteWord } from "./sandbox/adapters/bootstrap";
 import { usesOutboundSandboxPortalRelay } from "./sandbox/config";
 import { configuredRepos, configuredServer } from "./config";
 import type { WorkloadIdentityContext } from "./workload-identity";
+
+/** Gitignored files a repository's dev server needs to boot, carried from the
+ *  operator-owned main checkout because git cannot. */
+export const SEED_ENV_FILES = ["packages/core/webapp/.env.local", ".envrc"];
+
+/**
+ * Restore the gitignored env files a repository's boot script requires before
+ * a host Portal starts. A warm-template refresh deliberately excludes `.env*`
+ * from what it seeds into a worktree and nothing else puts them back, so a
+ * repository whose `.agents/start.sh` exits on a missing `.env.local` failed
+ * for every fresh worktree. Only fills gaps: a worktree copy may carry
+ * deliberate per-session edits, so an existing file is never overwritten.
+ */
+export function seedHostEnvFiles(
+  worktreeDir: string,
+  repo: Repo | undefined = repoForPathOrNull(worktreeDir),
+): string[] {
+  if (!repo?.repo || resolve(repo.repo) === resolve(worktreeDir)) return [];
+  const seeded: string[] = [];
+  for (const rel of SEED_ENV_FILES) {
+    const dest = join(worktreeDir, rel);
+    const src = join(repo.repo, rel);
+    if (existsSync(dest) || !existsSync(src)) continue;
+    try {
+      mkdirSync(dirname(dest), { recursive: true });
+      writeFileSync(dest, readFileSync(src), { mode: 0o600 });
+      seeded.push(rel);
+      console.log(`[portals] seeded ${rel} into ${basename(worktreeDir)}`);
+    } catch (error) {
+      console.warn(
+        `[portals] seeding ${rel} into ${worktreeDir} failed:`,
+        error,
+      );
+    }
+  }
+  return seeded;
+}
 
 export interface PreviewService {
   /** Friendly label, e.g. "Webapp". */
@@ -496,9 +535,19 @@ async function ensurePreviewRoute(
       body: JSON.stringify(server),
     });
   try {
-    // PUT creates the key; if it already exists (e.g. Caddy kept the server
-    // across an opensession restart, so our cache is cold) it 409s — drop it
-    // and recreate so the route always points at the current upstream.
+    // Caddy may already hold this exact route: it outlived a gateway handoff,
+    // or an earlier PUT was still queued behind a reload when its response
+    // timed out. Adopt it instead of writing again. Every write is a Caddy
+    // config reload that waits for the previous servers to drain, so a
+    // needless DELETE + PUT costs two reloads and briefly drops the listener.
+    const existing = await caddyFetch(path);
+    if (existing.ok && Bun.deepEquals(await existing.json(), server)) {
+      previewRoutes.set(httpsPort, signature);
+      return true;
+    }
+    // PUT creates the key; if it already exists with another upstream (the
+    // host port moved) it 409s — drop it and recreate so the route always
+    // points at the current upstream.
     let res = await put();
     if (res.status === 409) {
       await caddyFetch(path, { method: "DELETE" }).catch(() => {});
