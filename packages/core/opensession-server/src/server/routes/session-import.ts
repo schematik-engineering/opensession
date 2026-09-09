@@ -10,6 +10,7 @@ import {
   createWorkspace,
   findWorkspaceByBranch,
   getWorkspace,
+  peekWorkspace,
 } from "../workspaces";
 import {
   readRequestTextWithinLimit,
@@ -252,26 +253,18 @@ function createdAtForImport(
 async function persistImportedSession(
   record: SessionImportRecord,
 ): Promise<{ workspaceId: string }> {
-  let persistedWorkspaceId = `ws-import-${record.sessionId.slice(4)}`;
+  const fallbackWorkspaceId = `ws-import-${record.sessionId.slice(4)}`;
+  const branchWorkspace =
+    record.repoId && record.branch
+      ? await findWorkspaceByBranch(record.repoId, record.branch)
+      : null;
+  let persistedWorkspaceId = fallbackWorkspaceId;
   await updateSessionFile(record.sessionId, (current) => {
     const exists = current.id === record.sessionId;
-    const branchWorkspace =
-      record.repoId && record.branch
-        ? findWorkspaceByBranch(record.repoId, record.branch)
-        : null;
     const workspaceId =
-      (current.workspaceId && getWorkspace(current.workspaceId)?.id) ||
+      (current.workspaceId && peekWorkspace(current.workspaceId)?.id) ||
       branchWorkspace?.id ||
-      `ws-import-${record.sessionId.slice(4)}`;
-    if (!getWorkspace(workspaceId))
-      createWorkspace({
-        id: workspaceId,
-        name: record.title,
-        repo: record.repoId,
-        createdBy: record.createdBy,
-        createdAt: record.createdAt,
-        ...(record.branch ? { branch: record.branch } : {}),
-      });
+      fallbackWorkspaceId;
     persistedWorkspaceId = workspaceId;
     return {
       ...current,
@@ -299,6 +292,16 @@ async function persistImportedSession(
       lastActivity: record.importedAt,
     };
   });
+  if (!(await getWorkspace(persistedWorkspaceId))) {
+    await createWorkspace({
+      id: persistedWorkspaceId,
+      name: record.title,
+      repo: record.repoId,
+      createdBy: record.createdBy,
+      createdAt: record.createdAt,
+      ...(record.branch ? { branch: record.branch } : {}),
+    });
+  }
   return { workspaceId: persistedWorkspaceId };
 }
 

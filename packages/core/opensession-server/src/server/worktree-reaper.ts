@@ -760,8 +760,11 @@ let sweepTimer: ReturnType<typeof setInterval> | null = null;
 
 /** Start the hourly reap. Call once from the __opensessionBooted block. */
 export function startWorktreeReaper(
-  getSessions: () => readonly (WorktreeActivitySession &
-    Partial<ScratchSweepSession>)[] = () => [],
+  getSessions: () =>
+    | readonly (WorktreeActivitySession & Partial<ScratchSweepSession>)[]
+    | Promise<
+        readonly (WorktreeActivitySession & Partial<ScratchSweepSession>)[]
+      > = () => [],
 ): void {
   if (sweepTimer) return;
   if (process.env.OPENSESSION_WORKTREE_REAPER === "0") {
@@ -769,32 +772,34 @@ export function startWorktreeReaper(
     return;
   }
   const run = () => {
-    let sessions: readonly (WorktreeActivitySession &
-      Partial<ScratchSweepSession>)[];
-    try {
-      sessions = getSessions();
-    } catch (e) {
-      console.error("[worktree-reaper] session snapshot failed; skipping:", e);
-      return;
-    }
-    void sweepWorktreeReaper({ sessions }).catch((e) =>
-      console.error("[worktree-reaper] sweep failed:", e),
-    );
-    // Session scratch dirs (session-scratch.ts) ride the same cadence and
-    // session snapshot; scratch outlives its session only up to the same
-    // horizons the worktrees do.
-    const scratchSessions = sessions.filter(
-      (s): s is WorktreeActivitySession & ScratchSweepSession =>
-        typeof s.id === "string",
-    );
-    void sweepSessionScratch(scratchSessions)
-      .then((removed) => {
-        if (removed.length)
-          console.log(
-            `[session-scratch] swept ${removed.length} idle scratch dir(s)`,
-          );
+    void Promise.resolve()
+      .then(() => getSessions())
+      .then((sessions) => {
+        void sweepWorktreeReaper({ sessions }).catch((e) =>
+          console.error("[worktree-reaper] sweep failed:", e),
+        );
+        // Session scratch dirs (session-scratch.ts) ride the same cadence and
+        // session snapshot; scratch outlives its session only up to the same
+        // horizons the worktrees do.
+        const scratchSessions = sessions.filter(
+          (s): s is WorktreeActivitySession & ScratchSweepSession =>
+            typeof s.id === "string",
+        );
+        void sweepSessionScratch(scratchSessions)
+          .then((removed) => {
+            if (removed.length)
+              console.log(
+                `[session-scratch] swept ${removed.length} idle scratch dir(s)`,
+              );
+          })
+          .catch((e) => console.error("[session-scratch] sweep failed:", e));
       })
-      .catch((e) => console.error("[session-scratch] sweep failed:", e));
+      .catch((e) => {
+        console.error(
+          "[worktree-reaper] session snapshot failed; skipping:",
+          e,
+        );
+      });
   };
   setTimeout(run, FIRST_SWEEP_DELAY_MS);
   sweepTimer = setInterval(run, SWEEP_INTERVAL_MS);

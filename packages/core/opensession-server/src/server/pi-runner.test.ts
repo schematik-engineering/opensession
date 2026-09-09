@@ -267,7 +267,7 @@ describe("resolvePiRoutedModel", () => {
       modelID: "claude-fable-5-1",
       orchestrator: {
         id: "orchestrator/fable-sol",
-        workerAgents: ["worker-sol"],
+        workerAgents: ["worker-astra"],
       },
       effort: "high",
     });
