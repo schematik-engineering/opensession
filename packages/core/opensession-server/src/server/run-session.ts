@@ -30,7 +30,7 @@ import { syncAgentSessionEngine } from "./agent-session-sync";
 import { cancelAgentWait } from "./agent-waits";
 import { runAgentHosted } from "./host-client";
 import { getRunState, transitionRunState } from "./run-state";
-import { resolveSessionRunInputs } from "./session-run-inputs";
+import { resolveSessionRunInputs, runAccountSpec } from "./session-run-inputs";
 import { defaultRepo } from "./config";
 import { isDevInstance } from "./dev-mode";
 import {
@@ -164,7 +164,7 @@ import {
 import { markRecapPendingIfUnwatched } from "./recap";
 import { scheduleSessionHistoryIndex } from "./session-index";
 import { broadcastToSession, sessionWatchers } from "./ws-hub";
-import { getWorkspace } from "./workspaces";
+import { peekWorkspace } from "./workspaces";
 import {
   broadcastQueue,
   beginNextPromptDispatch,
@@ -534,7 +534,11 @@ import {
   ORPHANED_STEER_PROMPT,
   WEDGE_RETRY_PROMPT,
 } from "./auto-continue";
-import { SYSTEM_RESTART_USER } from "./session-actors";
+import {
+  humanPrompter,
+  sessionPrincipal,
+  SYSTEM_RESTART_USER,
+} from "./session-actors";
 
 const g = globalThis as any;
 
@@ -1823,6 +1827,7 @@ export function sandboxRunSecuritySpec(
   opts: {
     isAutomationSession: boolean;
     user?: string;
+    accountUser?: string;
     mcpServers?: McpScope;
     deniedTools?: Record<string, string>;
   },
@@ -1836,6 +1841,7 @@ export function sandboxRunSecuritySpec(
   | "aws"
   | "user"
   | "mcpGrantUser"
+  | "accountUser"
   | "journalKind"
   | "trustProfile"
 > {
@@ -1862,6 +1868,9 @@ export function sandboxRunSecuritySpec(
     mcpGrantUser: opts.isAutomationSession
       ? undefined
       : session.createdByLogin || undefined,
+    // The person pressing send may spend their own subscription even in an
+    // automation-owned session; the identity stops at account selection.
+    accountUser: opts.accountUser,
     journalKind: opts.isAutomationSession ? "automation" : "prompt",
     trustProfile: opts.isAutomationSession ? "automation" : "interactive",
   };
@@ -1881,6 +1890,7 @@ export async function maybeLaunchSandboxedRun(
     promptCarriesHandoff?: boolean;
     cwd: string;
     user?: string;
+    accountUser?: string;
     images?: ImageInput[];
     mcpServers?: McpScope;
     deniedTools?: Record<string, string>;
@@ -1918,7 +1928,7 @@ export async function maybeLaunchSandboxedRun(
     opts.isAutomationSession && !session.automationDescendantPolicy;
   const owningAutomation = disposableAutomationResume
     ? session.automationId
-      ? getAutomation(session.automationId)
+      ? await getAutomation(session.automationId)
       : null
     : null;
   if (disposableAutomationResume) {
@@ -2165,20 +2175,16 @@ export async function maybeLaunchSandboxedRun(
       confirmTools: STRIPE_CONFIRM_TOOLS,
       author: commitAuthorFor(
         opts.isAutomationSession ? undefined : opts.user,
-        opts.isAutomationSession ? undefined : session.startedBy,
+        opts.isAutomationSession ? undefined : sessionPrincipal(session),
       ),
       fallbackModel: opts.isAutomationSession
         ? undefined
         : interactiveFallbackModel(session.model),
       effort: portablePreset?.effort ?? session.effort,
       fastMode: session.fastMode,
-      accountId: disposableAutomationResume
-        ? owningAutomation?.accountId
-        : session.accountId,
-      accountStrict: disposableAutomationResume ? true : undefined,
-      usageCredits: disposableAutomationResume
-        ? owningAutomation?.usageCredits
-        : undefined,
+      // A disposable automation resume carries the automation's hard pin for
+      // its own turns; a person's takeover turn carries none (runAccountSpec).
+      ...runAccountSpec(session, opts, owningAutomation),
     };
     if (isAgentSessionCancelled(session.id, opts.startToken)) {
       unregisterRunToken(rpcToken);
@@ -2617,6 +2623,31 @@ async function runSessionPromptInner(
   // own delivery keeps the flag, capping it at one consecutive auto-continue).
   if (user !== AUTO_CONTINUE_USER) autoContinueNudged.delete(sessionId);
 
+  // A person's prompt makes them the one this session acts for: the next
+  // turn nobody sends (a review handoff, an auto-continue, a queue drain)
+  // commits on their behalf, not the creator's (sessionPrincipal). Recorded
+  // before the turn so a run that dies mid-way still leaves it behind, and
+  // never allowed to block the turn: attribution is not worth a lost prompt.
+  const prompter = humanPrompter(user);
+  if (
+    prompter &&
+    session.source === "opensession" &&
+    session.lastPromptedBy !== prompter
+  ) {
+    try {
+      await updateSessionFile(sessionId, (data) => ({
+        ...data,
+        lastPromptedBy: prompter,
+      }));
+      session.lastPromptedBy = prompter;
+    } catch (error) {
+      console.warn(
+        `[run] could not record ${sessionId}'s prompter:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
   // The engine session id depends on the session's model: codex models resume
   // the codex thread, claude models the claude session. A missing engine id
   // just means "first run on this provider" — a fresh thread/session starts.
@@ -3036,6 +3067,7 @@ async function runSessionPromptInner(
         promptCarriesHandoff: !!switchHandoff,
         cwd,
         user,
+        accountUser: runInputs.accountUser,
         images,
         mcpServers: mcpServers ?? "all",
         deniedTools,
@@ -3089,6 +3121,12 @@ async function runSessionPromptInner(
   // scoping intact: proxy names come from the same fail-closed automation
   // set the run-rpc fallback builder serves, while the repos note and MCP
   // grant identity are withheld.
+  // Resolved once: the automation-bar server set is a catalog read, and the
+  // proxy name list, the run-rpc fallback and the in-process mount below must
+  // all describe the same set.
+  const automationMcp = isAutomationSession
+    ? await automationSessionMcp(session, sessionId)
+    : {};
   const hostedRun =
     !runnerRun && !sandboxRun
       ? runAgentHosted({
@@ -3112,7 +3150,7 @@ async function runSessionPromptInner(
           proxyMcpServers: session.automationDescendantPolicy
             ? []
             : isAutomationSession
-              ? Object.keys(automationSessionMcp(session, sessionId))
+              ? Object.keys(automationMcp)
               : [
                   ...Object.keys(interactiveMcpServers(user, sessionId)),
                   ...(session.goalId ? ["opensession-goal-self"] : []),
@@ -3130,19 +3168,22 @@ async function runSessionPromptInner(
             : undefined,
           confirmTools: STRIPE_CONFIRM_TOOLS,
           aws: !isAutomationSession,
-          author: commitAuthorFor(user, session.startedBy),
+          author: commitAuthorFor(user, sessionPrincipal(session)),
           user: runInputs.user,
+          accountUser: runInputs.accountUser,
           fallbackModel: interactiveFallbackModel(session.model),
           effort: session.effort,
           fastMode: session.fastMode,
-          accountId: session.accountId,
+          // Session pin, except for a person's turn in an automation-owned
+          // session: they pay personal-first with the pool as backup.
+          ...runAccountSpec(session, runInputs),
           trustProfile: isAutomationSession ? "automation" : "interactive",
           journalKind: "prompt",
           onAskUser: makeAskHandler(sessionId),
           onSteerFailed: (text) => requeueFailedSteer(session.id, text, user),
           fallbackInProcessMcp: () =>
             isAutomationSession
-              ? automationSessionMcp(session, sessionId)
+              ? automationMcp
               : session.goalId
                 ? {
                     ...interactiveMcpServers(user, sessionId),
@@ -3188,8 +3229,10 @@ async function runSessionPromptInner(
       effort: session.effort,
       fastMode: session.fastMode,
       // Pinned subscription for this session (claude-runner prefers it, pool
-      // fallback on exhaustion). Ignored by Codex models.
-      accountId: session.accountId,
+      // fallback on exhaustion). Ignored by Codex models. A person's turn in
+      // an automation-owned session carries no pin, so their own subscription
+      // is tried before the automation's account and the pool.
+      ...runAccountSpec(session, runInputs),
       // Only switch models when a fallback is explicitly configured. By default,
       // usage exhaustion stops the run so the human can choose what to do.
       fallbackModel: interactiveFallbackModel(session.model),
@@ -3219,7 +3262,7 @@ async function runSessionPromptInner(
       inProcessMcp: session.automationDescendantPolicy
         ? {}
         : isAutomationSession
-          ? automationSessionMcp(session, sessionId)
+          ? automationMcp
           : session.goalId
             ? {
                 ...interactiveMcpServers(user, sessionId),
@@ -3242,12 +3285,16 @@ async function runSessionPromptInner(
       confirmTools: STRIPE_CONFIRM_TOOLS,
       aws: !isAutomationSession, // automation descendants never receive AWS credentials
       // Attribute any commits this turn makes to whoever sent the prompt, or
-      // to whoever the session belongs to when nobody did (an auto-continue,
-      // a restart resume, a queue drain).
-      author: commitAuthorFor(user, session.startedBy),
+      // to the person the session acts for when nobody did (an auto-continue,
+      // a restart resume, a queue drain): the last person who prompted it,
+      // else its creator.
+      author: commitAuthorFor(user, sessionPrincipal(session)),
       // Gate per-user MCP servers (allowedUsers) to the prompt's author. Automation
       // sessions pass no user, so they never see a user-restricted server.
       user: runInputs.user,
+      // The person who sent the prompt may spend their own subscription even
+      // when the session is automation-owned (the pool stays the backup).
+      accountUser: runInputs.accountUser,
       // The creator grant also gives provider routing a safe human identity for
       // synthetic continuations such as worker reports and restart recovery.
       mcpGrantUser: runInputs.mcpGrantUser,
@@ -3733,7 +3780,8 @@ export function sessionMentionsNote(
   if (workspaceIds.length) {
     const sessions = getCachedSessions();
     const lines = workspaceIds.map((id) => {
-      const workspace = getWorkspace(id);
+      // Memory projection: the note is assembled synchronously per prompt.
+      const workspace = peekWorkspace(id);
       if (!workspace) return `- @workspace:${id} · no workspace with this id`;
       const members = sessions.filter(
         (session) => session.workspaceId === id && !session.archived,

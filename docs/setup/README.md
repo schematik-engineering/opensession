@@ -44,7 +44,7 @@ flowchart LR
 
   clients --> http
   hooks -->|webhooks and OAuth| wh
-  agents -->|Socket Mode and polling| hooks
+  agents -->|polling| hooks
   http <--> kernel
   agents <--> kernel
   autos <--> kernel
@@ -96,7 +96,7 @@ separate app listener on 3850 serves the private UI and API.
   installer can add it with `--tailscale`; on macOS install the Tailscale app.
   The default install binds loopback, and joining a tailnet is a separate step
   that needs your account or an auth key.
-- Optional: **Docker** (sandboxed sessions —
+- Optional: a **Daytona or Box account** (Sandbox sessions —
   [self-hosting-sandboxes](../self-hosting-sandboxes.md)), **Caddy** (direct
   HTTPS for public callbacks and TLS for live previews), **cloudflared**
   (custom-domain public callbacks, or an externally configured Access-protected

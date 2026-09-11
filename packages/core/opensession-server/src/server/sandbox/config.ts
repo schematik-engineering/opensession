@@ -2,10 +2,10 @@
  * Sandbox configuration.
  *
  * `~/.opensession/sandbox.json` holds the workspace's sandbox settings. The
- * provider connections (Daytona, Box) live in its `connections` array and are
- * managed from Workspace → Sandboxes; everything else here is small operator
- * plumbing: the dial-back URL, the clone credential, the runner pin, and the
- * warm-on-typing pool.
+ * provider connections (Docker, Daytona, Box) live in its `connections` array
+ * and are managed from Workspace → Sandboxes; everything else here is small
+ * operator plumbing: the dial-back URL, the clone credential, the runner pin,
+ * and the warm-on-typing pool. Docker is a first-class local provider.
  *
  * Read fresh on every call so a config change applies to the next run without
  * a restart. Missing/invalid config = provider "local" = host sessions only.
@@ -214,6 +214,15 @@ export function sandboxConfig(): SandboxConfig {
           if (provider) perRepo[repoId] = { provider };
         }
       }
+      const previewPorts = Array.isArray(raw?.previewPorts)
+        ? raw.previewPorts.filter(
+            (p: unknown): p is number =>
+              typeof p === "number" &&
+              Number.isInteger(p) &&
+              p > 0 &&
+              p < 65536,
+          )
+        : [];
       const str = (v: unknown): string | undefined =>
         typeof v === "string" && v.trim() ? v.trim() : undefined;
       return {
@@ -224,11 +233,35 @@ export function sandboxConfig(): SandboxConfig {
             : isRunnableSandboxProvider(raw?.sessionDefault)
               ? raw.sessionDefault
               : undefined,
+        image: typeof raw?.image === "string" ? raw.image : undefined,
         idleStopMinutes:
           typeof raw?.idleStopMinutes === "number" && raw.idleStopMinutes > 0
             ? raw.idleStopMinutes
             : undefined,
+        cpus:
+          typeof raw?.cpus === "number" && raw.cpus > 0 ? raw.cpus : undefined,
+        memory:
+          typeof raw?.memory === "string" &&
+          /^\d+(\.\d+)?[kmg]b?$/i.test(raw.memory.trim())
+            ? raw.memory.trim()
+            : undefined,
+        workspace: raw?.workspace === "volume" ? "volume" : undefined,
+        previewPorts: previewPorts.length ? previewPorts : undefined,
+        snapshots:
+          raw?.snapshots && typeof raw.snapshots === "object"
+            ? {
+                enabled: raw.snapshots.enabled === true,
+                onIdle: raw.snapshots.onIdle !== false,
+                maxPerSession:
+                  typeof raw.snapshots.maxPerSession === "number" &&
+                  raw.snapshots.maxPerSession >= 1
+                    ? Math.floor(raw.snapshots.maxPerSession)
+                    : SNAPSHOT_DEFAULTS.maxPerSession,
+                quickSyncOnRestore: raw.snapshots.quickSyncOnRestore !== false,
+              }
+            : undefined,
         perRepo: Object.keys(perRepo).length ? perRepo : undefined,
+        transport: raw?.transport === "ws" ? "ws" : undefined,
         callbackBaseUrl: str(raw?.callbackBaseUrl),
         publicIngress:
           raw?.publicIngress && typeof raw.publicIngress === "object"
@@ -500,18 +533,20 @@ export function isRunnableSandboxProvider(
 }
 
 /** Remote providers have no host mounts — their workspaces are ALWAYS
- *  volume-style (cloned inside the sandbox; no host fallback for runs). */
+ *  volume-style (cloned inside the sandbox; no host fallback for runs).
+ *  Docker is local to this host and can bind-mount the worktree. */
 export function isRemoteSandboxProvider(
   v: unknown,
-): v is RunnableSandboxProviderId {
-  return isRunnableSandboxProvider(v);
+): v is Exclude<RunnableSandboxProviderId, "docker"> {
+  return isRunnableSandboxProvider(v) && v !== "docker";
 }
 
 /** Providers whose service ports cannot be reached from the Open Session host
  * and therefore need the authenticated outbound HTTP/WebSocket Portal relay.
- * Every supported Sandbox provider is remote, so this is every Sandbox. */
+ * Docker publishes loopback ports on this host, so it stays on the direct
+ * branch. */
 export function usesOutboundSandboxPortalRelay(v: unknown): boolean {
-  return isRunnableSandboxProvider(v);
+  return isRemoteSandboxProvider(v);
 }
 
 /** True when a sandbox config file exists and parses — the operator has set
@@ -777,7 +812,7 @@ export function sandboxCapabilityStatus(): SandboxCapabilityStatus {
       const certification = SANDBOX_PROVIDER_CERTIFICATIONS[id];
       const usability = sandboxProviderUsability(id);
       const notes = [
-        configured ? remoteNote : undefined,
+        configured && id !== "docker" ? remoteNote : undefined,
         usability.state === "unqualified"
           ? "needs attention in Workspace > Sandboxes"
           : undefined,
@@ -853,7 +888,7 @@ export function resolveRequestedSandbox(
       return {
         ok: false,
         error:
-          "No Sandbox provider is ready. Connect Daytona or Box in Workspace > Sandboxes.",
+          "No Sandbox provider is ready. Connect Docker, Daytona or Box in Workspace > Sandboxes.",
       };
     return withModelCheck(provider);
   }
@@ -862,13 +897,13 @@ export function resolveRequestedSandbox(
   if (isRetiredSandboxProvider(id)) {
     return {
       ok: false,
-      error: `Sandbox provider "${requested}" has been retired — valid values: daytona, box (or true for the workspace's Sandbox).`,
+      error: `Sandbox provider "${requested}" has been retired — valid values: docker, daytona, box (or true for the workspace's Sandbox).`,
     };
   }
   if (!isRunnableSandboxProvider(id)) {
     return {
       ok: false,
-      error: `Unknown sandbox provider "${requested}" — valid values: daytona, box (or true for the workspace's Sandbox).`,
+      error: `Unknown sandbox provider "${requested}" — valid values: docker, daytona, box (or true for the workspace's Sandbox).`,
     };
   }
   return withModelCheck(id);

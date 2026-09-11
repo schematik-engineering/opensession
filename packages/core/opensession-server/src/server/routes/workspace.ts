@@ -94,7 +94,6 @@ import {
 } from "../worktree";
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { isClientSessionId, isNativeSessionId, newSessionId } from "../paths";
-import { isReusableEmptySession } from "../empty-session";
 import { githubMutationCredential } from "./github-credential";
 import { conditionalJsonResponse } from "../http-json";
 import { indexedActiveWorkspaceIds } from "../session-list-store";
@@ -493,10 +492,10 @@ export async function handleWorkspaceRoutes(
     // The defaults ride once at the top level; a workspace row carries
     // modelSettings only when someone saved their own copy. Stamping the
     // defaults on every row multiplied the payload by the workspace count.
-    let workspaces = listWorkspaces();
+    let workspaces = await listWorkspaces();
     const activeOnly = url.searchParams.get("active") === "1";
     if (activeOnly) {
-      const indexedIds = indexedActiveWorkspaceIds();
+      const indexedIds = await indexedActiveWorkspaceIds();
       const activeWorkspaceIds = new Set(
         indexedIds ??
           (await getCachedSessionsAsync("exclude"))
@@ -551,7 +550,7 @@ export async function handleWorkspaceRoutes(
         return Response.json({ error: "invalid draft" }, { status: 400 });
       if (parsed !== null) draft = parsed;
     }
-    const workspace = createWorkspace({
+    const workspace = await createWorkspace({
       name: body.name,
       repo: body.repo,
       color: body.color,
@@ -581,7 +580,7 @@ export async function handleWorkspaceRoutes(
     };
     const createdBy = requestUser(ctx, body.user) || "Anonymous";
     if (body.externalRef?.kind && body.externalRef?.id) {
-      const { workspace, created } = resolveExternalWorkspace({
+      const { workspace, created } = await resolveExternalWorkspace({
         ref: {
           kind: body.externalRef.kind,
           id: body.externalRef.id,
@@ -593,7 +592,7 @@ export async function handleWorkspaceRoutes(
       return Response.json({ workspaceId: workspace.id, created });
     }
     if (body.plainThreadId) {
-      const { workspace, created } = resolvePlainWorkspace({
+      const { workspace, created } = await resolvePlainWorkspace({
         threadId: body.plainThreadId,
         title: body.name,
         createdBy,
@@ -648,7 +647,7 @@ export async function handleWorkspaceRoutes(
         return Response.json({ error: "invalid draft" }, { status: 400 });
       draft = parsed;
     }
-    const workspace = updateWorkspace(id, {
+    const workspace = await updateWorkspace(id, {
       ...rest,
       ...(rawDraft !== undefined ? { draft } : {}),
     });
@@ -659,7 +658,7 @@ export async function handleWorkspaceRoutes(
 
   if (workspaceMatch && req.method === "DELETE") {
     const id = decodeURIComponent(workspaceMatch[1]);
-    if (!getWorkspace(id)) return Response.json({ ok: false });
+    if (!(await getWorkspace(id))) return Response.json({ ok: false });
 
     // A workspace owns its sessions. Delete each through the normal session route
     // so running agents, transcripts, sandboxes, and tombstones receive the same
@@ -674,7 +673,7 @@ export async function handleWorkspaceRoutes(
     if (failure) return failure;
 
     // Deleting the last non-PR session may already remove the workspace.
-    const ok = deleteWorkspace(id) || !getWorkspace(id);
+    const ok = (await deleteWorkspace(id)) || !(await getWorkspace(id));
     return Response.json({ ok });
   }
 
@@ -739,24 +738,6 @@ export async function handleWorkspaceRoutes(
         id: bksId,
         session: await sessionDetail(existing),
       });
-    // One reusable empty tab per workspace. This server-side check closes the
-    // multi-window race that hiding the + in one browser cannot prevent.
-    const reusable = body.duplicate
-      ? undefined
-      : src.workspaceId
-        ? (await getCachedSessionsAsync("exclude")).find(
-            (session) =>
-              session.workspaceId === src.workspaceId &&
-              isReusableEmptySession(session),
-          )
-        : isReusableEmptySession(src)
-          ? src
-          : undefined;
-    if (reusable)
-      return Response.json({
-        id: reusable.id,
-        session: await sessionDetail(reusable),
-      });
     let branch = src.branch || "";
     let worktreeDir = src.worktreeDir || "";
     let mode: "ask" | "code" | "scratch" = src.mode || "code";
@@ -819,7 +800,7 @@ export async function handleWorkspaceRoutes(
       // Same workspace ⇒ same worktree: even when the source session has no
       // worktree of its own (e.g. + from an ask tab), a share sibling
       // joins the workspace's owned worktree instead of starting bare.
-      const ws = getWorkspace(src.workspaceId);
+      const ws = await getWorkspace(src.workspaceId);
       if (ws?.worktreeDir && existsSync(ws.worktreeDir)) {
         branch = ws.branch || "";
         worktreeDir = ws.worktreeDir;
@@ -839,7 +820,7 @@ export async function handleWorkspaceRoutes(
         );
         mode = "code";
         repoId = getRepo(ws.repo).id;
-        updateWorkspace(ws.id, { worktreeDir });
+        await updateWorkspace(ws.id, { worktreeDir });
       }
     }
     // A workspace-less source gets healed here: adopt the workspace that
@@ -854,13 +835,13 @@ export async function handleWorkspaceRoutes(
     // from it gets its own workspace and the Desk stays out of the sidebar.
     let workspaceId = src.workspaceId || null;
     if (!workspaceId && !src.desk) {
-      const owned = workspaceOwningWorktree(src.worktreeDir);
+      const owned = await workspaceOwningWorktree(src.worktreeDir);
       if (owned) {
         workspaceId = owned.id;
         if (src.source === "opensession")
           touchNativeSession(src.id, { workspaceId: owned.id });
       } else if (src.source === "opensession") {
-        const ws = createWorkspace({
+        const ws = await createWorkspace({
           name: src.title || src.branch || "Workspace",
           repo: src.repo,
           createdBy:
@@ -891,14 +872,15 @@ export async function handleWorkspaceRoutes(
       return Response.json({ error: sandboxResolved.error }, { status: 400 });
     // A sibling in a ticket-linked session/workspace stays linked to the ticket
     // (conversation tab + ticket→session mapping follow the workspace).
+    const siblingWorkspace = workspaceId
+      ? await getWorkspace(workspaceId)
+      : null;
     const plainThreadId =
-      src.plainThreadId ||
-      (workspaceId ? getWorkspace(workspaceId)?.plainThreadId : undefined);
+      src.plainThreadId || siblingWorkspace?.plainThreadId || undefined;
     // Feed-item linkage follows the workspace the same way (Video tab +
     // sidebar feed-row → session join — the feeds design).
     const siblingRefs =
-      src.externalRefs ||
-      (workspaceId ? getWorkspace(workspaceId)?.externalRefs : undefined);
+      src.externalRefs || siblingWorkspace?.externalRefs || undefined;
     const data: NativeSessionFile = {
       id: bksId,
       ...(body.duplicate ? { duplicatedFromSessionId: src.id } : {}),
@@ -1041,9 +1023,9 @@ export async function handleWorkspaceRoutes(
       worktreeDir &&
       !isSharedCheckoutDir(worktreeDir)
     ) {
-      const ws = getWorkspace(session.workspaceId);
+      const ws = await getWorkspace(session.workspaceId);
       if (ws && !ws.worktreeDir)
-        updateWorkspace(ws.id, { worktreeDir, branch });
+        await updateWorkspace(ws.id, { worktreeDir, branch });
     }
     return Response.json({ ok: true, branch, worktreeDir });
   }
@@ -1059,7 +1041,7 @@ export async function handleWorkspaceRoutes(
       workspaceId?: string | null;
     };
     const workspaceId = body.workspaceId ?? null;
-    if (workspaceId && !getWorkspace(workspaceId))
+    if (workspaceId && !(await getWorkspace(workspaceId)))
       return Response.json({ error: "Workspace not found" }, { status: 404 });
     touchNativeSession(sessionId, { workspaceId });
     return Response.json({ ok: true, workspaceId });

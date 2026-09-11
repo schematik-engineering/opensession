@@ -1,12 +1,21 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { createServer } from "node:net";
 import {
   listPortalServices,
   listSandboxPortalServices,
+  hostPortalAdmissionReason,
   normalizePortalPath,
+  portalShouldSleep,
   portalsNeedingContainment,
   type PortalRecord,
   portalsToRestore,
@@ -25,6 +34,13 @@ import type { Sandbox } from "./sandbox/provider";
 let worktree = "";
 const previousStateDir = process.env.OPENSESSION_STATE_DIR;
 const previousPath = process.env.PATH;
+// Host Portal admission samples real host memory against a 24 GB floor, and
+// hosted CI runners have less than that. The floor itself is covered by the
+// pure hostPortalAdmissionReason test; the process tests below must not
+// depend on the machine they run on.
+const previousMemoryFloor =
+  process.env.OPENSESSION_PORTAL_MIN_AVAILABLE_MEMORY_MB;
+process.env.OPENSESSION_PORTAL_MIN_AVAILABLE_MEMORY_MB = "1";
 const processTools = mkdtempSync(join(tmpdir(), "os-process-tools-"));
 let testSetsid = Bun.which("setsid");
 if (!testSetsid) {
@@ -54,6 +70,11 @@ afterAll(() => {
   else process.env.OPENSESSION_STATE_DIR = previousStateDir;
   if (previousPath == null) delete process.env.PATH;
   else process.env.PATH = previousPath;
+  if (previousMemoryFloor == null)
+    delete process.env.OPENSESSION_PORTAL_MIN_AVAILABLE_MEMORY_MB;
+  else
+    process.env.OPENSESSION_PORTAL_MIN_AVAILABLE_MEMORY_MB =
+      previousMemoryFloor;
   rmSync(processTools, { recursive: true, force: true });
 });
 
@@ -133,6 +154,52 @@ describe("Portal containment migration", () => {
       ["awake-legacy", "starting-legacy"],
     );
     expect(portalsNeedingContainment(records, false)).toEqual([]);
+  });
+});
+
+describe("host Portal capacity", () => {
+  test("rejects starts at either the process or memory boundary", () => {
+    expect(
+      hostPortalAdmissionReason({
+        active: 4,
+        maxActive: 4,
+        availableMemoryMb: 80_000,
+        minAvailableMemoryMb: 24_576,
+      }),
+    ).toContain("capacity is full");
+    expect(
+      hostPortalAdmissionReason({
+        active: 1,
+        reserved: 1,
+        maxActive: 4,
+        availableMemoryMb: 20_000,
+        minAvailableMemoryMb: 24_576,
+      }),
+    ).toContain("memory is below");
+    expect(
+      hostPortalAdmissionReason({
+        active: 1,
+        maxActive: 4,
+        availableMemoryMb: 80_000,
+        minAvailableMemoryMb: 24_576,
+      }),
+    ).toBeUndefined();
+  });
+});
+
+describe("host Portal idle sleep", () => {
+  test("sleeps only an idle, awake Portal whose owner is not running", () => {
+    const base = {
+      state: "awake" as const,
+      ownerRunning: false,
+      now: 1_000_000,
+      lastAccessedAt: 100_000,
+      idleMs: 600_000,
+    };
+    expect(portalShouldSleep(base)).toBe(true);
+    expect(portalShouldSleep({ ...base, ownerRunning: true })).toBe(false);
+    expect(portalShouldSleep({ ...base, state: "sleeping" })).toBe(false);
+    expect(portalShouldSleep({ ...base, lastAccessedAt: 900_000 })).toBe(false);
   });
 });
 
@@ -371,6 +438,36 @@ describe("session Portal supervisor", () => {
       }),
     ]);
     expect((await listPortalServices(worktree))[0]?.state).toBe("stopped");
+  });
+
+  test("a worktree spelled through a symlink is the same worktree to the reaper", async () => {
+    const alias = join(
+      mkdtempSync(join(tmpdir(), "os-portals-alias-")),
+      "repo",
+    );
+    symlinkSync(worktree, alias);
+    await startPortalService({
+      sessionId: "owner",
+      worktreeDir: worktree,
+      name: "shared",
+      port: 18_705,
+      command:
+        "bun -e 'Bun.serve({port:Number(process.env.PORT),fetch(){return new Response(\"shared\")}})'",
+    });
+    // Another live session records the same checkout under its alias. Keyed
+    // by spelling, the registry read under the alias saw only that session
+    // as owner and reaped the Portal.
+    const result = await reapOrphanedPortalServices([
+      { id: "owner", worktreeDir: worktree, attachedRepos: [] },
+      { id: "other", worktreeDir: alias, attachedRepos: [] },
+    ]);
+    expect(result.stopped).toEqual([]);
+    expect((await listPortalServices(worktree))[0]?.state).toBe("awake");
+    await stopPortalService({
+      sessionId: "owner",
+      worktreeDir: worktree,
+      name: "shared",
+    });
   });
 
   test("supervises and deduplicates a Portal through the Sandbox execution boundary", async () => {

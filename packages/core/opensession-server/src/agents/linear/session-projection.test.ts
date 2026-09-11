@@ -11,6 +11,9 @@ describe("Linear session projection", () => {
     const listStoreUrl = pathToFileURL(
       join(import.meta.dir, "../../server/session-list-store.ts"),
     ).href;
+    const listSqliteUrl = pathToFileURL(
+      join(import.meta.dir, "../../server/session-list-sqlite.ts"),
+    ).href;
     const cacheUrl = pathToFileURL(
       join(import.meta.dir, "../../server/session-cache.ts"),
     ).href;
@@ -32,7 +35,10 @@ describe("Linear session projection", () => {
       const { mkdirSync } = await import("node:fs");
       mkdirSync(process.env.HOME + "/.linear-sessions", { recursive: true });
       const list = await import(${JSON.stringify(listStoreUrl)});
-      list.sessionListStore().markCovered("include");
+      const sqlite = await import(${JSON.stringify(listSqliteUrl)});
+      const store = new sqlite.SessionListStore(":memory:");
+      list.__setSessionListStoreForTest(store);
+      store.markCovered("include");
       const { saveSessionInfo, loadSessionInfo, ensureLinearWorktree, linearSessionRepoId } = await import(${JSON.stringify(sessionUrl)});
       const repoId = linearSessionRepoId();
       await saveSessionInfo("check-open-sch274", {
@@ -49,9 +55,9 @@ describe("Linear session projection", () => {
         lastActiveUser: null,
         issueCreator: null
       });
-      const indexed = list.indexedSessions("include") || [];
-      const { findSession } = await import(${JSON.stringify(cacheUrl)});
-      const direct = findSession("linear-check-open-sch274");
+      const indexed = (await list.indexedSessions("include")) || [];
+      const { findSessionAsync } = await import(${JSON.stringify(cacheUrl)});
+      const direct = await findSessionAsync("linear-check-open-sch274");
       await Bun.write(process.env.HOME + "/.linear-sessions/legacy.json", JSON.stringify({
         branch: "legacy",
         worktreeDir: process.env.OPENSESSION_STATE_DIR + "/.opensession/worktrees/biss-client-legacy"

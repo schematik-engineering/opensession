@@ -88,7 +88,7 @@ import {
 import { createAskUserMcpServer, type AskUserHandler } from "./ask-tools";
 import { writeJsonAtomic } from "../../server/shared/atomic-write";
 import { ensureGeneratedTitle } from "../../server/generated-titles";
-import { invalidateSessionsCache } from "../../server/session-cache";
+import { publishSessionChange } from "../../server/session-cache";
 import {
   getDefaultModel,
   toPiModel,
@@ -119,11 +119,14 @@ import type { SlackSession, PendingAnswer } from "./state";
 
 const ALLOWED_USER_ID = process.env.ALLOWED_SLACK_USER_ID;
 
-function pinSlackSession(sessionId: string, slackUserId: string): void {
+async function pinSlackSession(
+  sessionId: string,
+  slackUserId: string,
+): Promise<void> {
   const user = slackIdToFirstName(slackUserId);
   // Opt-in, matching the web UI's "Pin new sessions" default.
   if (!user || getUiPrefs(user)["pin-new-sessions"] !== "on") return;
-  pinForUser(user, sessionId);
+  await pinForUser(user, sessionId);
 }
 
 async function postOpenSessionCard(
@@ -185,7 +188,7 @@ async function activateLinkedSession(
     },
   );
   if (res.status !== "error") {
-    pinSlackSession(sessionId, slackUserId);
+    await pinSlackSession(sessionId, slackUserId);
     await postOpenSessionCard(channel, threadTs, sessionId).catch((e) =>
       console.warn(
         `[slack] Failed to post linked-session card for ${sessionId}:`,
@@ -254,11 +257,23 @@ function mergeFileRefs(
   return merged.length ? merged : undefined;
 }
 
+// Save the session and refresh its list index row. The index learns rows
+// from targeted publishes and full rebuilds only, never from this file write:
+// without the publish a thread created after boot stayed invisible to the
+// sidebar and to the worktree reaper's session snapshot, which reaped its
+// fresh checkout hourly as "tip in origin/main" (2026-09-10).
+async function saveAndPublishSession(session: SlackSession): Promise<void> {
+  await saveSession(session);
+  void publishSessionChange(
+    `slack-${getSessionKey(session.channel, session.threadTs)}`,
+  );
+}
+
 // Save the session and mirror claudeSessionId/lastActivity into the
 // branch-named session file (written by `wt new-slack`), so opensession can
 // dedupe the two into one session as soon as the id exists.
 async function persistSession(session: SlackSession): Promise<void> {
-  await saveSession(session);
+  await saveAndPublishSession(session);
   if (!session.branch) return;
   const branchFile = `${SESSION_DIR}/${session.branch}.json`;
   try {
@@ -607,7 +622,7 @@ export async function handleModelCommand(
   const prevProvider = providerFor(session.model);
   session.model = resolved.id;
   session.lastActivity = new Date().toISOString();
-  await saveSession(session);
+  await saveAndPublishSession(session);
 
   let note = "";
   if (prevProvider !== resolved.provider) {
@@ -714,7 +729,7 @@ export async function processMessage(
     createdSession = true;
     // Persist immediately — the "Open in Open Session" link posted below points
     // at slack-<channel>-<ts>, which only resolves once this file exists.
-    await saveSession(session);
+    await saveAndPublishSession(session);
   }
 
   if (!session) {
@@ -737,7 +752,7 @@ export async function processMessage(
     await persistSession(session);
   }
 
-  if (createdSession) pinSlackSession(`slack-${sessionKey}`, msg.userId);
+  if (createdSession) await pinSlackSession(`slack-${sessionKey}`, msg.userId);
 
   // Auto-name the session from its opening prompt, exactly like a UI-created
   // session. Without this a Slack session wears its session key as a title
@@ -752,7 +767,7 @@ export async function processMessage(
       msg.userId,
       session.model,
     ).then((t) => {
-      if (t) invalidateSessionsCache();
+      if (t) void publishSessionChange(`slack-${sessionKey}`);
     });
   }
 
@@ -885,7 +900,7 @@ export async function processMessage(
       console.log(`[slack] [revive] Worktree ${branch} recreated`);
       // Reset Claude session since old one is stale after cleanup
       session.claudeSessionId = null;
-      await saveSession(session);
+      await saveAndPublishSession(session);
     } catch (e) {
       console.error(
         `[slack] [revive] Failed to recreate worktree ${session.branch}:`,
@@ -1498,7 +1513,7 @@ async function maybeRetriggerAutomation(
   // automations.ts pulls in several slack tool modules — avoid a load cycle.
   const { retriggerAutomationSession } =
     await import("../../server/automations");
-  const res = retriggerAutomationSession(threadSessionId);
+  const res = await retriggerAutomationSession(threadSessionId);
   if (res.ok) {
     console.log(
       `[slack] Retrigger in ${channel}/${threadTs} → automation "${res.name}"`,

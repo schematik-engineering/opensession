@@ -536,7 +536,7 @@ export interface OrchestratorPreset {
 /**
  * Worker roles are stable while their backing model may follow the lead's
  * provider. Pi delegates them through Open Session worker sessions, so an
- * explicit cross-provider role such as `worker-sol` can deliberately stay on
+ * explicit cross-provider role such as `worker-astra` can deliberately stay on
  * OpenAI while Fable leads on Anthropic. Only orchestrator runs receive the
  * instructions that name these workers.
  */
@@ -600,21 +600,21 @@ export const ORCHESTRATOR_WORKER_AGENTS: Record<
       },
     },
   },
-  "worker-sol": {
+  "worker-astra": {
     label: "Implementation worker",
     description:
-      "Implementation worker: GPT-5.6 Sol at high effort executes one well-scoped " +
+      "Implementation worker: GPT-6 Astra at high effort executes one well-scoped " +
       "implementation task end to end. Give it exact files, constraints, and acceptance criteria.",
     bridges: {
       anthropic: {
-        model: "openai/gpt-5.6-sol",
+        model: "openai/gpt-6-astra",
         variant: "high",
-        label: "GPT-5.6 Sol",
+        label: "GPT-6 Astra",
       },
       openai: {
-        model: "openai/gpt-5.6-sol",
+        model: "openai/gpt-6-astra",
         variant: "high",
-        label: "GPT-5.6 Sol",
+        label: "GPT-6 Astra",
       },
     },
   },
@@ -666,13 +666,14 @@ export const ORCHESTRATOR_PRESETS: OrchestratorPreset[] = [
     workerAgents: ["worker", "worker-fast"],
   },
   {
+    // Keep the persisted preset id so existing selections follow this upgrade.
     id: "orchestrator/fable-sol",
-    label: "Orchestrator · Fable + Sol",
+    label: "Orchestrator · Fable + Astra",
     description:
-      "Fable 5.1 high leads planning, review, and integration; Sol high implements",
+      "Fable 5.1 high leads planning, review, and integration; Astra high implements",
     model: "claude-fable-5-1",
     effort: "high",
-    workerAgents: ["worker-sol"],
+    workerAgents: ["worker-astra"],
   },
   {
     id: "orchestrator/sol",
@@ -868,7 +869,7 @@ const CODEX_MODEL_ORDER = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
  * ranking — it encodes the configured rotation policy: keep a run going on
  * an equal-or-smarter model automatically, but ASK a human before dropping to a
  * dumber one. "smart→smart / medium→smart = fine (auto); smart→dumb /
- * medium→dumb = ask." Concrete edges that policy yields: Fable→Sol auto,
+ * medium→dumb = ask." Concrete edges that policy yields: Fable→Astra auto,
  * Fable→Opus auto, Opus→Sol auto, and Opus→Sonnet ask.
  *
  * Unlisted models default to tier 1 (treated as a downgrade from any premium
@@ -901,6 +902,7 @@ const FALLBACK_TIER: Record<string, number> = {
  * of, so routing another exhausted model back into it would just re-hit the cap.
  */
 const FALLBACK_DESTINATIONS = [
+  "gpt-6-astra",
   "gpt-5.6-sol",
   // Prefer Opus before the cheaper 5.6 siblings once Sol is unavailable.
   "claude-opus-5",
@@ -1347,8 +1349,8 @@ export interface FallbackHop {
  * we keep the strongest usable model. Returns null when nothing is left.
  *
  * `mode` is the tier comparison against the model we're LEAVING: equal-or-higher
- * tier ⇒ "auto" (Fable→Sol, Opus→Sol), lower ⇒ "ask" (Fable→Opus, Opus→Sonnet,
- * Sol→Opus). Fallbacks preserve an explicit Pi engine choice; legacy and
+ * tier ⇒ "auto" (Fable→Astra, Astra→Sol), lower ⇒ "ask" (Opus→Sonnet).
+ * Fallbacks preserve an explicit Pi engine choice; legacy and
  * unrouted primaries keep mapping onto Pi.
  */
 export function nextFallbackModel(
@@ -1388,7 +1390,7 @@ export function nextFallbackModel(
 
   // Auto-eligible models stay ahead of downgrades. Within a tier, use the
   // explicit destination order rather than candidate insertion order: the
-  // configured Opus fallback is added first above, but Sol must remain the
+  // configured Opus fallback is added first above, but Astra must remain the
   // first hop off Fable.
   candidates.sort((a, b) => {
     const aDown = fallbackTier(a) >= currentTier ? 0 : 1;

@@ -108,7 +108,7 @@ const providerAccountRecordSchema = z.object({
   usable: z.boolean().optional(),
   kind: z.string().optional(),
   provider: z.enum(["grok", "cursor"]).optional(),
-  usage: accountUsageSchema.optional(),
+  usage: accountUsageSchema,
 });
 
 const providerAccountsResponseSchema = z.object({

@@ -208,6 +208,43 @@ describe("assistant transcript output", () => {
     ]);
   });
 
+  test("places a media marker in the text block and lists its media", () => {
+    expect(
+      piAssistantTranscriptEntries(
+        [
+          { type: "thinking", thinking: "OPENSESSION_IMAGE: /tmp/plan.png" },
+          {
+            type: "text",
+            text: "Done.\n\nOPENSESSION_IMAGE: /tmp/shot.png\nThe result\n",
+          },
+        ],
+        "2026-08-24T12:00:00.000Z",
+        "gpt-5.6-terra",
+        "message-1",
+      ),
+    ).toEqual([
+      {
+        id: "message-1",
+        type: "assistant",
+        content: "![](/media?path=%2Ftmp%2Fplan.png)",
+        timestamp: "2026-08-24T12:00:00.000Z",
+        model: "gpt-5.6-terra",
+        isReasoning: true,
+        images: ["/media?path=%2Ftmp%2Fplan.png"],
+        featuredMedia: ["/media?path=%2Ftmp%2Fplan.png"],
+      },
+      {
+        id: "message-1-b1",
+        type: "assistant",
+        content: "Done.\n\n![The result](/media?path=%2Ftmp%2Fshot.png)",
+        timestamp: "2026-08-24T12:00:00.000Z",
+        model: "gpt-5.6-terra",
+        images: ["/media?path=%2Ftmp%2Fshot.png"],
+        featuredMedia: ["/media?path=%2Ftmp%2Fshot.png"],
+      },
+    ]);
+  });
+
   test("zero for the empty-completion shapes providers emit", () => {
     // The exact os-01a02486 shape: content: [] with stopReason "stop".
     expect(assistantRenderableBlockCount([])).toBe(0);
@@ -267,7 +304,7 @@ describe("resolvePiRoutedModel", () => {
       modelID: "claude-fable-5-1",
       orchestrator: {
         id: "orchestrator/fable-sol",
-        workerAgents: ["worker-sol"],
+        workerAgents: ["worker-astra"],
       },
       effort: "high",
     });
@@ -1318,6 +1355,20 @@ test("unattended runs select the isolated CLI home", () => {
   expect(source).toContain(
     "const isolatedHome = policy.unattended || Boolean(opts.publicationPolicy)",
   );
+});
+
+test("host runs never resolve the operator's ambient gh identity", () => {
+  const env = piBashHomeEnv({
+    runKey: "run/unsafe",
+    scratchDir: "/scratch/session",
+    isolated: false,
+    hostHome: "/Users/operator",
+  });
+  expect(env.HOME).toBe("/Users/operator");
+  // gh answers from GH_TOKEN when a credential was injected; without one it
+  // must fail "not logged in" rather than act as whatever identity the host's
+  // ~/.config/gh/hosts.yml holds.
+  expect(env.GH_CONFIG_DIR).toBe("/scratch/session/gh-config-run_unsafe");
 });
 
 test("automation descendants receive an isolated CLI home", () => {

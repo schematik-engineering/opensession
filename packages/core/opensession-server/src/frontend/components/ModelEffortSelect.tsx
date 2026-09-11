@@ -13,6 +13,7 @@ import {
   pushRecentModel,
 } from "../lib/model-recents";
 import { Menu } from "../ui/menu";
+import { Badge } from "../ui/badge";
 import { cn } from "../ui/cn";
 import { Tooltip } from "../ui/tooltip";
 import {
@@ -50,6 +51,7 @@ const PRIMARY_MODEL_IDS = [
   "claude-opus-5",
   "claude-sonnet-5",
   "claude-haiku-4-5",
+  "gpt-6-astra",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",
@@ -173,6 +175,10 @@ export function shortModelLabel(id: string, models: ModelOption[]): string {
   const preset = workspacePresetLabel(baseModelId(id), models);
   if (preset) return preset;
   const oc = routedModelParts(id);
+  if (oc?.provider === "dial" || oc?.provider === "orchestrator") {
+    const label = models.find((m) => m.id === id)?.label;
+    if (label) return label;
+  }
   if (oc) return friendlyModelSlug(oc.model);
   // Last resort is the id itself, minus its routing prefix — an id with no
   // catalog entry is still a name, and the engine is not part of it.
@@ -237,6 +243,7 @@ const MODEL_TAIL_ORDER = [
   "claude-sonnet-5",
   "claude-sonnet-4-6",
   "claude-haiku-4-5",
+  "gpt-6-astra",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",
@@ -885,7 +892,11 @@ export function ModelEffortSelect({
             <Menu.SubmenuRoot>
               <Menu.SubmenuTrigger className="justify-between gap-3">
                 <span className="min-w-0 truncate">Weekly remaining</span>
-                <span className="flex flex-none items-center gap-1 text-dim">
+                <span className="flex flex-none items-center gap-1.5 text-dim">
+                  {/* A model with its own weekly bucket (Fable) is capped by
+                      that bucket, not the plan's 7-day window; name it so a
+                      full general week is not read as Fable headroom. */}
+                  {weeklyReadout?.scope && <Badge>{weeklyReadout.scope}</Badge>}
                   {weeklyReadout && (
                     <span
                       className={cn(
@@ -899,7 +910,7 @@ export function ModelEffortSelect({
                   <IconChevronRight className="shrink-0" size={17} />
                 </span>
               </Menu.SubmenuTrigger>
-              <Menu.Popup className="w-72 max-w-[min(360px,calc(100vw-1rem))]">
+              <Menu.Popup className="w-80 max-w-[min(360px,calc(100vw-1rem))]">
                 {weeklyRows.map((row, i) => {
                   const pinnable =
                     hasAccount && row.provider === accountProvider;
@@ -930,7 +941,8 @@ export function ModelEffortSelect({
                             size={15}
                           />
                         </span>
-                        <span className="min-w-0 truncate">{row.label}</span>
+                        <span className="min-w-0 truncate">{row.name}</span>
+                        {row.scope && <Badge>{row.scope}</Badge>}
                       </span>
                       <span className="flex flex-none items-center gap-2 tabular-nums">
                         {row.owner ? (

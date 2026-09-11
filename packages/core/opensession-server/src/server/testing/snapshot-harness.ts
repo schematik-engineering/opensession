@@ -206,6 +206,11 @@ export async function loadSnapshotHarness(): Promise<SnapshotHarness> {
   const hostClient = await import("../host-client");
   const prevRunHostsInProcess = hostClient.__setRunHostsInProcessForTest(true);
 
+  // Automation definitions are catalog documents: the fixture file written by
+  // prepareSnapshotEnv is only visible once the legacy import has run.
+  const catalogDocuments = await import("../catalog-documents");
+  await catalogDocuments.importApplicationCatalog();
+
   const runSession = await import("../run-session");
   const agentRunner = await import("../agent-runner");
   const sessionCache = await import("../session-cache");

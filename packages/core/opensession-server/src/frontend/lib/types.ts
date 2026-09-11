@@ -28,14 +28,19 @@ export type SessionSource = "slack" | "linear" | "opensession" | "cli";
 
 /**
  * What the last automated (os-review) run concluded about a PR, as the UI needs
- * it: the same verdict and 1-5 confidence its PR comment ends with, plus whether
- * the branch has moved on since.
+ * it: the same verdict, 1-5 quality score, and merge risk its PR comment ends
+ * with, plus whether the branch has moved on since.
  */
 export interface OsReview {
   /** approve | comment | request_changes. */
   verdict?: string;
-  /** 1-5: how safe the reviewer thought this was to merge. */
+  /** 1-5: quality of the change as written. */
   confidence?: number;
+  /** How hard a mistake would be to undo, scored separately from quality. */
+  risk?: "low" | "medium" | "high";
+  /** Time to recover every user if the change is wrong. */
+  recovery?: "minutes" | "hours" | "days" | "irreversible";
+  riskFactors?: string[];
   findings: number;
   /** P0/P1 findings — what would block a merge. */
   blocking: number;
@@ -419,6 +424,9 @@ export interface UnifiedSession {
    *  changes requested / commented). Open PRs only. */
   prReviewedBy?: string[];
   prAuthor?: string;
+  /** GitHub login of the teammate the PR is for: the author, or on a
+   *  bot-authored PR its first human assignee (the bot records who asked). */
+  prRequester?: string;
   prUpdatedAt?: string;
   prChecks?: { total: number; passed: number; failed: number; pending: number };
   /** What the last automated review concluded on this PR. */
@@ -928,6 +936,15 @@ export type WSServerMessage =
       viewing: Array<{ user: string; sessionId: string }>;
     }
   | { type: "pins_changed"; user: string; pins: string[] }
+  // One of this person's sidebar maps was written from any client. Sent only
+  // to that person's sockets and carries no entries: the receiver re-reads the
+  // map, so a claim made on the phone reaches a desktop window that never
+  // lost visibility. Native clients safely ignore this frame.
+  | {
+      type: "user_map_changed";
+      map: "lanes" | "snoozes" | "hides";
+      user: string;
+    }
   // The materialized session list changed. Web clients refetch their scoped
   // sidebar projection; older and native clients safely ignore this frame.
   | { type: "sessions_invalidated" }

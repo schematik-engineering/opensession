@@ -279,6 +279,7 @@ export interface HostedRunOpts {
   codexCliEnv?: boolean;
   author?: GitIdentity | null;
   user?: string;
+  accountUser?: string;
   fallbackModel?: string;
   /** Original logical-turn policy copied onto every one-attempt host spec so
    * restart recovery can continue the server-owned coordinator. */
@@ -313,7 +314,10 @@ export interface HostedRunOpts {
   /** A steer arrived too late at the host — queue it so it isn't dropped. */
   onSteerFailed?: (text: string) => void;
   /** Builds SDK MCP servers only on platforms without detached run hosts. */
-  fallbackInProcessMcp?: () => Record<string, unknown> | undefined;
+  fallbackInProcessMcp?: () =>
+    | Record<string, unknown>
+    | Promise<Record<string, unknown> | undefined>
+    | undefined;
 }
 
 /**
@@ -770,7 +774,7 @@ async function* runAgentInProcess(
     forkSession: opts.forkSession,
     resumeSessionAt: opts.resumeSessionAt,
     mcpServers: opts.mcpServers ?? "all",
-    inProcessMcp: opts.fallbackInProcessMcp?.(),
+    inProcessMcp: await opts.fallbackInProcessMcp?.(),
     reposNote: opts.reposNote,
     deniedTools: opts.deniedTools,
     publicationPolicy: opts.publicationPolicy,
@@ -780,6 +784,7 @@ async function* runAgentInProcess(
     codexCliEnv: opts.codexCliEnv,
     author: opts.author,
     user: opts.user,
+    accountUser: opts.accountUser,
     fallbackModel: opts.fallbackModel,
     accountAffinityKey: opts.accountAffinityKey,
     effort: opts.effort,
@@ -919,6 +924,7 @@ function hostedRunRecord(spec: RunHostSpec): ActiveRunRecord {
     mode: spec.mode,
     mcpServers: spec.mcpServers,
     user: spec.user,
+    accountUser: spec.accountUser,
     deniedTools: spec.deniedTools,
     publicationPolicy: spec.publicationPolicy,
     confirmTools: spec.confirmTools,
@@ -988,6 +994,7 @@ async function spawnHostRun(
     codexCliEnv: opts.codexCliEnv,
     author: opts.author,
     user: opts.user,
+    accountUser: opts.accountUser,
     fallbackModel: opts.fallbackModel,
     logicalFallbackModel: opts.logicalFallbackModel,
     logicalAccountId: opts.logicalAccountId,

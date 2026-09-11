@@ -24,6 +24,7 @@ import { refWebPanel } from "./components/FeedWebPane";
 import { FirstMile } from "./components/FirstMile";
 import { Goals } from "./components/Goals";
 import { IconDesk, IconSidebarLeft } from "./components/icons";
+import { BlockExpandHost } from "./components/BlockExpandDialog";
 import { MediaLightboxHost } from "./components/MediaLightbox";
 import { NavigationProvider } from "./components/NavigationProvider";
 import { NewSession } from "./components/NewSession";
@@ -107,6 +108,7 @@ import {
   receivePins,
   unpin,
 } from "./lib/pins";
+import { resyncUserMap } from "./lib/user-map";
 import { ARCHIVED_PAGE_COLUMN } from "./lib/archived-classes";
 import { PR_PAGE_COLUMN } from "./lib/pr-list-classes";
 import { repoLabel } from "./lib/repo-label";
@@ -555,6 +557,10 @@ export function AppContent({
       }
       if (msg.type === "pins_changed") {
         receivePins(msg.user, msg.pins);
+        return;
+      }
+      if (msg.type === "user_map_changed") {
+        void resyncUserMap(msg.map, msg.user);
         return;
       }
       if (msg.type === "mention") {
@@ -1216,6 +1222,7 @@ export function AppContent({
     <UserGate>
       <RestartOverlay connected={connected} addHandler={addHandler} />
       <MediaLightboxHost />
+      <BlockExpandHost />
       <ToastHost container={settingsActive ? null : detailPaneEl} />
       <RunningCloseDialog {...runningCloseDialog} />
       <div className="app">

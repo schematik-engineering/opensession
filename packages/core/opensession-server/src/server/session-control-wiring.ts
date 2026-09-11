@@ -834,7 +834,9 @@ registerSessionControl({
     // this path's equivalent of the web tab strip's "+"). An unknown id is a
     // hard error: falling back to a standalone create would silently mint the
     // duplicate sidebar row the caller asked to avoid.
-    const joinedWorkspace = workspaceId ? getWorkspace(workspaceId) : null;
+    const joinedWorkspace = workspaceId
+      ? await getWorkspace(workspaceId)
+      : null;
     if (workspaceId && !joinedWorkspace) {
       throw new Error(`No such workspace: ${workspaceId}`);
     }
@@ -897,7 +899,7 @@ registerSessionControl({
     }
     const remoteSandbox = isRemoteSandboxProvider(sandboxProvider);
     const parentWorkspace = parentSession?.workspaceId
-      ? getWorkspace(parentSession.workspaceId)
+      ? await getWorkspace(parentSession.workspaceId)
       : null;
     // The workspace this session lands in: the one it explicitly joins, else the
     // parent's. Everything a session inherits from its workspace — repo context,
@@ -1047,7 +1049,7 @@ registerSessionControl({
         joinedWorkspace.prNumber != null && joinedWorkspace.branch
           ? joinedWorkspace.branch
           : sessionBranch;
-      updateWorkspace(joinedWorkspace.id, {
+      await updateWorkspace(joinedWorkspace.id, {
         worktreeDir: wtPath,
         ...(workspaceBranch ? { branch: workspaceBranch } : {}),
       });
@@ -1111,8 +1113,8 @@ registerSessionControl({
       // workspace, which is what a delegated worker deserves.
       const wsParent = deskParent ? null : parentSession;
       const owned =
-        workspaceOwningWorktree(wsParent?.worktreeDir) ??
-        workspaceOwningWorktree(wtPath);
+        (await workspaceOwningWorktree(wsParent?.worktreeDir)) ??
+        (await workspaceOwningWorktree(wtPath));
       if (owned) resolvedWorkspaceId = owned.id;
       else {
         const plannedWorkspaceId =
@@ -1143,7 +1145,7 @@ registerSessionControl({
           ...(branchForWs ? { branch: branchForWs } : {}),
           ...(dir ? { worktreeDir: dir } : {}),
         });
-        const ws = getWorkspace(plannedWorkspaceId);
+        const ws = await getWorkspace(plannedWorkspaceId);
         if (!ws)
           throw new Error(
             `Workspace ${plannedWorkspaceId} projection is missing after actor receipt`,

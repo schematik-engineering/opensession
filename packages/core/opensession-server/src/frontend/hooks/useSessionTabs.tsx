@@ -710,10 +710,9 @@ export function useSessionTabs({
                 dropPaneUrlSuffix(closingTab);
             }
           },
-          newSession:
-            barSessions.some((session) => session.desk) || emptyWorkspaceSession
-              ? undefined
-              : (mode, origin) => handleNewSession(mode, side, origin),
+          newSession: barSessions.some((session) => session.desk)
+            ? undefined
+            : (mode, origin) => handleNewSession(mode, side, origin),
           rename: async (id, title) => {
             await (async () => {
               await renameSessionApi(id, title);
@@ -839,8 +838,8 @@ export function useSessionTabs({
         setOptimisticSession((pending) =>
           pending?.id === id ? null : pending,
         );
-        // A different id belongs to another window's reusable tab. Only delete
-        // the session this request actually created.
+        // A different id means the server already held a session for this
+        // request. Only delete the session this request actually created.
         if (createdId === id)
           await deleteSessionApi(createdId, false).catch((error) =>
             console.error("Abandoned empty session cleanup failed:", error),
@@ -849,8 +848,8 @@ export function useSessionTabs({
         return createdId;
       }
       if (createdId !== id) {
-        // Another window won the one-empty-tab race. Drop this optimistic
-        // shell and focus the reusable tab the server returned.
+        // The server answered with an existing session. Drop this optimistic
+        // shell and focus the tab it returned.
         unstick(id);
         remove(id);
       }

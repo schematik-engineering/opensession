@@ -265,9 +265,10 @@ export function SessionHeader({
             <IconRobot size={18} />
           </span>
         ) : null}
-        {/* Where this session's runs execute: a Sandbox, a Runner, or this
-            machine (with the move into a Sandbox). Purely from session
-            fields until opened; no provider polling in the header. */}
+        {/* Where this session's runs execute when it is not this machine: a
+            Sandbox or a Runner. Purely from session fields until opened; no
+            provider polling in the header. The move into a Sandbox is in the
+            ⋯ menu. */}
         <SandboxBadge
           sessionId={session.id}
           sandbox={session.sandbox}
