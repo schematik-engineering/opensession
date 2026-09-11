@@ -4,7 +4,7 @@ import { audit } from "../audit";
 import { configuredRepos } from "../config";
 import { parseCodexLinesAsync, parseJsonlLinesAsync } from "../jsonl-parser";
 import { importLegacyTranscript } from "../actor-transcript";
-import { updateSessionFile } from "../session-cache";
+import { findSessionAsync, updateSessionFile } from "../session-cache";
 import { sessionIdForRequest } from "../session-request-id";
 import {
   createWorkspace,
@@ -252,40 +252,41 @@ function createdAtForImport(
 async function persistImportedSession(
   record: SessionImportRecord,
 ): Promise<{ workspaceId: string }> {
-  let persistedWorkspaceId = `ws-import-${record.sessionId.slice(4)}`;
-  await updateSessionFile(record.sessionId, (current) => {
-    const exists = current.id === record.sessionId;
-    const branchWorkspace =
-      record.repoId && record.branch
-        ? findWorkspaceByBranch(record.repoId, record.branch)
-        : null;
-    const workspaceId =
-      (current.workspaceId && getWorkspace(current.workspaceId)?.id) ||
-      branchWorkspace?.id ||
-      `ws-import-${record.sessionId.slice(4)}`;
-    if (!getWorkspace(workspaceId))
-      createWorkspace({
-        id: workspaceId,
-        name: record.title,
-        repo: record.repoId,
-        createdBy: record.createdBy,
-        createdAt: record.createdAt,
-        ...(record.branch ? { branch: record.branch } : {}),
-      });
-    persistedWorkspaceId = workspaceId;
+  const fallbackWorkspaceId = `ws-import-${record.sessionId.slice(4)}`;
+  const current = await findSessionAsync(record.sessionId);
+  const branchWorkspace =
+    record.repoId && record.branch
+      ? await findWorkspaceByBranch(record.repoId, record.branch)
+      : null;
+  const currentWorkspace = current?.workspaceId
+    ? await getWorkspace(current.workspaceId)
+    : null;
+  const workspaceId =
+    currentWorkspace?.id || branchWorkspace?.id || fallbackWorkspaceId;
+  if (!(await getWorkspace(workspaceId)))
+    await createWorkspace({
+      id: workspaceId,
+      name: record.title,
+      repo: record.repoId,
+      createdBy: record.createdBy,
+      createdAt: record.createdAt,
+      ...(record.branch ? { branch: record.branch } : {}),
+    });
+  await updateSessionFile(record.sessionId, (session) => {
+    const exists = session.id === record.sessionId;
     return {
-      ...current,
+      ...session,
       id: record.sessionId,
-      claudeSessionId: exists ? current.claudeSessionId : "",
+      claudeSessionId: exists ? session.claudeSessionId : "",
       branch: record.branch,
-      worktreeDir: exists ? current.worktreeDir : "",
-      createdBy: exists ? current.createdBy : record.createdBy,
+      worktreeDir: exists ? session.worktreeDir : "",
+      createdBy: exists ? session.createdBy : record.createdBy,
       ...(record.createdByLogin
         ? { createdByLogin: record.createdByLogin }
         : {}),
-      createdAt: exists ? current.createdAt : record.createdAt,
+      createdAt: exists ? session.createdAt : record.createdAt,
       title: record.title,
-      mode: exists ? current.mode : "ask",
+      mode: exists ? session.mode : "ask",
       workspaceId,
       ...(record.repoId
         ? { repo: record.repoId, repoLess: undefined }
@@ -299,7 +300,7 @@ async function persistImportedSession(
       lastActivity: record.importedAt,
     };
   });
-  return { workspaceId: persistedWorkspaceId };
+  return { workspaceId };
 }
 
 export async function handleSessionImportRoutes(

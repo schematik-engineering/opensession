@@ -129,8 +129,8 @@ function HostBadge({ sessionId, host }: { sessionId: string; host: HostRef }) {
           </div>
         ) : providers.length === 0 ? (
           <div className="px-2.5 py-2 text-meta text-dim">
-            No Sandbox is ready. Connect Daytona or Box in Workspace &gt;
-            Sandboxes.
+            No Sandbox is ready. Connect Docker, Daytona or Box in Workspace
+            &gt; Sandboxes.
           </div>
         ) : (
           <>
@@ -236,7 +236,7 @@ export function SandboxBadge({
     return (
       <Popover.Root open={open} onOpenChange={setOpen}>
         <Popover.Trigger
-          className="flex min-h-10 flex-none items-center gap-1.5 rounded-md border border-line bg-surface px-2 text-meta font-medium text-dim outline-none transition-[color,background-color,border-color,scale] hover:border-line-strong hover:text-fg focus-visible:border-line-strong active:scale-[0.96]"
+          className="flex h-8 flex-none items-center gap-1.5 rounded-md border border-line bg-surface px-2 text-meta font-medium text-dim outline-none transition-[color,background-color,border-color,scale] hover:border-line-strong hover:text-fg focus-visible:border-line-strong active:scale-[0.96]"
           aria-label={`Runner · ${runner.name} · ${label}`}
         >
           <span className={cn("size-2 rounded-full", dot)} aria-hidden="true" />
@@ -360,7 +360,7 @@ export function SandboxBadge({
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger
-        className="flex min-h-10 flex-none items-center gap-1.5 rounded-md border border-line bg-surface px-2 text-meta font-medium text-dim outline-none transition-[color,background-color,border-color,scale] hover:border-line-strong hover:text-fg focus-visible:border-line-strong active:scale-[0.96]"
+        className="flex h-8 flex-none items-center gap-1.5 rounded-md border border-line bg-surface px-2 text-meta font-medium text-dim outline-none transition-[color,background-color,border-color,scale] hover:border-line-strong hover:text-fg focus-visible:border-line-strong active:scale-[0.96]"
         data-testid="sandbox-badge"
         aria-label={`Sandbox · ${lifecycleLabel[lifecycle]}`}
       >

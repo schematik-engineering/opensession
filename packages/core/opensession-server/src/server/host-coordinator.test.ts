@@ -218,18 +218,18 @@ describe("hosted model coordinator", () => {
     });
 
     const events = await collect(
-      runAgentHosted(opts({ fallbackModel: "pi/openai/gpt-5.6-sol" })),
+      runAgentHosted(opts({ fallbackModel: "pi/openai/gpt-6-astra" })),
     );
 
     expect(attempts.map((attempt) => attempt.model)).toEqual([
       "grok/grok-4.6",
       "grok/grok-4.6",
-      "pi/openai/gpt-5.6-sol",
+      "pi/openai/gpt-6-astra",
     ]);
     expect(events.find((event) => event.type === "model_switch")).toMatchObject(
       {
         fromModel: "grok/grok-4.6",
-        toModel: "pi/openai/gpt-5.6-sol",
+        toModel: "pi/openai/gpt-6-astra",
       },
     );
     expect(events.at(-1)).toMatchObject({
@@ -259,7 +259,7 @@ describe("hosted model coordinator", () => {
       runAgentHosted(
         opts({
           accountId,
-          fallbackModel: "pi/openai/gpt-5.6-sol",
+          fallbackModel: "pi/openai/gpt-6-astra",
           journalKind: "automation",
         }),
       ),
@@ -267,7 +267,7 @@ describe("hosted model coordinator", () => {
 
     expect(attempts.map((attempt) => attempt.model)).toEqual([
       "grok/grok-4.6",
-      "pi/openai/gpt-5.6-sol",
+      "pi/openai/gpt-6-astra",
     ]);
     expect(
       acpSessionExhaustedAccounts(opts().osSessionId, "grok").has(accountId),
@@ -275,7 +275,7 @@ describe("hosted model coordinator", () => {
     expect(events.find((event) => event.type === "model_switch")).toMatchObject(
       {
         fromModel: "grok/grok-4.6",
-        toModel: "pi/openai/gpt-5.6-sol",
+        toModel: "pi/openai/gpt-6-astra",
         temporaryFallback: true,
       },
     );
@@ -290,7 +290,7 @@ describe("hosted model coordinator", () => {
     let firstDrained = false;
     __setHostedPhysicalRunnerForTest(async function* (attempt) {
       attempts.push(attempt);
-      if (attempt.model === "pi/openai/gpt-5.6-sol") {
+      if (attempt.model === "pi/openai/gpt-6-astra") {
         yield {
           type: "error",
           content: "subscription usage limit exhausted",
@@ -308,7 +308,7 @@ describe("hosted model coordinator", () => {
     const events = await collect(
       runAgentHosted(
         opts({
-          model: "pi/openai/gpt-5.6-sol",
+          model: "pi/openai/gpt-6-astra",
           fallbackModel: "pi/anthropic/claude-opus-4-6",
         }),
       ),
@@ -406,7 +406,7 @@ describe("hosted model coordinator", () => {
       cwd: scratch,
       model: "grok/grok-4.6",
       fallbackModel: "none",
-      logicalFallbackModel: "pi/openai/gpt-5.6-sol",
+      logicalFallbackModel: "pi/openai/gpt-6-astra",
       accountId: mutableSpecAccount,
       accountStrict: true,
       logicalAccountStrict: false,
@@ -445,11 +445,11 @@ describe("hosted model coordinator", () => {
 
     expect(attempts.map((attempt) => attempt.model)).toEqual([
       "grok/grok-4.6",
-      "pi/openai/gpt-5.6-sol",
+      "pi/openai/gpt-6-astra",
     ]);
     expect(attempts[0]?.accountId).toBe(second);
     expect(events.find((event) => event.type === "model_switch")).toMatchObject(
-      { fromModel: "grok/grok-4.6", toModel: "pi/openai/gpt-5.6-sol" },
+      { fromModel: "grok/grok-4.6", toModel: "pi/openai/gpt-6-astra" },
     );
     expect(events.at(-1)).toMatchObject({
       type: "done",
@@ -487,7 +487,7 @@ describe("hosted model coordinator", () => {
       cwd: scratch,
       model: "grok/grok-4.6",
       fallbackModel: "none",
-      logicalFallbackModel: "pi/openai/gpt-5.6-sol",
+      logicalFallbackModel: "pi/openai/gpt-6-astra",
       accountId: first,
       accountStrict: true,
       logicalAccountId: first,
@@ -526,10 +526,10 @@ describe("hosted model coordinator", () => {
     );
 
     expect(attempts.map((attempt) => attempt.model)).toEqual([
-      "pi/openai/gpt-5.6-sol",
+      "pi/openai/gpt-6-astra",
     ]);
     expect(events.find((event) => event.type === "model_switch")).toMatchObject(
-      { fromModel: "grok/grok-4.6", toModel: "pi/openai/gpt-5.6-sol" },
+      { fromModel: "grok/grok-4.6", toModel: "pi/openai/gpt-6-astra" },
     );
     expect(events.at(-1)).toMatchObject({
       type: "done",

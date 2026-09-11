@@ -150,8 +150,9 @@ export function buildRunInstructions(input: {
     );
   } else if (!input.isAsk && !input.isScratch && input.hasSession) {
     parts.push(
-      "## PR attribution\nEnd each PR body with the attribution footer from the session " +
-        "context and follow its assignee rule.",
+      "## Pull requests\nEnd each PR body with the attribution footer from the session " +
+        "context and follow its assignee rule. Add the `Co-authored-by` trailer from the " +
+        "session context to every commit. Never merge, approve, or push the default branch.",
     );
     if (input.prReviewer) {
       parts.push(
@@ -178,10 +179,11 @@ export function buildRunInstructions(input: {
   }
   if (!input.isAsk && inproc["opensession-portals"]) {
     parts.push(
-      "## Portals\nShow running software through `opensession-portals`: `start_declared_portal` " +
-        "for a Portal the repository declares, else `start_portal` with the command. Open the " +
-        "Portal URL, exercise the changed feature, and report the URL. For user-facing web " +
-        "changes, set the exact root-relative route with `set_portal_path`, query included. " +
+      "## Portals\nStart a Portal (`start_declared_portal` for one the repository declares, else " +
+        "`start_portal`) only when the person asks to see the change or a running app is the only " +
+        "way to verify it, never as a closing step. Reuse this session's Portal; while it starts, " +
+        "wait with `list_portals`, do not start it again. For user-facing web changes, set the " +
+        "exact root-relative route with `set_portal_path`, query included. " +
         "For Tella editor routes, call `tella-stage` `lease_editor_fixture` (fixture " +
         "`multi_clip_transcript_v1`, this Open Session id as `leaseKey`) and pass only its " +
         "`leaseId` to `set_editor_preview_path`; never construct a video id yourself.",
@@ -199,8 +201,16 @@ export function buildRunInstructions(input: {
   }
 
   parts.push(
-    "## Media\nShow selected results with `OPENSESSION_IMAGE: /abs/path.png` or " +
-      "`OPENSESSION_VIDEO: /abs/path.mp4`.",
+    "## Media\nShow results where they belong: `OPENSESSION_IMAGE: /abs/path.png`, " +
+      "`OPENSESSION_VIDEO: /abs/path.mp4` (a plain line under one is its caption), " +
+      "`OPENSESSION_COMPARE: /a.png /b.png` (slider). Charts: a ```vega-lite fence " +
+      "with inline `data.values`." +
+      (inproc["opensession-charts"]
+        ? " `make_chart` validates one and offloads large data."
+        : "") +
+      " Live fences: mermaid, math, csv, json, ansi, palette, metrics (`Label: value " +
+      "(delta)`), choices (a reply per line, click sends), tree, artifact (sandboxed " +
+      "HTML), svg, slides (`---`); `> [!NOTE]` is a callout.",
   );
   // Instance-local operator instructions last: they're the deployment's own
   // additions and may refine anything above.
@@ -222,13 +232,18 @@ export function buildSessionContext(input: {
   isScratch?: boolean;
   repoHost?: "github" | "codestorage";
   /** Requester attribution for PRs: the turn's raw user label and the resolved
-   *  git identity (same table as commit attribution). PRs open under the bot
-   *  GitHub account, so the body line + assignee are how the human shows up. */
+   *  git identity (same table as commit attribution). PRs opened from the
+   *  shell are the bot's, so the body line + assignee are how the human
+   *  shows up. */
   user?: string;
   author?: GitIdentity | null;
-  /** Set when this run carries the owner's own GitHub token (github-auth.ts):
-   *  PRs are authored by them directly, so skip the bot-attribution assignee. */
+  /** Set when this turn was started by a connected person: the gateway's
+   *  `open_pull_request` tool opens PRs as them, so skip the bot-attribution
+   *  assignee. In code mode the shell holds their token too
+   *  (pi-runner runGithubEnv). */
   githubUserLogin?: string | null;
+  /** `Name <email>` for the commit trailer (pi-runner GIT_COAUTHOR_ENV). */
+  coAuthor?: string;
 }): string {
   const lines: string[] = [];
   const link = input.osSessionId
@@ -249,11 +264,13 @@ export function buildSessionContext(input: {
       : `Created by [this ${personaName()} session](${link})`;
     lines.push(`PR attribution footer: ${footer}`);
     const rule = input.githubUserLogin
-      ? `PRs use @${input.githubUserLogin}'s account; do not add an assignee.`
+      ? `PRs open under @${input.githubUserLogin}'s account through open_pull_request; do not add an assignee.`
       : requester && login
         ? `When possible, assign @${login}.`
         : "";
     if (rule) lines.push(rule);
+    if (input.coAuthor)
+      lines.push(`Commit trailer: Co-authored-by: ${input.coAuthor}`);
   }
   return lines.join("\n");
 }

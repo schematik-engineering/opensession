@@ -241,7 +241,7 @@ export function safeSandboxConnections(): SafeSandboxConnection[] {
     }
     const hasCredentials = connection.credentialRef
       ? workspaceSecretExists(connection.credentialRef)
-      : false;
+      : provider === "docker";
     const signatureCurrent = sandboxAdapterSignatureCurrent(
       provider,
       connection.qualification?.adapterSignature,
@@ -281,17 +281,19 @@ export function connectSandboxProvider(
 ): SandboxConnection {
   const previous = getSandboxConnection(provider);
   let credentialRef = previous?.credentialRef;
-  if (input.secret) {
-    credentialRef = putWorkspaceSecret(
-      `sandbox.${provider}`,
-      input.secret.trim(),
-      credentialRef,
-    );
-  }
-  if (!credentialRef) {
-    throw new Error(
-      `${provider === "box" ? "Box" : "Daytona"} API key is required`,
-    );
+  if (provider !== "docker") {
+    if (input.secret) {
+      credentialRef = putWorkspaceSecret(
+        `sandbox.${provider}`,
+        input.secret.trim(),
+        credentialRef,
+      );
+    }
+    if (!credentialRef) {
+      throw new Error(
+        `${provider === "box" ? "Box" : "Daytona"} API key is required`,
+      );
+    }
   }
   const now = new Date().toISOString();
   const connection: SandboxConnection = {
@@ -401,6 +403,7 @@ export function sandboxConnectionReady(
     )
   )
     return false;
+  if (provider === "docker") return true;
   return Boolean(
     connection.credentialRef && workspaceSecretExists(connection.credentialRef),
   );

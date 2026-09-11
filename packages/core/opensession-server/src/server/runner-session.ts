@@ -33,12 +33,13 @@ import type { UnifiedSession } from "./types";
 import { interactiveMcpServers } from "./interactive-mcp";
 import { interactiveFallbackModel } from "./models";
 import { STRIPE_CONFIRM_TOOLS } from "./runner-shared";
+import { sessionPrincipal } from "./session-actors";
 import { commitAuthorFor } from "./shared/user-mappings";
 import { makeAskHandler } from "./asks";
 import type { McpScope } from "./runner-shared";
 import type { StreamEvent } from "./agent-runner";
 import type { ImageInput } from "./run-events";
-import { resolveSessionRunInputs } from "./session-run-inputs";
+import { resolveSessionRunInputs, runAccountSpec } from "./session-run-inputs";
 import {
   activeRunRecords,
   journalClear,
@@ -165,7 +166,9 @@ export async function maybeLaunchRunnerRun(
     model: session.model,
     effort: session.effort,
     fastMode: session.fastMode,
-    accountId: session.accountId,
+    // A person's turn in an automation-owned session carries no pin, so the
+    // Runner tries their own subscription before the automation's account.
+    ...runAccountSpec(session, runInputs),
     images: opts.images,
     mcpServers: runInputs.isAutomationSession
       ? (runInputs.mcpServers ?? [])
@@ -180,8 +183,9 @@ export async function maybeLaunchRunnerRun(
     publicationPolicy,
     confirmTools: STRIPE_CONFIRM_TOOLS,
     aws: !runInputs.isAutomationSession,
-    author: commitAuthorFor(opts.user, session.startedBy),
+    author: commitAuthorFor(opts.user, sessionPrincipal(session)),
     user: runUser,
+    accountUser: runInputs.accountUser,
     mcpGrantUser: runInputs.mcpGrantUser,
     fallbackModel: interactiveFallbackModel(session.model),
     journalKind: runInputs.isAutomationSession ? "automation" : "prompt",

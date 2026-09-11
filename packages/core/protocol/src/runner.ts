@@ -107,6 +107,9 @@ export interface RunHostSpec {
   codexCliEnv?: boolean;
   author?: GitIdentity | null;
   user?: string;
+  /** Person whose personal provider subscription may serve the run when it
+   *  differs from `user` (see agent-runner RunAgentOpts). */
+  accountUser?: string;
   fallbackModel?: string;
   /** Server-owned policy for the complete logical turn. A physical detached
    * host still receives fallbackModel:"none" and one strict ACP account, but

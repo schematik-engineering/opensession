@@ -56,6 +56,7 @@ import {
 import { useTabReorder } from "./session-tabs/useTabReorder";
 import { SessionDraftIndicator } from "./session-tabs/SessionDraftIndicator";
 import { shouldShowTabStrip } from "../lib/split-tabs";
+import { sessionNeverRan } from "../lib/landing-session";
 import type { SessionTabsProps, ViewTab } from "../lib/session-tabs-types";
 
 interface SessionTabStyle extends React.CSSProperties {
@@ -522,7 +523,10 @@ export function SessionTabs({
             const session = member.session;
             const waiting = !!session.waitingForInput;
             const hex = colorHex(colors[key]);
-            const empty = key === emptySessionId;
+            // An untouched tab morphs back into a + when it closes. A workspace
+            // can hold any number of them; the + stays put beside the strip.
+            const empty =
+              session.source === "opensession" && sessionNeverRan(session);
             const openingEmpty = key === morphingSessionId && !!morphOrigin;
             const emptyVisual = empty || openingEmpty;
 

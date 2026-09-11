@@ -17,6 +17,7 @@
 import {
   transcriptLineAssistantText,
   transcriptLineCompactionSummary,
+  transcriptLineRecap,
   transcriptLineRunnerNotice,
   transcriptLineToolResult,
   transcriptLineToolUse,
@@ -190,8 +191,11 @@ export function demoSessions(opts: {
   worktreeDir: string;
   /** The generated base repo (clean checkout on main). */
   repoDir: string;
+  /** Where the generator wrote the stills the hero session shows
+   *  (generate.ts retryStill); served by the /media route. */
+  mediaDir: string;
 }): DemoSessionFixture[] {
-  const { now, worktreeDir, repoDir } = opts;
+  const { now, worktreeDir, repoDir, mediaDir } = opts;
   const min = 60_000;
   const sessions: DemoSessionFixture[] = [];
 
@@ -286,9 +290,71 @@ export function demoSessions(opts: {
           t0 + 140_000,
         ),
         transcriptLineAssistantText(
-          "Fixed and verified — 100/100 green. The loop now honors the configured retry budget. I committed the change on `demo/fix-flaky-upload` and opened a PR with the regression note in the description.",
+          "Fixed and verified — 100/100 green. The loop now honors the configured retry budget. I committed the change on `demo/fix-flaky-upload` and opened a PR with the regression note in the description.\n\n" +
+            "Where the flakes were coming from, per attempt across the 50 reruns:\n\n" +
+            "```vega-lite\n" +
+            JSON.stringify({
+              title: "Upload retries per attempt, 50 reruns",
+              mark: "bar",
+              data: {
+                values: [
+                  { attempt: "1st", build: "before", succeeded: 31 },
+                  { attempt: "2nd", build: "before", succeeded: 18 },
+                  { attempt: "3rd", build: "before", succeeded: 0 },
+                  { attempt: "1st", build: "after", succeeded: 30 },
+                  { attempt: "2nd", build: "after", succeeded: 17 },
+                  { attempt: "3rd", build: "after", succeeded: 3 },
+                ],
+              },
+              encoding: {
+                x: { field: "attempt", type: "nominal", title: "Attempt" },
+                xOffset: { field: "build", title: "Build" },
+                y: {
+                  field: "succeeded",
+                  type: "quantitative",
+                  title: "Runs that succeeded",
+                },
+                color: { field: "build", title: "Build" },
+              },
+            }) +
+            "\n```",
           "demo-pr-a3",
           iso(t0 + 170_000),
+          MODEL_FABLE,
+        ),
+        // Media in place: an image marker with a caption and a before/after
+        // compare marker, rendered where they are written (docs/blocks.md).
+        transcriptLineAssistantText(
+          "Proof that the third attempt now runs. The retry timeline from the reruns, before and after the fix:\n\n" +
+            `OPENSESSION_COMPARE: ${mediaDir}/retry-before.png ${mediaDir}/retry-after.png\n` +
+            "Attempts per run: before on the left, after on the right\n\n" +
+            `OPENSESSION_IMAGE: ${mediaDir}/retry-after.png\n` +
+            "All three attempts run and the third one succeeds\n\n" +
+            "Both stills come from the 100-run rerun above.",
+          "demo-pr-a4",
+          iso(t0 + 180_000),
+          MODEL_FABLE,
+        ),
+        // Blocks that talk back to the session: a file tree whose rows open
+        // the changed file, and quick replies that send as the next turn.
+        transcriptLineAssistantText(
+          "The fix touches these files:\n\n" +
+            "```tree\n" +
+            "acme-todo/\n" +
+            "├── src/\n" +
+            "│   ├── upload.ts  # retry loop\n" +
+            "│   └── upload.test.ts\n" +
+            "├── NOTES.md\n" +
+            "└── package.json\n" +
+            "```\n\n" +
+            "How do you want to proceed?\n\n" +
+            "```choices\n" +
+            "- Merge the PR\n" +
+            "- Add a test for the terminal error\n" +
+            "- Explain the fix again\n" +
+            "```",
+          "demo-pr-a5",
+          iso(t0 + 190_000),
           MODEL_FABLE,
         ),
       ],
@@ -666,6 +732,180 @@ export function demoSessions(opts: {
           "demo-scratch-a1",
           iso(t0 + 80_000),
           MODEL_CODEX,
+        ),
+      ],
+    });
+  }
+
+  // 9. A PR that went through two handed-off review fix rounds and settled:
+  //    the transcript folds the whole loop into one "Review loop" row and the
+  //    closing wrap-up sits beneath it, so a reader coming back cold sees
+  //    where the PR stands rather than the last round's report.
+  {
+    const t0 = now - 95 * min;
+    const handoff = (round: number, quality: number, finding: string) =>
+      `[GitHub] <!--os:review-handoff-->\n🔍 This session's PR #131 “Upload progress callback” (branch \`demo/upload-progress\`) was just reviewed and is not merge-ready yet (verdict: request changes, quality ${quality}/5). You wrote this code, so the follow-through is yours — this is fix round ${round}/6.\n\nOpen review feedback (every reviewer; inline items carry a \`comment <id>\` for thread replies):\n${finding}\n\nDo this now, in this session's worktree:\n1. Sync the branch first: \`git pull origin demo/upload-progress\`.\n2. Address every actionable finding. If you disagree with one, leave the code unchanged and reply in that thread explaining why — never silently skip.\n3. Commit (stage specific files) and push: \`git push origin HEAD:demo/upload-progress\`.\n4. Reply in each addressed inline thread with what you did.\n5. NEVER merge the PR (\`gh pr merge\` is forbidden) and never force-push.\n\nThe review re-runs automatically after your push.`;
+    sessions.push({
+      id: "bks-demo-review",
+      engineSessionId: "ses_demo09",
+      file: base("bks-demo-review", "ses_demo09", 95, 40, {
+        title: "Upload progress callback",
+        branch: "demo/upload-progress",
+        worktreeDir: repoDir,
+        usage: usage(2.31, 51_800, 8_140, 12, iso(now - 40 * min)),
+      }),
+      lines: [
+        transcriptLineUser(
+          "Add a progress callback to the uploader so the UI can show a bar. Open a PR once it's green.",
+          "demo-review-u1",
+          iso(t0),
+        ),
+        transcriptLineAssistantText(
+          "Adding an `onProgress` option to `upload()` and threading it through the retry loop.",
+          "demo-review-a1",
+          iso(t0 + 15_000),
+          MODEL_FABLE,
+        ),
+        ...tool(
+          "review",
+          1,
+          "Edit",
+          {
+            file_path: "src/upload.ts",
+            old_string:
+              "export async function upload(file: Blob, opts: UploadOptions) {",
+            new_string:
+              "export async function upload(file: Blob, opts: UploadOptions & { onProgress?: (sent: number) => void }) {",
+          },
+          "Edited src/upload.ts",
+          t0 + 40_000,
+        ),
+        ...tool(
+          "review",
+          2,
+          "Bash",
+          { command: "bun test src/upload.test.ts" },
+          "12 pass\n0 fail",
+          t0 + 70_000,
+        ),
+        transcriptLineAssistantText(
+          "Opened PR #131 with the progress callback. Tests pass; the review will run on the push.",
+          "demo-review-a2",
+          iso(t0 + 100_000),
+          MODEL_FABLE,
+        ),
+        transcriptLineUser(
+          handoff(
+            1,
+            3,
+            "- [@acme-review[bot] · comment 9001] src/upload.ts:42 — 🔴 **P1** — `onProgress` reports the previous attempt's byte count after a failed attempt, so the bar jumps backwards on every retry.",
+          ),
+          "demo-review-u2",
+          iso(t0 + 9 * min),
+        ),
+        transcriptLineAssistantText(
+          "Resetting the reported byte count at the top of each attempt.",
+          "demo-review-a3",
+          iso(t0 + 9 * min + 20_000),
+          MODEL_FABLE,
+        ),
+        ...tool(
+          "review",
+          3,
+          "Edit",
+          {
+            file_path: "src/upload.ts",
+            old_string: "  for (let attempt = 0; attempt < max; attempt++) {",
+            new_string:
+              "  for (let attempt = 0; attempt < max; attempt++) {\n    sent = 0;\n    opts.onProgress?.(sent);",
+          },
+          "Edited src/upload.ts",
+          t0 + 9 * min + 40_000,
+        ),
+        ...tool(
+          "review",
+          4,
+          "Bash",
+          {
+            command:
+              "bun test src/upload.test.ts && git commit -qam 'upload: reset progress per attempt' && git push -q origin HEAD:demo/upload-progress",
+          },
+          "13 pass\n0 fail",
+          t0 + 9 * min + 70_000,
+        ),
+        transcriptLineAssistantText(
+          "Fix round 1 is addressed and pushed (`a1b2c3d`): the byte count resets at the start of every attempt, with a regression test for the retry path. Replied in the thread.",
+          "demo-review-a4",
+          iso(t0 + 9 * min + 100_000),
+          MODEL_FABLE,
+        ),
+        transcriptLineRecap(
+          "Fixed the backwards progress bar on retry and pushed; waiting for the re-review.",
+          "demo-review-r1",
+          iso(t0 + 12 * min),
+        ),
+        transcriptLineUser(
+          handoff(
+            2,
+            4,
+            "- [@acme-review[bot] · comment 9002] src/upload.ts:47 — 🟠 **P2** — The callback now fires on every 64 KiB chunk; a 2 GB upload calls it 32,000 times. Throttle it.",
+          ),
+          "demo-review-u3",
+          iso(t0 + 20 * min),
+        ),
+        transcriptLineAssistantText(
+          "Throttling progress events to one per 100 ms, with the final byte count always delivered.",
+          "demo-review-a5",
+          iso(t0 + 20 * min + 20_000),
+          MODEL_FABLE,
+        ),
+        ...tool(
+          "review",
+          5,
+          "Edit",
+          {
+            file_path: "src/upload.ts",
+            old_string: "    opts.onProgress?.(sent);",
+            new_string: "    reportProgress(sent);",
+          },
+          "Edited src/upload.ts",
+          t0 + 20 * min + 40_000,
+        ),
+        ...tool(
+          "review",
+          6,
+          "Bash",
+          {
+            command:
+              "bun test src/upload.test.ts && git commit -qam 'upload: throttle progress events' && git push -q origin HEAD:demo/upload-progress",
+          },
+          "14 pass\n0 fail",
+          t0 + 20 * min + 70_000,
+        ),
+        transcriptLineAssistantText(
+          "Fix round 2 is addressed and pushed (`d4e5f6a`): progress events are throttled to one per 100 ms and the last one always carries the final size.",
+          "demo-review-a6",
+          iso(t0 + 20 * min + 100_000),
+          MODEL_FABLE,
+        ),
+        transcriptLineUser(
+          "[GitHub] <!--os:review-settled:passed-->\n✅ This session's PR #131 “Upload progress callback” (branch `demo/upload-progress`) passed review after 2 fix rounds, quality 5/5. The review loop is closed; no more findings are coming your way.\n\nWrite a short wrap-up for whoever comes back to this thread cold. Your earlier messages report each round; this one is the current state:\n1. Where things stand: review passed, CI (`gh pr checks 131 --repo acme/acme-todo`), and whether anything still blocks a merge.\n2. What changed across the fix rounds, in a few lines: the shape of the change, not a per-finding replay.\n3. Where to look: https://github.com/acme/acme-todo/pull/131, plus the preview URL if this branch has one.\n4. Anything a person still has to decide or do.\n\nKeep it short. Do not push new commits, re-run the review, or merge (`gh pr merge` is forbidden).",
+          "demo-review-u4",
+          iso(t0 + 50 * min),
+        ),
+        ...tool(
+          "review",
+          7,
+          "Bash",
+          { command: "gh pr checks 131 --repo acme/acme-todo" },
+          "14 pass\n0 pending\n0 fail",
+          t0 + 50 * min + 20_000,
+        ),
+        transcriptLineAssistantText(
+          "**PR #131 is ready to merge.** Review passed after two fix rounds and CI is green (14 checks).\n\n**What changed:** `upload()` takes an `onProgress` callback. The count resets at the start of every retry attempt so the bar never runs backwards, and events are throttled to one per 100 ms with the final size always delivered.\n\n**Where to look:** https://github.com/acme/acme-todo/pull/131. Nothing is left for you to decide; merge when convenient.",
+          "demo-review-a7",
+          iso(t0 + 50 * min + 50_000),
+          MODEL_FABLE,
         ),
       ],
     });

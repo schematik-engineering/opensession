@@ -63,9 +63,10 @@ export const INTERNAL_MCP_CAPABILITIES = {
       "Publish a workspace directory as a durable internal web app when the deliverable needs to stay live beyond this run.",
   },
   "opensession-repos": {
-    summary: "Attach or switch repos, and link a PR to this session.",
+    summary:
+      "Attach or switch repos, link a PR to this session, and label PRs in any registered repo.",
     guidance:
-      "Attach or switch repositories and link pull requests while preserving this session's multi-repo context.",
+      "Attach or switch repositories and link pull requests while preserving this session's multi-repo context. Use label_pull_request to label a PR in any registered repo, including one your shell cannot reach.",
   },
   "opensession-memory": {
     summary:
@@ -116,6 +117,12 @@ export const INTERNAL_MCP_CAPABILITIES = {
     guidance:
       "Save uncommitted reports, diagrams, visualizations, or sample data that should be previewable from this session. Publish existing workspace files with write_asset.sourcePath, especially binary outputs such as DOCX, PDF, and ZIP files.",
   },
+  "opensession-charts": {
+    summary:
+      "Validate a Vega-Lite spec and get the ```vega-lite fence that renders as an interactive chart.",
+    guidance:
+      "Show quantitative results as an interactive chart: pass a Vega-Lite spec (and optionally the rows) to make_chart, then paste the returned ```vega-lite fence into your reply. Prefer this to a hand-built HTML chart asset or a static image of a chart.",
+  },
   "opensession-todos": {
     summary: "The user's Desk todo list.",
     guidance:
@@ -157,6 +164,12 @@ export const INTERNAL_MCP_CAPABILITIES = {
       "A self-improving automation reading and rewriting its OWN prompt.",
     guidance:
       "Read or improve this automation's own prompt. It cannot modify another automation.",
+  },
+  "opensession-pull-requests": {
+    summary:
+      "Open and edit this session's pull request as the person who asked; propose a merge for them to tap.",
+    guidance:
+      "Use open_pull_request instead of `gh pr create` so the PR carries the person's name. When asked to merge, call propose_merge: you cannot merge, approve, or push the default branch yourself.",
   },
   "opensession-github": {
     summary:

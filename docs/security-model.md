@@ -63,14 +63,29 @@ configuration for the run.
   shared detached worktree pinned to `origin/<defaultBranch>`; only a
   repository configured as a shared self-development checkout uses its live
   checkout. Sandboxed ask runs use the sandbox workspace. Code gets an
-  isolated writable workspace/worktree and can edit and commit. Ordinary
-  automations currently receive no GitHub credential, so they cannot push or
-  open a GitHub PR. Headless GitHub security scans follow that report-only
-  rule.
-  Trusted `github-*` code workflows have a separate, repository-scoped App
-  credential path. Every other scope still applies: MCP allowlist, denied
+  isolated writable workspace/worktree and can edit and commit. Every
+  automation run holds a repository-scoped App installation token and never
+  a person's (`docs/setup/github.md`, "Who holds which credential"): code
+  runs mint the code permission set (push the branch, reply, inspect checks
+  and Actions logs), while ask runs — the review workflows, which process
+  untrusted PR content — mint the read-only set and ignore any
+  launcher-supplied token, so nothing they can be injected into holds write
+  capability. Only a code turn a connected person started holds that
+  person's token instead. What that token may do to
+  the default branch is a ruleset decision on GitHub; the command policy
+  refuses merges, approving reviews, and default-branch pushes in every run
+  as a tripwire. Every other scope still applies: MCP allowlist, denied
   writes, IMDS blocking, and the explicit environment.
 - A sandboxed automation runs in a fresh disposable Daytona Executor. Open
+  Session admits it only after Daytona has passed qualification, including a
+  live domain-allowlist check. The provider applies that allowlist before
+  runner bootstrap, repository setup hooks, private workspace seeds, or model
+  credentials enter the guest. Each run requires one hard-pinned Anthropic or
+  OpenAI subscription account, no fallback model, no nested CLI credentials,
+  and an explicit MCP allowlist. The launcher adds only the callback, clone,
+  runner bootstrap, model API, configured MCP, and operator-approved domains.
+  It probes one allowed and one blocked destination before continuing, and
+  strictly deletes the Executor after the run. There is no host fallback.
 - When adding an automation, scope it: pick ask mode unless it must write, and
   name only the MCP servers it uses.
 - Interactive sessions may publish an existing workspace file through
@@ -130,6 +145,19 @@ addresses, GitHub logins, and Slack ids resolve to the configured person.
   resumes explicitly drop both identities, so an `allowedUsers`-restricted
   server remains invisible even if the automation's `mcpServers` allowlist
   names it.
+- Provider account selection is the one place a person's identity survives an
+  automation-owned session: `accountUser` (session-run-inputs.ts) names the
+  human who sent the prompt, so their personal Claude subscription is tried
+  before the shared pool when they take over an automation's session. A
+  machine sender (the automation's own tick, a review handoff, auto-continue)
+  resolves to no account user and stays pool-only. `accountUser` never feeds
+  the MCP gate, GitHub credentials, or the trust profile. It is journaled
+  with the run so restart recovery keeps the same routing. In a remote
+  sandbox the same identity scopes which subscriptions are uploaded. On every
+  launch path (host, detached pi host, Runner, sandbox) a person's takeover
+  turn carries no automation pin (`runAccountSpec`, `remoteRunAccountPolicy`),
+  because account selection tries a pin before personal accounts; the
+  automation's own turns keep their pin.
 - Manage it from the Connections UI (the Add-MCP form has an "Allowed users"
   field; each server card has a Restrict/Edit-access button →
   `PUT /api/connections/mcp/:name` with `{allowedUsers}`), or via
@@ -233,20 +261,24 @@ at `~/.opensession/github-app.pem` (or the path in
 `OPENSESSION_GITHUB_APP_KEY`). Environment App identity values win over config.
 Enabling `userPrAuth` activates both halves below:
 
-- **PRs as the session owner** (packages/core/opensession-server/src/server/github-auth.ts): teammates connect
-  their GitHub account via the OAuth _device flow_ (Connections UI card, or
-  implicitly by signing in). Tokens live per-login in
-  `~/.opensession/github-auth.json` (0600, never returned by any API). The
-  runner injects them as GH_TOKEN/GITHUB_TOKEN into the engine-server env —
-  interactive kinds only and never a least-privilege run
-  (`policy.unattended`: automations and deniedTools carriers including the
-  Slack/Linear loops stay credential-free; trusted GitHub code workflows alone
-  receive a repository-scoped App token). The run user
-  resolves to a login through the SAME identity table as commit attribution,
-  so the mapping is config (identity.team[].github), not code. The
-  PR-attribution instructions swap the `--assignee` bot wording for "authored
-  by them" when the token rides. Injection lives in pi-runner.ts ⇒
-  needs a real restart.
+- **PRs as the session owner** (packages/core/opensession-server/src/server/github-auth.ts,
+  pull-request-mcp.ts): teammates connect their GitHub account via the OAuth
+  _device flow_ (Connections UI card, or implicitly by signing in). Tokens
+  live per-login in `~/.opensession/github-auth.json` (0600, never returned
+  by any API). A code turn a connected person started holds their token in
+  its shell (pi-runner `runGithubEnv`, the sandbox launcher's projected auth
+  file), so its pushes and any PR it opens are theirs; the gateway uses the
+  same token for the UI's PR routes (merge, close, review, comment) and the
+  `opensession-pull-requests` tools (`open_pull_request`,
+  `edit_pull_request`) mounted on such a turn. Ask runs, unattended runs,
+  and machine senders hold an App token and never a person's
+  (`docs/setup/github.md`). A review handoff, worker report, or automation
+  sender is nobody and gets no such tools. The run user resolves
+  to a login through the SAME identity table as commit attribution, so the
+  mapping is config (identity.team[].github), not code. The PR-attribution
+  instructions swap the `--assignee` bot wording for "opened under their
+  account" when the tools are mounted. Merge is never a tool: `propose_merge`
+  posts a notice and the person merges from the PR panel.
 - **GitHub web sign-in** (packages/core/opensession-server/src/server/web-auth.ts + routes/auth.ts): when
   active, the UI's name picker is replaced by a real sign-in (UserGate →
   device flow → HttpOnly `opensession_auth` cookie; sessions in
@@ -283,7 +315,7 @@ tokens are what scopes teammates' tokens to your org (see the previous
 section): they can't reach public/third-party repos, they expire ~8h, and
 github-auth.ts refreshes them via a rotating refresh token (20-min ticker
 parked on globalThis + refresh-on-boot; getters never hand out an expired
-token: interactive runs receive no GitHub credential and web mutations return
+token: the owner-identity tools are not mounted and web mutations return
 403 to "connect your account"). A refresh rotates the token string, which changes the
 shared-server config hash → drain-respawn at next run start, by design.
 `oauthClientSecret` is what that refresh grant needs. Signing in never uses

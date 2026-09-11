@@ -9,20 +9,13 @@ import {
   appendMessageOutput,
   appendReportOutput,
 } from "../lib/automation-output-editor";
-import { FIELD_LABEL, FORM_ROW } from "../lib/automation-form";
+import { FIELD_LABEL, FORM_ROW, uniqueFlowId } from "../lib/automation-form";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Input, Select } from "../ui/input";
 import { Tooltip } from "../ui/tooltip";
 import { BrandMark } from "./BrandMark";
 import { IconFileText2, IconTrash } from "./icons";
-
-function uniqueFlowId(prefix: string, used: string[]): string {
-  let candidate = prefix;
-  let index = 2;
-  while (used.includes(candidate)) candidate = `${prefix}-${index++}`;
-  return candidate;
-}
 
 function messageUrgency(value: string): "low" | "medium" | "high" | "critical" {
   if (value === "low" || value === "medium" || value === "critical")
