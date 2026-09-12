@@ -1017,6 +1017,7 @@ async function spawnHostRun(
     registerRunToken(rpcToken, {
       sessionId: opts.osSessionId,
       user: opts.user,
+      promptEntryId: opts.promptEntryId,
     });
 
   let handle: HostHandle | undefined;
@@ -2528,6 +2529,7 @@ export async function resumeLocalHostRun(
     registerRunToken(spec.rpcToken, {
       sessionId: spec.osSessionId,
       user: spec.user,
+      promptEntryId: spec.promptEntryId,
     });
   }
   const handle = new HostHandle(

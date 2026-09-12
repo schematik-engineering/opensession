@@ -13,6 +13,7 @@
  * papercutsServerFor and the automation guard in the run-rpc builder below.
  */
 
+import { deskNavigationMcp } from "./desk-navigation-mcp";
 import { createSessionsMcpServer } from "../agents/slack/sessions-tools";
 import { isDevInstance } from "./dev-mode";
 import { createRunnersMcpServer } from "./runners-mcp";
@@ -37,6 +38,7 @@ import { createTodosMcpServer } from "../agents/slack/todos-tools";
 import { createSearchMcpServer } from "../agents/slack/search-tools";
 import { createAssetsMcpServer } from "../agents/slack/assets-tools";
 import { createChartsMcpServer } from "./charts-mcp";
+import { createDatabasesMcpServer } from "../agents/slack/databases-tools";
 import { createWorkflowsMcpServer } from "../agents/slack/workflow-tools";
 import { createSelfDeployMcpServer } from "./self-deploy";
 import { createWebMcpServer } from "./web-mcp";
@@ -46,15 +48,6 @@ import { defaultRepo, productName } from "./config";
 import { githubCredentialForRun } from "./github-auth";
 import { REPOS, getRepo, sessionRepoId } from "./worktree";
 import { labelPr } from "./pr-labels";
-import {
-  createPullRequestMcpServer,
-  ownerGithubUser,
-} from "./pull-request-mcp";
-import { getPrDetailsFresh, prMetaForBranch } from "./pr-info";
-import {
-  appendTranscriptEntries,
-  transcriptLineRunnerNotice,
-} from "./transcript-persistence";
 import { registerInteractiveMcpBuilder } from "./run-rpc";
 import {
   automationRunMcpForSession,
@@ -71,6 +64,7 @@ import {
 } from "./preview-path-leases";
 import {
   attachRepo,
+  checkPrMergeReadiness,
   linkPr,
   resolveSessionRepoContext,
   sessionRepoIds,
@@ -138,6 +132,7 @@ function desktopServerFor(sessionId: string): Record<string, unknown> {
 export function interactiveMcpServers(
   user?: string,
   sessionId?: string,
+  promptEntryId?: string,
 ): Record<string, unknown> {
   const createdBy = user || productName();
   return {
@@ -186,6 +181,7 @@ export function interactiveMcpServers(
     // the others) from automation runs — see the runSessionPrompt call site.
     ...(sessionId
       ? {
+          ...deskNavigationMcp(sessionId, promptEntryId),
           "opensession-humans": createHumansMcpServer({
             sessionId,
             createdBy,
@@ -209,11 +205,6 @@ export function interactiveMcpServers(
             user: createdBy,
             worktreeDir: () => findSession(sessionId)?.worktreeDir || undefined,
           }),
-          // The owner-identity GitHub tools: open/edit the PR as the person
-          // who started this turn, and hand them a merge. Mounted only when
-          // the sender resolves to a connected person; the run's shell holds
-          // the bot token either way (docs/github-authority.md).
-          ...pullRequestServerFor(sessionId, user),
           // Cross-repo: attach secondary repos as isolated worktrees.
           "opensession-repos": createReposMcpServer({
             sessionId,
@@ -249,6 +240,7 @@ export function interactiveMcpServers(
               })),
             linkPr: (input) => linkPr(sessionId, input),
             labelPr: (input) => labelPr(sessionId, input),
+            checkPrReady: (input) => checkPrMergeReadiness(sessionId, input),
           }),
           // Durable repo/user/team memory, shared both ways with Slack's
           // channel memory. Write tools are
@@ -398,6 +390,15 @@ export function interactiveMcpServers(
           // ```vega-lite fences render on their own; this compiles a spec
           // for the agent and offloads big data into the session's assets.
           "opensession-charts": createChartsMcpServer({ sessionId }),
+          // Named SQLite databases kept outside every repo (databases.ts),
+          // browsed in the Databases view. Unscoped here: an interactive
+          // session reaches every database, the way it reaches every
+          // report. Automation runs get the same server scoped to their
+          // own databases (automations.ts).
+          "opensession-databases": createDatabasesMcpServer({
+            sessionId,
+            user: createdBy,
+          }),
           // The user's Desk todo list — add/list/complete/drop/update.
           // Interactive-only like the siblings (the automation branch below
           // fails closed): untrusted ticket text must not write to a
@@ -439,56 +440,6 @@ export function interactiveMcpServers(
  * path) can compute proxy names that resolve to this same fail-closed set,
  * never the interactive siblings.
  */
-/**
- * opensession-pull-requests for a turn a connected person started, else
- * nothing. The person is the turn's sender (the session owner for an
- * auto-continue nudge); a machine sender is nobody. The credential is
- * re-resolved on every tool call, so a disconnect mid-turn fails closed.
- */
-function pullRequestServerFor(
-  sessionId: string,
-  user?: string,
-): Record<string, unknown> {
-  const session = findSession(sessionId);
-  const who = ownerGithubUser(user, session?.startedBy);
-  const credential = who ? githubCredentialForRun(who) : null;
-  if (!session || !credential || credential.kind !== "user") return {};
-  const login = credential.principal.replace(/^user:/, "");
-  return {
-    "opensession-pull-requests": createPullRequestMcpServer({
-      sessionId,
-      login,
-      credential: () => {
-        const current = githubCredentialForRun(who);
-        return current?.kind === "user" ? current : null;
-      },
-      workspace: (repo) => {
-        const current = findSession(sessionId);
-        if (!current) return null;
-        const context = resolveSessionRepoContext(current, repo);
-        if (!context) return null;
-        const registered = getRepo(context.repo);
-        if (!registered?.ghRepo || registered.host === "codestorage")
-          return null;
-        return {
-          ghRepo: registered.ghRepo,
-          ...(context.branch ? { branch: context.branch } : {}),
-          baseBranch: registered.defaultBranch,
-        };
-      },
-      prMeta: (branch, ghRepo, cred) => prMetaForBranch(branch, ghRepo, cred),
-      prDetails: (branch, ghRepo) => getPrDetailsFresh(branch, ghRepo),
-      notice: async (text, id) => {
-        const current = findSession(sessionId);
-        if (!current?.claudeSessionId) return;
-        await appendTranscriptEntries(current.claudeSessionId, [
-          transcriptLineRunnerNotice(text, id),
-        ]);
-      },
-    }),
-  };
-}
-
 export async function automationSessionMcp(
   session: { automation?: string; worktreeDir?: string | null },
   sessionId: string,
@@ -504,7 +455,7 @@ export async function automationSessionMcp(
   };
 }
 
-registerInteractiveMcpBuilder(async (sessionId, user) => {
+registerInteractiveMcpBuilder(async (sessionId, user, promptEntryId) => {
   // Automation-owned sessions run on untrusted event/ticket text. Their runs
   // only ever carry the automation-bar set (automationSessionMcp above), but
   // this builder is also run-rpc's FALLBACK resolver for any registered run
@@ -514,7 +465,7 @@ registerInteractiveMcpBuilder(async (sessionId, user) => {
   if (sessionId && session?.automation) {
     return automationSessionMcp(session, sessionId);
   }
-  const servers = interactiveMcpServers(user, sessionId);
+  const servers = interactiveMcpServers(user, sessionId, promptEntryId);
   const goalId = session?.goalId;
   if (goalId)
     (servers as Record<string, unknown>)["opensession-goal-self"] =

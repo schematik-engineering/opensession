@@ -6,6 +6,20 @@ import {
 } from "./run-instructions";
 
 describe("buildRunInstructions", () => {
+  test("preserves attribution without imposing a blanket Git publishing restriction", () => {
+    const prompt = buildRunInstructions({ isAsk: false, hasSession: true });
+
+    expect(prompt).toContain(
+      "End each PR body with the attribution footer from the session context and follow its assignee rule.",
+    );
+    expect(prompt).toContain(
+      "Add the `Co-authored-by` trailer from the session context to every commit.",
+    );
+    expect(prompt).not.toContain(
+      "Never merge, approve, or push the default branch.",
+    );
+  });
+
   test("limits automatic reviewers to unattended automation pull requests", async () => {
     const prompt = buildRunInstructions({
       isAsk: false,
@@ -79,6 +93,13 @@ describe("buildRunInstructions", () => {
     expect(prompt).toContain("this Open Session id as `leaseKey`");
     expect(prompt).toContain("pass only its `leaseId`");
     expect(prompt).not.toContain("## Sandbox");
+    expect(prompt).toContain(
+      "Follow repository branching and publication rules.",
+    );
+    expect(prompt).not.toContain(
+      "Never merge, approve, or push the default branch",
+    );
+    expect(prompt).not.toContain("open_pull_request");
     // The Media section names every block form the transcript renders live;
     // that is the one list the model cannot learn from a skill.
     expect(prompt.length).toBeLessThan(1_950);
@@ -140,7 +161,7 @@ describe("buildSessionContext", () => {
       /PR attribution footer: Started by Jaap Frolich in \[this .* session\]\(.*\/session\/os-test\)/,
     );
     expect(ctx).toContain(
-      "PRs open under @jfrolich's account through open_pull_request; do not add an assignee.",
+      "PRs use @jfrolich's account through gh; do not add an assignee.",
     );
     expect(ctx).toContain(
       "Commit trailer: Co-authored-by: Jaap Frolich <jaap@example.com>",
