@@ -64,9 +64,9 @@ export const INTERNAL_MCP_CAPABILITIES = {
   },
   "opensession-repos": {
     summary:
-      "Attach or switch repos, link a PR to this session, and label PRs in any registered repo.",
+      "Attach or switch repos, link a PR to this session, label PRs, and check whether a PR is ready to merge.",
     guidance:
-      "Attach or switch repositories and link pull requests while preserving this session's multi-repo context. Use label_pull_request to label a PR in any registered repo, including one your shell cannot reach.",
+      "Attach or switch repositories and link pull requests while preserving this session's multi-repo context. Use label_pull_request to label a PR in any registered repo, including one your shell cannot reach. Use check_pr_ready for one deterministic merge-readiness verdict (checks, reviews, conflicts, draft, branch rules) instead of reading transcripts or raw gh output.",
   },
   "opensession-memory": {
     summary:
@@ -143,6 +143,12 @@ export const INTERNAL_MCP_CAPABILITIES = {
     guidance:
       "Publish the run's finished HTML report into the durable Reports view.",
   },
+  "opensession-databases": {
+    summary:
+      "Create, fill and query named SQLite databases kept by Open Session, browsed in the Databases view.",
+    guidance:
+      "Keep tabular data that a later turn, session or run will query again (collected metrics, scraped rows, triage state) in a named database: create_database with a schema, insert_rows for bulk data, query_database to read it back. Prefer it to a CSV asset when the data will be updated or joined later.",
+  },
   "opensession-turn": {
     summary: 'Say "looked, nothing to report" instead of ending on silence.',
     guidance:
@@ -164,12 +170,6 @@ export const INTERNAL_MCP_CAPABILITIES = {
       "A self-improving automation reading and rewriting its OWN prompt.",
     guidance:
       "Read or improve this automation's own prompt. It cannot modify another automation.",
-  },
-  "opensession-pull-requests": {
-    summary:
-      "Open and edit this session's pull request as the person who asked; propose a merge for them to tap.",
-    guidance:
-      "Use open_pull_request instead of `gh pr create` so the PR carries the person's name. When asked to merge, call propose_merge: you cannot merge, approve, or push the default branch yourself.",
   },
   "opensession-github": {
     summary:

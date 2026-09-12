@@ -49,7 +49,7 @@ touches an in-process tool:
 | [`opensession-humans`](#opensession-humans) | 3 | interactive, Slack loop, goal wake | Interactive runs need a session id (the answer routes back to it). |
 | [`opensession-keychain`](#opensession-keychain) | 3 | interactive | Needs a session id. |
 | [`opensession-publish`](#opensession-publish) | 4 | interactive | Needs a session id. |
-| [`opensession-repos`](#opensession-repos) | 5 | interactive | Needs a session id. |
+| [`opensession-repos`](#opensession-repos) | 6 | interactive | Needs a session id. |
 | [`opensession-memory`](#opensession-memory) | 9 | interactive | Needs a session id. |
 | [`opensession-web`](#opensession-web) | 3 | interactive, goal wake | Needs a session id. |
 | [`opensession-portals`](#opensession-portals) | 7 | interactive | Needs a session id. |
@@ -60,11 +60,11 @@ touches an in-process tool:
 | [`opensession-workflows`](#opensession-workflows) | 8 | interactive, automation | Automation runs get it ONLY with the human-set `workflows` flag. |
 | [`opensession-assets`](#opensession-assets) | 4 | interactive | Needs a session id. Works in read-only Ask mode — assets land outside the checkout. |
 | [`opensession-charts`](#opensession-charts) | 1 | interactive, automation | Needs a session id. Held to the automation bar: its only write is offloaded chart data into the calling session's own assets. |
-| [`opensession-pull-requests`](#opensession-pull-requests) | 3 | interactive | Only on a turn a connected person started: never a review handoff, a worker report, or an automation. |
 | [`opensession-todos`](#opensession-todos) | 5 | interactive | Needs a session id. |
 | [`opensession-schedule`](#opensession-schedule) | 3 | interactive | Needs a session id. |
 | [`opensession-papercuts`](#opensession-papercuts) | 2 | interactive, automation | Dropped when the session's repo opted out (Settings → Papercuts). |
 | [`opensession-report`](#opensession-report) | 1 | automation | – |
+| [`opensession-databases`](#opensession-databases) | 8 | interactive, automation | Needs a session id. |
 | [`opensession-turn`](#opensession-turn) | 2 | automation | – |
 | [`opensession-health`](#opensession-health) | 1 | automation | – |
 | [`opensession-audit`](#opensession-audit) | 1 | automation | – |
@@ -72,7 +72,7 @@ touches an in-process tool:
 | [`opensession-github`](#opensession-github) | 4 | Slack loop | – |
 | [`opensession-goal-self`](#opensession-goal-self) | 6 | goal wake | Only on a session that carries a goalId. |
 
-31 servers, 135 tools.
+31 servers, 141 tools.
 
 ## opensession-sessions
 
@@ -496,7 +496,7 @@ Stop a published app. It stays registered with its versions intact and can be st
 
 ## opensession-repos
 
-Attach or switch repos, link a PR to this session, and label PRs in any registered repo.
+Attach or switch repos, link a PR to this session, label PRs, and check whether a PR is ready to merge.
 
 - **Source** `packages/core/opensession-server/src/agents/slack/repos-tools.ts`
 - **Wired in** `packages/core/opensession-server/src/server/interactive-mcp.ts`
@@ -532,6 +532,12 @@ Link a pull request to this session so it shows in the session's Review tab besi
 `mcp__opensession-repos__label_pull_request` · input: `url` (string), `repo` (string), `number` (number), `add` (string[]), `remove` (string[])
 
 Add or remove labels on a pull request in any registered GitHub repo, including one this session does not have checked out. Labels are applied as the bot: the gateway mints a token for that repo, so this works where `gh` in your shell cannot see the repo. Pass the PR URL, or a repo id and number.
+
+### `check_pr_ready`
+
+`mcp__opensession-repos__check_pr_ready` · input: `url` (string), `repo` (string), `number` (number), `session` (string)
+
+Is a pull request ready to merge? One deterministic verdict from live GitHub state: ready or not, and every blocker: open/merged/closed, draft, merge conflicts, each check's latest run by name (failing, pending, passing), the review decision and who gave it, and the base branch's rules. The first line is a sentence to say as-is; the JSON block at the end is the same verdict for branching on. Pass a PR URL, a repo id and number, or a session id to check that session's PR (defaults to this session's own PR). Read-only, runs as the bot, works for any registered repo. Use this instead of piecing readiness together from transcripts or gh output.
 
 ## opensession-memory
 
@@ -889,34 +895,6 @@ Validate a Vega-Lite spec and get the ```vega-lite fence that renders as an inte
 
 Turn a Vega-Lite spec into the ```vega-lite fence that renders as an interactive chart (tooltips, zoom, brushing) in this session. Compiles the spec with the same library the client uses and returns errors with their paths instead of a silent code block; large inline data is moved to a session asset the chart loads from. Paste the returned fence verbatim into your reply, on its own lines. Keep specs small and readable: aggregate first, use `data.values` (or the data argument) rather than external URLs, and omit width so the chart fills the column.
 
-## opensession-pull-requests
-
-Open and edit this session's pull request as the person who asked; propose a merge for them to tap.
-
-- **Source** `packages/core/opensession-server/src/server/pull-request-mcp.ts`
-- **Wired in** `packages/core/opensession-server/src/server/interactive-mcp.ts`
-- **Runs** interactive
-- **Condition** Only on a turn a connected person started: never a review handoff, a worker report, or an automation.
-- **Note** The gateway makes the request with the person's token; the run never holds it (docs/github-authority.md). propose_merge holds no token: the person merges from the PR panel.
-
-### `open_pull_request`
-
-`mcp__opensession-pull-requests__open_pull_request` · input: `repo` (string), `title` (string, required), `body` (string, required), `base` (string), `draft` (boolean)
-
-Open a pull request for this session's pushed branch under @you's own GitHub account. The request is made by the gateway with their token; you never hold it. Prefer this over `gh pr create`, which opens the PR as the bot. Push the branch first. End the body with the attribution footer from the session context.
-
-### `edit_pull_request`
-
-`mcp__opensession-pull-requests__edit_pull_request` · input: `repo` (string), `number` (integer), `title` (string), `body` (string), `ready` (boolean)
-
-Change the title, body, or draft state of this session's pull request as @you. The gateway makes the request with their token.
-
-### `propose_merge`
-
-`mcp__opensession-pull-requests__propose_merge` · input: `repo` (string), `method` ("squash" | "merge" | "rebase"), `note` (string)
-
-Hand a merge to @you. You cannot merge: no token in your reach can update the default branch. This checks the PR is open and reports its checks and review state, then posts a notice in the session; the person merges with one tap in the PR panel. Call it when asked to merge, or when the work is ready and reviewed.
-
 ## opensession-todos
 
 The user's Desk todo list.
@@ -1020,6 +998,64 @@ Publish this run's durable HTML report into the Reports view.
 `mcp__opensession-report__publish_report` · input: `title` (string, required), `html` (string, required), `assets` (string[]), `summary` (string), `urgency` ("low" | "medium" | "high" | "critical"), `confidence` ("low" | "medium" | "high"), `highlights` (object[]), `tasks` (object[])
 
 Publish this run's HTML report with optional durable assets shown in the Reports view — latest per automation, with history. Store image/media evidence as assets instead of base64 data URLs. Use it when the task's outcome is a recurring readable report; each publish adds a new entry, so publish once per run with the final document.
+
+## opensession-databases
+
+Create, fill and query named SQLite databases kept by Open Session, browsed in the Databases view.
+
+- **Source** `packages/core/opensession-server/src/agents/slack/databases-tools.ts`
+- **Wired in** `packages/core/opensession-server/src/server/interactive-mcp.ts`, `packages/core/opensession-server/src/server/automations.ts`
+- **Runs** interactive, automation
+- **Condition** Needs a session id.
+- **Note** Automation runs get it scoped to the automation's own databases, the way opensession-report only publishes into its own group. Every statement is screened (database-sql-guard.ts) and runs on the databases worker, never on the gateway thread.
+
+### `create_database`
+
+`mcp__opensession-databases__create_database` · input: `name` (string, required), `description` (string), `schema` (string)
+
+Create a named SQLite database that Open Session keeps outside every repo, for data this or a later session will query again: collected metrics, scraped rows, triage state, anything tabular that should outlive the session. It appears in the Databases view. Pass schema to create the tables in the same call.
+
+### `list_databases`
+
+`mcp__opensession-databases__list_databases` · input: none
+
+List the databases in reach, newest write first, with table counts and sizes.
+
+### `describe_database`
+
+`mcp__opensession-databases__describe_database` · input: `database` (string, required)
+
+The schema of one database: every table and view with its columns, types, constraints and row count. Call this before writing SQL against a database you did not just create.
+
+### `query_database`
+
+`mcp__opensession-databases__query_database` · input: `database` (string, required), `sql` (string, required), `params` (string | number | boolean | null[] | object), `limit` (integer)
+
+Run one read-only SQL statement and get the rows back as JSON. Results are capped at 1000 rows (lower with limit) and flagged truncated when cut, so aggregate in SQL rather than pulling a whole table to count it.
+
+### `execute_sql`
+
+`mcp__opensession-databases__execute_sql` · input: `database` (string, required), `sql` (string, required), `params` (string | number | boolean | null[] | object)
+
+Run DDL or DML against a database: CREATE, ALTER, INSERT, UPDATE, DELETE, or a script of several statements. Everything runs in one transaction, so a failure changes nothing. For many rows of data use insert_rows instead of a script of INSERTs.
+
+### `insert_rows`
+
+`mcp__opensession-databases__insert_rows` · input: `database` (string, required), `table` (string, required), `rows` (object[], required), `replace` (boolean)
+
+Insert JSON rows into one table in a single transaction, up to 5000 per call. Keys must be columns of the table; a missing key inserts NULL (or the column default). Set replace to upsert on the primary key.
+
+### `update_database`
+
+`mcp__opensession-databases__update_database` · input: `database` (string, required), `name` (string), `description` (string)
+
+Rename a database or change its description. The id and the data stay as they are.
+
+### `delete_database`
+
+`mcp__opensession-databases__delete_database` · input: `database` (string, required), `confirmName` (string, required)
+
+Delete a database and everything in it. Irreversible; confirmName must repeat the database's exact name.
 
 ## opensession-turn
 
